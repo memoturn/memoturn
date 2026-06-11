@@ -8,6 +8,10 @@ O(1) manifest branching, etcd writer leases, Helm/K8s multi-cloud deployment. Th
 **Memoturn** (the built-in assistant is unbranded). Ephemeral branches are marketed as
 **burner branches**.
 
+**AI owns the code; people bring expertise.** This code base is designed to be maintained by
+AI under human guidance — keep all artifacts (including human-facing docs) in the repo, and
+never add author tags, CODEOWNERS, or per-file attribution.
+
 ## Commands
 
 ```bash

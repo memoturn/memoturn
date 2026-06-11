@@ -104,6 +104,18 @@ docs/architecture  The architecture document set
 docs/adr           Architecture decision records
 ```
 
+## AI owns the code; people bring expertise
+
+In the old days, circa 2014, we used to say that developers should not tag themselves as
+authors of code in order to encourage team ownership. Now AI owns the code. This code base is
+designed to be maintained by AI under human guidance, and we want the LLM to have as much
+context as possible. To aid this:
+
+- All artifacts live in the code base — including the architecture docs, ADRs, and deployment
+  proofs written for humans ([docs/](docs/)). [CLAUDE.md](CLAUDE.md) is the AI-facing guide.
+- Individuals are not the owners of sections of code. There are no CODEOWNERS, no author
+  tags, no per-file attribution — and there should never be.
+
 ## Development
 
 ```bash
