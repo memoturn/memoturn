@@ -324,6 +324,54 @@ export class MemoryProfile {
     }
   }
 
+  /**
+   * Verifiable erasure (ADR-0010): hard-forget now with secure_delete, then
+   * a bounded-time history rewrite proven by a signed receipt. Target exactly
+   * one of a memory id, a topic chain, or a session. Returns the coupon
+   * summary; poll `erasure(id)` for the receipt.
+   */
+  async erase(target: EraseTarget): Promise<EraseAccepted> {
+    const body: Record<string, unknown> = {};
+    if ("memoryId" in target) body.memory_id = target.memoryId;
+    if ("topicKey" in target) {
+      body.topic_key = target.topicKey;
+      body.type = target.type;
+    }
+    if ("sessionId" in target) {
+      body.session_id = target.sessionId;
+      if (target.turns) body.turns = true;
+    }
+    const r = await this.w.request(
+      "POST",
+      `/v1/memory/${this.namespace}/${this.profile}/erasures${this.qs()}`,
+      { body },
+    );
+    return r.json as EraseAccepted;
+  }
+
+  /** Erasure coupons for this profile, newest first. */
+  async erasures(): Promise<Record<string, unknown>[]> {
+    const r = await this.w.request(
+      "GET",
+      `/v1/memory/${this.namespace}/${this.profile}/erasures${this.qs()}`,
+    );
+    return r.json.erasures;
+  }
+
+  /** One erasure coupon — `status: "completed"` carries the signed receipt. */
+  async erasure(id: string): Promise<Record<string, unknown> | null> {
+    try {
+      const r = await this.w.request(
+        "GET",
+        `/v1/memory/${this.namespace}/${this.profile}/erasures/${id}${this.qs()}`,
+      );
+      return r.json;
+    } catch (e) {
+      if (e instanceof MemoturnError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
   async sessions(): Promise<{ id: string; created_at: number; last_active_at: number }[]> {
     const r = await this.w.request(
       "GET",
@@ -748,6 +796,19 @@ export interface ProfilePolicy {
   /** Field-wise strictest of node config, namespace, and profile. */
   effective: Record<string, unknown>;
   revision: number;
+}
+
+/** Exactly one erasure target. */
+export type EraseTarget =
+  | { memoryId: string }
+  | { topicKey: string; type: "fact" | "instruction" }
+  | { sessionId: string; turns?: boolean };
+
+export interface EraseAccepted {
+  erasure_id: string;
+  status: "pending" | "blocked" | "completed";
+  txid: number;
+  grace_until: number;
 }
 
 export interface AuditQuery {

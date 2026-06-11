@@ -355,6 +355,9 @@ async fn main() -> anyhow::Result<()> {
         "v1",
         Duration::from_secs(policy_cache_secs),
     ));
+    // Erasure coupons (ADR-0010 phase 3) — durable in object storage, outside
+    // any database prefix so the trail survives deletion.
+    let erasures = Arc::new(memoturn_governance::ErasureLedger::new(store.clone(), "v1"));
 
     let state = AppState {
         node,
@@ -371,6 +374,7 @@ async fn main() -> anyhow::Result<()> {
         governance,
         embed_provenance,
         audit: audit.clone(),
+        erasures,
     };
     // Re-arm token revocation across restarts: the registry's durable
     // tombstones re-seed the (possibly fresh) control-plane revocation list.
@@ -398,6 +402,13 @@ async fn main() -> anyhow::Result<()> {
                 // than every tick. Retention first: it dereferences expired
                 // history that a later GC pass then reclaims.
                 if tick % 20 == 0 {
+                    // Erasures first: they dereference history that the same
+                    // pass's GC then physically reclaims, and the verifier
+                    // (which counts raw keys) runs after GC.
+                    let n = memoturn_api::process_erasures(&state).await;
+                    if n > 0 {
+                        tracing::info!(pruned = n, "erasure history rewrite");
+                    }
                     let n = memoturn_api::enforce_retention(&state).await;
                     if n > 0 {
                         tracing::info!(pruned = n, "PITR retention");
@@ -405,6 +416,10 @@ async fn main() -> anyhow::Result<()> {
                     let n = memoturn_api::gc_objects(&state).await;
                     if n > 0 {
                         tracing::info!(reclaimed = n, "object refcount GC");
+                    }
+                    let n = memoturn_api::finalize_erasures(&state).await;
+                    if n > 0 {
+                        tracing::info!(completed = n, "erasures verified and receipted");
                     }
                     let n = memoturn_api::sweep_audit_retention(&state).await;
                     if n > 0 {

@@ -144,6 +144,43 @@ scale (10³–10⁵ embeddings per DB) is squarely in DiskANN's comfort zone.
 - Continuous **restore drills**: sample databases, restore from object storage, checksum against
   primary — backups that are never restored are not backups.
 
+## Per-database write ceiling
+
+The single-writer invariant has a deliberate corollary: **a database's write throughput is
+bounded by one libSQL writer on one node.** Reads don't share the cap — WAL readers run
+alongside the writer, replicas absorb the rest — and profile-per-database granularity keeps
+real per-DB write rates low. But a single high-fan-in database (e.g. a shared team-memory
+profile ingested into by many concurrent agents — see
+[07](07-agent-memory.md#hierarchy--isolation)) serializes on one handle, and no amount of
+fleet capacity changes that: the fleet scales *across* databases, never *within* one.
+
+The ceiling is managed in layers, cheapest first:
+
+1. **Make saturation visible, not mysterious** *(planned)*. Per-DB write-rate and apply-queue
+   metrics; past a queue-depth threshold the node sheds that DB's writes with `429` +
+   `Retry-After` instead of letting latency collapse. (`MEMOTURN_MAX_CONCURRENCY` is node-global
+   and protects the node, not the hot DB.)
+2. **Group commit** *(planned, node-local)*. Coalesce concurrently arriving write requests for
+   the same DB into one transaction-and-fsync round: each request becomes a savepoint (per-
+   request atomicity and error reporting preserved), the WAL fsync amortizes across all of them,
+   and they share a `txid`. Raises the ceiling by roughly the coalescing factor with no invariant
+   touched — commit point, epoch fencing, and segment shipping are unchanged.
+3. **Engine headroom: the Turso swap** ([ADR-0001](../adr/0001-libsql-as-library.md)). Turso's
+   MVCC / concurrent-writes work lifts intra-handle serialization on the owner node. Behind the
+   `SqlEngine` trait this is an upgrade, not a redesign — still one owner node, still one
+   logical writer for fencing purposes.
+4. **Sharded profiles** *(product-level, last resort — explicitly not v1)*. A logical profile
+   backed by N physical shard DBs, each with its own lease and writer. Routing must follow the
+   memory semantics: shard by hash of the supersession key (`type`, `topic_key`), falling back
+   to the content-addressed id, so a topic's supersession chain and idempotent dedup stay within
+   one shard; recall fans out and merges — the same shape as the existing multi-channel RRF
+   merge. This is the only layer that dilutes "one profile = one database" (branch/rewind would
+   have to coordinate N manifests), which is why it sits last.
+
+**Not on the list:** multiple concurrent writer *nodes* for one database. That would break epoch
+fencing and the zombie-writer story; the answer to fan-in is layers 1–4, never relaxing the
+invariant.
+
 ## Data flows
 
 - **Write:** client → gateway → owner node (lease+epoch check) → txn → WAL fsync → ack → segment

@@ -1796,9 +1796,11 @@ dependencies = [
 name = "memoturn-governance"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "bytes",
  "futures",
  "object_store",
+ "ring",
  "serde",
  "serde_json",
  "tempfile",

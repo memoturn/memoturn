@@ -167,6 +167,11 @@ eff = mt.get_policy("acme", profile="alice")                  # override + effec
 # Audit stream: iterator, paginates transparently. Metadata only.
 for evt in mt.audit_events("acme", action="ai.", outcome="denied"):
     print(evt["ts"], evt["action"], evt.get("profile"))
+
+# Verifiable erasure: hard-forget now, history rewrite + signed receipt
+# after the grace window. Target one memory, a topic chain, or a session.
+accepted = alice.erase(topic_key="user.home-address", type="fact")
+coupon = alice.erasure(accepted["erasure_id"])  # pending → completed (with receipt)
 ```
 
 ## Tests

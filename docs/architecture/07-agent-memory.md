@@ -23,6 +23,11 @@ namespace                e.g. an application, environment, or tenant
   field: agents won't reliably self-report, so the surfaces apply it ambiently — the MCP server
   defaults it from `MEMOTURN_SOURCE` (each coding agent's MCP config sets its own), and the SDKs
   take a client-level `source` used as the ingest default.
+- The flip side of structural isolation: a profile's *write* throughput is one node's single
+  writer ([01](01-storage-engine.md#per-database-write-ceiling)). Per-user profiles never
+  notice; a high-fan-in shared profile (hundreds of agents ingesting into one team memory
+  concurrently) eventually will. Prefer modeling heavy independent writers as separate
+  profiles; the mitigation ladder in 01 covers the rest.
 - **Sessions** are optional groupings scoped to a profile (different profiles may reuse session
   IDs). Task memories attach to sessions and expire; sessions also index the raw transcript layer.
 - Profiles are auto-created on first ingest (metadata-only, instant). Recall against a profile

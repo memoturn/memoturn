@@ -58,8 +58,10 @@ TTL caps, AI egress rules, audit; tighten-only profile overrides) live in object
 read through a cache (`MEMOTURN_POLICY_CACHE_SECS`, 30); `MEMOTURN_EMBED_SELF_HOSTED_HOSTS`
 allowlists embedder hosts for the `embed: self_hosted_only` rule; per-namespace audit streams
 (JSONL in object storage, `MEMOTURN_AUDIT_FLUSH_MS` flush window, 2000) record mutations and AI
-egress metadata when `audit.enabled`; `memoturn policy get|set|clear` and `memoturn audit export`
-on the CLI.
+egress metadata when `audit.enabled`; verifiable erasure (`POST .../erasures`) hard-forgets with
+secure_delete, rewrites object-storage history below the forget txid after `erasure.grace_secs`,
+and proves it with a signed Ed25519 receipt; `memoturn policy get|set|clear`,
+`memoturn audit export`, and `memoturn memory erase|erasures` on the CLI.
 
 ## Architecture
 

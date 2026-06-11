@@ -1,10 +1,10 @@
 # 08 — Data Governance
 
 Enterprise data-handling controls ([ADR-0010](../adr/0010-data-governance.md)): per-namespace
-policies for retention, memory aging, task TTLs, AI egress, and (phased) audit logging and
-verifiable erasure. Everything here *tightens* what the node would otherwise allow — node env
-vars stay the outer ceilings, a namespace constrains its tenants, a profile may constrain itself
-further, and nothing in a policy can grant.
+policies for retention, memory aging, task TTLs, and AI egress; per-namespace audit streams;
+and verifiable erasure with signed receipts. Everything here *tightens* what the node would
+otherwise allow — node env vars stay the outer ceilings, a namespace constrains its tenants, a
+profile may constrain itself further, and nothing in a policy can grant.
 
 ## Policy hierarchy
 
@@ -50,8 +50,8 @@ node env ceiling             MEMOTURN_PITR_RETENTION_SECS, … (deployment confi
 | `memory.event_max_age_secs` | events older than this are deleted | writer-side maintenance sweep (~30 s tick), ≤ 500 deletes/pass |
 | `memory.superseded_max_age_secs` | superseded rows older than this are deleted | same sweep |
 | `memory.superseded_max_count` | per `(type, topic_key)`, keep at most N superseded rows | same sweep |
-| `erasure.*` | erasure coupon behavior | phase 3 (designed in ADR-0010) |
-| `audit.*` | per-namespace audit stream | phase 2 (designed in ADR-0010) |
+| `erasure.purge_on_forget` / `grace_secs` | upgrade plain forgets to tracked erasures; the undo window before history rewrite | erase path + maintenance loop (see below) |
+| `audit.*` | per-namespace audit stream | emission at every audited surface (see below) |
 | `ai_egress.extract` / `ask` | `allow` \| `deny` — gate the explicit LLM endpoints | request time: deny → 403 naming the field, before recall runs or the provider is touched |
 | `ai_egress.embed` | `allow` \| `self_hosted_only` \| `deny` — gate auto-embedding | at the embed call site (the owner node on forwarded writes): deny behaves exactly like an unconfigured embedder |
 
@@ -140,21 +140,49 @@ carve-out on `/v1/namespaces`). Cursors are stable because objects are immutable
 iterator. Hash-chain tamper evidence is reserved (a `prev` field) — until then, immutable
 objects plus bucket-level object-lock/WORM are the recommended posture.
 
-## Phased: verifiable erasure
+## Verifiable erasure (shipped)
 
-Fully designed in [ADR-0010](../adr/0010-data-governance.md); the policy document already
-carries the `erasure` section so enabling it is additive.
+Forget hides; **erasure proves**. `POST /v1/memory/{ns}/{profile}/erasures` (write scope)
+targets exactly one of a memory id, a topic's whole supersession chain (`topic_key` + `type`),
+or a session (`session_id`, optionally `turns`):
 
-**Verifiable erasure (phase 3):** erasure coupons that hard-forget at txid `T` (with
-`secure_delete` page zeroing), then force a post-`T` snapshot, prune all history below `T`
-(a prefix drop below a snapshot base — manifest chains never splice), let GC reclaim, verify
-absence by listing txid-named objects, and finish with a signed Ed25519 erasure receipt. Bounded
-completion: `grace + tick + GC grace`. Four honest caveats, surfaced rather than papered over:
-named checkpoints below `T` block (delete the checkpoint to proceed), pre-`T` forks hold the
-datum as *live content* and are reported in `blocked_by`, replica caches converge within the
-stream/eviction window (the receipt's claim is scoped to object storage, the source of truth),
-and local-disk scrubbing of evicted cache files is future work. Crypto-shredding arrives with
-per-tenant encryption (ADR-0008's enterprise phase) as the fast path.
+```
+202 { "erasure_id": "ers_…", "status": "pending", "txid": T, "grace_until": … }
+```
+
+**The lifecycle:**
+
+1. **Now**: the rows, FTS entries, and vectors are hard-deleted at txid `T` with SQLite
+   `secure_delete` page zeroing, and the post-forget state ships durably before the coupon is
+   written. The coupon lives at `v1/_governance/erasures/{db}/{id}.json` — outside the
+   database's prefix and outside `__memoturn_*` tables, so neither database deletion nor a
+   branch rewind can lose the evidence.
+2. **After `erasure.grace_secs`** (the undo window, default 24 h), the maintenance loop forces
+   a post-`T` snapshot per branch where needed, then prunes every manifest reference below `T`
+   — always a chain-*prefix* drop below a snapshot base; segment chains never splice — and the
+   refcount GC physically reclaims the dereferenced objects.
+3. **Verification**: object keys encode their txids, so absence is provable by listing —
+   `verify_erased_before` checks every branch manifest *and* every raw key under the database's
+   prefix. Only when nothing below `T` remains does the coupon complete.
+4. **The receipt**: a signed Ed25519 proof (domain-separated, the cluster's signing key;
+   auth-disabled dev nodes state `alg: "none"` explicitly) embedding the target, the forget
+   txid, and the verification evidence. Anyone holding the cluster public key verifies offline.
+
+Bounded completion: `grace + maintenance tick + GC grace` — not the 30-day snapshot tier.
+
+**Honest blockers**, surfaced in the coupon (`status: "blocked"`, `blocked_by`), never silently
+violated: named **checkpoints** pinning history below `T` (delete the checkpoint to proceed),
+and **branches** that may hold the datum as *live content* rather than history — anything not
+forked from the erased branch at or after `T`, conservatively (erase or delete it there too).
+Two scoping caveats: replica caches converge within the stream/eviction window (the receipt's
+claim is scoped to object storage, the source of truth), and local-disk scrubbing of evicted
+cache files is future work. Crypto-shredding arrives with per-tenant encryption (ADR-0008's
+enterprise phase) as the fast path.
+
+`erasure.purge_on_forget: true` in the policy upgrades every plain `DELETE .../memories/{id}`
+into a tracked erasure — the coupon id rides the `Memoturn-Erasure-Id` response header.
+`GET .../erasures[/{id}]` (read scope) lists coupons or fetches one with its receipt; audit
+records `erasure.requested` and `erasure.completed`.
 
 ## Operator surface
 
@@ -167,4 +195,6 @@ memoturn policy get <ns> [--profile p]        # ns: platform key; profile: token
 memoturn policy set <ns> [--profile p] [--file policy.json]   # JSON via --file or stdin
 memoturn policy clear <ns> --profile p
 memoturn audit export <ns> [--from 7d] [--action ai.] [--outcome denied]   # JSONL to stdout
+memoturn memory erase <ns> <profile> (--memory id | --topic key --type fact | --session sid [--turns])
+memoturn memory erasures <ns> <profile> [id]  # coupons; completed ones carry the signed receipt
 ```

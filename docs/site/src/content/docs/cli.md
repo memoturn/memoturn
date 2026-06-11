@@ -32,9 +32,15 @@ memoturn memory recall  <ns> <profile> [<query>] [--topic <key>] [--k 8] [--type
 memoturn memory extract <ns> <profile> [--session <id>] [--source <agent>] [--dry-run]   # turns JSON on stdin
 memoturn memory get     <ns> <profile> <id>
 memoturn memory forget  <ns> <profile> <id>
+memoturn memory erase   <ns> <profile> (--memory id | --topic key --type fact | --session sid [--turns])
+memoturn memory erasures <ns> <profile> [id]
 memoturn memory sessions <ns> <profile>
 memoturn memory profiles <ns>
 ```
+
+`erase` is [verifiable erasure](/security/#verifiable-erasure): a hard forget now, then a
+bounded-time object-storage history rewrite proven by a signed receipt — `erasures` shows the
+coupon and, once completed, the receipt.
 
 ```bash
 # every agent serving acme's user "alice" shares one profile

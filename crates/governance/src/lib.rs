@@ -6,9 +6,14 @@
 //! source of truth as the data they govern, and are read through a small
 //! per-node cache.
 
+pub mod erasure;
 pub mod policy;
 pub mod store;
 
+pub use erasure::{
+    receipt_payload, sign_receipt, verify_receipt, BlockedBy, ErasureCoupon, ErasureLedger,
+    ErasureStatus, ErasureTarget, Receipt,
+};
 pub use policy::{
     AiEgressPolicy, AuditPolicy, Effective, EgressRule, ErasurePolicy, MemoryPolicy, Policy,
     PolicyDoc, RetentionPolicy, SCHEMA_VERSION,

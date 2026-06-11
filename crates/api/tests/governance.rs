@@ -53,6 +53,10 @@ async fn test_state(dir: &std::path::Path) -> AppState {
         governance: Arc::new(memoturn_api::governance::PolicyStore::in_memory()),
         embed_provenance: None,
         audit: memoturn_api::audit::AuditSink::noop(),
+        erasures: std::sync::Arc::new(memoturn_governance::ErasureLedger::new(
+            std::sync::Arc::new(object_store::memory::InMemory::new()),
+            "v1",
+        )),
     }
 }
 

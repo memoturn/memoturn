@@ -282,6 +282,53 @@ class MemoryProfile:
                 return False
             raise
 
+    def erase(
+        self,
+        *,
+        memory_id: Optional[str] = None,
+        topic_key: Optional[str] = None,
+        type: Optional[str] = None,
+        session_id: Optional[str] = None,
+        turns: bool = False,
+    ) -> dict:
+        """Verifiable erasure (ADR-0010): hard-forget now with secure_delete,
+        then a bounded-time history rewrite proven by a signed receipt.
+        Target exactly one of ``memory_id``, ``topic_key`` (with ``type``),
+        or ``session_id``. Poll :meth:`erasure` for the receipt."""
+        body = _drop_none(
+            {
+                "memory_id": memory_id,
+                "topic_key": topic_key,
+                "type": type,
+                "session_id": session_id,
+                "turns": turns or None,
+            }
+        )
+        r = self._w.request(
+            "POST", f"/v1/memory/{self.namespace}/{self.profile}/erasures{self._qs()}", json=body
+        )
+        return r.json()
+
+    def erasures(self) -> list:
+        """Erasure coupons for this profile, newest first."""
+        r = self._w.request(
+            "GET", f"/v1/memory/{self.namespace}/{self.profile}/erasures{self._qs()}"
+        )
+        return r.json()["erasures"]
+
+    def erasure(self, erasure_id: str) -> Optional[dict]:
+        """One erasure coupon — ``completed`` carries the signed receipt."""
+        try:
+            r = self._w.request(
+                "GET",
+                f"/v1/memory/{self.namespace}/{self.profile}/erasures/{erasure_id}{self._qs()}",
+            )
+            return r.json()
+        except MemoturnError as e:
+            if e.status == 404:
+                return None
+            raise
+
     def sessions(self) -> list:
         r = self._w.request(
             "GET", f"/v1/memory/{self.namespace}/{self.profile}/sessions{self._qs()}"

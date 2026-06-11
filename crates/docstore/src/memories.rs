@@ -881,6 +881,76 @@ pub async fn forget(h: &DbHandle, id: &str) -> Result<(u64, u64)> {
     }
 }
 
+/// Hard-delete an entire topic — the active row and its whole supersession
+/// chain (erasure path, ADR-0010). Returns the ids removed and the txid.
+/// The deletes re-check the topic condition inside the atomic batch, so a
+/// row revived between the id read and the delete is handled consistently.
+pub async fn forget_topic(
+    h: &DbHandle,
+    mtype: MemoryType,
+    key: &str,
+) -> Result<(Vec<String>, u64)> {
+    let cond = "type = ? AND topic_key = ?";
+    let params = vec![
+        Value::Text(mtype.as_str().to_string()),
+        Value::Text(key.to_string()),
+    ];
+    let ids: Vec<String> = match h
+        .read_trusted(
+            &format!("SELECT id FROM __memoturn_memories WHERE {cond}"),
+            params.clone(),
+        )
+        .await
+    {
+        Ok(r) => r
+            .rows
+            .into_iter()
+            .filter_map(|row| row.first().and_then(|v| v.as_str().map(str::to_string)))
+            .collect(),
+        Err(memoturn_engine::EngineError::Sql(e)) if e.contains("no such table") => Vec::new(),
+        Err(e) => return Err(e.into()),
+    };
+    if ids.is_empty() {
+        return Ok((Vec::new(), h.txid()));
+    }
+    // Vector rows first, tolerant of the table never having been created
+    // (same posture as `forget`).
+    match h
+        .write_trusted(
+            &format!(
+                "DELETE FROM {VEC_TABLE} WHERE id IN
+                   (SELECT id FROM __memoturn_memories WHERE {cond})"
+            ),
+            params.clone(),
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(memoturn_engine::EngineError::Sql(e)) if e.contains("no such table") => {}
+        Err(e) => return Err(e.into()),
+    }
+    let stmts = vec![
+        (
+            format!(
+                "INSERT INTO __memoturn_memories_fts (__memoturn_memories_fts, rowid, summary, keywords)
+                 SELECT 'delete', rowid, summary, keywords FROM __memoturn_memories WHERE {cond}"
+            ),
+            params.clone(),
+        ),
+        (
+            format!("DELETE FROM __memoturn_memories WHERE {cond}"),
+            params,
+        ),
+    ];
+    match h.write_trusted_batch(&stmts).await {
+        Ok((_, txid)) => Ok((ids, txid)),
+        Err(memoturn_engine::EngineError::Sql(e)) if e.contains("no such table") => {
+            Ok((Vec::new(), h.txid()))
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Sessions seen by ingest, most recently active first.
 pub async fn list_sessions(h: &DbHandle, limit: u32) -> Result<Vec<Json>> {
     let r = match h

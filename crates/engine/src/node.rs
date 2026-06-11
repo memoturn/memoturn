@@ -281,6 +281,20 @@ impl DbHandle {
         self.conn.execute(sql, params).await
     }
 
+    /// Toggle SQLite `secure_delete` on the writer connection: while on,
+    /// freed cells are zeroed, so a snapshot taken after a delete carries no
+    /// byte residue of the deleted rows (the erasure path, ADR-0010).
+    /// Connection-scoped — callers bracket the erasing transaction.
+    pub async fn set_secure_delete(&self, on: bool) -> Result<()> {
+        let _guard = self.write_lock.lock().await;
+        let sql = if on {
+            "PRAGMA secure_delete=ON"
+        } else {
+            "PRAGMA secure_delete=OFF"
+        };
+        self.conn.query_writer(sql, vec![]).await.map(|_| ())
+    }
+
     fn wal_path(&self) -> PathBuf {
         let mut name = self.path.file_name().unwrap_or_default().to_os_string();
         name.push("-wal");

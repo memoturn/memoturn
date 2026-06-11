@@ -300,6 +300,33 @@ enum MemoryCmd {
         profile: String,
         id: String,
     },
+    /// Verifiably erase: hard-forget now (secure_delete), then a bounded-time
+    /// history rewrite with a signed receipt (ADR-0010 phase 3).
+    Erase {
+        ns: String,
+        profile: String,
+        /// Erase one memory by id.
+        #[arg(long)]
+        memory: Option<String>,
+        /// Erase a topic's whole supersession chain (requires --type).
+        #[arg(long)]
+        topic: Option<String>,
+        /// fact | instruction (with --topic).
+        #[arg(long = "type")]
+        mtype: Option<String>,
+        /// Erase a session's task memories.
+        #[arg(long)]
+        session: Option<String>,
+        /// With --session: also drop the verbatim transcript.
+        #[arg(long)]
+        turns: bool,
+    },
+    /// List erasure coupons, or show one (including its signed receipt).
+    Erasures {
+        ns: String,
+        profile: String,
+        id: Option<String>,
+    },
     /// List a profile's sessions.
     Sessions { ns: String, profile: String },
     /// List profiles under a namespace (namespace token required).
@@ -722,6 +749,46 @@ async fn main() -> anyhow::Result<()> {
                         .await?,
                 )
                 .await
+            }
+            MemoryCmd::Erase {
+                ns,
+                profile,
+                memory,
+                topic,
+                mtype,
+                session,
+                turns,
+            } => {
+                let mut body = serde_json::Map::new();
+                if let Some(m) = memory {
+                    body.insert("memory_id".into(), json!(m));
+                }
+                if let Some(t) = topic {
+                    body.insert("topic_key".into(), json!(t));
+                }
+                if let Some(t) = mtype {
+                    body.insert("type".into(), json!(t));
+                }
+                if let Some(s) = session {
+                    body.insert("session_id".into(), json!(s));
+                }
+                if turns {
+                    body.insert("turns".into(), json!(true));
+                }
+                show(
+                    c.post(format!("{base}/v1/memory/{ns}/{profile}/erasures"))
+                        .json(&Value::Object(body))
+                        .send()
+                        .await?,
+                )
+                .await
+            }
+            MemoryCmd::Erasures { ns, profile, id } => {
+                let url = match id {
+                    Some(id) => format!("{base}/v1/memory/{ns}/{profile}/erasures/{id}"),
+                    None => format!("{base}/v1/memory/{ns}/{profile}/erasures"),
+                };
+                show(c.get(url).send().await?).await
             }
             MemoryCmd::Sessions { ns, profile } => {
                 show(

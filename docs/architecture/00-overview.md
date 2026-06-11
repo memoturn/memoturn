@@ -64,7 +64,9 @@ agents natively speak JSON — with SQL kept as the power-user escape hatch.
 ## Core guarantees (the contract)
 
 1. **Per-database strong writes.** Each database (branch) has exactly one writer at a time
-   (lease + epoch fencing). Transactions are serializable within a database.
+   (lease + epoch fencing). Transactions are serializable within a database. The corollary —
+   per-database write throughput is one node's single writer — is documented with its
+   mitigation ladder in [01](01-storage-engine.md#per-database-write-ceiling).
 2. **Reads carry `txid`.** Primary reads are strongly consistent. Replica/cached reads are
    eventually consistent within a bounded window (~1 s in-region; `max_age` backstop) and always
    disclose their `txid`. Clients pass `min_txid` for read-your-writes.
