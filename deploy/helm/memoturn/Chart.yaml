@@ -1,0 +1,10 @@
+apiVersion: v2
+name: memoturn
+description: >-
+  Memoturn — the agent-memory database. Prototype chart: memoturnd data plane
+  with object-storage source of truth, optional in-cluster MinIO. The
+  production umbrella (gateway, control-api, etcd, Postgres, observability)
+  layers on per docs/architecture/05.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

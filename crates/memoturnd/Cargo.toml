@@ -1,0 +1,24 @@
+[package]
+name = "memoturnd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "memoturnd"
+path = "src/main.rs"
+
+[dependencies]
+memoturn-engine = { path = "../engine" }
+memoturn-api = { path = "../api" }
+memoturn-replication = { path = "../replication" }
+memoturn-control = { path = "../control" }
+reqwest.workspace = true
+object_store.workspace = true
+anyhow.workspace = true
+uuid.workspace = true
+base64.workspace = true
+tokio.workspace = true
+axum.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

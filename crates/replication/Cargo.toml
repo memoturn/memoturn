@@ -1,0 +1,22 @@
+[package]
+name = "memoturn-replication"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+memoturn-engine = { path = "../engine" }
+object_store.workspace = true
+futures.workspace = true
+bytes.workspace = true
+lz4_flex = "0.11"
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

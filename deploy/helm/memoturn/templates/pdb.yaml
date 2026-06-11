@@ -1,0 +1,14 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "memoturn.fullname" . }}-dataplane
+  labels: {{- include "memoturn.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memoturn
+      app.kubernetes.io/component: dataplane
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

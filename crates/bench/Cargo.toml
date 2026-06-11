@@ -1,0 +1,20 @@
+[package]
+name = "memoturn-bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "memoturn-bench"
+path = "src/main.rs"
+
+[dependencies]
+memoturn-engine = { path = "../engine" }
+memoturn-kv = { path = "../kv" }
+memoturn-docstore = { path = "../docstore" }
+memoturn-replication = { path = "../replication" }
+object_store.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tempfile.workspace = true

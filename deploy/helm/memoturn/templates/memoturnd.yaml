@@ -1,0 +1,199 @@
+{{- if and (gt (int .Values.dataplane.replicas) 1) (not .Values.cluster.etcd.enabled) }}
+{{- fail "dataplane.replicas > 1 requires cluster.etcd.enabled=true: the in-process lease table cannot enforce single-writer across nodes (split-brain). Enable cluster.etcd, or keep replicas: 1." }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "memoturn.fullname" . }}-dataplane
+  labels: {{- include "memoturn.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.dataplane.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memoturn
+      app.kubernetes.io/component: dataplane
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memoturn
+        app.kubernetes.io/component: dataplane
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ include "memoturn.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: memoturnd
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: MEMOTURN_LISTEN
+              value: "0.0.0.0:8080"
+            - name: MEMOTURN_DATA_DIR
+              value: /var/lib/memoturn
+            - name: MEMOTURN_HOT_CAP
+              value: {{ .Values.dataplane.hotHandleCap | quote }}
+            - name: MEMOTURN_OBJECT_STORE
+              value: {{ include "memoturn.objectStoreUrl" . | quote }}
+            {{- if .Values.cluster.etcd.enabled }}
+            - name: MEMOTURN_ETCD
+              value: {{ .Values.cluster.etcd.endpoints | quote }}
+            {{- else }}
+            # Single node: the in-process lease table is safe for one replica.
+            - name: MEMOTURN_SINGLE_NODE
+              value: "1"
+            {{- end }}
+            {{- if .Values.auth.enabled }}
+            - name: MEMOTURN_AUTH
+              value: "on"
+            - name: MEMOTURN_PLATFORM_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.existingSecret }}
+                  key: PLATFORM_KEY
+            - name: MEMOTURN_CLUSTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.existingSecret }}
+                  key: CLUSTER_KEY
+            # Shared signing key for multi-pod token validation (optional: a
+            # single replica generates its own on first boot).
+            - name: MEMOTURN_AUTH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.existingSecret }}
+                  key: AUTH_KEY
+                  optional: true
+            {{- if .Values.server.persistAuthKey }}
+            - name: MEMOTURN_PERSIST_AUTH_KEY
+              value: "1"
+            {{- end }}
+            {{- end }}
+            {{- with .Values.server.requestTimeoutSecs }}
+            - name: MEMOTURN_REQUEST_TIMEOUT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.server.maxBodyBytes }}
+            - name: MEMOTURN_MAX_BODY_BYTES
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.server.maxConcurrency }}
+            - name: MEMOTURN_MAX_CONCURRENCY
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.server.controlRate }}
+            - name: MEMOTURN_CONTROL_RATE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.server.durability }}
+            - name: MEMOTURN_DURABILITY
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.server.gcGraceSecs }}
+            - name: MEMOTURN_GC_GRACE_SECS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.ai.existingSecret }}
+            - name: MEMOTURN_EXTRACT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ai.existingSecret }}
+                  key: EXTRACT_API_KEY
+                  optional: true
+            - name: MEMOTURN_EMBED_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ai.existingSecret }}
+                  key: EMBED_API_KEY
+                  optional: true
+            {{- if .Values.ai.extractModel }}
+            - name: MEMOTURN_EXTRACT_MODEL
+              value: {{ .Values.ai.extractModel | quote }}
+            {{- end }}
+            {{- if .Values.ai.embedModel }}
+            - name: MEMOTURN_EMBED_MODEL
+              value: {{ .Values.ai.embedModel | quote }}
+            {{- end }}
+            {{- if .Values.ai.embedProvider }}
+            - name: MEMOTURN_EMBED_PROVIDER
+              value: {{ .Values.ai.embedProvider | quote }}
+            {{- end }}
+            {{- if .Values.ai.embedBaseUrl }}
+            - name: MEMOTURN_EMBED_BASE_URL
+              value: {{ .Values.ai.embedBaseUrl | quote }}
+            {{- end }}
+            {{- end }}
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.objectStorage.s3.region | quote }}
+            {{- if .Values.minio.enabled }}
+            - name: AWS_ENDPOINT
+              value: http://{{ include "memoturn.fullname" . }}-minio:9000
+            - name: AWS_ALLOW_HTTP
+              value: "true"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "memoturn.minioSecretName" . }}
+                  key: rootUser
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "memoturn.minioSecretName" . }}
+                  key: rootPassword
+            {{- else if .Values.objectStorage.s3.existingSecret }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.objectStorage.s3.existingSecret }}
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.objectStorage.s3.existingSecret }}
+                  key: AWS_SECRET_ACCESS_KEY
+            {{- end }}
+          volumeMounts:
+            - name: cache
+              mountPath: /var/lib/memoturn
+            - name: tmp
+              mountPath: /tmp
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            {{- toYaml .Values.dataplane.probes.startup | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            {{- toYaml .Values.dataplane.probes.readiness | nindent 12 }}
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            {{- toYaml .Values.dataplane.probes.liveness | nindent 12 }}
+          resources: {{- toYaml .Values.dataplane.resources | nindent 12 }}
+      volumes:
+        # Disposable local cache tier — durability lives in object storage.
+        - name: cache
+          emptyDir:
+            sizeLimit: {{ .Values.dataplane.cacheSize }}
+        # Writable scratch for the read-only root filesystem.
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.dataplane.tmpSize }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "memoturn.fullname" . }}
+  labels: {{- include "memoturn.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app.kubernetes.io/name: memoturn
+    app.kubernetes.io/component: dataplane
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      name: http

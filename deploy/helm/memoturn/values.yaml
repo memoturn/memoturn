@@ -1,0 +1,138 @@
+image:
+  repository: memoturn/memoturnd
+  tag: 0.1.0
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  # A dedicated SA with no token mounted — memoturnd never calls the K8s API.
+  create: true
+  name: ""
+  annotations: {}
+
+# Pod- and container-level security context. Secure-by-default: non-root,
+# read-only root filesystem, all Linux capabilities dropped, no privilege
+# escalation, RuntimeDefault seccomp. Writable paths are explicit emptyDir
+# mounts (/var/lib/memoturn, /tmp).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop: ["ALL"]
+
+dataplane:
+  # Deployment, not StatefulSet: object storage is the source of truth, pods
+  # are disposable (ADR-0008). Running more than one replica requires etcd for
+  # single-writer leases (cluster.etcd below) — the chart refuses replicas > 1
+  # without it, since the in-process lease table cannot prevent split-brain.
+  replicas: 1
+  hotHandleCap: 50000
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "2", memory: 2Gi }
+  # Ephemeral local cache tier (emptyDir on NVMe-backed node pools).
+  cacheSize: 10Gi
+  # Writable scratch for the read-only root filesystem (rustls, temp files).
+  tmpSize: 64Mi
+  probes:
+    liveness: { initialDelaySeconds: 5, periodSeconds: 10, timeoutSeconds: 2, failureThreshold: 3 }
+    readiness: { initialDelaySeconds: 2, periodSeconds: 5, timeoutSeconds: 2, failureThreshold: 3 }
+    # Cold start can restore from object storage; give it room before liveness.
+    startup: { periodSeconds: 2, failureThreshold: 30 }
+
+objectStorage:
+  # minio | s3  (gcs/azure arrive with the object_store config surface)
+  backend: minio
+  s3:
+    bucket: memoturn
+    region: us-east-1
+    # credentials via existingSecret with AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY,
+    # or IRSA/workload identity in cloud profiles
+    existingSecret: ""
+
+minio:
+  # Dev/self-hosted MinIO. Disable when objectStorage.backend=s3. NOT for
+  # production — override rootPassword and prefer a managed object store.
+  enabled: true
+  # Pinned digestable tag (avoid :latest, which is unreproducible/unscannable).
+  image: minio/minio:RELEASE.2024-09-22T00-33-43Z
+  rootUser: memoturn
+  rootPassword: memoturn-dev-secret
+  storage: 10Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
+
+cluster:
+  # Writer leases. With one replica the in-process lease table is safe and the
+  # node runs with MEMOTURN_SINGLE_NODE=1. For multi-node, enable etcd and set
+  # endpoints; every owned database attaches to a per-node etcd lease so node
+  # death releases ownership within the TTL (docs/architecture/03).
+  etcd:
+    enabled: false
+    endpoints: "" # comma-separated, e.g. "http://etcd-0:2379,http://etcd-1:2379"
+
+auth:
+  # Per-database JWT auth (Ed25519) + platform key. Strongly recommended for
+  # any shared deployment; off only for throwaway dev clusters.
+  enabled: true
+  # Secret with keys PLATFORM_KEY and CLUSTER_KEY (created out of band). For a
+  # multi-replica fleet also add AUTH_KEY (base64 PKCS8 Ed25519 signing key) so
+  # tokens validate across pods; without it each pod generates its own key.
+  existingSecret: memoturn-auth
+
+server:
+  # Request-surface + durability knobs. Empty = the node's built-in default.
+  requestTimeoutSecs: "" # default 30
+  maxBodyBytes: "" # default 33554432 (32 MiB)
+  maxConcurrency: "" # default 1024
+  controlRate: "" # control-endpoint req/s, default 10
+  durability: "" # "" (standard) | durable — ack writes only after they ship
+  gcGraceSecs: "" # refcount object-GC grace window, default 600
+  # Persist a generated signing key to object storage (UNENCRYPTED) so it
+  # survives disposable pods. Prefer auth.existingSecret AUTH_KEY in production.
+  persistAuthKey: false
+
+ai:
+  # Opt-in server-side extraction + auto-embedding (docs/architecture/07).
+  # Secret may carry either or both keys: EXTRACT_API_KEY (Claude API),
+  # EMBED_API_KEY (embeddings provider). Empty = both stay bring-your-own.
+  existingSecret: ""
+  # Model overrides (defaults: claude-opus-4-8 / provider default).
+  extractModel: ""
+  embedModel: ""
+  # Embeddings provider: voyage (default) | openai. With openai, embedBaseUrl
+  # may point at any OpenAI-compatible server (Ollama, vLLM, …) for a
+  # self-hosted embedder.
+  embedProvider: ""
+  embedBaseUrl: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+
+networkPolicy:
+  # Lock egress to what the node needs (DNS, object store, optional HTTPS for
+  # S3/AI APIs); restrict ingress to the HTTP port. Egress lockdown is the
+  # high-value control for a data store — it blocks exfiltration paths.
+  enabled: true
+  # Clients are typically external, so allow any source to reach :8080 by
+  # default. Set false to restrict ingress to extraIngressFrom (+ node-to-node).
+  allowExternalIngress: true
+  # Allow egress to TCP 443 (real S3, Anthropic/Voyage/OpenAI embedders). Turn
+  # off for a fully in-cluster (MinIO + self-hosted embedder) deployment.
+  allowHttpsEgress: true
+  extraIngressFrom: [] # extra NetworkPolicyPeer entries allowed to the HTTP port
+  extraEgress: [] # extra egress rules, e.g. to etcd (TCP 2379) or a sidecar
+
+podDisruptionBudget:
+  # Recommended for multi-replica (etcd) deployments.
+  enabled: false
+  minAvailable: 1
