@@ -20,6 +20,7 @@ prompt.
 | `keywords` | optional space-separated terms; FTS-indexed alongside `summary` |
 | `embedding` | optional `f32` vector; powers the [vector recall channel](/recall/). Bring-your-own by default; with [auto-embedding](/embeddings/) the node embeds `summary + keywords` at ingest |
 | `session_id` | optional grouping; required semantics only for tasks — see [Sessions](/sessions/) |
+| `source` | optional provenance: which agent wrote this (e.g. `claude-code`, `cursor`). Free-form, returned on every memory, filterable at [recall](/recall/) |
 | `superseded_by` / `superseded_at` | set when a newer memory replaces this one; history preserved |
 | `expires_at` | tasks only; default 24 h TTL |
 
@@ -78,6 +79,28 @@ The `id` is a content hash, so ingest is idempotent by construction:
 
 Agents can replay extraction output without flooding the store with copies.
 
+## Provenance: which agent wrote this
+
+When several agents share one profile — a coding assistant, an IDE agent, a support bot, all
+acting for the same user — `source` records who wrote each memory:
+
+```json
+{ "memories": [
+  { "type": "fact", "topic_key": "user.indentation", "summary": "prefers tabs",
+    "content": {"indent": "tabs"}, "source": "claude-code" }
+] }
+```
+
+Source is provenance, not identity. It is excluded from the content hash, so the same memory
+ingested by two agents still dedupes to one record — the first writer's attribution sticks, and
+`duplicate`/`revived` outcomes never overwrite it. Supersession is likewise profile-wide: a fact
+from one agent supersedes the same `topic_key` from another, because shared memory is the point.
+
+You rarely set `source` by hand. The [MCP server](/mcp/) defaults it from the `MEMOTURN_SOURCE`
+environment variable (set per agent in each tool's MCP config), the [TypeScript](/sdk-typescript/)
+and [Python](/sdk-python/) SDKs take a client-level `source` applied to every ingest, and the
+[CLI](/cli/) has `--source`.
+
 ## Batch ingest
 
 `POST /v1/memory/{ns}/{profile}/memories` takes a batch; one batch is one transaction and returns
@@ -121,6 +144,11 @@ hides history.
 ```bash
 curl -X DELETE http://localhost:8080/v1/memory/acme/alice/memories/mem_a1…
 ```
+
+By default history is kept indefinitely. Namespaces that need bounded retention can set a
+[governance policy](/security/#data-governance-policies): cap task TTLs (clamped at ingest),
+age out events, and bound superseded history by age or per-topic count — the node deletes
+aged-out rows automatically.
 
 ## Storage
 

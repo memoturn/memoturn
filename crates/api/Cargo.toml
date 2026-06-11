@@ -10,6 +10,7 @@ memoturn-kv = { path = "../kv" }
 memoturn-docstore = { path = "../docstore" }
 memoturn-replication = { path = "../replication" }
 memoturn-control = { path = "../control" }
+memoturn-governance = { path = "../governance" }
 reqwest.workspace = true
 async-trait.workspace = true
 jsonwebtoken = "9"

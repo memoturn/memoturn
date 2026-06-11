@@ -6,6 +6,7 @@ members = [
     "crates/docstore",
     "crates/replication",
     "crates/control",
+    "crates/governance",
     "crates/api",
     "crates/memoturnd",
     "crates/cli",

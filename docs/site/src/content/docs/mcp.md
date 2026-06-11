@@ -14,9 +14,9 @@ a streamable-HTTP transport for production and a `schema_inspect` tool.
 
 | Tool | Purpose | Scope |
 | --- | --- | --- |
-| `memory_ingest {namespace, profile, memories}` | Store typed memories — idempotent batch; `fact`/`instruction` supersede older entries sharing `topic_key` | ns:write or the profile's db token |
-| `memory_recall {namespace, profile, query?, embedding?, topic_key?, types?, k?, include_superseded?, include_turns?}` | Hybrid recall: keyword + topic + vector channels, rank-fused; empty result means nothing relevant | ns:read or the profile's db token |
-| `memory_extract {namespace, profile, turns, session_id?, dry_run?}` | Distill raw turns into typed memories with the node's server-side extractor, then ingest; errors with 503 when the node has no extractor (see [Server-side extraction](/extraction/)) | ns:write |
+| `memory_ingest {namespace, profile, memories}` | Store typed memories — idempotent batch; `fact`/`instruction` supersede older entries sharing `topic_key`; each memory's `source` defaults from `MEMOTURN_SOURCE` | ns:write or the profile's db token |
+| `memory_recall {namespace, profile, query?, embedding?, topic_key?, types?, source?, k?, include_superseded?, include_turns?}` | Hybrid recall: keyword + topic + vector channels, rank-fused; empty result means nothing relevant; `source` filters to one agent's memories | ns:read or the profile's db token |
+| `memory_extract {namespace, profile, turns, session_id?, source?, dry_run?}` | Distill raw turns into typed memories with the node's server-side extractor, then ingest; errors with 503 when the node has no extractor (see [Server-side extraction](/extraction/)) | ns:write |
 | `memory_forget {namespace, profile, id}` | Permanently delete one memory (hard delete; supersession preserves history without it) | ns:write |
 | `memory_get {namespace, profile, id}` | Fetch one memory by id with its supersession state; reports not-found rather than erroring | ns:read or the profile's db token |
 | `memory_profiles_list {namespace}` | List the profiles under a namespace — each is one isolated store | namespace token |
@@ -104,6 +104,7 @@ Configuration is by environment variable:
 | `MEMOTURN_URL` | Node or gateway base URL (default `http://127.0.0.1:8080`) |
 | `MEMOTURN_TOKEN` | Per-database or namespace JWT for data-plane tools |
 | `MEMOTURN_PLATFORM_KEY` | Platform credential for `provision_database` / `list_databases` |
+| `MEMOTURN_SOURCE` | Default [provenance](/memories/#provenance-which-agent-wrote-this) for ingested memories (e.g. `claude-code`) — applied when a tool call doesn't set `source` itself |
 
 A typical MCP client registration:
 
@@ -115,12 +116,17 @@ A typical MCP client registration:
       "args": ["/path/to/db/mcp/dist/index.js"],
       "env": {
         "MEMOTURN_URL": "http://127.0.0.1:8080",
-        "MEMOTURN_TOKEN": "<jwt>"
+        "MEMOTURN_TOKEN": "<jwt>",
+        "MEMOTURN_SOURCE": "claude-code"
       }
     }
   }
 }
 ```
+
+Register the same server in each coding tool with a different `MEMOTURN_SOURCE` — every agent
+then reads and writes the same profile while each memory carries the agent that wrote it, and
+`memory_recall` can filter by it.
 
 ## The built-in assistant
 

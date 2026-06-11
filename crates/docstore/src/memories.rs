@@ -20,6 +20,7 @@ const DDL: &[&str] = &[
        content BLOB NOT NULL,
        keywords TEXT NOT NULL DEFAULT '',
        session_id TEXT,
+       source TEXT,
        created_at INTEGER NOT NULL,
        expires_at INTEGER,
        superseded_by TEXT,
@@ -29,6 +30,10 @@ const DDL: &[&str] = &[
        ON __memoturn_memories (type, topic_key) WHERE superseded_by IS NULL",
     "CREATE INDEX IF NOT EXISTS __memoturn_memories_session
        ON __memoturn_memories (session_id) WHERE session_id IS NOT NULL",
+    // On a pre-`source` database this index is the first statement to fail,
+    // which is what triggers the migrate-and-retry in `ingest`.
+    "CREATE INDEX IF NOT EXISTS __memoturn_memories_source
+       ON __memoturn_memories (source) WHERE source IS NOT NULL",
     "CREATE VIRTUAL TABLE IF NOT EXISTS __memoturn_memories_fts
        USING fts5(summary, keywords, content=__memoturn_memories, content_rowid=rowid)",
     "CREATE TABLE IF NOT EXISTS __memoturn_memory_sessions (
@@ -39,7 +44,9 @@ const DDL: &[&str] = &[
 ];
 
 const VEC_TABLE: &str = "__memoturn_memories_vec";
-const DEFAULT_TASK_TTL_SECS: u64 = 86_400;
+/// Default task-memory TTL; public so the API layer can clamp a defaulted TTL
+/// against a governance policy cap (ADR-0010).
+pub const DEFAULT_TASK_TTL_SECS: u64 = 86_400;
 /// RRF rank constant (the standard 60) and per-channel weights.
 const RRF_K: f64 = 60.0;
 const W_TOPIC: f64 = 2.0;
@@ -90,6 +97,10 @@ pub struct MemoryInput {
     pub keywords: Option<String>,
     pub embedding: Option<Vec<f32>>,
     pub session_id: Option<String>,
+    /// Originating agent ("claude-code", "cursor", …). Provenance, not
+    /// identity: excluded from the content-addressed id, so the same memory
+    /// from two agents dedupes and the first writer's source wins.
+    pub source: Option<String>,
     pub ttl_secs: Option<u64>,
 }
 
@@ -318,8 +329,8 @@ pub async fn ingest(h: &DbHandle, items: Vec<MemoryInput>) -> Result<(Vec<Ingest
             stmts.push((
                 "INSERT OR IGNORE INTO __memoturn_memories
                    (id, type, topic_key, summary, content, keywords, session_id,
-                    created_at, expires_at)
-                 VALUES (?, ?, ?, ?, jsonb(?), ?, ?, ?, ?)"
+                    source, created_at, expires_at)
+                 VALUES (?, ?, ?, ?, jsonb(?), ?, ?, ?, ?, ?)"
                     .into(),
                 vec![
                     Value::Text(id.clone()),
@@ -335,6 +346,7 @@ pub async fn ingest(h: &DbHandle, items: Vec<MemoryInput>) -> Result<(Vec<Ingest
                         .clone()
                         .map(Value::Text)
                         .unwrap_or(Value::Null),
+                    item.source.clone().map(Value::Text).unwrap_or(Value::Null),
                     Value::Integer(now),
                     expires_at.map(Value::Integer).unwrap_or(Value::Null),
                 ],
@@ -418,8 +430,41 @@ pub async fn ingest(h: &DbHandle, items: Vec<MemoryInput>) -> Result<(Vec<Ingest
         });
     }
 
-    let (_, txid) = h.write_trusted_batch(&stmts).await?;
+    let (_, txid) = match h.write_trusted_batch(&stmts).await {
+        Ok(r) => r,
+        // Pre-`source` database: the batch rolled back whole at the first
+        // statement referencing the column. Add it and retry once — the
+        // failed attempt changed nothing.
+        Err(memoturn_engine::EngineError::Sql(e)) if missing_source_column(&e) => {
+            migrate_source_column(h).await?;
+            h.write_trusted_batch(&stmts).await?
+        }
+        Err(e) => return Err(e.into()),
+    };
     Ok((outcomes, txid))
+}
+
+/// SQLite's two spellings for a reference to a column the table doesn't have,
+/// narrowed to `source` so genuine SQL bugs still surface.
+fn missing_source_column(e: &str) -> bool {
+    (e.contains("no such column") || e.contains("has no column named")) && e.contains("source")
+}
+
+/// Add the `source` column to a pre-`source` database. Stateless by design:
+/// branch rewind can resurrect the old schema at any time, so migration must
+/// key off the error, never off cached state. Tolerates a concurrent racer.
+async fn migrate_source_column(h: &DbHandle) -> Result<()> {
+    match h
+        .write_trusted(
+            "ALTER TABLE __memoturn_memories ADD COLUMN source TEXT",
+            vec![],
+        )
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(memoturn_engine::EngineError::Sql(e)) if e.contains("duplicate column") => Ok(()),
+        Err(e) => Err(e.into()),
+    }
 }
 
 pub struct RecallQuery {
@@ -428,6 +473,7 @@ pub struct RecallQuery {
     pub topic_key: Option<String>,
     pub types: Option<Vec<MemoryType>>,
     pub session_id: Option<String>,
+    pub source: Option<String>,
     pub k: u32,
     pub include_superseded: bool,
 }
@@ -479,8 +525,12 @@ pub(crate) fn rrf_merge(
 
 fn empty_on_missing(e: memoturn_engine::EngineError) -> Result<Vec<String>> {
     match e {
+        // A pre-`source` database holds no sourced rows, so a source-filtered
+        // channel is correctly empty — reads never migrate.
         memoturn_engine::EngineError::Sql(s)
-            if s.contains("no such table") || s.contains("no such index") =>
+            if s.contains("no such table")
+                || s.contains("no such index")
+                || missing_source_column(&s) =>
         {
             Ok(Vec::new())
         }
@@ -517,6 +567,10 @@ fn channel_filter(q: &RecallQuery, alias: &str) -> (String, Vec<Value>) {
     if let Some(sid) = &q.session_id {
         sql.push_str(&format!(" AND {alias}.session_id = ?"));
         params.push(Value::Text(sid.clone()));
+    }
+    if let Some(src) = &q.source {
+        sql.push_str(&format!(" AND {alias}.source = ?"));
+        params.push(Value::Text(src.clone()));
     }
     (sql, params)
 }
@@ -618,7 +672,8 @@ pub async fn recall(h: &DbHandle, q: &RecallQuery) -> Result<Vec<Json>> {
                     || s.contains("no such index")
                     || s.contains("dimension")
                     || s.contains("F32_BLOB")
-                    || s.contains("vector") =>
+                    || s.contains("vector")
+                    || missing_source_column(&s) =>
             {
                 Vec::new()
             }
@@ -633,15 +688,32 @@ pub async fn recall(h: &DbHandle, q: &RecallQuery) -> Result<Vec<Json>> {
     }
 
     let ids: Vec<String> = merged.iter().map(|(id, _, _)| id.clone()).collect();
+    // `source` last so no pre-existing row index shifts; on a pre-`source`
+    // database retry without it (reads never migrate) — the shorter row
+    // serializes the field as null via `row.get`.
     let sql = format!(
         "SELECT id, type, topic_key, summary, json(content), keywords, session_id,
-                created_at, expires_at, superseded_by
+                created_at, expires_at, superseded_by, source
          FROM __memoturn_memories WHERE id IN ({})",
         placeholders(ids.len())
     );
-    let rows = h
-        .read_trusted(&sql, ids.iter().map(|i| Value::Text(i.clone())).collect())
-        .await?;
+    let id_params = || ids.iter().map(|i| Value::Text(i.clone())).collect();
+    let rows = match h.read_trusted(&sql, id_params()).await {
+        Ok(r) => r,
+        Err(memoturn_engine::EngineError::Sql(e)) if missing_source_column(&e) => {
+            h.read_trusted(
+                &format!(
+                    "SELECT id, type, topic_key, summary, json(content), keywords, session_id,
+                            created_at, expires_at, superseded_by
+                     FROM __memoturn_memories WHERE id IN ({})",
+                    placeholders(ids.len())
+                ),
+                id_params(),
+            )
+            .await?
+        }
+        Err(e) => return Err(e.into()),
+    };
     let mut by_id: std::collections::HashMap<String, Vec<Json>> = rows
         .rows
         .into_iter()
@@ -678,6 +750,11 @@ pub async fn recall(h: &DbHandle, q: &RecallQuery) -> Result<Vec<Json>> {
                 continue;
             }
         }
+        if let Some(src) = &q.source {
+            if row.get(10).and_then(|v| v.as_str()) != Some(src.as_str()) {
+                continue;
+            }
+        }
         out.push(json!({
             "id": row[0],
             "type": row[1],
@@ -689,6 +766,7 @@ pub async fn recall(h: &DbHandle, q: &RecallQuery) -> Result<Vec<Json>> {
                 .unwrap_or(Json::Null),
             "keywords": row[5],
             "session_id": row[6],
+            "source": row.get(10).cloned().unwrap_or(Json::Null),
             "created_at": row[7],
             "superseded_by": row[9],
             "score": score,
@@ -707,7 +785,7 @@ pub async fn get(h: &DbHandle, id: &str) -> Result<Option<Json>> {
     let r = match h
         .read_trusted(
             "SELECT id, type, topic_key, summary, json(content), keywords, session_id,
-                    created_at, expires_at, superseded_by, superseded_at
+                    created_at, expires_at, superseded_by, superseded_at, source
              FROM __memoturn_memories WHERE id = ?",
             vec![Value::Text(id.to_string())],
         )
@@ -716,6 +794,17 @@ pub async fn get(h: &DbHandle, id: &str) -> Result<Option<Json>> {
         Ok(r) => r,
         Err(memoturn_engine::EngineError::Sql(e)) if e.contains("no such table") => {
             return Ok(None)
+        }
+        // Pre-`source` database: retry without the column (reads never
+        // migrate); `row.get` below serializes the field as null.
+        Err(memoturn_engine::EngineError::Sql(e)) if missing_source_column(&e) => {
+            h.read_trusted(
+                "SELECT id, type, topic_key, summary, json(content), keywords, session_id,
+                        created_at, expires_at, superseded_by, superseded_at
+                 FROM __memoturn_memories WHERE id = ?",
+                vec![Value::Text(id.to_string())],
+            )
+            .await?
         }
         Err(e) => return Err(e.into()),
     };
@@ -741,6 +830,7 @@ pub async fn get(h: &DbHandle, id: &str) -> Result<Option<Json>> {
             .unwrap_or(Json::Null),
         "keywords": row[5],
         "session_id": row[6],
+        "source": row.get(11).cloned().unwrap_or(Json::Null),
         "created_at": row[7],
         "expires_at": row[8],
         "superseded_by": row[9],
@@ -865,6 +955,110 @@ pub async fn sweep_expired(h: &DbHandle) -> Result<u64> {
     }
 }
 
+/// Governance memory-age rules (ADR-0010), resolved from the namespace policy
+/// by the API layer. `None` = unbounded (today's behavior).
+#[derive(Debug, Clone, Default)]
+pub struct MemoryRules {
+    /// Delete events older than this.
+    pub event_max_age_secs: Option<u64>,
+    /// Delete superseded rows older than this.
+    pub superseded_max_age_secs: Option<u64>,
+    /// Per `(type, topic_key)`, keep at most this many superseded rows.
+    pub superseded_max_count: Option<u64>,
+}
+
+impl MemoryRules {
+    pub fn any(&self) -> bool {
+        self.event_max_age_secs.is_some()
+            || self.superseded_max_age_secs.is_some()
+            || self.superseded_max_count.is_some()
+    }
+}
+
+/// Deletions per maintenance pass. These deletes are writes (they ship
+/// segments), so each pass is bounded; the next pass continues the backlog.
+const POLICY_SWEEP_LIMIT: i64 = 500;
+
+/// Delete memories the namespace policy has aged out: superseded rows past an
+/// age or per-topic count cap, and events past their max age. Runs on the
+/// writer like `sweep_expired`. Unlike the task sweep, superseded facts and
+/// events carry vectors, so the vector rows go too.
+pub async fn enforce_memory_policy(h: &DbHandle, rules: &MemoryRules) -> Result<u64> {
+    let now = now_ms();
+    let mut conds: Vec<String> = Vec::new();
+    let mut params: Vec<Value> = Vec::new();
+    if let Some(age) = rules.superseded_max_age_secs {
+        conds.push("(m.superseded_at IS NOT NULL AND m.superseded_at <= ?)".into());
+        params.push(Value::Integer(now - (age as i64) * 1000));
+    }
+    if let Some(cnt) = rules.superseded_max_count {
+        // Doomed iff at least `cnt` superseded rows on the same topic are
+        // newer (rowid tiebreak keeps the ranking total).
+        conds.push(
+            "(m.superseded_by IS NOT NULL AND (
+                SELECT COUNT(*) FROM __memoturn_memories n
+                WHERE n.type = m.type AND n.topic_key = m.topic_key
+                  AND n.superseded_by IS NOT NULL
+                  AND (n.superseded_at > m.superseded_at
+                       OR (n.superseded_at = m.superseded_at AND n.rowid > m.rowid))
+             ) >= ?)"
+                .into(),
+        );
+        params.push(Value::Integer(cnt as i64));
+    }
+    if let Some(age) = rules.event_max_age_secs {
+        conds.push("(m.type = 'event' AND m.created_at <= ?)".into());
+        params.push(Value::Integer(now - (age as i64) * 1000));
+    }
+    if conds.is_empty() {
+        return Ok(0);
+    }
+    // Deterministic doomed set: repeated verbatim in every statement of the
+    // atomic batch, so the FTS 'delete' (which needs the rows still present)
+    // and the base DELETE cover exactly the same rows.
+    let doomed = format!(
+        "SELECT m.rowid FROM __memoturn_memories m WHERE {} ORDER BY m.rowid LIMIT {POLICY_SWEEP_LIMIT}",
+        conds.join(" OR ")
+    );
+
+    // Vector rows first, as a separate write tolerant of the table never
+    // having been created (same posture as `forget`).
+    match h
+        .write_trusted(
+            &format!(
+                "DELETE FROM {VEC_TABLE} WHERE id IN
+                   (SELECT id FROM __memoturn_memories WHERE rowid IN ({doomed}))"
+            ),
+            params.clone(),
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(memoturn_engine::EngineError::Sql(e)) if e.contains("no such table") => {}
+        Err(e) => return Err(e.into()),
+    }
+
+    let stmts = vec![
+        (
+            format!(
+                "INSERT INTO __memoturn_memories_fts (__memoturn_memories_fts, rowid, summary, keywords)
+                 SELECT 'delete', rowid, summary, keywords FROM __memoturn_memories
+                 WHERE rowid IN ({doomed})"
+            ),
+            params.clone(),
+        ),
+        (
+            format!("DELETE FROM __memoturn_memories WHERE rowid IN ({doomed})"),
+            params,
+        ),
+    ];
+    match h.write_trusted_batch(&stmts).await {
+        Ok((n, _)) => Ok(n / 2),
+        Err(memoturn_engine::EngineError::Sql(e)) if e.contains("no such table") => Ok(0),
+        Err(e) => Err(e.into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -941,6 +1135,7 @@ mod tests {
             keywords: None,
             embedding: None,
             session_id: None,
+            source: None,
             ttl_secs: None,
         };
         assert!(validate(&base()).is_ok());

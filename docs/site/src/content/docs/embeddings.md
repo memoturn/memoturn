@@ -74,6 +74,10 @@ Hybrid recall is built for partial channels: results are reciprocal-rank fused a
 channels ran, and each hit reports which channels found it, so degraded recall is visible
 rather than silent.
 
+A namespace [governance policy](/security/#data-governance-policies) can switch embedding off
+per tenant (`ai_egress.embed: deny` — degrades exactly like an unconfigured embedder) or require
+a self-hosted endpoint (`self_hosted_only`), even on a node with a hosted provider configured.
+
 ## Performance
 
 From the README measured table (prototype, single node, p50): memory ingest of a typed fact

@@ -63,6 +63,8 @@ As shipped (ADR-0003 update), the retention window is enforced by snapshot-floor
 `MEMOTURN_PITR_SNAPSHOT_RETENTION_SECS` (default 2592000) keeps older snapshots as coarse
 restore points. Named checkpoints pin their history regardless of age; the floor snapshot is
 never pruned. Level compaction (ltx/1, ltx/2) remains the planned optimization for restore cost.
+Per-namespace governance policies may tighten (never widen) these windows per profile database —
+effective = `min(env, policy)` ([08](08-data-governance.md), ADR-0010).
 
 ## GC
 

@@ -20,6 +20,7 @@ const mt = memoturn({
   url: "http://127.0.0.1:8080", // default
   token,                        // per-database or namespace JWT (data plane)
   platformKey,                  // platform key (control plane)
+  source: "claude-code",        // optional: default provenance for ingested memories
 });
 ```
 
@@ -49,12 +50,16 @@ const { memories } = await alice.recall({
   embedding,                 // optional: vector channel
   topicKey: "user.diet",     // optional: exact-topic channel
   types: ["fact"],
+  source: "claude-code",     // optional: only memories this agent ingested
   k: 8,
 });
 
 const memory = await alice.get(memories[0].id); // includes the supersession chain; null if gone
 await alice.forget(memories[0].id);             // hard delete
 ```
+
+Each memory may carry a `source` ([which agent wrote it](/memories/#provenance-which-agent-wrote-this));
+the client-level `source` fills it in for any ingested memory that doesn't set its own.
 
 Embeddings are bring-your-own `number[]` values; with node-side
 [auto-embedding](/embeddings/) enabled they can be omitted. Server-side

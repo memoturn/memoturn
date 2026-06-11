@@ -85,6 +85,7 @@ impl Answerer for ClaudeAnswerer {
                     "topic_key": m["topic_key"],
                     "summary": m["summary"],
                     "content": m["content"],
+                    "source": m["source"],
                     "created_at": m["created_at"],
                     "superseded": !m["superseded_by"].is_null(),
                 })

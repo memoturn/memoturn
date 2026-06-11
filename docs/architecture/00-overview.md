@@ -88,4 +88,5 @@ agents natively speak JSON — with SQL kept as the power-user escape hatch.
 | [05-deployment](05-deployment.md) | Kubernetes, Helm, multi-cloud, security, observability |
 | [06-mcp-and-assistant](06-mcp-and-assistant.md) | MCP tools, built-in assistant |
 | [07-agent-memory](07-agent-memory.md) | namespaces, profiles, typed memories, supersession, hybrid recall |
+| [08-data-governance](08-data-governance.md) | per-namespace policies: retention/TTL caps, AI egress, audit, erasure |
 | [docs/adr](../adr) | one record per locked decision |

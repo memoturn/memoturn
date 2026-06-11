@@ -99,6 +99,19 @@ assert.equal(after.memories[0].summary, "vegan since 2026");
 assert.equal(await alice.forget(after.memories[0].id), true);
 assert.equal(await alice.forget(after.memories[0].id), false);
 
+// source provenance: client-level default, explicit override, recall filter
+const coder = memoturn({ url, token, platformKey, source: "claude-code" }).memory(ns, "alice");
+r = await coder.ingest([
+  { type: "event", summary: "refactored the auth module", content: { pr: 41 } },
+  { type: "event", summary: "reviewed the auth module", content: { pr: 42 }, source: "cursor" },
+]);
+assert.ok(r.results.every((x) => x.status === "created"));
+const bySrc = await alice.recall({ query: "auth module" });
+assert.deepEqual(new Set(bySrc.memories.map((m) => m.source)), new Set(["claude-code", "cursor"]));
+const onlyCursor = await alice.recall({ query: "auth module", source: "cursor" });
+assert.deepEqual(onlyCursor.memories.map((m) => m.source), ["cursor"]);
+assert.equal((await alice.get(r.results[0].id)).source, "claude-code");
+
 // namespace listing (ns token) + substrate smoke (kv via the profile db)
 if (token) {
   const profiles = await mt.profiles(ns);

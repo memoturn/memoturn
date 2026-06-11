@@ -83,6 +83,21 @@ recall silently skip the vector channel for text-only requests.
 | `MEMOTURN_EMBED_PROVIDER` | `voyage` | `voyage` or `openai`. The `openai` provider speaks the OpenAI-compatible embeddings protocol, so it also reaches local servers. |
 | `MEMOTURN_EMBED_MODEL` | provider default | Embedding model override. |
 | `MEMOTURN_EMBED_BASE_URL` | provider default | Base URL override — point the `openai` provider at any OpenAI-compatible server, including a self-hosted one. |
+| `MEMOTURN_EMBED_SELF_HOSTED_HOSTS` | unset | Comma-separated hosts to treat as self-hosted for the `ai_egress.embed: self_hosted_only` governance rule — covers a self-hosted embedding server behind a public DNS name. Loopback, private-network, and cluster-internal hosts qualify automatically. |
+
+## Data governance
+
+Per-namespace [governance policies](/security/#data-governance-policies) — retention caps,
+memory aging, task-TTL ceilings, and AI egress rules — are data, not node config: they are set
+through the API (`PUT /v1/namespaces/{ns}/policy`) and stored in object storage, so every node
+enforces the same policy. One node knob controls how fast policy changes propagate:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `MEMOTURN_POLICY_CACHE_SECS` | `30` | Per-node policy read-cache TTL. A policy change takes effect on the node that served it immediately and on every other node within this window. |
+
+Policies tighten what the node would otherwise allow — node-level settings such as the
+retention windows above remain the outer ceilings.
 
 ## Examples
 

@@ -54,6 +54,7 @@ curl -X POST http://localhost:8080/v1/memory/acme/alice/recall \
 | `topic_key` | exact key for the topic channel |
 | `types` | filter to a subset of `fact` / `event` / `instruction` / `task` |
 | `session_id` | restrict to memories ingested with this session |
+| `source` | restrict to memories one agent ingested (e.g. `"claude-code"`) — see [provenance](/memories/#provenance-which-agent-wrote-this) |
 | `k` | result cap, default 8 |
 | `include_superseded` | include superseded rows (default `false`) |
 | `include_turns` | also search the raw transcript (see below) |
@@ -71,6 +72,7 @@ curl -X POST http://localhost:8080/v1/memory/acme/alice/recall \
       "content": {"diet": "vegan"},
       "keywords": "food preference",
       "session_id": null,
+      "source": "claude-code",
       "created_at": 1781136000000,
       "superseded_by": null,
       "score": 0.04918,

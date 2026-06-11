@@ -131,6 +131,9 @@ def main() -> None:
     mt = Memoturn(
         os.environ.get("MEMOTURN_URL", "http://127.0.0.1:8080"),
         token=os.environ.get("MEMOTURN_TOKEN"),
+        # Provenance: every memory this agent writes is attributed to it, so
+        # other agents sharing the profile can filter recall by source.
+        source="memory-agent",
     )
     profile = mt.memory(ns, user)
     claude = anthropic.Anthropic()  # ANTHROPIC_API_KEY from env

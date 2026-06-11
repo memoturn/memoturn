@@ -63,6 +63,12 @@ enum Cmd {
         #[command(subcommand)]
         cmd: TokenCmd,
     },
+    /// Data-governance policies (ADR-0010): retention/TTL caps and AI egress
+    /// rules per namespace, with tighten-only per-profile overrides.
+    Policy {
+        #[command(subcommand)]
+        cmd: PolicyCmd,
+    },
     /// Ask a question answered from a profile's memories (server-side
     /// recall + answer synthesis; needs MEMOTURN_ASSISTANT_API_KEY on the node).
     Ask {
@@ -74,6 +80,9 @@ enum Cmd {
         k: u32,
         #[arg(long)]
         session: Option<String>,
+        /// Only consider memories ingested by this agent (e.g. claude-code).
+        #[arg(long)]
+        source: Option<String>,
         /// Print the full JSON response (answer, sources, memories).
         #[arg(long)]
         json: bool,
@@ -143,6 +152,33 @@ enum TokenCmd {
 }
 
 #[derive(Subcommand)]
+enum PolicyCmd {
+    /// Show the namespace policy (platform key), or a profile's override plus
+    /// the effective policy actually enforced (read token).
+    Get {
+        ns: String,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Set the namespace policy (platform key) or a tighten-only profile
+    /// override (admin token). Policy JSON from --file or stdin.
+    Set {
+        ns: String,
+        #[arg(long)]
+        profile: Option<String>,
+        /// Read the policy JSON from this file instead of stdin.
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+    },
+    /// Clear a profile's override (the namespace policy applies unmodified).
+    Clear {
+        ns: String,
+        #[arg(long)]
+        profile: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum MemoryCmd {
     /// Store one typed memory (profile auto-creates on first ingest).
     Ingest {
@@ -165,6 +201,9 @@ enum MemoryCmd {
         keywords: Option<String>,
         #[arg(long)]
         session: Option<String>,
+        /// Originating agent for provenance (e.g. claude-code).
+        #[arg(long)]
+        source: Option<String>,
         /// Task lifetime in seconds.
         #[arg(long)]
         ttl: Option<u64>,
@@ -182,6 +221,9 @@ enum MemoryCmd {
         /// fact | event | instruction | task (repeatable).
         #[arg(long = "type")]
         types: Vec<String>,
+        /// Only memories ingested by this agent (e.g. claude-code).
+        #[arg(long)]
+        source: Option<String>,
         #[arg(long)]
         include_superseded: bool,
     },
@@ -192,6 +234,9 @@ enum MemoryCmd {
         profile: String,
         #[arg(long)]
         session: Option<String>,
+        /// Originating agent for provenance (e.g. claude-code).
+        #[arg(long)]
+        source: Option<String>,
         /// Propose without ingesting.
         #[arg(long)]
         dry_run: bool,
@@ -268,7 +313,15 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     // Control-plane commands authenticate with the platform key; data-plane
     // commands with the per-database token. Either falls back to the other.
-    let is_platform = matches!(cli.cmd, Cmd::Db { .. } | Cmd::Token { .. });
+    // Namespace-level policy is control-plane; profile-level rides the token.
+    let is_platform = match &cli.cmd {
+        Cmd::Db { .. } | Cmd::Token { .. } => true,
+        Cmd::Policy { cmd } => match cmd {
+            PolicyCmd::Get { profile, .. } | PolicyCmd::Set { profile, .. } => profile.is_none(),
+            PolicyCmd::Clear { .. } => false,
+        },
+        _ => false,
+    };
     let cred = if is_platform {
         cli.platform_key.clone().or_else(|| cli.token.clone())
     } else {
@@ -422,6 +475,38 @@ async fn main() -> anyhow::Result<()> {
                 .await
             }
         },
+        Cmd::Policy { cmd } => match cmd {
+            PolicyCmd::Get { ns, profile } => {
+                let url = match profile {
+                    Some(p) => format!("{base}/v1/memory/{ns}/{p}/policy"),
+                    None => format!("{base}/v1/namespaces/{ns}/policy"),
+                };
+                show(c.get(url).send().await?).await
+            }
+            PolicyCmd::Set { ns, profile, file } => {
+                let text = match file {
+                    Some(f) => std::fs::read_to_string(&f)
+                        .with_context(|| format!("reading {}", f.display()))?,
+                    None => std::io::read_to_string(std::io::stdin()).context("reading stdin")?,
+                };
+                let policy: Value =
+                    serde_json::from_str(&text).context("policy must be a JSON object")?;
+                let url = match profile {
+                    Some(p) => format!("{base}/v1/memory/{ns}/{p}/policy"),
+                    None => format!("{base}/v1/namespaces/{ns}/policy"),
+                };
+                show(c.put(url).json(&json!({ "policy": policy })).send().await?).await
+            }
+            PolicyCmd::Clear { ns, profile } => {
+                show(
+                    c.put(format!("{base}/v1/memory/{ns}/{profile}/policy"))
+                        .json(&json!({ "policy": null }))
+                        .send()
+                        .await?,
+                )
+                .await
+            }
+        },
         Cmd::Memory { cmd } => match cmd {
             MemoryCmd::Ingest {
                 ns,
@@ -432,6 +517,7 @@ async fn main() -> anyhow::Result<()> {
                 content,
                 keywords,
                 session,
+                source,
                 ttl,
             } => {
                 let content: Value = match content {
@@ -447,6 +533,9 @@ async fn main() -> anyhow::Result<()> {
                 }
                 if let Some(s) = session {
                     m["session_id"] = json!(s);
+                }
+                if let Some(s) = source {
+                    m["source"] = json!(s);
                 }
                 if let Some(t) = ttl {
                     m["ttl"] = json!(t);
@@ -466,6 +555,7 @@ async fn main() -> anyhow::Result<()> {
                 topic,
                 k,
                 types,
+                source,
                 include_superseded,
             } => {
                 let mut body = json!({"k": k, "include_superseded": include_superseded});
@@ -477,6 +567,9 @@ async fn main() -> anyhow::Result<()> {
                 }
                 if !types.is_empty() {
                     body["types"] = json!(types);
+                }
+                if let Some(s) = source {
+                    body["source"] = json!(s);
                 }
                 show(
                     c.post(format!("{base}/v1/memory/{ns}/{profile}/recall"))
@@ -490,6 +583,7 @@ async fn main() -> anyhow::Result<()> {
                 ns,
                 profile,
                 session,
+                source,
                 dry_run,
             } => {
                 let stdin = std::io::read_to_string(std::io::stdin()).context("reading stdin")?;
@@ -498,6 +592,9 @@ async fn main() -> anyhow::Result<()> {
                 let mut body = json!({"turns": turns, "dry_run": dry_run});
                 if let Some(s) = session {
                     body["session_id"] = json!(s);
+                }
+                if let Some(s) = source {
+                    body["source"] = json!(s);
                 }
                 show(
                     c.post(format!("{base}/v1/memory/{ns}/{profile}/extract"))
@@ -562,6 +659,7 @@ async fn main() -> anyhow::Result<()> {
             question,
             k,
             session,
+            source,
             json: raw,
         } => {
             let question = question.join(" ");
@@ -571,6 +669,9 @@ async fn main() -> anyhow::Result<()> {
             let mut body = json!({"question": question, "k": k});
             if let Some(s) = session {
                 body["session_id"] = json!(s);
+            }
+            if let Some(s) = source {
+                body["source"] = json!(s);
             }
             let resp = c
                 .post(format!("{base}/v1/memory/{ns}/{profile}/ask"))
