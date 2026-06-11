@@ -53,18 +53,32 @@ gains `policy_get`/`policy_set`/`audit_query`; both SDKs gain policy get/set and
 iterator. Hash-chain tamper evidence stays reserved (`prev` field) — immutable objects + bucket
 object-lock are the near-term posture.
 
+**Update (2026-06): verifiable erasure shipped (phase 3).** Erasure coupons at
+`v1/_governance/erasures/{db_name}/{id}.json` — outside the db's `{uuid}/` prefix and outside
+`__memoturn_*` tables, so neither db deletion nor branch rewind loses the evidence, and keyed by
+name so the trail survives uuid re-mint. `POST /v1/memory/{ns}/{profile}/erasures` (write scope;
+target exactly one of `memory_id`, `topic_key`+`type` — the whole supersession chain via the new
+`forget_topic` — or `session_id`+`turns`) hard-forgets at txid `T` with **`secure_delete` page
+zeroing** on the writer connection, ships durably, and answers 202 with the coupon. After
+`erasure.grace_secs` the maintenance loop (ordered before retention/GC, with the verifier after
+GC): forces a post-`T` snapshot where this node can own the branch, prunes manifest references
+below `T` per branch (`prune_before` — a chain-*prefix* drop below a snapshot base; segment
+chains never splice), lets GC reclaim, then `verify_erased_before` proves absence — every
+manifest ref AND every raw txid-named object key sits at or above `T` — and a **signed Ed25519
+receipt** (domain-separated `memoturn-erasure-receipt-v1`, same keypair as JWTs, `alg: "none"`
+stated explicitly on auth-disabled nodes) lands in the coupon. Bounded completion =
+grace + tick + GC grace, not the 30-day snapshot tier. Honest blockers surface in
+`blocked_by` and flip the coupon to `blocked`: named checkpoints below `T` (by name) and
+branches that may hold the datum as *live content* (anything not forked from the erased branch
+at ≥ `T` — conservative by construction). `erasure.purge_on_forget` upgrades every plain forget
+into a coupon (`Memoturn-Erasure-Id` response header). Surfaces: `memoturn memory erase|erasures`,
+SDK `erase()/erasures()/erasure()`, MCP `memory_erase`/`memory_erasure_status`; audit events
+`erasure.requested`/`erasure.completed`.
+
 **Deferred (tracked here):**
-- **Verifiable erasure (phase 3, designed):** erasure coupons at
-  `v1/_governance/erasures/{db}/{id}.json` (outside the db prefix and outside `__memoturn_*`
-  tables so neither db deletion nor branch rewind loses the evidence): forget at txid `T` with
-  `secure_delete` (zeroes freed pages), durable ship, then after `erasure.grace_secs` the
-  maintenance loop forces a post-`T` snapshot, prunes manifest references below `T` (a chain
-  *prefix* drop below a snapshot base — segment chains never splice), GC reclaims, a verifier
-  proves absence by listing (object keys encode txids), and a signed Ed25519 receipt
-  (domain-separated, same keypair as JWTs) lands in the coupon. Bounded completion =
-  grace + tick + GC grace, not the 30-day snapshot tier. Honest blockers surface in the coupon:
-  named checkpoints below `T` and pre-`T` forks (where the datum is live content, not history).
-  `erasure.purge_on_forget` upgrades every plain forget into a coupon.
 - **Crypto-shredding** rides the per-tenant KMS encryption phase (ADR-0008 deferral) as the
-  erasure fast path. Cold-database memory-age sweeps wake on next hot; whole-profile TTL stays
-  deferred (ADR-0009).
+  erasure fast path; until then bounded-time rewrite is the guarantee.
+- Synchronous `?mode=purge` (no grace window); a checkpoint-delete API to unblock pinned
+  erasures deliberately; local-disk scrubbing of evicted cache files (receipts scope their
+  claim to object storage, the source of truth). Cold-database memory-age sweeps wake on next
+  hot; whole-profile TTL stays deferred (ADR-0009).

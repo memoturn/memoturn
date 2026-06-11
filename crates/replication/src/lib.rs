@@ -17,7 +17,7 @@ pub mod segment;
 mod shipper;
 
 pub use manifest::{Manifest, ParentRef, SnapshotRef};
-pub use replicator::{Replicator, ShipOutcome, ShipPayload};
+pub use replicator::{ErasureEvidence, PruneBeforeOutcome, Replicator, ShipOutcome, ShipPayload};
 pub use segment::SegmentRef;
 pub use shipper::Shipper;
 

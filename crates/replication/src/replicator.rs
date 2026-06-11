@@ -33,6 +33,56 @@ pub struct ShipOutcome {
     pub payload: Option<ShipPayload>,
 }
 
+/// Result of a [`Replicator::prune_before`] erasure pass on one branch.
+#[derive(Debug, PartialEq)]
+pub enum PruneBeforeOutcome {
+    /// References dropped; objects fall to the next GC pass.
+    Pruned(usize),
+    /// Nothing below the floor remained referenced.
+    AlreadyClean,
+    /// Named checkpoints pin history below the erasure txid — deliberate
+    /// conflict, surfaced rather than silently violated.
+    Blocked { checkpoints: Vec<String> },
+    /// No snapshot at or above the erasure txid exists yet; the caller must
+    /// ship one first (the new restore base).
+    NoBase,
+}
+
+/// What [`Replicator::verify_erased_before`] saw — the receipt's evidence.
+#[derive(Debug, serde::Serialize)]
+pub struct ErasureEvidence {
+    pub manifests_checked: usize,
+    pub objects_listed: usize,
+    /// Oldest snapshot txid observed anywhere (manifest refs and raw keys).
+    pub oldest_snapshot_txid: Option<u64>,
+    /// Oldest segment `min_txid` observed anywhere.
+    pub oldest_segment_min_txid: Option<u64>,
+    /// True iff nothing below the erasure txid was seen.
+    pub clean: bool,
+}
+
+impl ErasureEvidence {
+    fn note_snapshot(&mut self, seen: u64, floor: u64) {
+        self.oldest_snapshot_txid = Some(self.oldest_snapshot_txid.map_or(seen, |o| o.min(seen)));
+        if seen < floor {
+            self.clean = false;
+        }
+    }
+    fn note_segment(&mut self, seen: u64, floor: u64) {
+        self.oldest_segment_min_txid =
+            Some(self.oldest_segment_min_txid.map_or(seen, |o| o.min(seen)));
+        if seen < floor {
+            self.clean = false;
+        }
+    }
+}
+
+/// Leading txid of a data-object file name (`{txid:020}-…`).
+fn key_leading_txid(key: &str) -> Option<u64> {
+    let name = key.rsplit('/').next()?;
+    name.split('-').next()?.parse().ok()
+}
+
 /// Storage-side operations: ship snapshots, load/store manifests, restore,
 /// fork, checkpoint, rewind. Stateless — all state lives in object storage.
 pub struct Replicator {
@@ -720,6 +770,104 @@ impl Replicator {
         Ok(pruned)
     }
 
+    /// Drop every manifest reference to history strictly below `txid` on one
+    /// branch (verifiable erasure, ADR-0010 phase 3). Only ever removes a
+    /// chain *prefix* below a snapshot base at or above `txid` — segment
+    /// chains stay contiguous; gaps are never spliced. Named checkpoints
+    /// pinning history below `txid` block rather than being silently
+    /// violated. Plain CAS like `prune_retention`: a lost race against a
+    /// concurrent ship defers the branch to the next pass.
+    pub async fn prune_before(
+        &self,
+        uuid: &str,
+        branch: &str,
+        txid: u64,
+    ) -> Result<PruneBeforeOutcome> {
+        let Some((mut m, version)) = self.load_manifest_versioned(uuid, branch).await? else {
+            return Err(ReplicationError::BranchNotFound(branch.to_string()));
+        };
+        let blockers: Vec<String> = m
+            .checkpoints
+            .iter()
+            .filter(|(_, &t)| t < txid)
+            .map(|(name, _)| name.clone())
+            .collect();
+        if !blockers.is_empty() {
+            return Ok(PruneBeforeOutcome::Blocked {
+                checkpoints: blockers,
+            });
+        }
+        // The new restore base: the oldest snapshot at or above `txid`.
+        let Some(base) = m.snapshots.iter().find(|s| s.txid >= txid).map(|s| s.txid) else {
+            return Ok(PruneBeforeOutcome::NoBase);
+        };
+        let before = m.snapshots.len() + m.segments.len();
+        m.snapshots.retain(|s| s.txid >= base);
+        m.segments.retain(|s| s.max_txid > base);
+        let after = m.snapshots.len() + m.segments.len();
+        if after == before {
+            return Ok(PruneBeforeOutcome::AlreadyClean);
+        }
+        self.store_manifest(uuid, &m, Some(version)).await?;
+        Ok(PruneBeforeOutcome::Pruned(before - after))
+    }
+
+    /// Prove that no history below `txid` remains for this database: every
+    /// branch manifest references nothing below it, and — because object keys
+    /// encode their txids — no snapshot/segment object below it exists in the
+    /// store, referenced or not. Absence is provable by listing.
+    pub async fn verify_erased_before(&self, uuid: &str, txid: u64) -> Result<ErasureEvidence> {
+        let branches_prefix = ObjPath::from(format!("{}/{uuid}/branches", self.root));
+        let manifest_keys: Vec<ObjPath> = self
+            .store
+            .list(Some(&branches_prefix))
+            .map_ok(|m| m.location)
+            .try_collect()
+            .await?;
+        let mut ev = ErasureEvidence {
+            manifests_checked: 0,
+            objects_listed: 0,
+            oldest_snapshot_txid: None,
+            oldest_segment_min_txid: None,
+            clean: true,
+        };
+        for mk in &manifest_keys {
+            let bytes = self.store.get(mk).await?.bytes().await?;
+            let m: Manifest = serde_json::from_slice(&bytes)
+                .map_err(|e| ReplicationError::Corrupt(e.to_string()))?;
+            ev.manifests_checked += 1;
+            for s in &m.snapshots {
+                ev.note_snapshot(s.txid, txid);
+            }
+            for s in &m.segments {
+                ev.note_segment(s.min_txid, txid);
+            }
+        }
+        // Object keys encode txids ({txid:020}-… / {min:020}-{max:020}-…), so
+        // residue invisible to manifests (awaiting GC) still fails the proof.
+        for sub in ["snapshots", "ltx"] {
+            let prefix = ObjPath::from(format!("{}/{uuid}/{sub}", self.root));
+            let keys: Vec<ObjPath> = self
+                .store
+                .list(Some(&prefix))
+                .map_ok(|m| m.location)
+                .try_collect()
+                .await?;
+            for key in keys {
+                ev.objects_listed += 1;
+                let Some(first) = key_leading_txid(key.as_ref()) else {
+                    ev.clean = false; // unparseable object under the data prefix
+                    continue;
+                };
+                match sub {
+                    "snapshots" => ev.note_snapshot(first, txid),
+                    _ => ev.note_segment(first, txid),
+                }
+            }
+        }
+        Ok(ev)
+    }
+
     /// Delete every object under a database prefix (database deletion).
     pub async fn delete_db(&self, uuid: &str) -> Result<()> {
         let prefix = ObjPath::from(format!("{}/{uuid}", self.root));
@@ -943,5 +1091,100 @@ mod tests {
         let deleted = r.gc("u2", Duration::from_secs(3600)).await.unwrap();
         assert_eq!(deleted, 0, "fresh objects survive the grace window");
         assert!(store.get(&ObjPath::from(orphan)).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn prune_before_drops_only_the_prefix_below_a_post_txid_base() {
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let r = Replicator::new(store.clone(), "v1");
+        // Fixture: snapshots at 5 and 10, segments 5-6, 6-10, 10-12.
+        retention_fixture(&store, &r, "e1").await;
+
+        // Erase below txid 7: the base is snapshot 10 (first ≥ 7); snapshot 5
+        // and the segments at or below 10 go; the live chain 10-12 stays.
+        let outcome = r.prune_before("e1", "main", 7).await.unwrap();
+        assert_eq!(outcome, PruneBeforeOutcome::Pruned(3));
+        let m = r.load_manifest("e1", "main").await.unwrap().unwrap();
+        assert_eq!(m.snapshots.len(), 1);
+        assert_eq!(m.snapshots[0].txid, 10);
+        assert_eq!(m.segments.len(), 1);
+        assert_eq!((m.segments[0].min_txid, m.segments[0].max_txid), (10, 12));
+        assert_eq!(m.head_txid, 12, "the head never moves");
+
+        // Idempotent.
+        assert_eq!(
+            r.prune_before("e1", "main", 7).await.unwrap(),
+            PruneBeforeOutcome::AlreadyClean
+        );
+    }
+
+    #[tokio::test]
+    async fn prune_before_needs_a_base_and_honors_checkpoints() {
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let r = Replicator::new(store.clone(), "v1");
+
+        // No snapshot at or above the erasure txid: the caller must ship one.
+        retention_fixture(&store, &r, "e2").await;
+        assert_eq!(
+            r.prune_before("e2", "main", 11).await.unwrap(),
+            PruneBeforeOutcome::NoBase
+        );
+
+        // A checkpoint pinning pre-erasure history blocks, by name.
+        let mut m = retention_fixture(&store, &r, "e3").await;
+        m.checkpoints.insert("pre-launch".into(), 6);
+        let (_, v) = r
+            .load_manifest_versioned("e3", "main")
+            .await
+            .unwrap()
+            .unwrap();
+        r.store_manifest("e3", &m, Some(v)).await.unwrap();
+        assert_eq!(
+            r.prune_before("e3", "main", 7).await.unwrap(),
+            PruneBeforeOutcome::Blocked {
+                checkpoints: vec!["pre-launch".into()]
+            }
+        );
+        // A checkpoint at or above the erasure txid does not block.
+        let mut m = r.load_manifest("e3", "main").await.unwrap().unwrap();
+        m.checkpoints.clear();
+        m.checkpoints.insert("post".into(), 10);
+        let (_, v) = r
+            .load_manifest_versioned("e3", "main")
+            .await
+            .unwrap()
+            .unwrap();
+        r.store_manifest("e3", &m, Some(v)).await.unwrap();
+        assert!(matches!(
+            r.prune_before("e3", "main", 7).await.unwrap(),
+            PruneBeforeOutcome::Pruned(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn verify_erased_before_proves_absence_from_keys_and_manifests() {
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let r = Replicator::new(store.clone(), "v1");
+        retention_fixture(&store, &r, "e4").await;
+
+        // Dirty before any prune: pre-7 history exists.
+        let ev = r.verify_erased_before("e4", 7).await.unwrap();
+        assert!(!ev.clean);
+        assert_eq!(ev.oldest_snapshot_txid, Some(5));
+
+        // Prune the manifest — still dirty: the objects exist until GC runs
+        // (txid-named keys make residue visible without reading a byte).
+        r.prune_before("e4", "main", 7).await.unwrap();
+        let ev = r.verify_erased_before("e4", 7).await.unwrap();
+        assert!(!ev.clean, "unreferenced objects still fail the proof");
+
+        // After GC reclaims the dereferenced objects, the proof passes.
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        r.gc("e4", Duration::ZERO).await.unwrap();
+        let ev = r.verify_erased_before("e4", 7).await.unwrap();
+        assert!(ev.clean, "{ev:?}");
+        assert_eq!(ev.oldest_snapshot_txid, Some(10));
+        assert_eq!(ev.oldest_segment_min_txid, Some(10));
+        assert_eq!(ev.manifests_checked, 1);
     }
 }

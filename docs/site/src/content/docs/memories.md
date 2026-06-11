@@ -150,6 +150,12 @@ By default history is kept indefinitely. Namespaces that need bounded retention 
 age out events, and bound superseded history by age or per-topic count — the node deletes
 aged-out rows automatically.
 
+When forget isn't enough — the data must also leave point-in-time-recovery history —
+[**verifiable erasure**](/security/#verifiable-erasure) (`POST .../erasures`) hard-deletes now
+with `secure_delete` page zeroing, rewrites object-storage history below the erasure point
+after a grace window, and proves it with a signed receipt. It can target one memory, a topic's
+whole supersession chain, or a session.
+
 ## Storage
 
 Memories live in reserved tables inside the profile database: `__memoturn_memories` (rows and

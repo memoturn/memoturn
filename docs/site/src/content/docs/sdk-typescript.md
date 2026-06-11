@@ -170,6 +170,11 @@ const eff = await mt.policy.getProfile("acme", "alice");      // override + effe
 for await (const evt of mt.auditEvents("acme", { action: "ai.", outcome: "denied" })) {
   console.log(evt.ts, evt.action, evt.profile);
 }
+
+// Verifiable erasure: hard-forget now, history rewrite + signed receipt
+// after the grace window. Target one memory, a topic chain, or a session.
+const { erasure_id } = await alice.erase({ topicKey: "user.home-address", type: "fact" });
+const coupon = await alice.erasure(erasure_id);   // status: pending → completed (with receipt)
 ```
 
 ## Tests

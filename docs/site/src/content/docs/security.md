@@ -166,6 +166,37 @@ a rewind can never erase the trail, and surviving even deletion of the profiles 
   window (`MEMOTURN_AUDIT_FLUSH_MS`, default 2 s; orderly shutdowns drain). `audit.retention_secs`
   bounds the stream itself. For tamper evidence, pair the stream with bucket-level object lock.
 
+## Verifiable erasure
+
+Forget hides a memory; **erasure proves it's gone** — including from point-in-time-recovery
+history. `POST /v1/memory/{ns}/{profile}/erasures` targets one memory, a topic's whole
+supersession chain, or a session:
+
+```bash
+curl -X POST $MEMOTURN_URL/v1/memory/acme/alice/erasures \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"topic_key": "user.home-address", "type": "fact"}'
+# 202 { "erasure_id": "ers_…", "status": "pending", "txid": 412, "grace_until": … }
+```
+
+- **Immediately**: the rows, search entries, and vectors are hard-deleted with `secure_delete`
+  page zeroing, and the post-erasure state is durably shipped before the request returns.
+- **After the grace window** (`erasure.grace_secs` in the policy, default 24 h — the undo
+  window), the node rewrites object-storage history: every restorable snapshot and segment
+  below the erasure point is dereferenced and physically reclaimed. Completion is bounded by
+  grace + maintenance cadence, never the 30-day snapshot tier.
+- **Then it proves it**: object keys encode their transaction ids, so absence is verifiable by
+  listing. A completed erasure carries a **signed Ed25519 receipt** — target, erasure point,
+  and the verification evidence — checkable offline against the cluster's public key.
+- **Honest blockers**: a named checkpoint pinning older history, or a branch that may still
+  hold the data as live content, flips the erasure to `blocked` with the offenders named —
+  never silently violated. Receipts scope their claim to object storage (the source of truth);
+  node-local caches are transient and converge.
+- `erasure.purge_on_forget: true` upgrades every plain forget into a tracked erasure (the
+  coupon id rides the `Memoturn-Erasure-Id` response header). Poll
+  `GET .../erasures/{id}` or `memoturn memory erasures` for the receipt; erasure requests and
+  completions land in the [audit stream](#audit-logging).
+
 ## Operational notes
 
 - Without `MEMOTURN_ETCD`, a node that looks multi-node — auth on, or a non-loopback

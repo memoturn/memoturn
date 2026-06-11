@@ -62,6 +62,9 @@ pub struct AppState {
     /// Per-namespace audit stream (ADR-0010 phase 2). Always present;
     /// emission is gated by each namespace's `audit.enabled` policy.
     pub audit: Arc<audit::AuditSink>,
+    /// Erasure coupons (ADR-0010 phase 3): durable records of verifiable
+    /// erasures, in object storage outside any database's prefix.
+    pub erasures: Arc<memoturn_governance::ErasureLedger>,
 }
 
 /// Body cap for control/query requests (filters, recall, SQL queries). 1 MiB is
@@ -228,6 +231,13 @@ pub fn router(state: AppState) -> Router {
             "/v1/memory/{ns}/{profile}/policy",
             get(profile_policy_get).put(profile_policy_put),
         )
+        // Verifiable erasure (ADR-0010 phase 3): hard-forget now, then a
+        // bounded-time history rewrite with a signed receipt.
+        .route(
+            "/v1/memory/{ns}/{profile}/erasures",
+            post(memories_erase).get(erasures_list),
+        )
+        .route("/v1/memory/{ns}/{profile}/erasures/{id}", get(erasure_get))
         // Audit stream reads (platform key, or a namespace admin token for
         // its own stream — the carve-out lives in the auth middleware).
         .route(
@@ -2474,7 +2484,12 @@ async fn memories_forget(
 ) -> Result<Response, ApiError> {
     let actor = actor.map(|e| e.0);
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
-    let (audit_on, _) = audit_gate(&state, &ns, &profile).await;
+    let eff = state
+        .governance
+        .effective(&ns, Some(&profile))
+        .await
+        .unwrap_or_default();
+    let audit_on = eff.audit_enabled;
     let spec = format!("{name}@{branch}");
     let l = match resolve_write(&state, &spec).await? {
         WriteRoute::Remote { addr } => {
@@ -2506,11 +2521,45 @@ async fn memories_forget(
         }
         WriteRoute::Local(l) => l,
     };
-    let (deleted, txid) = memoturn_docstore::memories::forget(&l.h, &id).await?;
+    // `erasure.purge_on_forget` upgrades a plain forget into a tracked
+    // erasure: secure_delete page zeroing now, coupon + history rewrite after
+    // the grace window. The coupon id rides a response header.
+    let purge = eff.purge_on_forget;
+    if purge {
+        l.h.set_secure_delete(true).await?;
+    }
+    let forgotten = memoturn_docstore::memories::forget(&l.h, &id).await;
+    if purge {
+        let _ = l.h.set_secure_delete(false).await;
+    }
+    let (deleted, txid) = forgotten?;
     if deleted == 0 {
         return Err(ApiError(StatusCode::NOT_FOUND, "memory not found".into()));
     }
-    settle(&state, &l, false).await?;
+    let mut resp_headers = txid_headers(txid);
+    if purge {
+        // The coupon path ships durably — it supersedes the plain settle.
+        let target = memoturn_governance::ErasureTarget {
+            memory_id: Some(id.clone()),
+            ..Default::default()
+        };
+        let coupon = create_erasure_coupon(
+            &state,
+            &ns,
+            &profile,
+            &l,
+            target,
+            vec![id.clone()],
+            txid,
+            &actor,
+        )
+        .await?;
+        if let Ok(v) = coupon.id.parse() {
+            resp_headers.insert("Memoturn-Erasure-Id", v);
+        }
+    } else {
+        settle(&state, &l, false).await?;
+    }
     if audit_on && !is_internal(&actor) {
         state.audit.emit(
             audit::AuditEvent::new("memory.forget", &ns)
@@ -2521,7 +2570,7 @@ async fn memories_forget(
                 .actor(actor.as_ref()),
         );
     }
-    Ok((txid_headers(txid), StatusCode::NO_CONTENT).into_response())
+    Ok((resp_headers, StatusCode::NO_CONTENT).into_response())
 }
 
 async fn memory_sessions_list(
@@ -2854,6 +2903,377 @@ pub async fn sweep_audit_retention(state: &AppState) -> usize {
         }
     }
     n
+}
+
+// ---- verifiable erasure (ADR-0010 phase 3) ----
+
+#[derive(Deserialize)]
+struct EraseReq {
+    /// Erase one memory by id.
+    #[serde(default)]
+    memory_id: Option<String>,
+    /// Erase a whole topic — the active row and its supersession chain.
+    #[serde(default)]
+    topic_key: Option<String>,
+    #[serde(rename = "type", default)]
+    mtype: Option<String>,
+    /// Erase a session's task memories; `turns: true` drops its transcript.
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    turns: bool,
+}
+
+/// Hard-forget now (with `secure_delete` page zeroing), durably ship the
+/// post-forget state, and record an erasure coupon promising that after the
+/// grace window every trace below the forget txid leaves object storage —
+/// verified and receipted by the maintenance loop.
+async fn memories_erase(
+    State(state): State<AppState>,
+    Path((ns, profile)): Path<(String, String)>,
+    headers: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+    actor: Option<axum::Extension<audit::Actor>>,
+    Json(req): Json<serde_json::Value>,
+) -> Result<Response, ApiError> {
+    let actor = actor.map(|e| e.0);
+    let parsed: EraseReq = serde_json::from_value(req.clone())
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+    let targets = [
+        parsed.memory_id.is_some(),
+        parsed.topic_key.is_some(),
+        parsed.session_id.is_some(),
+    ]
+    .iter()
+    .filter(|t| **t)
+    .count();
+    if targets != 1 {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "exactly one of memory_id, topic_key (with type), or session_id".into(),
+        ));
+    }
+    if parsed.topic_key.is_some() && parsed.mtype.is_none() {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "topic_key erasure requires type (fact | instruction)".into(),
+        ));
+    }
+    let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
+    let spec = format!("{name}@{branch}");
+    let l = match resolve_write(&state, &spec).await? {
+        WriteRoute::Remote { addr } => {
+            // The owner performs the forget and creates the coupon (it holds
+            // the handle the durable ship needs).
+            return forward(
+                &state,
+                &addr,
+                reqwest::Method::POST,
+                &format!("/v1/memory/{ns}/{profile}/erasures?branch={}", enc(&branch)),
+                Some(req),
+                None,
+            )
+            .await;
+        }
+        WriteRoute::Local(l) => l,
+    };
+
+    // The erasing transaction runs with secure_delete on, so the freed cells
+    // are zeroed and the forced post-forget snapshot carries no byte residue.
+    l.h.set_secure_delete(true).await?;
+    let erased: Result<(Vec<String>, u64), ApiError> = async {
+        if let Some(id) = &parsed.memory_id {
+            let (deleted, txid) = memoturn_docstore::memories::forget(&l.h, id).await?;
+            if deleted == 0 {
+                return Err(ApiError(StatusCode::NOT_FOUND, "memory not found".into()));
+            }
+            Ok((vec![id.clone()], txid))
+        } else if let (Some(key), Some(mtype)) = (&parsed.topic_key, &parsed.mtype) {
+            let mtype = memoturn_docstore::memories::MemoryType::parse(mtype)?;
+            let (ids, txid) = memoturn_docstore::memories::forget_topic(&l.h, mtype, key).await?;
+            if ids.is_empty() {
+                return Err(ApiError(
+                    StatusCode::NOT_FOUND,
+                    "no memories on that topic".into(),
+                ));
+            }
+            Ok((ids, txid))
+        } else {
+            let sid = parsed.session_id.as_deref().unwrap_or_default();
+            let mut txid = memoturn_docstore::memories::end_session(&l.h, sid).await?;
+            if parsed.turns {
+                txid = memoturn_docstore::memory::drop_session(&l.h, sid).await?;
+            }
+            Ok((Vec::new(), txid))
+        }
+    }
+    .await;
+    let off = l.h.set_secure_delete(false).await;
+    let (memory_ids, txid) = erased?;
+    off?;
+
+    let target = memoturn_governance::ErasureTarget {
+        memory_id: parsed.memory_id,
+        topic_key: parsed.topic_key,
+        mtype: parsed.mtype,
+        session_id: parsed.session_id,
+        turns: parsed.turns,
+    };
+    let coupon =
+        create_erasure_coupon(&state, &ns, &profile, &l, target, memory_ids, txid, &actor).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        txid_headers(txid),
+        Json(json!({
+            "erasure_id": coupon.id,
+            "status": coupon.status,
+            "txid": txid,
+            "grace_until": coupon.grace_until,
+        })),
+    )
+        .into_response())
+}
+
+/// Durably ship the post-forget state, then write the coupon. Ordering
+/// matters: the coupon must never promise an erasure whose post-`T` state is
+/// not yet in object storage.
+#[allow(clippy::too_many_arguments)]
+async fn create_erasure_coupon(
+    state: &AppState,
+    ns: &str,
+    profile: &str,
+    l: &LocalWrite,
+    target: memoturn_governance::ErasureTarget,
+    memory_ids: Vec<String>,
+    txid: u64,
+    actor: &Option<audit::Actor>,
+) -> Result<memoturn_governance::ErasureCoupon, ApiError> {
+    state
+        .shipper
+        .flush_one(&l.uuid, &l.branch, &l.h, l.epoch)
+        .await?;
+    let eff = state
+        .governance
+        .effective(ns, Some(profile))
+        .await
+        .unwrap_or_default();
+    let now = now_ms();
+    let coupon = memoturn_governance::ErasureCoupon {
+        id: format!("ers_{}", &uuid::Uuid::new_v4().simple().to_string()[..16]),
+        db: format!("{ns}--{profile}"),
+        uuid: l.uuid.clone(),
+        target,
+        memory_ids,
+        requested_at: now,
+        grace_until: now + (eff.erasure_grace_secs as i64) * 1000,
+        forget_txid: std::collections::BTreeMap::from([(l.branch.clone(), txid)]),
+        status: memoturn_governance::ErasureStatus::Pending,
+        blocked_by: None,
+        completed_at: None,
+        receipt: None,
+        extra: serde_json::Map::new(),
+    };
+    state.erasures.create(&coupon).await?;
+    if eff.audit_enabled {
+        state.audit.emit(
+            audit::AuditEvent::new("erasure.requested", ns)
+                .profile(profile)
+                .branch(&l.branch)
+                .resource(&coupon.id)
+                .txid(txid)
+                .count(coupon.memory_ids.len() as u64)
+                .actor(actor.as_ref()),
+        );
+    }
+    Ok(coupon)
+}
+
+async fn erasures_list(
+    State(state): State<AppState>,
+    Path((ns, profile)): Path<(String, String)>,
+    headers: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+) -> Result<Response, ApiError> {
+    let (name, _) = profile_db(&ns, &profile, &headers, &q)?;
+    let erasures = state.erasures.list(&name).await?;
+    Ok(Json(json!({ "erasures": erasures })).into_response())
+}
+
+async fn erasure_get(
+    State(state): State<AppState>,
+    Path((ns, profile, id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+) -> Result<Response, ApiError> {
+    let (name, _) = profile_db(&ns, &profile, &headers, &q)?;
+    match state.erasures.get(&name, &id).await? {
+        Some(coupon) => Ok(Json(serde_json::to_value(coupon).unwrap_or_default()).into_response()),
+        None => Err(ApiError(StatusCode::NOT_FOUND, "erasure not found".into())),
+    }
+}
+
+/// Drive pending erasures past their grace window: per branch, ensure a
+/// post-`T` snapshot base (forcing one when this node can own the branch),
+/// surface checkpoint/fork blockers honestly, and prune history below `T`.
+/// Runs before `enforce_retention`/`gc_objects` so dereferenced objects fall
+/// to this pass's GC; `finalize_erasures` then proves and receipts.
+pub async fn process_erasures(state: &AppState) -> usize {
+    let Ok(coupons) = state.erasures.unfinished().await else {
+        return 0;
+    };
+    let now = now_ms();
+    let mut acted = 0;
+    for mut coupon in coupons {
+        if coupon.grace_until > now {
+            continue;
+        }
+        let Some((&ref request_branch, &t)) = coupon.forget_txid.iter().next() else {
+            continue;
+        };
+        // A fully deleted database is the strongest erasure — nothing to
+        // prune; finalize verifies the (empty) prefix.
+        if state.registry.get(&coupon.db).await.is_err() {
+            continue;
+        }
+        let mut branches: Vec<String> = vec!["main".into()];
+        if let Ok(bs) = state.registry.list_branches(&coupon.db).await {
+            branches.extend(bs.into_iter().map(|b| b.branch));
+        }
+        branches.sort();
+        branches.dedup();
+        let mut blocked = memoturn_governance::BlockedBy::default();
+        for b in &branches {
+            let Ok(Some(m)) = state.replicator.load_manifest(&coupon.uuid, b).await else {
+                continue;
+            };
+            // A branch that isn't the erased one and didn't fork from it at
+            // or after `T` may hold the datum as LIVE content, not history —
+            // pruning can't help; the caller must erase or delete it there.
+            if b != request_branch {
+                let post_t_child = m
+                    .parent
+                    .as_ref()
+                    .is_some_and(|p| &p.branch == request_branch && p.fork_txid >= t);
+                if !post_t_child {
+                    blocked.branches.push(b.clone());
+                    continue;
+                }
+            }
+            match state.replicator.prune_before(&coupon.uuid, b, t).await {
+                Ok(memoturn_replication::PruneBeforeOutcome::Pruned(n)) => acted += n,
+                Ok(memoturn_replication::PruneBeforeOutcome::AlreadyClean) => {}
+                Ok(memoturn_replication::PruneBeforeOutcome::Blocked { checkpoints }) => {
+                    blocked.checkpoints.extend(checkpoints)
+                }
+                Ok(memoturn_replication::PruneBeforeOutcome::NoBase) => {
+                    // No post-T snapshot yet: force one if this node can own
+                    // the branch; a remote owner's pass handles it otherwise.
+                    let spec = format!("{}@{b}", coupon.db);
+                    if let Ok(WriteRoute::Local(l)) = resolve_write(state, &spec).await {
+                        if l.h.txid() >= t
+                            && state
+                                .replicator
+                                .ship_snapshot(&l.h, &coupon.uuid, b, l.epoch)
+                                .await
+                                .is_ok()
+                        {
+                            if let Ok(memoturn_replication::PruneBeforeOutcome::Pruned(n)) =
+                                state.replicator.prune_before(&coupon.uuid, b, t).await
+                            {
+                                acted += n;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(db = %coupon.db, branch = %b, error = %e, "erasure prune deferred")
+                }
+            }
+        }
+        blocked.checkpoints.sort();
+        blocked.checkpoints.dedup();
+        let status = if blocked.any() {
+            memoturn_governance::ErasureStatus::Blocked
+        } else {
+            memoturn_governance::ErasureStatus::Pending
+        };
+        let blocked = blocked.any().then_some(blocked);
+        if status != coupon.status
+            || serde_json::to_value(&blocked).ok() != serde_json::to_value(&coupon.blocked_by).ok()
+        {
+            coupon.status = status;
+            coupon.blocked_by = blocked;
+            if let Err(e) = state.erasures.update(&coupon).await {
+                tracing::warn!(id = %coupon.id, error = %e, "erasure coupon update failed");
+            }
+        }
+    }
+    acted
+}
+
+/// Prove and receipt erasures whose history rewrite has fully landed: every
+/// manifest and every txid-named object sits at or above the forget txid.
+/// Runs after `gc_objects` (the verifier counts raw keys, so dereferenced
+/// objects must be physically gone first).
+pub async fn finalize_erasures(state: &AppState) -> usize {
+    let Ok(coupons) = state.erasures.unfinished().await else {
+        return 0;
+    };
+    let now = now_ms();
+    let mut done = 0;
+    for mut coupon in coupons {
+        if coupon.grace_until > now || coupon.status == memoturn_governance::ErasureStatus::Blocked
+        {
+            continue;
+        }
+        let Some(&t) = coupon.forget_txid.values().next() else {
+            continue;
+        };
+        let ev = match state.replicator.verify_erased_before(&coupon.uuid, t).await {
+            Ok(ev) => ev,
+            Err(e) => {
+                tracing::warn!(id = %coupon.id, error = %e, "erasure verification deferred");
+                continue;
+            }
+        };
+        if !ev.clean {
+            continue; // objects still pending GC — next pass
+        }
+        let der = match &state.auth {
+            auth::Auth::Enabled(keys) => Some(keys.signing_der().to_vec()),
+            auth::Auth::Disabled => None,
+        };
+        let payload = memoturn_governance::receipt_payload(
+            &coupon,
+            now,
+            serde_json::to_value(&ev).unwrap_or_else(|_| json!({})),
+        );
+        let receipt = match memoturn_governance::sign_receipt(der.as_deref(), payload) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(id = %coupon.id, error = %e, "erasure receipt signing failed");
+                continue;
+            }
+        };
+        coupon.status = memoturn_governance::ErasureStatus::Completed;
+        coupon.completed_at = Some(now);
+        coupon.receipt = Some(receipt);
+        if state.erasures.update(&coupon).await.is_ok() {
+            done += 1;
+            tracing::info!(id = %coupon.id, db = %coupon.db, "erasure verified and receipted");
+            if let Some((ns, profile)) = coupon.db.split_once("--") {
+                let (audit_on, _) = audit_gate(state, ns, profile).await;
+                if audit_on {
+                    state.audit.emit(
+                        audit::AuditEvent::new("erasure.completed", ns)
+                            .profile(profile)
+                            .resource(&coupon.id),
+                    );
+                }
+            }
+        }
+    }
+    done
 }
 
 /// Set or clear a profile override (admin scope). Tighten-only: a 409 names

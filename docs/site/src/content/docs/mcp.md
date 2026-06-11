@@ -18,6 +18,8 @@ a streamable-HTTP transport for production and a `schema_inspect` tool.
 | `memory_recall {namespace, profile, query?, embedding?, topic_key?, types?, source?, k?, include_superseded?, include_turns?}` | Hybrid recall: keyword + topic + vector channels, rank-fused; empty result means nothing relevant; `source` filters to one agent's memories | ns:read or the profile's db token |
 | `memory_extract {namespace, profile, turns, session_id?, source?, dry_run?}` | Distill raw turns into typed memories with the node's server-side extractor, then ingest; errors with 503 when the node has no extractor (see [Server-side extraction](/extraction/)) | ns:write |
 | `memory_forget {namespace, profile, id}` | Permanently delete one memory (hard delete; supersession preserves history without it) | ns:write |
+| `memory_erase {namespace, profile, memory_id? \| topic_key?+type? \| session_id?+turns?}` | [Verifiable erasure](/security/#verifiable-erasure): hard delete now, history rewrite + signed receipt after the grace window | ns:write |
+| `memory_erasure_status {namespace, profile, id?}` | List erasure coupons or fetch one (completed coupons carry the signed receipt) | ns:read |
 | `memory_get {namespace, profile, id}` | Fetch one memory by id with its supersession state; reports not-found rather than erroring | ns:read or the profile's db token |
 | `memory_profiles_list {namespace}` | List the profiles under a namespace — each is one isolated store | namespace token |
 
@@ -65,7 +67,7 @@ a streamable-HTTP transport for production and a `schema_inspect` tool.
 
 `db` accepts a spec of `name` or `name@branch` (`@main` implicit). Every tool result carries
 the `txid` of the operation. Destructive tools — `branch_rewind`, `memory_forget`,
-`memory_session_end`, `provision_database`, `policy_set` — are the ones an MCP host should gate
+`memory_erase`, `memory_session_end`, `provision_database`, `policy_set` — are the ones an MCP host should gate
 behind confirmation.
 
 ## Auth postures

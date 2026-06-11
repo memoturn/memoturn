@@ -37,6 +37,9 @@ profiles is structural — no operation touches two profiles. Full semantics:
 | DELETE | `/v1/memory/{ns}/{profile}/sessions/{sid}` | End session: delete its task memories (`?turns=true` drops the transcript too) |
 | GET | `/v1/memory/{ns}/{profile}/policy` | The profile's [governance policy](/security/#data-governance-policies): override + effective values (read scope) |
 | PUT | `/v1/memory/{ns}/{profile}/policy` | Set or clear a tighten-only profile override (admin scope; loosening is `409`) |
+| POST | `/v1/memory/{ns}/{profile}/erasures` | [Verifiable erasure](/security/#verifiable-erasure): hard-forget now, history rewrite + signed receipt after the grace window (`202` + coupon) |
+| GET | `/v1/memory/{ns}/{profile}/erasures` | List erasure coupons (newest first) |
+| GET | `/v1/memory/{ns}/{profile}/erasures/{id}` | One coupon — `completed` carries the signed receipt |
 | GET | `/v1/memory/{ns}` | List profiles in the namespace (namespace token) |
 
 ### Ingest

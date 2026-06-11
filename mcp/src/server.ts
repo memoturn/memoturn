@@ -329,6 +329,38 @@ export function buildServer(creds: Creds): McpServer {
   );
 
   server.tool(
+    "memory_erase",
+    "Verifiably erase memories (stronger than forget): hard delete now with secure_delete page zeroing, then a bounded-time object-storage history rewrite proven by a signed receipt. Target exactly one of memory id, topic chain, or session. Poll memory_erasure_status for the receipt.",
+    {
+      namespace,
+      profile,
+      memory_id: z.string().optional().describe("Erase one memory by id"),
+      topic_key: z.string().optional().describe("Erase a topic's whole supersession chain (requires type)"),
+      type: z.enum(["fact", "instruction"]).optional().describe("Memory type for topic erasure"),
+      session_id: z.string().optional().describe("Erase a session's task memories"),
+      turns: z.boolean().optional().describe("With session_id: also drop the verbatim transcript"),
+    },
+    async ({ namespace, profile, memory_id, topic_key, type, session_id, turns }) =>
+      ok(
+        await api("POST", `/v1/memory/${namespace}/${profile}/erasures`, {
+          ...(memory_id !== undefined ? { memory_id } : {}),
+          ...(topic_key !== undefined ? { topic_key, type } : {}),
+          ...(session_id !== undefined ? { session_id, ...(turns ? { turns } : {}) } : {}),
+        }),
+      ),
+  );
+
+  server.tool(
+    "memory_erasure_status",
+    "Inspect erasure coupons: list a profile's erasures, or fetch one by id — a completed coupon carries the signed erasure receipt.",
+    { namespace, profile, id: z.string().optional().describe("Erasure id (ers_…); omit to list") },
+    async ({ namespace, profile, id }) =>
+      id !== undefined
+        ? ok(await api("GET", `/v1/memory/${namespace}/${profile}/erasures/${id}`))
+        : ok(await api("GET", `/v1/memory/${namespace}/${profile}/erasures`)),
+  );
+
+  server.tool(
     "memory_get",
     "Fetch one memory from a profile by id, including its supersession state. Returns not-found rather than erroring when the id is unknown.",
     { namespace, profile, id: z.string().describe("Memory id (mem_…)") },

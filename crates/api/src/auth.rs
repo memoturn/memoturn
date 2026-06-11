@@ -89,6 +89,9 @@ pub enum Auth {
 pub struct AuthKeys {
     encoding: EncodingKey,
     decoding: DecodingKey,
+    /// The pkcs8 DER backing `encoding` — reused (domain-separated) to sign
+    /// erasure receipts (ADR-0010 phase 3).
+    signing_der: Vec<u8>,
     pub platform_key: String,
     pub cluster_key: String,
 }
@@ -121,9 +124,15 @@ impl AuthKeys {
         Ok(Self {
             encoding: EncodingKey::from_ed_der(pkcs8),
             decoding: DecodingKey::from_ed_der(pair.public_key().as_ref()),
+            signing_der: pkcs8.to_vec(),
             platform_key,
             cluster_key,
         })
+    }
+
+    /// The signing key DER, for domain-separated reuse (erasure receipts).
+    pub fn signing_der(&self) -> &[u8] {
+        &self.signing_der
     }
 
     /// Mint a per-database token. `ttl_secs` may be negative (tests).
@@ -200,6 +209,9 @@ fn required_scope_memory(method: &axum::http::Method, rest: &[&str]) -> Scope {
         ["sessions", _] => Scope::Write, // DELETE end-session
         ["policy"] if *method == Method::GET => Scope::Read,
         ["policy"] => Scope::Admin, // PUT tighten-only override (ADR-0010)
+        ["erasures"] if *method == Method::GET => Scope::Read,
+        ["erasures"] => Scope::Write, // POST — same bar as forget
+        ["erasures", _] => Scope::Read,
         _ => Scope::Admin,
     }
 }
