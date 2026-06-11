@@ -28,7 +28,12 @@ impl Shipper {
         node: Arc<NodeEngine>,
         sink: Option<Arc<dyn SegmentSink>>,
     ) -> Self {
-        Self { replicator, node, sink, dirty: Mutex::new(HashMap::new()) }
+        Self {
+            replicator,
+            node,
+            sink,
+            dirty: Mutex::new(HashMap::new()),
+        }
     }
 
     async fn ship_and_publish(
@@ -38,7 +43,10 @@ impl Shipper {
         branch: &str,
         epoch: u64,
     ) -> Result<()> {
-        let outcome = self.replicator.ship_outcome(handle, uuid, branch, epoch).await?;
+        let outcome = self
+            .replicator
+            .ship_outcome(handle, uuid, branch, epoch)
+            .await?;
         if let (Some(sink), Some(payload)) = (&self.sink, &outcome.payload) {
             sink.publish(uuid, branch, payload).await;
         }
@@ -60,7 +68,8 @@ impl Shipper {
         };
         let mut shipped = 0;
         for (uuid, branch, handle, epoch) in drained {
-            self.ship_and_publish(&handle, &uuid, &branch, epoch).await?;
+            self.ship_and_publish(&handle, &uuid, &branch, epoch)
+                .await?;
             shipped += 1;
         }
         Ok(shipped)

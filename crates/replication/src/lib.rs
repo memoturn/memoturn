@@ -41,8 +41,13 @@ pub enum ReplicationError {
     NoSnapshot(u64),
     #[error("manifest corrupt: {0}")]
     Corrupt(String),
-    #[error("write fenced: manifest is at epoch {manifest_epoch}, writer holds epoch {writer_epoch}")]
-    ZombieFenced { manifest_epoch: u64, writer_epoch: u64 },
+    #[error(
+        "write fenced: manifest is at epoch {manifest_epoch}, writer holds epoch {writer_epoch}"
+    )]
+    ZombieFenced {
+        manifest_epoch: u64,
+        writer_epoch: u64,
+    },
     #[error("manifest CAS conflict (concurrent writer)")]
     CasConflict,
     #[error("io error: {0}")]

@@ -52,9 +52,9 @@ pub fn compile(update: &Json) -> Result<CompiledUpdate> {
                     expr = format!("jsonb_remove({expr}, '$.{path}')");
                 }
                 "$inc" => {
-                    let by = val.as_f64().ok_or_else(|| {
-                        DocError::InvalidUpdate("$inc expects a number".into())
-                    })?;
+                    let by = val
+                        .as_f64()
+                        .ok_or_else(|| DocError::InvalidUpdate("$inc expects a number".into()))?;
                     params.push(if val.is_i64() {
                         Value::Integer(val.as_i64().unwrap())
                     } else {
@@ -68,13 +68,14 @@ pub fn compile(update: &Json) -> Result<CompiledUpdate> {
                     params.push(Value::Text(val.to_string()));
                     expr = format!("jsonb_insert({expr}, '$.{path}[#]', jsonb(?))");
                 }
-                other => {
-                    return Err(DocError::InvalidUpdate(format!("unknown operator {other}")))
-                }
+                other => return Err(DocError::InvalidUpdate(format!("unknown operator {other}"))),
             }
         }
     }
-    Ok(CompiledUpdate { doc_expr: expr, params })
+    Ok(CompiledUpdate {
+        doc_expr: expr,
+        params,
+    })
 }
 
 /// Build the full UPDATE statement for a collection table.

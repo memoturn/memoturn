@@ -22,12 +22,7 @@ pub(crate) fn vector_text(embedding: &[f32]) -> String {
     s
 }
 
-pub async fn upsert(
-    h: &DbHandle,
-    collection: &str,
-    id: &str,
-    embedding: &[f32],
-) -> Result<u64> {
+pub async fn upsert(h: &DbHandle, collection: &str, id: &str, embedding: &[f32]) -> Result<u64> {
     if embedding.is_empty() {
         return Err(DocError::InvalidDocument("empty embedding".into()));
     }
@@ -44,7 +39,9 @@ pub async fn upsert(
             vec![],
         ),
         (
-            format!("CREATE INDEX IF NOT EXISTS \"{table}_ann\" ON \"{table}\" (libsql_vector_idx(e))"),
+            format!(
+                "CREATE INDEX IF NOT EXISTS \"{table}_ann\" ON \"{table}\" (libsql_vector_idx(e))"
+            ),
             vec![],
         ),
         (
@@ -52,7 +49,10 @@ pub async fn upsert(
                 "INSERT INTO \"{table}\" (id, e) VALUES (?, vector32(?))
                  ON CONFLICT(id) DO UPDATE SET e = excluded.e"
             ),
-            vec![Value::Text(id.to_string()), Value::Text(vector_text(embedding))],
+            vec![
+                Value::Text(id.to_string()),
+                Value::Text(vector_text(embedding)),
+            ],
         ),
     ];
     let (_, txid) = h.write_trusted_batch(&stmts).await?;
@@ -112,9 +112,7 @@ pub async fn delete(h: &DbHandle, collection: &str, id: &str) -> Result<u64> {
         .await
     {
         Ok((_, txid)) => Ok(txid),
-        Err(memoturn_engine::EngineError::Sql(e)) if e.contains("no such table") => {
-            Ok(h.txid())
-        }
+        Err(memoturn_engine::EngineError::Sql(e)) if e.contains("no such table") => Ok(h.txid()),
         Err(e) => Err(e.into()),
     }
 }

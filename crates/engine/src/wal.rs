@@ -64,7 +64,10 @@ fn walk(
     salt2: u32,
     page_size: usize,
 ) -> (WalCapture, usize) {
-    let mut capture = WalCapture { page_size: page_size as u32, ..Default::default() };
+    let mut capture = WalCapture {
+        page_size: page_size as u32,
+        ..Default::default()
+    };
     let mut pending: Vec<(u32, Vec<u8>)> = Vec::new();
     let mut offset = start;
     let mut consumed = start;
@@ -118,7 +121,12 @@ impl WalCursor {
             None => {
                 let (capture, consumed) =
                     walk(&bytes, WAL_HEADER, salt1, salt2, page_size as usize);
-                *cursor = Some(WalCursor { offset: consumed, salt1, salt2, page_size });
+                *cursor = Some(WalCursor {
+                    offset: consumed,
+                    salt1,
+                    salt2,
+                    page_size,
+                });
                 Ok(CaptureOutcome::Captured(capture))
             }
         }
@@ -140,7 +148,12 @@ impl WalCursor {
             _ => WAL_HEADER,
         };
         let (_, consumed) = walk(&bytes, start, salt1, salt2, page_size as usize);
-        *cursor = Some(WalCursor { offset: consumed, salt1, salt2, page_size });
+        *cursor = Some(WalCursor {
+            offset: consumed,
+            salt1,
+            salt2,
+            page_size,
+        });
         Ok(())
     }
 }

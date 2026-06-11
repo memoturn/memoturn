@@ -50,7 +50,9 @@ pub async fn get(h: &DbHandle, ns: &str, key: &str) -> Result<Option<KvEntry>> {
             vec![Value::Text(ns.to_string()), Value::Text(key.to_string())],
         )
         .await?;
-    let Some(row) = r.rows.first() else { return Ok(None) };
+    let Some(row) = r.rows.first() else {
+        return Ok(None);
+    };
     if let Some(exp) = row[1].as_i64() {
         if exp <= now_ms() {
             // Lazy expiry: opportunistically delete and report a miss.
@@ -72,7 +74,10 @@ pub async fn get(h: &DbHandle, ns: &str, key: &str) -> Result<Option<KvEntry>> {
         serde_json::Value::String(s) => s.clone().into_bytes(),
         other => other.to_string().into_bytes(),
     };
-    Ok(Some(KvEntry { value, txid: h.txid() }))
+    Ok(Some(KvEntry {
+        value,
+        txid: h.txid(),
+    }))
 }
 
 pub async fn delete(h: &DbHandle, ns: &str, key: &str) -> Result<u64> {
@@ -85,12 +90,7 @@ pub async fn delete(h: &DbHandle, ns: &str, key: &str) -> Result<u64> {
     Ok(txid)
 }
 
-pub async fn list(
-    h: &DbHandle,
-    ns: &str,
-    prefix: &str,
-    limit: u32,
-) -> Result<Vec<String>> {
+pub async fn list(h: &DbHandle, ns: &str, prefix: &str, limit: u32) -> Result<Vec<String>> {
     let r = h
         .read_trusted(
             "SELECT k FROM __memoturn_kv

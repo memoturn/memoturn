@@ -63,7 +63,11 @@ async fn run_query(
         }
         out.push(vals);
     }
-    Ok(QueryResult { columns, rows: out, rows_affected: 0 })
+    Ok(QueryResult {
+        columns,
+        rows: out,
+        rows_affected: 0,
+    })
 }
 
 #[async_trait]
@@ -121,6 +125,10 @@ impl SqlEngine for LibsqlEngine {
             .execute_batch("PRAGMA busy_timeout=5000; PRAGMA cache_size=-128;")
             .await
             .map_err(sql_err)?;
-        Ok(Arc::new(LibsqlConn { writer, reader, _db: db }))
+        Ok(Arc::new(LibsqlConn {
+            writer,
+            reader,
+            _db: db,
+        }))
     }
 }
