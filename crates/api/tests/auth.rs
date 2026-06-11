@@ -55,6 +55,7 @@ async fn secured_state(dir: &std::path::Path) -> (AppState, Arc<AuthKeys>) {
         embedder: None,
         governance: std::sync::Arc::new(memoturn_api::governance::PolicyStore::in_memory()),
         embed_provenance: None,
+        audit: memoturn_api::audit::AuditSink::noop(),
     };
     (state, keys)
 }

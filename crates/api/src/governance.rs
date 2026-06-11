@@ -9,7 +9,7 @@ pub use memoturn_governance::{Effective, EgressRule, Policy, PolicyDoc, PolicySt
 
 /// AI egress operations whose endpoints exist to call the model — a policy
 /// denial is a deterministic 403, not a degrade. Embedding is implicit
-/// (ingest/recall side-effect) and gated by [`embed_allowed`] instead.
+/// (ingest/recall side-effect) and gated by [`embed_rule_allows`] instead.
 #[derive(Debug, Clone, Copy)]
 pub enum EgressOp {
     Extract,
@@ -52,37 +52,42 @@ pub async fn check_egress(
     }
 }
 
-/// Gate the implicit auto-embed side channel. A denied embed behaves exactly
-/// like an unconfigured embedder: skip silently, never fail the write/read —
-/// keyword and topic recall still work, and the caller never asked for egress
-/// so there is nothing to 403.
-pub async fn embed_allowed(state: &AppState, ns: &str, profile: &str) -> bool {
-    match state.governance.effective(ns, Some(profile)).await {
-        Ok(eff) => match eff.embed {
-            EgressRule::Allow => true,
-            EgressRule::SelfHostedOnly => {
-                let ok = state
-                    .embed_provenance
-                    .as_ref()
-                    .is_some_and(|p| p.self_hosted);
-                if !ok {
-                    tracing::debug!(
-                        ns,
-                        profile,
-                        "auto-embed skipped: policy requires a self-hosted embedder"
-                    );
-                }
-                ok
-            }
-            EgressRule::Deny => {
-                tracing::debug!(ns, profile, "auto-embed skipped by policy");
-                false
-            }
-        },
-        Err(e) => {
-            tracing::warn!(ns, error = %e, "policy unavailable; skipping auto-embed (fail closed)");
-            false
-        }
+/// Gate the implicit auto-embed side channel against an already-resolved
+/// policy. A denied embed behaves exactly like an unconfigured embedder:
+/// skip silently, never fail the write/read — keyword and topic recall still
+/// work, and the caller never asked for egress so there is nothing to 403.
+pub fn embed_rule_allows(
+    eff: &Effective,
+    provenance: Option<&crate::embed::EmbedProvenance>,
+) -> bool {
+    match eff.embed {
+        EgressRule::Allow => true,
+        EgressRule::SelfHostedOnly => provenance.is_some_and(|p| p.self_hosted),
+        EgressRule::Deny => false,
+    }
+}
+
+/// Audit metadata for the extractor/answerer egress events: provider, model,
+/// endpoint host. Both speak to the Claude API; the model comes from env the
+/// same way the clients configure themselves.
+pub(crate) fn llm_egress_meta(
+    op: EgressOp,
+    input_items: usize,
+    input_bytes: usize,
+) -> crate::audit::EgressMeta {
+    let model_var = match op {
+        EgressOp::Extract => "MEMOTURN_EXTRACT_MODEL",
+        EgressOp::Ask => "MEMOTURN_ASSISTANT_MODEL",
+    };
+    crate::audit::EgressMeta {
+        provider: "anthropic".into(),
+        model: std::env::var(model_var).unwrap_or_else(|_| "claude-opus-4-8".into()),
+        endpoint_host: Some("api.anthropic.com".into()),
+        self_hosted: false,
+        input_items,
+        input_bytes,
+        output_items: None,
+        duration_ms: 0,
     }
 }
 

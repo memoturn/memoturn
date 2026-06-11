@@ -95,6 +95,7 @@ enforces the same policy. One node knob controls how fast policy changes propaga
 | Variable | Default | Description |
 | --- | --- | --- |
 | `MEMOTURN_POLICY_CACHE_SECS` | `30` | Per-node policy read-cache TTL. A policy change takes effect on the node that served it immediately and on every other node within this window. |
+| `MEMOTURN_AUDIT_FLUSH_MS` | `2000` | Audit-stream flush interval — buffered events become an immutable object in object storage at least this often. Also the crash-loss window (orderly shutdowns drain the buffer). |
 
 Policies tighten what the node would otherwise allow — node-level settings such as the
 retention windows above remain the outer ceilings.

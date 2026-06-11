@@ -121,4 +121,29 @@ const db = mt.db(`${ns}--alice`);
 await db.kv.put("scratch", "plan", "step 1");
 assert.equal(await db.kv.get("scratch", "plan"), "step 1");
 
+// governance: policy roundtrip, tighten-only override, audit stream
+if (platformKey) {
+  await mt.policy.set(ns, {
+    memory: { task_ttl_max_secs: 600 },
+    audit: { enabled: true },
+  });
+  const doc = await mt.policy.get(ns);
+  assert.equal(doc.policy.memory.task_ttl_max_secs, 600);
+  const prof = await mt.policy.getProfile(ns, "alice");
+  assert.equal(prof.effective.task_ttl_max_secs, 600);
+  await assert.rejects(
+    () => mt.policy.setProfile(ns, "alice", { memory: { task_ttl_max_secs: 9999 } }),
+    /loosens/,
+  );
+  await alice.ingest([{ type: "event", summary: "audited write", content: { n: 1 } }]);
+  await new Promise((r) => setTimeout(r, 2600)); // wait out the audit flush interval
+  const events = [];
+  for await (const e of mt.auditEvents(ns, { action: "memory." })) events.push(e);
+  assert.ok(
+    events.some((e) => e.action === "memory.ingest" && e.profile === "alice"),
+    "audit stream must record the ingest",
+  );
+  assert.ok(events.every((e) => !("summary" in e) && !("content" in e)), "metadata only");
+}
+
 console.log("sdk e2e: ok");

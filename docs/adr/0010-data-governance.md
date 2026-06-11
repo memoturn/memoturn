@@ -35,15 +35,25 @@ local; cross-node propagation would ride a debounced backup other nodes never re
 *A `__memoturn_audit` table for the audit trail (phase 2)* — audit would inherit PITR/branching:
 a branch rewind could erase audit history; audit must sit outside the data plane it observes.
 
+**Update (2026-06): audit logging shipped (phase 2).** Per-namespace append-only JSONL in object
+storage (`v1/_audit/{ns}/{yyyy}/{mm}/{dd}/{flush_ts}-{node}-{seq}.jsonl` — immutable object per
+flush, collision-free multi-node writers, **outside PITR/branching** so a rewind can never erase
+the trail), non-blocking emit → background flusher (512 events / `MEMOTURN_AUDIT_FLUSH_MS`,
+default 2 s; drop-and-count on backpressure, never blocking a write; graceful shutdown drains).
+Events: memory mutations (edge-emitted with the client's identity; the owner of a forwarded
+write sees the internal actor and stays silent — except `ai.embed`, which emits where bytes
+leave), reads behind `audit.include_reads`, AI egress with provider/model/byte/duration metadata
+(never payload content; **denials always recorded**), token minting, policy changes (gated on
+the *new* policy, so enabling audit is the stream's first record), and db deletion. Actor
+attribution = domain-separated SHA-256 hash prefix of the credential plus its claims — never the
+token. Read via `GET /v1/namespaces/{ns}/audit` (platform key, or a **namespace admin token**
+for its own stream) with cursor pagination over immutable objects; `memoturn audit export`
+streams JSONL; `audit.retention_secs` is enforced by a day-granular maintenance sweep. MCP
+gains `policy_get`/`policy_set`/`audit_query`; both SDKs gain policy get/set and an audit-event
+iterator. Hash-chain tamper evidence stays reserved (`prev` field) — immutable objects + bucket
+object-lock are the near-term posture.
+
 **Deferred (tracked here):**
-- **Audit logging (phase 2, designed):** per-namespace append-only JSONL in object storage
-  (`v1/_audit/{ns}/{yyyy}/{mm}/{dd}/{flush_ts}-{node}-{seq}.jsonl` — immutable object per flush,
-  collision-free multi-node writers), non-blocking emit → background flusher (512 events / 2 s;
-  crash loss ≤ one flush window), events for memory mutations, token minting, policy changes and
-  AI egress metadata (provider/model/byte counts — never payload content; denials always
-  recorded), `audit.enabled|include_reads|retention_secs` policy fields,
-  `GET /v1/namespaces/{ns}/audit` + `memoturn audit export`, hash-chain tamper evidence reserved
-  via a `prev` field.
 - **Verifiable erasure (phase 3, designed):** erasure coupons at
   `v1/_governance/erasures/{db}/{id}.json` (outside the db prefix and outside `__memoturn_*`
   tables so neither db deletion nor branch rewind loses the evidence): forget at txid `T` with

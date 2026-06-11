@@ -103,15 +103,47 @@ by the retention pass above.
   ≤ ~10 min for PITR pruning + GC).
 - TTL clamping is exact at ingest; pre-existing rows are governed by the sweeps.
 
-## Phased: audit logging and verifiable erasure
+## Audit logging (shipped)
 
-Both are fully designed in [ADR-0010](../adr/0010-data-governance.md); the policy document
-already carries their sections so enabling them is additive.
+Per-namespace append-only streams of **JSONL objects in object storage** —
+`v1/_audit/{ns}/{yyyy}/{mm}/{dd}/{flush_ts}-{node}-{seq}.jsonl`, one immutable object per flush,
+date-partitioned, collision-free across nodes — deliberately **outside PITR/branching** so a
+branch rewind can never erase the trail. Off by default; `audit.enabled` in the namespace policy
+turns it on (profiles may turn it on, never off).
 
-**Audit (phase 2):** per-namespace append-only JSONL streams in object storage — outside
-PITR/branching so a rewind can never erase the trail — with non-blocking emission off the hot
-path, AI-egress metadata (provider, model, byte counts; never payload content), denials always
-recorded, platform-key read API and CLI export, and reserved hash-chaining for tamper evidence.
+**What is recorded** (metadata only — never memory content, transcripts, or tokens):
+
+| Event | When |
+| --- | --- |
+| `memory.ingest` / `memory.extract` / `memory.forget` / `memory.session_end` | every mutation, with `txid`, count, branch |
+| `memory.recall` / `memory.get` / `memory.ask` | only with `audit.include_reads` |
+| `ai.extract` / `ai.ask` / `ai.embed` | every AI egress, with provider/model/endpoint, input items/bytes, duration; **denials always recorded** |
+| `token.mint`, `policy.update`, `db.delete` | control-plane actions touching the namespace |
+
+Actor attribution rides every event: a domain-separated SHA-256 hash prefix of the credential
+(correlates "same token" without granting anything), its scope and claims. Mutation events are
+**edge-emitted** — the node that authenticated the client writes the event; the owner of a
+forwarded write sees the internal actor and stays silent, except `ai.embed`, which emits where
+the bytes actually leave the cluster.
+
+**Pipeline**: handlers do one non-blocking `try_send`; a background flusher writes per-namespace
+objects at 512 events or `MEMOTURN_AUDIT_FLUSH_MS` (default 2 s). Backpressure drops and counts
+(a full audit channel must never block a write); a crash loses at most one flush window;
+graceful shutdown drains. `audit.retention_secs` is enforced day-granularly by the maintenance
+loop.
+
+**Reading**: `GET /v1/namespaces/{ns}/audit?from=&to=&action=&profile=&outcome=&limit=&cursor=`
+— platform key, or a **namespace admin token** for its own stream (the one data-plane-token
+carve-out on `/v1/namespaces`). Cursors are stable because objects are immutable.
+`memoturn audit export <ns> --from 7d` streams the range as JSONL. MCP exposes
+`policy_get`/`policy_set`/`audit_query`; the SDKs expose policy get/set and an audit-event
+iterator. Hash-chain tamper evidence is reserved (a `prev` field) — until then, immutable
+objects plus bucket-level object-lock/WORM are the recommended posture.
+
+## Phased: verifiable erasure
+
+Fully designed in [ADR-0010](../adr/0010-data-governance.md); the policy document already
+carries the `erasure` section so enabling it is additive.
 
 **Verifiable erasure (phase 3):** erasure coupons that hard-forget at txid `T` (with
 `secure_delete` page zeroing), then force a post-`T` snapshot, prune all history below `T`
@@ -129,8 +161,10 @@ per-tenant encryption (ADR-0008's enterprise phase) as the fast path.
 ```
 MEMOTURN_POLICY_CACHE_SECS          policy read-cache TTL (default 30)
 MEMOTURN_EMBED_SELF_HOSTED_HOSTS    comma-separated hosts to treat as self-hosted
+MEMOTURN_AUDIT_FLUSH_MS             audit flush interval / crash-loss window (default 2000)
 
 memoturn policy get <ns> [--profile p]        # ns: platform key; profile: token
 memoturn policy set <ns> [--profile p] [--file policy.json]   # JSON via --file or stdin
 memoturn policy clear <ns> --profile p
+memoturn audit export <ns> [--from 7d] [--action ai.] [--outcome denied]   # JSONL to stdout
 ```

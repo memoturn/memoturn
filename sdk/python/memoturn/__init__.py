@@ -18,7 +18,8 @@ exposed on ``db()``.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
+from urllib.parse import quote
 
 import httpx
 
@@ -538,3 +539,70 @@ class Memoturn:
             platform=True,
         )
         return r.json()["token"]
+
+    # ---- data governance (ADR-0010) ----
+
+    def get_policy(self, namespace: str, *, profile: Optional[str] = None) -> Optional[dict]:
+        """The namespace policy document (platform key; ``None`` when unset),
+        or — with ``profile`` — the override plus the effective policy
+        actually enforced (read token)."""
+        if profile is not None:
+            return self._w.request("GET", f"/v1/memory/{namespace}/{profile}/policy").json()
+        try:
+            return self._w.request("GET", f"/v1/namespaces/{namespace}/policy", platform=True).json()
+        except MemoturnError as e:
+            if e.status == 404:
+                return None
+            raise
+
+    def set_policy(
+        self, namespace: str, policy: Optional[dict], *, profile: Optional[str] = None
+    ) -> dict:
+        """Set the namespace policy (platform key), or — with ``profile`` —
+        a tighten-only profile override (admin token; loosening any field is
+        a 409). ``policy=None`` with ``profile`` clears the override."""
+        if profile is not None:
+            return self._w.request(
+                "PUT", f"/v1/memory/{namespace}/{profile}/policy", json={"policy": policy}
+            ).json()
+        return self._w.request(
+            "PUT", f"/v1/namespaces/{namespace}/policy", json={"policy": policy}, platform=True
+        ).json()
+
+    def audit_events(
+        self,
+        namespace: str,
+        *,
+        from_ms: Optional[int] = None,
+        to_ms: Optional[int] = None,
+        action: Optional[str] = None,
+        profile: Optional[str] = None,
+        outcome: Optional[str] = None,
+        limit: int = 100,
+    ) -> Iterator[dict]:
+        """Iterate a namespace's audit stream, oldest first, paginating
+        transparently (requires ``audit.enabled`` in its policy; platform key
+        or namespace admin token). Events are metadata only — never memory
+        content."""
+        cursor: Optional[str] = None
+        while True:
+            params = _drop_none(
+                {
+                    "from": from_ms,
+                    "to": to_ms,
+                    "action": action,
+                    "profile": profile,
+                    "outcome": outcome,
+                    "limit": limit,
+                    "cursor": cursor,
+                }
+            )
+            qs = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in params.items())
+            body = self._w.request(
+                "GET", f"/v1/namespaces/{namespace}/audit" + (f"?{qs}" if qs else ""),
+                platform=True,
+            ).json()
+            yield from body["events"]
+            cursor = body.get("next_cursor")
+            if body.get("complete") or not cursor:
+                return

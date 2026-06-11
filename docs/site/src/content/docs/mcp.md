@@ -55,10 +55,18 @@ a streamable-HTTP transport for production and a `schema_inspect` tool.
 | `branch_checkpoint {db, branch, name}` | Tag the current state with a name | db:admin |
 | `branch_rewind {db, branch, to}` | Rewind to a checkpoint — destructive for state after it | db:admin |
 
+### Governance and audit
+
+| Tool | Purpose | Scope |
+| --- | --- | --- |
+| `policy_get {namespace, profile?}` | The namespace [governance policy](/security/#data-governance-policies), or a profile's override + effective values | platform / ns:read |
+| `policy_set {namespace, profile?, policy}` | Set the namespace policy, or a tighten-only profile override (`policy: null` clears it) | platform / ns:admin |
+| `audit_query {namespace, from?, to?, action?, profile?, outcome?, limit?, cursor?}` | Page through the namespace's audit stream (metadata only — never memory content) | platform / ns:admin |
+
 `db` accepts a spec of `name` or `name@branch` (`@main` implicit). Every tool result carries
 the `txid` of the operation. Destructive tools — `branch_rewind`, `memory_forget`,
-`memory_session_end`, `provision_database` — are the ones an MCP host should gate behind
-confirmation.
+`memory_session_end`, `provision_database`, `policy_set` — are the ones an MCP host should gate
+behind confirmation.
 
 ## Auth postures
 

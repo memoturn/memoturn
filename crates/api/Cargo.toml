@@ -11,6 +11,9 @@ memoturn-docstore = { path = "../docstore" }
 memoturn-replication = { path = "../replication" }
 memoturn-control = { path = "../control" }
 memoturn-governance = { path = "../governance" }
+base64.workspace = true
+bytes.workspace = true
+futures.workspace = true
 reqwest.workspace = true
 async-trait.workspace = true
 jsonwebtoken = "9"

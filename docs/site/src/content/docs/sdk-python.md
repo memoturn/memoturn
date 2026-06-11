@@ -150,6 +150,25 @@ orch_token = mt.create_namespace_token("acme", "write")
 profiles = mt.profiles("acme")                     # requires a namespace token
 ```
 
+## Governance and audit
+
+Per-namespace [governance policies](/security/#data-governance-policies) and the audit stream:
+
+```python
+mt.set_policy("acme", {
+    "memory": {"task_ttl_max_secs": 600},
+    "ai_egress": {"extract": "deny"},
+    "audit": {"enabled": True},
+})
+doc = mt.get_policy("acme")                                   # None when unset
+mt.set_policy("acme", {"retention": {"pitr_secs": 600}}, profile="alice")  # tighten-only
+eff = mt.get_policy("acme", profile="alice")                  # override + effective
+
+# Audit stream: iterator, paginates transparently. Metadata only.
+for evt in mt.audit_events("acme", action="ai.", outcome="denied"):
+    print(evt["ts"], evt["action"], evt.get("profile"))
+```
+
 ## Tests
 
 The e2e suite is `python tests/e2e.py` and needs a running node (`cargo run -p memoturnd`). The

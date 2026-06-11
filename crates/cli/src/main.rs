@@ -69,6 +69,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: PolicyCmd,
     },
+    /// Per-namespace audit stream (requires `audit.enabled` in the policy).
+    Audit {
+        #[command(subcommand)]
+        cmd: AuditCmd,
+    },
     /// Ask a question answered from a profile's memories (server-side
     /// recall + answer synthesis; needs MEMOTURN_ASSISTANT_API_KEY on the node).
     Ask {
@@ -176,6 +181,48 @@ enum PolicyCmd {
         #[arg(long)]
         profile: String,
     },
+}
+
+#[derive(Subcommand)]
+enum AuditCmd {
+    /// Export audit events as JSONL to stdout, oldest first, paginating
+    /// through the whole range. Uses the platform key, or a namespace admin
+    /// token via --token.
+    Export {
+        ns: String,
+        /// Range start: unix ms, or relative like 24h / 7d (ago). Default 24h.
+        #[arg(long, default_value = "24h")]
+        from: String,
+        /// Range end: unix ms, or relative like 1h (ago). Default now.
+        #[arg(long)]
+        to: Option<String>,
+        /// Exact action, or a dot-terminated prefix (e.g. `ai.`).
+        #[arg(long)]
+        action: Option<String>,
+        #[arg(long)]
+        profile: Option<String>,
+        /// ok | denied | error
+        #[arg(long)]
+        outcome: Option<String>,
+    },
+}
+
+/// Unix ms, or a duration-ago like `24h`, `7d`, `30m`.
+fn parse_time(s: &str, now_ms: i64) -> anyhow::Result<i64> {
+    if let Ok(ms) = s.parse::<i64>() {
+        return Ok(ms);
+    }
+    let (num, unit) = s.split_at(s.len().saturating_sub(1));
+    let n: i64 = num
+        .parse()
+        .context("time must be unix ms or e.g. 24h/7d/30m")?;
+    let secs = match unit {
+        "m" => n * 60,
+        "h" => n * 3600,
+        "d" => n * 86_400,
+        _ => bail!("time must be unix ms or e.g. 24h/7d/30m"),
+    };
+    Ok(now_ms - secs * 1000)
 }
 
 #[derive(Subcommand)]
@@ -315,7 +362,7 @@ async fn main() -> anyhow::Result<()> {
     // commands with the per-database token. Either falls back to the other.
     // Namespace-level policy is control-plane; profile-level rides the token.
     let is_platform = match &cli.cmd {
-        Cmd::Db { .. } | Cmd::Token { .. } => true,
+        Cmd::Db { .. } | Cmd::Token { .. } | Cmd::Audit { .. } => true,
         Cmd::Policy { cmd } => match cmd {
             PolicyCmd::Get { profile, .. } | PolicyCmd::Set { profile, .. } => profile.is_none(),
             PolicyCmd::Clear { .. } => false,
@@ -505,6 +552,62 @@ async fn main() -> anyhow::Result<()> {
                         .await?,
                 )
                 .await
+            }
+        },
+        Cmd::Audit { cmd } => match cmd {
+            AuditCmd::Export {
+                ns,
+                from,
+                to,
+                action,
+                profile,
+                outcome,
+            } => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                let from = parse_time(&from, now)?;
+                let to = to.as_deref().map(|t| parse_time(t, now)).transpose()?;
+                let mut cursor: Option<String> = None;
+                let mut total = 0u64;
+                loop {
+                    let mut url = format!("{base}/v1/namespaces/{ns}/audit?from={from}&limit=500");
+                    if let Some(t) = to {
+                        url.push_str(&format!("&to={t}"));
+                    }
+                    for (k, v) in [
+                        ("action", &action),
+                        ("profile", &profile),
+                        ("outcome", &outcome),
+                    ] {
+                        if let Some(v) = v {
+                            url.push_str(&format!("&{k}={v}"));
+                        }
+                    }
+                    if let Some(c) = &cursor {
+                        url.push_str(&format!("&cursor={c}"));
+                    }
+                    let resp = c.get(&url).send().await?;
+                    let status = resp.status();
+                    let body: Value = resp.json().await?;
+                    if !status.is_success() {
+                        bail!("{status}: {body}");
+                    }
+                    for evt in body["events"].as_array().into_iter().flatten() {
+                        println!("{evt}");
+                        total += 1;
+                    }
+                    if body["complete"].as_bool().unwrap_or(true) {
+                        break;
+                    }
+                    cursor = body["next_cursor"].as_str().map(str::to_string);
+                    if cursor.is_none() {
+                        break;
+                    }
+                }
+                eprintln!("{total} events");
+                Ok(())
             }
         },
         Cmd::Memory { cmd } => match cmd {

@@ -144,6 +144,28 @@ curl -X PUT $MEMOTURN_URL/v1/namespaces/acme/policy \
 
 See [Configuration](/configuration/#data-governance) and the [CLI](/cli/#policy).
 
+## Audit logging
+
+With `audit.enabled` in the namespace policy, every node records an append-only, per-namespace
+audit stream in object storage — durable, immutable objects, deliberately outside branching so
+a rewind can never erase the trail, and surviving even deletion of the profiles it describes.
+
+- **What's recorded**: memory mutations (ingest, extract, forget, session end) with `txid` and
+  counts; every AI egress with provider, model, endpoint, item/byte counts, and duration —
+  including **denials**; token minting, policy changes, and database deletion. Reads (recall,
+  get, ask) are recorded only with `audit.include_reads`.
+- **Metadata only**: events never contain memory content, transcripts, or credentials. Each
+  event carries actor attribution — a non-reversible hash of the credential plus its scope and
+  claims — so an auditor can correlate "same token" without the stream ever holding material
+  that grants access.
+- **Reading the trail**: `GET /v1/namespaces/{ns}/audit` with time/action/profile/outcome
+  filters and cursor pagination — platform key, or a **namespace admin token** for its own
+  stream, so enterprises pull their trail without holding the platform key. The CLI exports
+  ranges as JSONL: `memoturn audit export acme --from 7d --action ai. --outcome denied`.
+- **Bounds**: emission is non-blocking and off the write path; a crash loses at most one flush
+  window (`MEMOTURN_AUDIT_FLUSH_MS`, default 2 s; orderly shutdowns drain). `audit.retention_secs`
+  bounds the stream itself. For tamper evidence, pair the stream with bucket-level object lock.
+
 ## Operational notes
 
 - Without `MEMOTURN_ETCD`, a node that looks multi-node — auth on, or a non-loopback
