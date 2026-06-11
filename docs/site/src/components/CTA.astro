@@ -1,0 +1,147 @@
+---
+type Props = {
+	kicker?: string;
+	title: string;
+	primary?: { href: string; text: string };
+	secondary?: { href: string; text: string };
+};
+
+const { kicker, title, primary, secondary } = Astro.props;
+---
+
+<section class="m-cta">
+	<div class="m-cta__inner">
+		{kicker && <p class="m-cta__kicker">{kicker}</p>}
+		<h2 class="m-cta__title">{title}</h2>
+		<div class="m-cta__body">
+			<slot />
+		</div>
+		{
+			(primary || secondary) && (
+				<div class="m-cta__actions">
+					{primary && (
+						<a class="m-cta__action m-cta__action--primary" href={primary.href}>
+							{primary.text}
+						</a>
+					)}
+					{secondary && (
+						<a class="m-cta__action m-cta__action--secondary" href={secondary.href}>
+							{secondary.text}
+						</a>
+					)}
+				</div>
+			)
+		}
+	</div>
+</section>
+
+<style>
+	/* Atoll closing band, matches the marketing-surface vocabulary.
+	 * One brand moment per page; this is the moment. Width inherits from the
+	 * parent (splash content cap or page content area) so it lines up with
+	 * the rest of the column. */
+	.m-cta {
+		margin-block: 3rem 1rem;
+	}
+	.m-cta__inner {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		padding: 3rem 1.5rem;
+		border-radius: var(--radius-lg);
+		background: var(--gradient-atoll);
+		color: var(--on-gradient-fg);
+	}
+	@media (min-width: 768px) {
+		.m-cta__inner {
+			padding: 3.5rem 3rem;
+		}
+	}
+	.m-cta__kicker {
+		margin: 0;
+		font-size: 0.69rem;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		font-weight: 700;
+		color: var(--on-gradient-fg-soft);
+	}
+	.m-cta__title {
+		margin: 0;
+		font-family: var(--font-heading-stack);
+		font-size: clamp(1.75rem, 3vw, 2.25rem);
+		font-weight: 700;
+		line-height: 1.15;
+		max-width: 22ch;
+		color: var(--on-gradient-fg);
+		letter-spacing: -0.015em;
+		text-wrap: balance;
+	}
+	.m-cta__body {
+		font-size: 0.95rem;
+		line-height: 1.65;
+		color: var(--on-gradient-fg-soft);
+		max-width: 50ch;
+		text-wrap: pretty;
+	}
+	.m-cta__body :global(p) {
+		margin: 0;
+	}
+	.m-cta__body :global(a) {
+		color: var(--on-gradient-fg);
+		text-decoration-color: color-mix(in oklab, var(--on-gradient-fg) 60%, transparent);
+		text-decoration-thickness: 1px;
+		text-underline-offset: 2px;
+		font-weight: 600;
+		transition:
+			color 180ms var(--ease-swell, ease),
+			text-decoration-color 180ms var(--ease-swell, ease);
+	}
+	.m-cta__body :global(a:hover) {
+		text-decoration-color: var(--on-gradient-fg);
+	}
+	.m-cta__body :global(a:focus-visible) {
+		outline: 2px solid var(--on-gradient-fg);
+		outline-offset: 3px;
+		border-radius: var(--radius-sm);
+	}
+	.m-cta__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		margin-top: 0.5rem;
+	}
+	.m-cta__action {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.625rem 1.25rem;
+		border-radius: var(--radius-md);
+		font-size: 0.95rem;
+		font-weight: 600;
+		text-decoration: none;
+		outline: none;
+		transition:
+			background-color 180ms var(--ease-swell, ease),
+			border-color 180ms var(--ease-swell, ease);
+	}
+	.m-cta__action:focus-visible {
+		outline: 2px solid var(--on-gradient-fg);
+		outline-offset: 3px;
+	}
+	.m-cta__action--primary {
+		background: var(--on-gradient-fg);
+		color: var(--sea-ink);
+	}
+	.m-cta__action--primary:hover {
+		background: color-mix(in oklab, var(--on-gradient-fg) 90%, transparent);
+	}
+	.m-cta__action--secondary {
+		background: transparent;
+		color: var(--on-gradient-fg);
+		border: 1px solid color-mix(in oklab, var(--on-gradient-fg) 40%, transparent);
+	}
+	.m-cta__action--secondary:hover {
+		background: color-mix(in oklab, var(--on-gradient-fg) 12%, transparent);
+		border-color: color-mix(in oklab, var(--on-gradient-fg) 60%, transparent);
+	}
+</style>

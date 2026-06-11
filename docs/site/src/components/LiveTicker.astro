@@ -1,0 +1,171 @@
+---
+const events = [
+	{ tool: "acme--alice", action: "fact ingested", detail: "user.diet · 3.9 ms" },
+	{ tool: "acme--alice", action: "memory recalled", detail: "rank-fused · 4 hits" },
+	{ tool: "acme--alice", action: "fact superseded", detail: "history kept" },
+	{ tool: "acme--alice", action: "branch created", detail: "copy-on-write · 47 µs" },
+	{ tool: "mcp", action: "memory_recall", detail: "namespace token · acme" },
+	{ tool: "acme--alice", action: "hibernated", detail: "object storage · near-zero cost" },
+] as const;
+---
+
+<aside
+	class="m-live-ticker"
+	role="status"
+	aria-live="polite"
+	aria-label="Sample event stream"
+	data-events={JSON.stringify(events)}
+>
+	<span class="m-live-ticker__dot" aria-hidden="true"></span>
+	<span class="m-live-ticker__kicker">demo · captured</span>
+	<span class="m-live-ticker__row">
+		<span class="m-live-ticker__tool" data-slot="tool">{events[0].tool}</span>
+		<span class="m-live-ticker__sep" aria-hidden="true">·</span>
+		<span class="m-live-ticker__action" data-slot="action">{events[0].action}</span>
+		<span class="m-live-ticker__sep" aria-hidden="true">·</span>
+		<span class="m-live-ticker__detail" data-slot="detail">{events[0].detail}</span>
+	</span>
+</aside>
+
+<script>
+	type Event = { tool: string; action: string; detail: string };
+
+	const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+	if (reduceMotion) {
+		// Freeze on the first event, suppress the cycle.
+	} else {
+		document.querySelectorAll<HTMLElement>(".m-live-ticker").forEach((el) => {
+			const raw = el.dataset.events;
+			if (!raw) return;
+			const events = JSON.parse(raw) as readonly Event[];
+			const row = el.querySelector(".m-live-ticker__row") as HTMLElement | null;
+			if (!row) return;
+			const tool = row.querySelector('[data-slot="tool"]') as HTMLElement;
+			const action = row.querySelector('[data-slot="action"]') as HTMLElement;
+			const detail = row.querySelector('[data-slot="detail"]') as HTMLElement;
+			let i = 0;
+			const cycle = () => {
+				i = (i + 1) % events.length;
+				row.classList.add("is-fading");
+				setTimeout(() => {
+					const ev = events[i];
+					if (!ev) return;
+					tool.textContent = ev.tool;
+					action.textContent = ev.action;
+					detail.textContent = ev.detail;
+					row.classList.remove("is-fading");
+				}, 220);
+			};
+			setInterval(cycle, 2400);
+		});
+	}
+</script>
+
+<style>
+	.m-live-ticker {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.4rem 0.75rem;
+		margin-block: 0.75rem 0;
+		border: 1px solid var(--docs-line);
+		border-radius: 999px;
+		background: var(--docs-panel-bg, transparent);
+		font-family: var(--font-mono-stack);
+		font-size: 0.78rem;
+		line-height: 1;
+		width: fit-content;
+		max-width: 100%;
+		overflow: hidden;
+	}
+
+	.m-live-ticker__dot {
+		flex: 0 0 auto;
+		width: 7px;
+		height: 7px;
+		border-radius: 999px;
+		background: var(--primary);
+		animation: m-live-ticker-pulse 1800ms cubic-bezier(0.16, 1, 0.3, 1) infinite;
+		transform-origin: center;
+	}
+
+	.m-live-ticker__kicker {
+		flex: 0 0 auto;
+		font-weight: 600;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		font-size: 0.66rem;
+		color: var(--kicker);
+		padding-right: 0.5rem;
+		border-right: 1px solid var(--docs-line);
+	}
+
+	.m-live-ticker__row {
+		flex: 1 1 auto;
+		display: inline-flex;
+		align-items: baseline;
+		gap: 0.4rem;
+		min-width: 0;
+		opacity: 1;
+		transition: opacity 220ms cubic-bezier(0.16, 1, 0.3, 1);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.m-live-ticker__row.is-fading {
+		opacity: 0;
+	}
+
+	.m-live-ticker__tool {
+		color: var(--primary);
+		font-weight: 600;
+	}
+
+	.m-live-ticker__sep {
+		color: var(--muted-foreground);
+		opacity: 0.55;
+	}
+
+	.m-live-ticker__action {
+		color: var(--foreground);
+	}
+
+	.m-live-ticker__detail {
+		color: var(--muted-foreground);
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	@keyframes m-live-ticker-pulse {
+		0%, 100% {
+			opacity: 0.55;
+			transform: scale(1);
+		}
+		50% {
+			opacity: 1;
+			transform: scale(1.2);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.m-live-ticker__dot {
+			animation: none;
+			opacity: 0.85;
+		}
+		.m-live-ticker__row {
+			transition: none;
+		}
+	}
+
+	@media (max-width: 600px) {
+		.m-live-ticker {
+			font-size: 0.72rem;
+			padding: 0.35rem 0.65rem;
+		}
+		.m-live-ticker__detail {
+			display: none;
+		}
+	}
+</style>

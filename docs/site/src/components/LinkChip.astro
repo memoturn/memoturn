@@ -1,0 +1,87 @@
+---
+type Props = {
+	kicker?: string;
+	title: string;
+	href: string;
+};
+
+const { kicker, title, href } = Astro.props;
+---
+
+<a class="m-link-chip" href={href}>
+	{kicker && <span class="m-link-chip__kicker">{kicker}</span>}
+	<span class="m-link-chip__title">{title}</span>
+	<span class="m-link-chip__body">
+		<slot />
+	</span>
+	<span class="m-link-chip__arrow" aria-hidden="true">→</span>
+</a>
+
+<style>
+	.m-link-chip {
+		display: grid;
+		grid-template-columns: 1fr auto;
+		grid-template-areas:
+			"kicker arrow"
+			"title arrow"
+			"body arrow";
+		row-gap: 0.15rem;
+		column-gap: 0.75rem;
+		align-items: center;
+		padding: 0.875rem 1rem;
+		border-radius: var(--radius-md);
+		border: 1px solid var(--docs-line);
+		background: var(--docs-panel-bg);
+		text-decoration: none;
+		color: var(--foreground);
+		transition:
+			border-color 180ms var(--ease-swell, ease),
+			color 180ms var(--ease-swell, ease);
+		outline: none;
+	}
+
+	.m-link-chip:hover {
+		border-color: color-mix(in oklab, var(--primary) 40%, var(--docs-line));
+	}
+
+	.m-link-chip:hover .m-link-chip__arrow {
+		color: var(--primary);
+	}
+
+	.m-link-chip:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 3px;
+	}
+
+	.m-link-chip__kicker {
+		grid-area: kicker;
+		font-size: 0.625rem;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		font-weight: 700;
+		color: var(--kicker);
+	}
+
+	.m-link-chip__title {
+		grid-area: title;
+		font-family: var(--font-heading-stack);
+		font-size: 0.95rem;
+		font-weight: 700;
+		line-height: 1.2;
+		color: var(--foreground);
+	}
+
+	.m-link-chip__body {
+		grid-area: body;
+		font-size: 0.8125rem;
+		line-height: 1.45;
+		color: var(--muted-foreground);
+	}
+
+	.m-link-chip__arrow {
+		grid-area: arrow;
+		color: var(--muted-foreground);
+		font-size: 1rem;
+		transition: color 180ms var(--ease-swell, ease);
+	}
+</style>

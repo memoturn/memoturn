@@ -1,0 +1,215 @@
+---
+import { Image } from "astro:assets";
+
+const { entry } = Astro.locals.starlightRoute;
+const { data } = entry;
+const { title = data.title, tagline, image, actions = [] } = data.hero ?? {};
+
+const imageAttrs = {
+	loading: "eager" as const,
+	decoding: "async" as const,
+	width: 400,
+	height: 400,
+	alt: image?.alt || "",
+};
+
+let darkImage: ImageMetadata | undefined;
+let lightImage: ImageMetadata | undefined;
+let rawHtml: string | undefined;
+if (image) {
+	if ("file" in image) {
+		lightImage = image.file;
+	} else if ("dark" in image) {
+		darkImage = image.dark;
+		lightImage = image.light;
+	} else {
+		rawHtml = image.html;
+	}
+}
+---
+
+<div class="memoturn-hero">
+	<div class="memoturn-hero__grid" aria-hidden="true"></div>
+	<div class="memoturn-hero__content">
+		{
+			lightImage && (
+				<Image
+					src={lightImage}
+					{...imageAttrs}
+					class:list={["memoturn-hero__image", { "light:sl-hidden": darkImage }]}
+				/>
+			)
+		}
+		{
+			darkImage && (
+				<Image
+					src={darkImage}
+					{...imageAttrs}
+					class:list={["memoturn-hero__image", "dark:sl-hidden"]}
+				/>
+			)
+		}
+		{rawHtml && <div class="memoturn-hero__image" set:html={rawHtml} />}
+
+		<div class="memoturn-hero__copy">
+			<p class="memoturn-hero__kicker">open source</p>
+			<h1 class="memoturn-hero__title" set:html={title} />
+			{tagline && <p class="memoturn-hero__tagline" set:html={tagline} />}
+			{
+				actions.length > 0 && (
+					<div class="memoturn-hero__actions">
+						{actions.map(({ attrs: { class: className, ...attrs } = {}, icon, link: href, text, variant }) => (
+							<a
+								{href}
+								class:list={[
+									"memoturn-hero__action",
+									`memoturn-hero__action--${variant}`,
+									className,
+								]}
+								{...attrs}
+							>
+								<span set:html={text} />
+								{icon?.html && <span class="memoturn-hero__action-icon" set:html={icon.html} />}
+							</a>
+						))}
+					</div>
+				)
+			}
+		</div>
+	</div>
+</div>
+
+<style>
+	.memoturn-hero {
+		position: relative;
+		padding-block: clamp(3rem, 8vw, 6rem);
+		isolation: isolate;
+		overflow: hidden;
+		border-bottom: 1px solid var(--docs-line);
+		/* Bleed past Starlight's content-panel padding so the hero band spans
+		 * the viewport, matching the marketing site hero. */
+		width: 100vw;
+		margin-inline: calc(50% - 50vw);
+	}
+
+	/* Quiet 96×96 hairline grid, same vocabulary as the marketing index hero —
+	 * centered + radially masked so edges don't read as stray rules. */
+	.memoturn-hero__grid {
+		position: absolute;
+		inset: 0;
+		z-index: -1;
+		background-image:
+			linear-gradient(to right, var(--docs-line-faint) 1px, transparent 1px),
+			linear-gradient(to bottom, var(--docs-line-faint) 1px, transparent 1px);
+		background-size: 96px 96px;
+		background-position: center;
+		-webkit-mask-image: radial-gradient(ellipse 88% 78% at 50% 45%, #000 50%, transparent 100%);
+		        mask-image: radial-gradient(ellipse 88% 78% at 50% 45%, #000 50%, transparent 100%);
+		pointer-events: none;
+	}
+
+	/* Match the splash content column (56rem) so the hero copy lines up
+	 * with HeroCard / ChipRow / CTA below it. The hero band itself is now
+	 * full-bleed, so we re-introduce inline padding here. */
+	.memoturn-hero__content {
+		max-width: 56rem;
+		margin-inline: auto;
+		padding-inline: clamp(1rem, 4vw, 2rem);
+		display: flex;
+		flex-direction: column;
+		gap: 1.25rem;
+	}
+
+	.memoturn-hero__image {
+		width: 56px;
+		height: auto;
+	}
+
+	.memoturn-hero__copy {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+
+	.memoturn-hero__kicker {
+		margin: 0;
+		font-size: 0.69rem;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		font-weight: 700;
+		color: var(--kicker);
+	}
+
+	.memoturn-hero__title {
+		margin: 0;
+		font-family: var(--font-heading-stack);
+		font-weight: 700;
+		font-size: clamp(2.5rem, 6vw, 3.75rem);
+		line-height: 1.05;
+		letter-spacing: -0.02em;
+		color: var(--foreground);
+		text-wrap: balance;
+		max-width: 16ch;
+	}
+
+	.memoturn-hero__tagline {
+		margin: 0;
+		font-size: clamp(1rem, 1.5vw, 1.125rem);
+		line-height: 1.65;
+		color: var(--muted-foreground);
+		text-wrap: pretty;
+		max-width: 60ch;
+	}
+
+	.memoturn-hero__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		margin-top: 0.75rem;
+	}
+
+	.memoturn-hero__action {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.625rem 1.25rem;
+		border-radius: var(--radius-md);
+		font-size: 0.95rem;
+		font-weight: 600;
+		text-decoration: none;
+		outline: none;
+		transition:
+			background-color 180ms var(--ease-swell, ease),
+			border-color 180ms var(--ease-swell, ease),
+			color 180ms var(--ease-swell, ease);
+	}
+
+	.memoturn-hero__action:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 3px;
+	}
+
+	.memoturn-hero__action--primary {
+		background: var(--primary);
+		color: var(--primary-foreground);
+	}
+	.memoturn-hero__action--primary:hover {
+		background: color-mix(in oklab, var(--primary) 90%, var(--foreground));
+	}
+
+	.memoturn-hero__action--secondary,
+	.memoturn-hero__action--minimal {
+		background: var(--docs-chip-bg);
+		color: var(--foreground);
+		border: 1px solid var(--docs-chip-line);
+	}
+	.memoturn-hero__action--secondary:hover,
+	.memoturn-hero__action--minimal:hover {
+		background: var(--docs-link-bg-hover);
+	}
+
+	.memoturn-hero__action-icon :global(svg) {
+		width: 1rem;
+		height: 1rem;
+	}
+</style>

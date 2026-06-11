@@ -1,0 +1,23 @@
+---
+// Layout container for LinkChip rows. Stacks vertically on mobile,
+// 3-up on desktop.
+---
+
+<div class="m-chip-row">
+	<slot />
+</div>
+
+<style>
+	.m-chip-row {
+		display: grid;
+		gap: 0.75rem;
+		margin-block: 1.5rem 2.5rem;
+	}
+
+	@media (min-width: 720px) {
+		.m-chip-row {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: 0.875rem;
+		}
+	}
+</style>

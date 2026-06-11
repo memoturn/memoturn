@@ -100,8 +100,9 @@ sdk/python/        memoturn — Python client (httpx)
 deploy/helm/       Helm umbrella chart (kind-deployable)
 bench/             Benchmark harness (success-criteria table)
 examples/           memory-agent — the product loop as a runnable chat agent
-docs/architecture  The architecture document set
-docs/adr           Architecture decision records
+docs/site          docs.memoturn.ai (Astro Starlight; publishes only docs/site/src/content/docs)
+docs/architecture  The architecture document set (internal, not published)
+docs/adr           Architecture decision records (internal, not published)
 ```
 
 ## AI owns the code; people bring expertise
@@ -112,7 +113,9 @@ designed to be maintained by AI under human guidance, and we want the LLM to hav
 context as possible. To aid this:
 
 - All artifacts live in the code base — including the architecture docs, ADRs, and deployment
-  proofs written for humans ([docs/](docs/)). [CLAUDE.md](CLAUDE.md) is the AI-facing guide.
+  proofs written for humans ([docs/](docs/)), and the published documentation site
+  (docs.memoturn.ai builds from [docs/site](docs/site)). [CLAUDE.md](CLAUDE.md) is the
+  AI-facing guide.
 - Individuals are not the owners of sections of code. There are no CODEOWNERS, no author
   tags, no per-file attribution — and there should never be.
 
@@ -125,6 +128,7 @@ cargo run -p memoturnd     # single node on :8080 (data ./data, objects ./data/o
 cargo run -p memoturn-cli -- memory ingest acme alice --summary "..."   # memory/db/branch/sql/kv/sync
 scripts/demo.sh            # the agent-story walkthrough against a running node
 cd mcp && npm i && npm run build   # MCP server: node dist/index.js (stdio) or --http 8765 (streamable HTTP)
+cd docs/site && npm i && npm run dev   # docs.memoturn.ai locally (deploy: npm run deploy)
 helm lint deploy/helm/memoturn     # kind-deployable chart (memoturnd + MinIO)
 
 # auth (off by default in dev): per-database Ed25519 JWTs + platform key.

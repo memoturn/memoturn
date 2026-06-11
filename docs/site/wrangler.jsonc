@@ -1,0 +1,27 @@
+/**
+ * Memoturn docs — public documentation site at docs.memoturn.ai.
+ *
+ * Static-only build: Starlight emits HTML+CSS+JS to `dist/`, served via
+ * Workers Static Assets. No `main` worker entrypoint, no DO/queues/KV
+ * bindings — assets-only.
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "memoturn-docs",
+	"compatibility_date": "2026-04-22",
+	"observability": { "enabled": true },
+	"assets": { "directory": "./dist", "not_found_handling": "404-page" },
+	"routes": [{ "pattern": "docs.memoturn.ai", "custom_domain": true }],
+	/**
+	 * Staging — `wrangler deploy --env staging` ships to
+	 * `memoturn-docs-staging` on `docs-staging.memoturn.ai`. Custom domain
+	 * is provisioned once in the Cloudflare dashboard.
+	 */
+	"env": {
+		"staging": {
+			"name": "memoturn-docs-staging",
+			"routes": [{ "pattern": "docs-staging.memoturn.ai", "custom_domain": true }],
+			"assets": { "directory": "./dist", "not_found_handling": "404-page" }
+		}
+	}
+}

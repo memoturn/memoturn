@@ -1,6 +1,7 @@
 # Memoturn — root task runner for the Rust workspace.
 # Run `make help` for the target list.
-# The web surfaces (memoturn.ai + docs.memoturn.ai) live in the memoturn/web repo.
+# docs.memoturn.ai lives in docs/site (cd docs/site && npm run dev|deploy); the
+# memoturn.ai marketing site lives in the private memoturn/web repo.
 
 .PHONY: help node test bench demo
 

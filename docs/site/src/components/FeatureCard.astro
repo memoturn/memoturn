@@ -1,0 +1,112 @@
+---
+type Props = {
+	kicker?: string;
+	title: string;
+	href?: string;
+	tags?: string[];
+};
+
+const { kicker, title, href, tags = [] } = Astro.props;
+const Tag = href ? "a" : "div";
+---
+
+<Tag class="m-feature-card" href={href}>
+	{kicker && <span class="m-feature-card__kicker">{kicker}</span>}
+	<h3 class="m-feature-card__title">{title}</h3>
+	<div class="m-feature-card__body">
+		<slot />
+	</div>
+	{
+		tags.length > 0 && (
+			<div class="m-feature-card__tags">
+				{tags.map((tag) => (
+					<span class="m-feature-card__tag">{tag}</span>
+				))}
+			</div>
+		)
+	}
+</Tag>
+
+<style>
+	.m-feature-card {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding: 1.5rem;
+		border-radius: var(--radius-lg);
+		border: 1px solid var(--docs-line);
+		background: var(--docs-panel-bg);
+		text-decoration: none;
+		color: var(--foreground);
+		transition: border-color 180ms var(--ease-swell, ease);
+		position: relative;
+		outline: none;
+	}
+
+	a.m-feature-card:hover {
+		border-color: color-mix(in oklab, var(--primary) 40%, var(--docs-line));
+	}
+
+	a.m-feature-card:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 3px;
+	}
+
+	.m-feature-card__kicker {
+		font-size: 0.69rem;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		font-weight: 700;
+		color: var(--kicker);
+	}
+
+	.m-feature-card__title {
+		margin: 0;
+		font-family: var(--font-heading-stack);
+		font-size: 1.125rem;
+		font-weight: 700;
+		line-height: 1.35;
+		letter-spacing: -0.01em;
+		color: var(--foreground);
+	}
+
+	.m-feature-card__body {
+		font-size: 0.9rem;
+		line-height: 1.65;
+		color: var(--muted-foreground);
+	}
+
+	.m-feature-card__body :global(p) {
+		margin: 0;
+	}
+
+	.m-feature-card__body :global(code) {
+		font-family: var(--font-mono-stack);
+		font-size: 0.85em;
+		font-weight: 500;
+		line-height: 1.5;
+		background: var(--muted);
+		color: var(--primary);
+		border-radius: calc(var(--radius) * 0.4);
+		padding: 0.1em 0.35em;
+	}
+
+	.m-feature-card__tags {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		margin-top: 0.5rem;
+	}
+
+	.m-feature-card__tag {
+		font-family: var(--font-mono-stack);
+		font-size: 0.6875rem;
+		font-weight: 500;
+		letter-spacing: 0;
+		color: var(--muted-foreground);
+		background: var(--docs-chip-bg);
+		border: 1px solid var(--docs-chip-line);
+		border-radius: var(--radius-sm);
+		padding: 0.15rem 0.5rem;
+	}
+</style>

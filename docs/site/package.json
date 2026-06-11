@@ -1,0 +1,25 @@
+{
+	"name": "@memoturn/docs",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"scripts": {
+		"dev": "astro dev",
+		"build": "astro build",
+		"preview": "astro build && wrangler dev",
+		"typecheck": "astro check",
+		"deploy": "astro build && wrangler deploy",
+		"deploy:staging": "MEMOTURN_DOCS_URL=https://docs-staging.memoturn.ai astro build && wrangler deploy --env staging",
+		"cf-typegen": "wrangler types"
+	},
+	"dependencies": {
+		"@astrojs/starlight": "^0.38.4",
+		"astro": "^6.1.9",
+		"sharp": "^0.34.5"
+	},
+	"devDependencies": {
+		"@astrojs/check": "^0.9.4",
+		"typescript": "^6.0.3",
+		"wrangler": "^4.85.0"
+	}
+}

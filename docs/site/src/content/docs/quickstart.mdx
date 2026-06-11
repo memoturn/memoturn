@@ -1,0 +1,173 @@
+---
+title: Quickstart
+description: Run a Memoturn node, store and recall typed agent memories, watch supersession work, and rewind a profile — in a few minutes.
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+Memoturn gives every user, team, or agent persona an isolated **memory profile** that all of
+their agents share. In this guide you run a single node locally, ingest a fact, recall it,
+update it (supersession), and then checkpoint, fork, and rewind the profile's entire memory.
+
+## 1. Run a node
+
+Clone the repo and start `memoturnd`. It listens on `:8080`, keeps data under `./data`, and
+runs with auth off in dev mode.
+
+```bash
+git clone https://github.com/memoturn/memoturn
+cd memoturn
+cargo run -p memoturnd
+```
+
+Install the CLI so `memoturn` is on your path (it targets `MEMOTURN_URL`, default
+`http://127.0.0.1:8080`):
+
+```bash
+cargo install --path crates/cli
+```
+
+## 2. Ingest a fact, then recall it
+
+Profiles auto-create on first ingest — no provisioning step. Every agent serving `acme`'s user
+`alice` reads and writes the same profile.
+
+<Tabs syncKey="client">
+<TabItem label="CLI">
+
+```bash
+memoturn memory ingest acme alice --type fact --topic user.seat \
+  --summary "prefers aisle seats" --keywords "seat travel preference"
+
+memoturn memory recall acme alice "what seat does the user like?"
+```
+
+</TabItem>
+<TabItem label="HTTP">
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/memory/acme/alice/memories \
+  -H 'content-type: application/json' -d '{"memories":[
+    {"type":"fact","topic_key":"user.seat","summary":"prefers aisle seats",
+     "content":{"seat":"aisle"},"keywords":"seat travel preference"}]}'
+
+curl -X POST http://127.0.0.1:8080/v1/memory/acme/alice/recall \
+  -H 'content-type: application/json' \
+  -d '{"query":"what seat does the user like?","k":3}'
+```
+
+</TabItem>
+<TabItem label="TypeScript">
+
+```ts
+import { memoturn } from "@memoturn/sdk";
+
+const mt = memoturn({ url: "http://127.0.0.1:8080" });
+const alice = mt.memory("acme", "alice");
+
+await alice.ingest([
+  { type: "fact", topicKey: "user.seat", summary: "prefers aisle seats",
+    content: { seat: "aisle" }, keywords: "seat travel preference" },
+]);
+
+const { memories } = await alice.recall({ query: "what seat does the user like?" });
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python
+from memoturn import Memoturn
+
+mt = Memoturn("http://127.0.0.1:8080")
+alice = mt.memory("acme", "alice")
+
+alice.ingest([
+    {"type": "fact", "topic_key": "user.seat", "summary": "prefers aisle seats",
+     "content": {"seat": "aisle"}, "keywords": "seat travel preference"},
+])
+
+hits = alice.recall(query="what seat does the user like?")
+```
+
+</TabItem>
+</Tabs>
+
+Ingest returns an id and a status per memory, plus the write's `txid`. Re-ingest the same
+memory and the status is `duplicate` — ids are content-addressed, so ingest is idempotent.
+Recall fuses keyword, topic, and vector channels and reports which channels found each hit;
+pass embeddings yourself or enable [auto-embedding](/embeddings/) on the node to light up the
+vector channel.
+
+## 3. Update the fact — supersession, not contradiction
+
+Alice changes her mind. Ingest a newer fact on the **same topic key**:
+
+```bash
+memoturn memory ingest acme alice --type fact --topic user.seat \
+  --summary "prefers window seats now" --keywords "seat travel preference"
+```
+
+The response lists the old memory's id under `"superseded"`. Recall now returns only the new
+fact:
+
+```bash
+memoturn memory recall acme alice --topic user.seat
+```
+
+```json
+{ "memories": [
+  { "id": "mem_…", "type": "fact", "topic_key": "user.seat",
+    "summary": "prefers window seats now", "channels": ["topic"] } ] }
+```
+
+Nothing was deleted: the old row is marked superseded and kept. Add `--include-superseded` to
+see the full history, or `memoturn memory get acme alice <id>` for one memory with its
+supersession chain.
+
+## 4. Checkpoint, burner-branch, rewind
+
+A profile is one database, so branching operates on the whole memory atomically. The database
+behind `acme/alice` is named `acme--alice`.
+
+Checkpoint before a risky run, let the agent learn something wrong, then rewind:
+
+```bash
+memoturn branch checkpoint acme--alice main before-run
+
+memoturn memory ingest acme alice --type fact --topic user.seat \
+  --summary "sits only on the wing"
+
+memoturn branch rewind acme--alice main before-run
+memoturn memory recall acme alice --topic user.seat   # window seats again
+```
+
+Or fork a **burner branch** — a copy-on-write fork with a TTL that is garbage-collected
+automatically. Writes to the branch never touch `main`:
+
+```bash
+memoturn branch create acme--alice burner --ttl 3600
+
+curl -X POST 'http://127.0.0.1:8080/v1/memory/acme/alice/memories?branch=burner' \
+  -H 'content-type: application/json' -d '{"memories":[
+    {"type":"fact","topic_key":"experiment.x","summary":"risky hypothesis","content":{}}]}'
+
+memoturn memory recall acme alice --topic experiment.x   # empty: main is untouched
+```
+
+In the SDKs the same flow is `alice.checkpoint("before-run")`, `alice.rewind("before-run")`,
+and `alice.fork("burner", { ttl: 3600 })`.
+
+For the full walkthrough — transcript layer, scratch KV, raw-turn recall — run
+`scripts/demo.sh` against your node.
+
+## Next steps
+
+- [Memories](/memories/) — the typed record, supersession semantics, idempotent ingest.
+- [Recall](/recall/) — the keyword + topic + vector channels and rank fusion.
+- [Branching](/branching/) — checkpoints, rewind, and burner branches in depth.
+- [MCP server](/mcp/) — give any agent these operations as tools.
+- [SDKs](/sdk-typescript/) — TypeScript and [Python](/sdk-python/) clients.
+- [Deployment](/deployment/) — Kubernetes, object storage, and multi-node clusters.
+- `examples/memory-agent` in the [repository](https://github.com/memoturn/memoturn) — a runnable chat
+  agent whose memory survives restarts.

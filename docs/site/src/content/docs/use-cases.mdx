@@ -1,0 +1,93 @@
+---
+title: Use cases
+description: What you build with typed agent memory, hybrid recall, and branchable per-profile databases.
+---
+
+import CTA from "../../components/CTA.astro";
+
+Memoturn's primitives are small: a memory profile per user, team, or persona
+(`namespace > profile > memory`), typed memories with supersession, hybrid recall, and a
+database per profile that replicates, branches, and rewinds as one unit. This page maps those
+primitives onto the systems people actually build.
+
+## Assistants that actually remember
+
+An assistant tells a user "you mentioned you're vegetarian" three weeks after the
+conversation where they said it — and stops suggesting steak after the user goes vegan. Facts
+persist across sessions and across every agent serving that user, because they all read and
+write the same profile. When a fact changes, supersession replaces the old fact on the same
+topic key instead of leaving two contradictory memories for recall to trip over; the history
+stays queryable. Ingest is idempotent, so an agent that re-asserts something it already knows
+produces a `duplicate`, not a copy.
+
+[Profiles](/profiles/) · [Memories](/memories/) · [Recall](/recall/)
+
+## Multi-agent fleets with shared state
+
+A planner decomposes a job, a researcher gathers facts, an executor acts on them — three
+agents, one user, one profile. The researcher ingests `fact` memories; the executor recalls
+them on its next turn with no message-passing or synchronization layer, because shared memory
+is just the same database. Isolation between users is structural, not policy: `acme--alice`
+and `acme--bob` are different database files with different manifests and leases, so recall on
+one can never surface the other's memories. Single-writer semantics per profile with write
+forwarding handle concurrent agents; `txid` gives read-your-writes.
+
+[Profiles](/profiles/) · [Consistency](/consistency/) · [Security](/security/)
+
+## Safe experimentation on live memory
+
+An agent about to start an autonomous overnight run checkpoints its own mind first. If it
+learns garbage — hallucinated facts, a poisoned instruction — a rewind to the checkpoint
+returns the entire memory (typed memories, transcript, scratch state) to the known-good state
+atomically. Experiments run on a burner branch with a TTL: the experiment ingests freely on
+the fork, main never sees it, and the branch is garbage-collected when the TTL lapses. Branch
+creation is a copy-on-write manifest operation, measured at 47 µs p50 on the prototype.
+
+[Branching](/branching/) · [Quickstart](/quickstart/)
+
+## Per-session scratch state
+
+A support agent working ticket #88 needs "follow up on the refund" to exist for this session
+and then disappear. `task` memories attach to a session and expire on TTL (24 h default);
+ending the session deletes its tasks in one call. Underneath, the raw transcript layer stores
+every turn verbatim per session, and KV namespaces with TTL hold scratchpads and flags — all
+in the same per-profile database, so nothing is lost between memory extractions and everything
+checkpoints together.
+
+[Sessions](/sessions/) · [Memories](/memories/) · [Data model](/data-model/)
+
+## Tool-native memory over MCP
+
+Agents do not need an SDK integration to use memory: the MCP server exposes `memory_ingest`,
+`memory_recall`, and `memory_forget` (plus the transcript, document, KV, vector, and branch
+tools) to any MCP-capable agent framework. The default posture locks an agent to one profile
+with a per-database JWT; an orchestrator holds a namespace token that covers every profile
+under its namespace — minting per-profile tokens, checkpointing memories — without any
+operation that reads across two profiles existing in the data plane.
+
+[MCP server](/mcp/) · [Security](/security/)
+
+## SaaS agents at tenant scale
+
+A product with 100,000 users means 100,000 profiles — and each profile is its own tiny
+database, provisioned as a metadata write (17 µs p50 on the prototype; 10k databases in
+93 ms). Idle profiles hibernate to object storage at near-zero cost and wake on the next
+request (0.7 ms p50 prototype restore-and-query, plus object-store round trip in production).
+Object storage is the source of truth, so nodes are disposable: kill a data-plane pod and a
+fresh pod with no persistent volume serves the same data, with writer-lease failover bounded
+at ≤15 s. All prototype numbers are p50, single node; reproduce with
+`cargo run --release -p memoturn-bench`.
+
+[Deployment](/deployment/) · [Scaling](/scaling/) · [Architecture](/architecture/)
+
+<CTA
+	kicker="memory for AI agents"
+	title="Give your agents a memory you can operate on."
+	primary={{ href: "/quickstart/", text: "Read the quickstart" }}
+	secondary={{ href: "https://github.com/memoturn/memoturn", text: "View on GitHub" }}
+>
+	<div>
+		Run a node with one cargo command, ingest a fact, recall it, and rewind the
+		profile — then deploy the same stack to any Kubernetes with one Helm chart.
+	</div>
+</CTA>

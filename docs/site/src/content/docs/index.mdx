@@ -1,0 +1,74 @@
+---
+title: Memoturn
+description: Memory for AI agents — typed memories, hybrid recall, and branchable per-profile databases.
+template: splash
+hero:
+  tagline: Every user, team, or agent persona gets an isolated memory profile that all of their agents share — typed memories with supersession, hybrid recall, and a per-profile database you can checkpoint, fork, and rewind. Self-hosted, on any Kubernetes.
+  actions:
+    - text: Read the quickstart
+      link: /quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: See use cases
+      link: /use-cases/
+      icon: right-arrow
+      variant: minimal
+    - text: View on GitHub
+      link: https://github.com/memoturn/memoturn
+      icon: external
+      variant: minimal
+---
+
+import HeroCard from "../../components/HeroCard.astro";
+import LinkChip from "../../components/LinkChip.astro";
+import ChipRow from "../../components/ChipRow.astro";
+import CTA from "../../components/CTA.astro";
+import LiveTicker from "../../components/LiveTicker.astro";
+
+<LiveTicker />
+
+<HeroCard
+	kicker="run it"
+	title="One ingest call, durable memory"
+	href="/quickstart/"
+	code={`memoturn memory ingest acme alice --type fact --topic user.diet \\
+  --summary "vegetarian since 2024"
+memoturn memory recall acme alice "what can this user eat?"`}
+	lang="bash"
+>
+	Memoturn is an open-source, distributed agent-memory database. Every agent serving a user
+	is a client of the same profile: facts supersede by topic with history kept, ingest is
+	idempotent, and recall fuses keyword, topic, and vector channels — empty when nothing
+	matches, never padded.
+</HeroCard>
+
+A Rust data plane embeds libSQL and gives each profile its own tiny database — provisioned in
+microseconds, hibernating to object storage at near-zero cost when idle, holding memories,
+documents, KV, vectors, and transcripts in one unit that replicates, branches, and rewinds
+together. Read the [architecture overview](/architecture/) for the full design.
+
+<ChipRow>
+	<LinkChip kicker="connect" title="Tool-native over MCP" href="/mcp/">
+		Agents ingest and recall memory as MCP tools — `memory_ingest`, `memory_recall`, `memory_forget`.
+	</LinkChip>
+	<LinkChip kicker="experiment" title="Burner branches" href="/branching/">
+		Checkpoint, fork, and rewind a whole profile in O(1) — ephemeral forks auto-expire.
+	</LinkChip>
+	<LinkChip kicker="operate" title="Self-hosted" href="/deployment/">
+		One Helm chart on any Kubernetes; object storage is the source of truth, nodes are disposable.
+	</LinkChip>
+</ChipRow>
+
+<CTA
+	kicker="open source · Apache-2.0"
+	title="Give your agents memory on infrastructure you own."
+	primary={{ href: "https://github.com/memoturn/memoturn", text: "Get the source" }}
+	secondary={{ href: "/quickstart/", text: "Quickstart" }}
+>
+	<div>
+		Typed memories with supersession, hybrid recall, and O(1) burner branches — database
+		semantics, not app-side glue. Run a local node with `memoturnd`, or deploy the Helm
+		chart to any Kubernetes with any S3-compatible object store. See
+		[Deployment](/deployment/) for the path.
+	</div>
+</CTA>

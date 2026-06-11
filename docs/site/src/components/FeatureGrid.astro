@@ -1,0 +1,31 @@
+---
+type Props = {
+	columns?: 2 | 3;
+};
+
+const { columns = 3 } = Astro.props;
+---
+
+<section class={`m-feature-grid m-feature-grid--cols-${columns}`}>
+	<slot />
+</section>
+
+<style>
+	.m-feature-grid {
+		display: grid;
+		gap: 1.25rem;
+		margin-block: 2.25rem 2rem;
+	}
+
+	@media (min-width: 720px) {
+		.m-feature-grid {
+			gap: 1.35rem;
+		}
+		.m-feature-grid--cols-2 {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.m-feature-grid--cols-3 {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+	}
+</style>

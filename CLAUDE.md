@@ -27,8 +27,12 @@ scripts/demo.sh                       # end-to-end demo against a local node
 ```
 
 The Makefile at the repo root wraps the common tasks: `make node|test|bench|demo` (see
-`make help`). The web surfaces (memoturn.ai marketing site and docs.memoturn.ai) live in the
-separate `memoturn/web` repository.
+`make help`). The docs site (docs.memoturn.ai) lives in `docs/site` — Astro Starlight, deployed
+as Cloudflare Workers static assets (`cd docs/site && npm run dev|build|deploy`). Only
+`docs/site/src/content/docs/` is published; `docs/architecture/` and `docs/adr/` are internal
+design docs. After changing product surfaces (env vars, CLI, API, MCP, SDKs, Helm), run
+`/sync-docs` to update the published pages. The memoturn.ai marketing site lives in the separate
+private `memoturn/web` repository.
 
 `memoturnd` is configured entirely via `MEMOTURN_*` env vars (see `crates/memoturnd/src/main.rs`):
 `MEMOTURN_OBJECT_STORE` (s3:// URL; defaults to local-FS store), `MEMOTURN_ETCD` (real leases vs
