@@ -54,9 +54,12 @@ ships+CAS before acking the txid; per-request `Memoturn-Durability: durable` hea
 `MEMOTURN_GC_GRACE_SECS` (refcount object GC grace window, 600), `MEMOTURN_PITR_RETENTION_SECS`
 (fine-grained PITR window, 86400; 0 disables) and `MEMOTURN_PITR_SNAPSHOT_RETENTION_SECS`
 (snapshot-grained tier, 2592000). Data governance (ADR-0010): per-namespace policies (retention/
-TTL caps, AI egress rules; tighten-only profile overrides) live in object storage and are read
-through a cache (`MEMOTURN_POLICY_CACHE_SECS`, 30); `MEMOTURN_EMBED_SELF_HOSTED_HOSTS` allowlists
-embedder hosts for the `embed: self_hosted_only` rule; `memoturn policy get|set|clear` on the CLI.
+TTL caps, AI egress rules, audit; tighten-only profile overrides) live in object storage and are
+read through a cache (`MEMOTURN_POLICY_CACHE_SECS`, 30); `MEMOTURN_EMBED_SELF_HOSTED_HOSTS`
+allowlists embedder hosts for the `embed: self_hosted_only` rule; per-namespace audit streams
+(JSONL in object storage, `MEMOTURN_AUDIT_FLUSH_MS` flush window, 2000) record mutations and AI
+egress metadata when `audit.enabled`; `memoturn policy get|set|clear` and `memoturn audit export`
+on the CLI.
 
 ## Architecture
 

@@ -216,7 +216,8 @@ Platform routes, authenticated with the platform key.
 | POST | `/v1/databases/{db}/tokens` | Mint a per-database token (`{scope, expires_in}`) |
 | POST | `/v1/namespaces/{ns}/tokens` | Mint a namespace token covering every profile under it |
 | GET | `/v1/namespaces/{ns}/policy` | The namespace [governance policy](/security/#data-governance-policies) |
-| PUT | `/v1/namespaces/{ns}/policy` | Set the namespace governance policy (retention, memory aging, AI egress) |
+| PUT | `/v1/namespaces/{ns}/policy` | Set the namespace governance policy (retention, memory aging, audit, AI egress) |
+| GET | `/v1/namespaces/{ns}/audit?from=&to=&action=&profile=&outcome=&limit=&cursor=` | Page the namespace [audit stream](/security/#audit-logging) — platform key or a namespace admin token |
 | GET | `/v1/databases/{db}/usage` | Usage counters |
 
 ```json

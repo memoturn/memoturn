@@ -640,6 +640,127 @@ export class Memoturn {
     });
     return r.json.token;
   }
+
+  /**
+   * Data governance (ADR-0010): per-namespace policies — retention/TTL caps,
+   * AI egress rules, audit — with tighten-only per-profile overrides.
+   * Namespace-level calls use the platform key; profile-level calls the token.
+   */
+  readonly policy = {
+    /** The namespace policy document (404 → null when none is set). */
+    get: async (namespace: string): Promise<PolicyDoc | null> => {
+      try {
+        const r = await this.w.request("GET", `/v1/namespaces/${namespace}/policy`, {
+          platform: true,
+        });
+        return r.json as PolicyDoc;
+      } catch (e) {
+        if (e instanceof MemoturnError && e.status === 404) return null;
+        throw e;
+      }
+    },
+    /** Replace the namespace policy. */
+    set: async (namespace: string, policy: Policy): Promise<PolicyDoc> => {
+      const r = await this.w.request("PUT", `/v1/namespaces/${namespace}/policy`, {
+        body: { policy },
+        platform: true,
+      });
+      return r.json as PolicyDoc;
+    },
+    /** A profile's override plus the effective policy actually enforced. */
+    getProfile: async (namespace: string, profile: string): Promise<ProfilePolicy> => {
+      const r = await this.w.request("GET", `/v1/memory/${namespace}/${profile}/policy`);
+      return r.json as ProfilePolicy;
+    },
+    /**
+     * Set a tighten-only profile override (admin scope; loosening any field
+     * is a 409), or clear it with `null`.
+     */
+    setProfile: async (
+      namespace: string,
+      profile: string,
+      policy: Policy | null,
+    ): Promise<ProfilePolicy> => {
+      const r = await this.w.request("PUT", `/v1/memory/${namespace}/${profile}/policy`, {
+        body: { policy },
+      });
+      return r.json as ProfilePolicy;
+    },
+  };
+
+  /**
+   * Page through a namespace's audit stream (requires `audit.enabled` in its
+   * policy; platform key, or a namespace admin token). Events are metadata
+   * only — never memory content.
+   */
+  async *auditEvents(
+    namespace: string,
+    opts: AuditQuery = {},
+  ): AsyncGenerator<Record<string, unknown>> {
+    let cursor = opts.cursor;
+    for (;;) {
+      const qs = new URLSearchParams();
+      for (const [k, v] of Object.entries({ ...opts, cursor })) {
+        if (v !== undefined) qs.set(k, String(v));
+      }
+      const suffix = qs.size > 0 ? `?${qs}` : "";
+      const r = await this.w.request("GET", `/v1/namespaces/${namespace}/audit${suffix}`, {
+        platform: true,
+      });
+      for (const evt of r.json.events as Record<string, unknown>[]) yield evt;
+      if (r.json.complete || !r.json.next_cursor) return;
+      cursor = r.json.next_cursor as string;
+    }
+  }
+}
+
+/** Governance policy sections; every field optional — absent = uncapped. */
+export interface Policy {
+  retention?: { pitr_secs?: number; pitr_snapshot_secs?: number };
+  memory?: {
+    task_ttl_max_secs?: number;
+    event_max_age_secs?: number;
+    superseded_max_age_secs?: number;
+    superseded_max_count?: number;
+  };
+  erasure?: { purge_on_forget?: boolean; grace_secs?: number };
+  audit?: { enabled?: boolean; include_reads?: boolean; retention_secs?: number };
+  ai_egress?: {
+    extract?: "allow" | "deny";
+    ask?: "allow" | "deny";
+    embed?: "allow" | "self_hosted_only" | "deny";
+  };
+  [k: string]: unknown;
+}
+
+export interface PolicyDoc {
+  namespace: string;
+  revision: number;
+  updated_at: number;
+  policy: Policy;
+  profiles?: Record<string, Policy>;
+}
+
+export interface ProfilePolicy {
+  namespace: string;
+  profile: string;
+  override: Policy | null;
+  /** Field-wise strictest of node config, namespace, and profile. */
+  effective: Record<string, unknown>;
+  revision: number;
+}
+
+export interface AuditQuery {
+  /** Unix ms; default `to - 24h`. */
+  from?: number;
+  /** Unix ms; default now. */
+  to?: number;
+  /** Exact action, or a dot-terminated prefix like `ai.`. */
+  action?: string;
+  profile?: string;
+  outcome?: "ok" | "denied" | "error";
+  limit?: number;
+  cursor?: string;
 }
 
 export function memoturn(opts: MemoturnOptions = {}): Memoturn {

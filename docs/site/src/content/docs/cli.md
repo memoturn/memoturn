@@ -173,6 +173,20 @@ memoturn policy clear acme --profile alice
 A profile override that loosens the namespace policy is rejected (`409`) naming each offending
 field. See [security](/security/#data-governance-policies) for the policy document shape.
 
+## audit
+
+Export a namespace's [audit stream](/security/#audit-logging) as JSONL, oldest first, paginating
+through the whole range (platform key, or a namespace admin token via `--token`). Requires
+`audit.enabled` in the namespace policy.
+
+```bash
+memoturn audit export acme                              # last 24 h
+memoturn audit export acme --from 7d --action memory.   # all memory mutations this week
+memoturn audit export acme --action ai. --outcome denied > denials.jsonl
+```
+
+`--from`/`--to` accept unix milliseconds or a duration ago (`30m`, `24h`, `7d`).
+
 ## ask
 
 Asks the built-in assistant. The assistant ships post-prototype; in the current build the

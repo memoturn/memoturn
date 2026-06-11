@@ -134,6 +134,16 @@ async fn main() -> anyhow::Result<()> {
         std::env::var("MEMOTURN_ADVERTISE").unwrap_or_else(|_| format!("http://{listen}"));
     let node_id = std::env::var("MEMOTURN_NODE_ID")
         .unwrap_or_else(|_| format!("node-{}", std::process::id()));
+
+    // Per-namespace audit stream (ADR-0010 phase 2): JSONL objects in object
+    // storage, flushed by a background task. Always constructed; emission is
+    // gated per namespace by the `audit.enabled` policy.
+    let audit_flush_ms: u64 = std::env::var("MEMOTURN_AUDIT_FLUSH_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2000);
+    let audit =
+        memoturn_api::audit::AuditSink::spawn(store.clone(), "v1", &node_id, audit_flush_ms);
     let control: Arc<dyn LeaseManager> = match std::env::var("MEMOTURN_ETCD") {
         Ok(endpoints) => {
             let endpoints: Vec<String> = endpoints.split(',').map(str::to_string).collect();
@@ -360,6 +370,7 @@ async fn main() -> anyhow::Result<()> {
         answerer,
         governance,
         embed_provenance,
+        audit: audit.clone(),
     };
     // Re-arm token revocation across restarts: the registry's durable
     // tombstones re-seed the (possibly fresh) control-plane revocation list.
@@ -395,6 +406,10 @@ async fn main() -> anyhow::Result<()> {
                     if n > 0 {
                         tracing::info!(reclaimed = n, "object refcount GC");
                     }
+                    let n = memoturn_api::sweep_audit_retention(&state).await;
+                    if n > 0 {
+                        tracing::info!(deleted = n, "audit retention");
+                    }
                 }
             }
         });
@@ -404,8 +419,11 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&listen).await?;
     tracing::info!(%listen, data_dir = %data_dir.display(), object_store = %store_url, "memoturnd listening");
     axum::serve(listener, app)
-        .with_graceful_shutdown(async {
+        .with_graceful_shutdown(async move {
             let _ = tokio::signal::ctrl_c().await;
+            // Drain the audit buffer before the pod goes away — the crash-loss
+            // window applies to crashes, not orderly shutdowns.
+            audit.flush_now().await;
         })
         .await?;
     Ok(())

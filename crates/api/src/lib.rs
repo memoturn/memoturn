@@ -12,6 +12,7 @@
 //! forces a refresh from object storage for read-your-writes.
 
 pub mod answer;
+pub mod audit;
 pub mod auth;
 pub mod embed;
 pub mod extract;
@@ -58,6 +59,9 @@ pub struct AppState {
     /// Where the configured embedder sends data (None = no embedder); decides
     /// the `ai_egress.embed = self_hosted_only` policy at startup.
     pub embed_provenance: Option<embed::EmbedProvenance>,
+    /// Per-namespace audit stream (ADR-0010 phase 2). Always present;
+    /// emission is gated by each namespace's `audit.enabled` policy.
+    pub audit: Arc<audit::AuditSink>,
 }
 
 /// Body cap for control/query requests (filters, recall, SQL queries). 1 MiB is
@@ -223,6 +227,12 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/v1/memory/{ns}/{profile}/policy",
             get(profile_policy_get).put(profile_policy_put),
+        )
+        // Audit stream reads (platform key, or a namespace admin token for
+        // its own stream — the carve-out lives in the auth middleware).
+        .route(
+            "/v1/namespaces/{ns}/audit",
+            get(ns_audit_read).layer(rl(control_rl.clone())),
         )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -774,6 +784,19 @@ async fn create_token(
     let token = keys
         .mint(&db, req.scope, ttl)
         .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    // Audit token minting into the profile's namespace stream (only memory
+    // databases have one; plain databases have no governance namespace).
+    if let Some((ns, profile)) = db.split_once("--") {
+        let (audit_on, _) = audit_gate(&state, ns, profile).await;
+        if audit_on {
+            state.audit.emit(
+                audit::AuditEvent::new("token.mint", ns)
+                    .profile(profile)
+                    .resource(format!("{db} scope={:?} ttl={ttl}", req.scope))
+                    .actor(Some(&audit::Actor::platform())),
+            );
+        }
+    }
     Ok((
         StatusCode::CREATED,
         Json(json!({ "token": token, "expires_in": ttl })),
@@ -810,6 +833,19 @@ async fn delete_db(
     // Drop the catalog name→uuid mapping last: a re-created database must mint
     // a fresh uuid rather than resolve to the deleted one's (now empty) prefix.
     state.control.forget_uuid(&db).await?;
+    // The deletion trail outlives the database: the audit stream lives under
+    // `_audit/{ns}`, not the deleted uuid prefix.
+    if let Some((ns, profile)) = db.split_once("--") {
+        let (audit_on, _) = audit_gate(&state, ns, profile).await;
+        if audit_on {
+            state.audit.emit(
+                audit::AuditEvent::new("db.delete", ns)
+                    .profile(profile)
+                    .resource(&db)
+                    .actor(Some(&audit::Actor::platform())),
+            );
+        }
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1603,9 +1639,6 @@ async fn auto_embed_items(
     let Some(embedder) = &state.embedder else {
         return;
     };
-    if !governance::embed_allowed(state, ns, profile).await {
-        return;
-    }
     let pending: Vec<usize> = items
         .iter()
         .enumerate()
@@ -1627,39 +1660,147 @@ async fn auto_embed_items(
             }
         })
         .collect();
-    match embedder.embed(&texts, embed::EmbedKind::Document).await {
-        Ok(vectors) => {
-            for (&i, v) in pending.iter().zip(vectors) {
-                items[i].embedding = Some(v);
-            }
-        }
-        Err(e) => tracing::warn!(error = %e, "auto-embedding failed; ingesting without vectors"),
+    let Some(vectors) = embed_texts(state, ns, profile, &texts, embed::EmbedKind::Document).await
+    else {
+        return;
+    };
+    for (&i, v) in pending.iter().zip(vectors) {
+        items[i].embedding = Some(v);
     }
 }
 
-/// Embed a query/question for the vector channel, best-effort and policy-
-/// gated like `auto_embed_items`. `None` = no embedder, denied by policy, or
-/// provider failure — recall degrades to keyword+topic either way.
+/// Embed a query/question for the vector channel. `None` = no embedder,
+/// denied by policy, or provider failure — recall degrades to keyword+topic
+/// either way.
 async fn auto_embed_query(
     state: &AppState,
     ns: &str,
     profile: &str,
     text: &str,
 ) -> Option<Vec<f32>> {
+    embed_texts(
+        state,
+        ns,
+        profile,
+        &[text.to_string()],
+        embed::EmbedKind::Query,
+    )
+    .await?
+    .pop()
+}
+
+/// The single embed egress point: policy gate, provider call, and the
+/// `ai.embed` audit event all live here — including for forwarded ingests,
+/// where this runs on the owner node (where the bytes would actually leave).
+/// Best-effort: failures and denials degrade, never error.
+async fn embed_texts(
+    state: &AppState,
+    ns: &str,
+    profile: &str,
+    texts: &[String],
+    kind: embed::EmbedKind,
+) -> Option<Vec<Vec<f32>>> {
     let embedder = state.embedder.as_ref()?;
-    if !governance::embed_allowed(state, ns, profile).await {
+    let eff = match state.governance.effective(ns, Some(profile)).await {
+        Ok(eff) => eff,
+        Err(e) => {
+            tracing::warn!(ns, error = %e, "policy unavailable; skipping auto-embed (fail closed)");
+            return None;
+        }
+    };
+    let input_bytes = texts.iter().map(String::len).sum();
+    if !governance::embed_rule_allows(&eff, state.embed_provenance.as_ref()) {
+        tracing::debug!(ns, profile, "auto-embed skipped by policy");
+        if eff.audit_enabled {
+            state.audit.emit(
+                audit::AuditEvent::new("ai.embed", ns)
+                    .profile(profile)
+                    .outcome("denied")
+                    .egress(embed_egress_meta(state, texts.len(), input_bytes, 0)),
+            );
+        }
         return None;
     }
-    match embedder
-        .embed(&[text.to_string()], embed::EmbedKind::Query)
-        .await
-    {
-        Ok(mut vs) => vs.pop(),
+    let started = std::time::Instant::now();
+    let result = embedder.embed(texts, kind).await;
+    let duration_ms = started.elapsed().as_millis() as u64;
+    match result {
+        Ok(vectors) => {
+            if eff.audit_enabled {
+                let mut meta = embed_egress_meta(state, texts.len(), input_bytes, duration_ms);
+                meta.output_items = Some(vectors.len());
+                state.audit.emit(
+                    audit::AuditEvent::new("ai.embed", ns)
+                        .profile(profile)
+                        .egress(meta),
+                );
+            }
+            Some(vectors)
+        }
         Err(e) => {
-            tracing::warn!(error = %e, "query auto-embedding failed; vector channel skipped");
+            tracing::warn!(error = %e, "auto-embedding failed; degrading to keyword/topic");
+            if eff.audit_enabled {
+                state.audit.emit(
+                    audit::AuditEvent::new("ai.embed", ns)
+                        .profile(profile)
+                        .egress(embed_egress_meta(
+                            state,
+                            texts.len(),
+                            input_bytes,
+                            duration_ms,
+                        ))
+                        .error(e),
+                );
+            }
             None
         }
     }
+}
+
+fn embed_egress_meta(
+    state: &AppState,
+    input_items: usize,
+    input_bytes: usize,
+    duration_ms: u64,
+) -> audit::EgressMeta {
+    let p = state.embed_provenance.as_ref();
+    audit::EgressMeta {
+        provider: p
+            .map(|p| p.provider.clone())
+            .unwrap_or_else(|| "unknown".into()),
+        model: p
+            .map(|p| p.model.clone())
+            .unwrap_or_else(|| "unknown".into()),
+        endpoint_host: p.map(|p| p.endpoint_host.clone()),
+        self_hosted: p.is_some_and(|p| p.self_hosted),
+        input_items,
+        input_bytes,
+        output_items: None,
+        duration_ms,
+    }
+}
+
+/// `(enabled, include_reads)` audit gates for one profile. Audit is off when
+/// the policy store is unreachable — no readable policy means no namespace
+/// has turned the stream on.
+async fn audit_gate(state: &AppState, ns: &str, profile: &str) -> (bool, bool) {
+    match state.governance.effective(ns, Some(profile)).await {
+        Ok(eff) => (eff.audit_enabled, eff.audit_include_reads),
+        Err(_) => (false, false),
+    }
+}
+
+/// Memory events are emitted at the edge (it holds the client's identity);
+/// the owner of a forwarded write sees the internal actor and stays silent.
+fn is_internal(actor: &Option<audit::Actor>) -> bool {
+    actor.as_ref().is_some_and(|a| a.is_internal())
+}
+
+fn forwarded_txid(resp: &Response) -> Option<u64> {
+    resp.headers()
+        .get("Memoturn-Txid")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse().ok())
 }
 
 /// Clamp task TTLs to the namespace policy's `memory.task_ttl_max_secs`
@@ -1724,8 +1865,10 @@ async fn memories_ingest(
     Path((ns, profile)): Path<(String, String)>,
     headers: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
+    actor: Option<axum::Extension<audit::Actor>>,
     Json(req): Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
+    let actor = actor.map(|e| e.0);
     let parsed: IngestReq = serde_json::from_value(req.clone())
         .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
     if parsed.memories.len() > MAX_INGEST_BATCH {
@@ -1734,15 +1877,40 @@ async fn memories_ingest(
             format!("ingest batch exceeds {MAX_INGEST_BATCH} memories; split the request"),
         ));
     }
+    let n_items = parsed.memories.len() as u64;
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
     ensure_profile(&state, &name).await?;
+    let (audit_on, _) = audit_gate(&state, &ns, &profile).await;
     let spec = format!("{name}@{branch}");
-    let l = route_write!(
-        &state,
-        &spec,
-        &format!("/v1/memory/{ns}/{profile}/memories?branch={}", enc(&branch)),
-        req
-    );
+    let l = match resolve_write(&state, &spec).await? {
+        WriteRoute::Remote { addr } => {
+            let resp = forward(
+                &state,
+                &addr,
+                reqwest::Method::POST,
+                &format!("/v1/memory/{ns}/{profile}/memories?branch={}", enc(&branch)),
+                Some(req),
+                None,
+            )
+            .await?;
+            if audit_on && !is_internal(&actor) {
+                let mut evt = audit::AuditEvent::new("memory.ingest", &ns)
+                    .profile(&profile)
+                    .branch(&branch)
+                    .count(n_items)
+                    .actor(actor.as_ref());
+                if let Some(t) = forwarded_txid(&resp) {
+                    evt = evt.txid(t);
+                }
+                if !resp.status().is_success() {
+                    evt = evt.outcome("error");
+                }
+                state.audit.emit(evt);
+            }
+            return Ok(resp);
+        }
+        WriteRoute::Local(l) => l,
+    };
     let items = parsed
         .memories
         .into_iter()
@@ -1772,6 +1940,16 @@ async fn memories_ingest(
         .into_iter()
         .map(|o| json!({ "id": o.id, "status": o.status, "superseded": o.superseded }))
         .collect();
+    if audit_on && !is_internal(&actor) {
+        state.audit.emit(
+            audit::AuditEvent::new("memory.ingest", &ns)
+                .profile(&profile)
+                .branch(&branch)
+                .txid(txid)
+                .count(results.len() as u64)
+                .actor(actor.as_ref()),
+        );
+    }
     Ok((
         StatusCode::CREATED,
         txid_headers(txid),
@@ -1800,14 +1978,31 @@ async fn memories_extract(
     Path((ns, profile)): Path<(String, String)>,
     headers: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
+    actor: Option<axum::Extension<audit::Actor>>,
     Json(req): Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
+    let actor = actor.map(|e| e.0);
+    let turns_bytes = req["turns"].to_string().len();
     let parsed: ExtractReq = serde_json::from_value(req)
         .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
+    let (audit_on, _) = audit_gate(&state, &ns, &profile).await;
     // Egress policy before anything else: this endpoint exists to send the
     // turns to the extractor model, so a denial is a deterministic 403.
-    governance::check_egress(&state, &ns, &profile, governance::EgressOp::Extract).await?;
+    // Denials are audited regardless of `include_reads`.
+    if let Err(e) =
+        governance::check_egress(&state, &ns, &profile, governance::EgressOp::Extract).await
+    {
+        if audit_on {
+            state.audit.emit(
+                audit::AuditEvent::new("ai.extract", &ns)
+                    .profile(&profile)
+                    .outcome("denied")
+                    .actor(actor.as_ref()),
+            );
+        }
+        return Err(e);
+    }
     let Some(extractor) = state.extractor.clone() else {
         return Err(ApiError(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1821,10 +2016,41 @@ async fn memories_extract(
         ));
     }
 
-    let extracted = extractor
-        .extract(&parsed.turns)
-        .await
-        .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, e))?;
+    let started = std::time::Instant::now();
+    let extracted = extractor.extract(&parsed.turns).await;
+    let duration_ms = started.elapsed().as_millis() as u64;
+    let mut egress_meta = governance::llm_egress_meta(
+        governance::EgressOp::Extract,
+        parsed.turns.len(),
+        turns_bytes,
+    );
+    egress_meta.duration_ms = duration_ms;
+    let extracted = match extracted {
+        Ok(x) => {
+            if audit_on {
+                egress_meta.output_items = Some(x.len());
+                state.audit.emit(
+                    audit::AuditEvent::new("ai.extract", &ns)
+                        .profile(&profile)
+                        .egress(egress_meta)
+                        .actor(actor.as_ref()),
+                );
+            }
+            x
+        }
+        Err(e) => {
+            if audit_on {
+                state.audit.emit(
+                    audit::AuditEvent::new("ai.extract", &ns)
+                        .profile(&profile)
+                        .egress(egress_meta)
+                        .error(e.clone())
+                        .actor(actor.as_ref()),
+                );
+            }
+            return Err(ApiError(StatusCode::BAD_GATEWAY, e));
+        }
+    };
     let proposals: Vec<serde_json::Value> = extracted
         .iter()
         .map(|m| {
@@ -1865,13 +2091,37 @@ async fn memories_extract(
     // Profiles auto-create on first ingest (same posture as /memories).
     ensure_profile(&state, &name).await?;
     let spec = format!("{name}@{branch}");
+    let n_proposals = proposals.len() as u64;
     let ingest_body = json!({ "memories": proposals });
-    let l = route_write!(
-        &state,
-        &spec,
-        &format!("/v1/memory/{ns}/{profile}/memories?branch={}", enc(&branch)),
-        ingest_body
-    );
+    let l = match resolve_write(&state, &spec).await? {
+        WriteRoute::Remote { addr } => {
+            let resp = forward(
+                &state,
+                &addr,
+                reqwest::Method::POST,
+                &format!("/v1/memory/{ns}/{profile}/memories?branch={}", enc(&branch)),
+                Some(ingest_body),
+                None,
+            )
+            .await?;
+            if audit_on && !is_internal(&actor) {
+                let mut evt = audit::AuditEvent::new("memory.extract", &ns)
+                    .profile(&profile)
+                    .branch(&branch)
+                    .count(n_proposals)
+                    .actor(actor.as_ref());
+                if let Some(t) = forwarded_txid(&resp) {
+                    evt = evt.txid(t);
+                }
+                if !resp.status().is_success() {
+                    evt = evt.outcome("error");
+                }
+                state.audit.emit(evt);
+            }
+            return Ok(resp);
+        }
+        WriteRoute::Local(l) => l,
+    };
     let items = extracted
         .into_iter()
         .map(|m| {
@@ -1904,6 +2154,16 @@ async fn memories_extract(
         .into_iter()
         .map(|o| json!({ "id": o.id, "status": o.status, "superseded": o.superseded }))
         .collect();
+    if audit_on && !is_internal(&actor) {
+        state.audit.emit(
+            audit::AuditEvent::new("memory.extract", &ns)
+                .profile(&profile)
+                .branch(&branch)
+                .txid(txid)
+                .count(results.len() as u64)
+                .actor(actor.as_ref()),
+        );
+    }
     Ok((
         StatusCode::CREATED,
         txid_headers(txid),
@@ -1940,8 +2200,10 @@ async fn memories_recall(
     Path((ns, profile)): Path<(String, String)>,
     headers: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
+    actor: Option<axum::Extension<audit::Actor>>,
     Json(req): Json<RecallReq>,
 ) -> Result<Response, ApiError> {
+    let actor = actor.map(|e| e.0);
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
     // Unknown profile: empty recall, not 404 — reads never create. But a caller
     // demanding read-your-writes (Min-Txid) needs an error, not a silent txid 0
@@ -1987,6 +2249,17 @@ async fn memories_recall(
         },
     )
     .await?;
+    let (audit_on, include_reads) = audit_gate(&state, &ns, &profile).await;
+    if audit_on && include_reads {
+        state.audit.emit(
+            audit::AuditEvent::new("memory.recall", &ns)
+                .profile(&profile)
+                .branch(&branch)
+                .txid(h.txid())
+                .count(memories.len() as u64)
+                .actor(actor.as_ref()),
+        );
+    }
     // Raw-turn channel: verbatim transcript moments alongside (not fused
     // with) typed memories — turns aren't memories, so they rank separately.
     let mut body = json!({ "memories": memories, "txid": h.txid() });
@@ -2029,8 +2302,10 @@ async fn memories_ask(
     Path((ns, profile)): Path<(String, String)>,
     headers: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
+    actor: Option<axum::Extension<audit::Actor>>,
     Json(req): Json<AskReq>,
 ) -> Result<Response, ApiError> {
+    let actor = actor.map(|e| e.0);
     let Some(answerer) = state.answerer.clone() else {
         return Err(ApiError(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -2045,9 +2320,22 @@ async fn memories_ask(
         ));
     }
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
+    let (audit_on, include_reads) = audit_gate(&state, &ns, &profile).await;
     // Egress policy before recall runs — don't pay recall cost for a denied
     // request, and the endpoint's purpose is the model call (deny = 403).
-    governance::check_egress(&state, &ns, &profile, governance::EgressOp::Ask).await?;
+    // Denials are audited regardless of `include_reads`.
+    if let Err(e) = governance::check_egress(&state, &ns, &profile, governance::EgressOp::Ask).await
+    {
+        if audit_on {
+            state.audit.emit(
+                audit::AuditEvent::new("ai.ask", &ns)
+                    .profile(&profile)
+                    .outcome("denied")
+                    .actor(actor.as_ref()),
+            );
+        }
+        return Err(e);
+    }
     // Unknown profile: no memories, no LLM call — same read posture as recall.
     if state.registry.get(&name).await.is_err() {
         return Ok((
@@ -2083,6 +2371,16 @@ async fn memories_ask(
         },
     )
     .await?;
+    if audit_on && include_reads {
+        state.audit.emit(
+            audit::AuditEvent::new("memory.ask", &ns)
+                .profile(&profile)
+                .branch(&branch)
+                .txid(h.txid())
+                .count(memories.len() as u64)
+                .actor(actor.as_ref()),
+        );
+    }
     if memories.is_empty() {
         return Ok((
             txid_headers(h.txid()),
@@ -2090,10 +2388,41 @@ async fn memories_ask(
         )
             .into_response());
     }
-    let out = answerer
-        .answer(&req.question, &memories)
-        .await
-        .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, e))?;
+    let started = std::time::Instant::now();
+    let answered = answerer.answer(&req.question, &memories).await;
+    let mut egress_meta = governance::llm_egress_meta(
+        governance::EgressOp::Ask,
+        memories.len(),
+        serde_json::to_string(&memories)
+            .map(|s| s.len())
+            .unwrap_or(0),
+    );
+    egress_meta.duration_ms = started.elapsed().as_millis() as u64;
+    let out = match answered {
+        Ok(out) => {
+            if audit_on {
+                state.audit.emit(
+                    audit::AuditEvent::new("ai.ask", &ns)
+                        .profile(&profile)
+                        .egress(egress_meta)
+                        .actor(actor.as_ref()),
+                );
+            }
+            out
+        }
+        Err(e) => {
+            if audit_on {
+                state.audit.emit(
+                    audit::AuditEvent::new("ai.ask", &ns)
+                        .profile(&profile)
+                        .egress(egress_meta)
+                        .error(e.clone())
+                        .actor(actor.as_ref()),
+                );
+            }
+            return Err(ApiError(StatusCode::BAD_GATEWAY, e));
+        }
+    };
     Ok((
         txid_headers(h.txid()),
         Json(json!({
@@ -2111,12 +2440,27 @@ async fn memories_get(
     Path((ns, profile, id)): Path<(String, String, String)>,
     headers: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
+    actor: Option<axum::Extension<audit::Actor>>,
 ) -> Result<Response, ApiError> {
+    let actor = actor.map(|e| e.0);
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
     let spec = format!("{name}@{branch}");
     let (h, _, _) = resolve_read(&state, &spec, min_txid_of(&headers)).await?;
     match memoturn_docstore::memories::get(&h, &id).await? {
-        Some(memory) => Ok((txid_headers(h.txid()), Json(memory)).into_response()),
+        Some(memory) => {
+            let (audit_on, include_reads) = audit_gate(&state, &ns, &profile).await;
+            if audit_on && include_reads {
+                state.audit.emit(
+                    audit::AuditEvent::new("memory.get", &ns)
+                        .profile(&profile)
+                        .branch(&branch)
+                        .resource(&id)
+                        .txid(h.txid())
+                        .actor(actor.as_ref()),
+                );
+            }
+            Ok((txid_headers(h.txid()), Json(memory)).into_response())
+        }
         None => Err(ApiError(StatusCode::NOT_FOUND, "memory not found".into())),
     }
 }
@@ -2126,12 +2470,15 @@ async fn memories_forget(
     Path((ns, profile, id)): Path<(String, String, String)>,
     headers: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
+    actor: Option<axum::Extension<audit::Actor>>,
 ) -> Result<Response, ApiError> {
+    let actor = actor.map(|e| e.0);
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
+    let (audit_on, _) = audit_gate(&state, &ns, &profile).await;
     let spec = format!("{name}@{branch}");
     let l = match resolve_write(&state, &spec).await? {
         WriteRoute::Remote { addr } => {
-            return forward(
+            let resp = forward(
                 &state,
                 &addr,
                 reqwest::Method::DELETE,
@@ -2143,7 +2490,19 @@ async fn memories_forget(
                 None,
                 None,
             )
-            .await;
+            .await?;
+            if audit_on && !is_internal(&actor) && resp.status().is_success() {
+                let mut evt = audit::AuditEvent::new("memory.forget", &ns)
+                    .profile(&profile)
+                    .branch(&branch)
+                    .resource(&id)
+                    .actor(actor.as_ref());
+                if let Some(t) = forwarded_txid(&resp) {
+                    evt = evt.txid(t);
+                }
+                state.audit.emit(evt);
+            }
+            return Ok(resp);
         }
         WriteRoute::Local(l) => l,
     };
@@ -2152,6 +2511,16 @@ async fn memories_forget(
         return Err(ApiError(StatusCode::NOT_FOUND, "memory not found".into()));
     }
     settle(&state, &l, false).await?;
+    if audit_on && !is_internal(&actor) {
+        state.audit.emit(
+            audit::AuditEvent::new("memory.forget", &ns)
+                .profile(&profile)
+                .branch(&branch)
+                .resource(&id)
+                .txid(txid)
+                .actor(actor.as_ref()),
+        );
+    }
     Ok((txid_headers(txid), StatusCode::NO_CONTENT).into_response())
 }
 
@@ -2186,14 +2555,23 @@ async fn memory_session_end(
     Path((ns, profile, sid)): Path<(String, String, String)>,
     headers: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
+    actor: Option<axum::Extension<audit::Actor>>,
 ) -> Result<Response, ApiError> {
+    let actor = actor.map(|e| e.0);
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
     let drop_turns = q.get("turns").map(String::as_str) == Some("true");
+    let (audit_on, _) = audit_gate(&state, &ns, &profile).await;
+    // The resource records whether the transcript went too.
+    let resource = if drop_turns {
+        format!("session:{sid}?turns=true")
+    } else {
+        format!("session:{sid}")
+    };
     let spec = format!("{name}@{branch}");
     let l = match resolve_write(&state, &spec).await? {
         WriteRoute::Remote { addr } => {
             let turns_qs = if drop_turns { "&turns=true" } else { "" };
-            return forward(
+            let resp = forward(
                 &state,
                 &addr,
                 reqwest::Method::DELETE,
@@ -2205,7 +2583,19 @@ async fn memory_session_end(
                 None,
                 None,
             )
-            .await;
+            .await?;
+            if audit_on && !is_internal(&actor) && resp.status().is_success() {
+                let mut evt = audit::AuditEvent::new("memory.session_end", &ns)
+                    .profile(&profile)
+                    .branch(&branch)
+                    .resource(&resource)
+                    .actor(actor.as_ref());
+                if let Some(t) = forwarded_txid(&resp) {
+                    evt = evt.txid(t);
+                }
+                state.audit.emit(evt);
+            }
+            return Ok(resp);
         }
         WriteRoute::Local(l) => l,
     };
@@ -2214,6 +2604,16 @@ async fn memory_session_end(
         txid = memoturn_docstore::memory::drop_session(&l.h, &sid).await?;
     }
     settle(&state, &l, false).await?;
+    if audit_on && !is_internal(&actor) {
+        state.audit.emit(
+            audit::AuditEvent::new("memory.session_end", &ns)
+                .profile(&profile)
+                .branch(&branch)
+                .resource(&resource)
+                .txid(txid)
+                .actor(actor.as_ref()),
+        );
+    }
     Ok((txid_headers(txid), StatusCode::NO_CONTENT).into_response())
 }
 
@@ -2275,6 +2675,16 @@ async fn create_ns_token(
     let token = keys
         .mint_ns(&ns, req.scope, ttl)
         .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    // Namespace-token mints gate on the namespace-level audit policy.
+    if let Ok(eff) = state.governance.effective(&ns, None).await {
+        if eff.audit_enabled {
+            state.audit.emit(
+                audit::AuditEvent::new("token.mint", &ns)
+                    .resource(format!("ns:{ns} scope={:?} ttl={ttl}", req.scope))
+                    .actor(Some(&audit::Actor::platform())),
+            );
+        }
+    }
     Ok((
         StatusCode::CREATED,
         Json(json!({ "token": token, "expires_in": ttl })),
@@ -2333,6 +2743,16 @@ async fn ns_policy_put(
     }
     let policy = parse_policy(req.policy)?;
     let doc = state.governance.put_namespace(&ns, policy).await?;
+    // Gate on the NEW policy so the change that turns audit on is itself the
+    // stream's first record.
+    if doc.effective(None).audit_enabled {
+        state.audit.emit(
+            audit::AuditEvent::new("policy.update", &ns)
+                .resource(format!("policy:{ns}"))
+                .count(doc.revision)
+                .actor(Some(&audit::Actor::platform())),
+        );
+    }
     Ok(Json(json!({
         "namespace": doc.namespace,
         "revision": doc.revision,
@@ -2371,14 +2791,81 @@ async fn profile_policy_get(
     .into_response())
 }
 
+#[derive(Deserialize)]
+struct AuditReadParams {
+    /// Unix ms; defaults to `to - 24h`.
+    from: Option<i64>,
+    /// Unix ms; defaults to now.
+    to: Option<i64>,
+    /// Exact action, or a `.`-terminated prefix (`ai.`).
+    action: Option<String>,
+    profile: Option<String>,
+    outcome: Option<String>,
+    limit: Option<u32>,
+    cursor: Option<String>,
+}
+
+/// Page through a namespace's audit stream, oldest first.
+async fn ns_audit_read(
+    State(state): State<AppState>,
+    Path(ns): Path<String>,
+    Query(p): Query<AuditReadParams>,
+) -> Result<Response, ApiError> {
+    if !ns_part_ok(&ns) {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "invalid namespace".into(),
+        ));
+    }
+    let to_ms = p.to.unwrap_or_else(now_ms);
+    let q = audit::AuditQuery {
+        from_ms: p.from.unwrap_or(to_ms - 86_400_000),
+        to_ms,
+        action: p.action,
+        profile: p.profile,
+        outcome: p.outcome,
+        limit: capped(p.limit.unwrap_or(100)) as usize,
+        cursor: p.cursor,
+    };
+    let page = state
+        .audit
+        .read_range(&ns, &q)
+        .await
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e))?;
+    Ok(Json(json!({
+        "events": page.events,
+        "next_cursor": page.next_cursor,
+        "complete": page.complete,
+    }))
+    .into_response())
+}
+
+/// Bound each namespace's audit stream to its `audit.retention_secs` policy
+/// (maintenance loop, same cadence as the other object-storage passes). Day
+/// granularity: a day prefix is deleted once wholly past the cutoff.
+pub async fn sweep_audit_retention(state: &AppState) -> usize {
+    let Ok(docs) = state.governance.list().await else {
+        return 0;
+    };
+    let mut n = 0;
+    for doc in docs {
+        if let Some(secs) = doc.effective(None).audit_retention_secs {
+            n += state.audit.sweep_retention(&doc.namespace, secs).await;
+        }
+    }
+    n
+}
+
 /// Set or clear a profile override (admin scope). Tighten-only: a 409 names
 /// every field that loosens the namespace policy. Works before the profile's
 /// first ingest — governance may precede data.
 async fn profile_policy_put(
     State(state): State<AppState>,
     Path((ns, profile)): Path<(String, String)>,
+    actor: Option<axum::Extension<audit::Actor>>,
     Json(req): Json<PolicyPut>,
 ) -> Result<Response, ApiError> {
+    let actor = actor.map(|e| e.0);
     if !ns_part_ok(&ns) || !ns_part_ok(&profile) {
         return Err(ApiError(
             StatusCode::BAD_REQUEST,
@@ -2392,6 +2879,15 @@ async fn profile_policy_put(
     };
     let doc = state.governance.put_profile(&ns, &profile, over).await?;
     let mut eff = doc.effective(Some(&profile));
+    if eff.audit_enabled {
+        state.audit.emit(
+            audit::AuditEvent::new("policy.update", &ns)
+                .profile(&profile)
+                .resource(format!("policy:{ns}/{profile}"))
+                .count(doc.revision)
+                .actor(actor.as_ref()),
+        );
+    }
     governance::fold_env_ceilings(&mut eff);
     Ok(Json(json!({
         "namespace": ns,

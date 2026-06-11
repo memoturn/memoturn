@@ -135,4 +135,22 @@ db.kv.put("scratch", "plan", "step 1")
 assert db.kv.get("scratch", "plan") == "step 1"
 assert db.sql("SELECT 1")["results"][0]["rows"][0][0] == 1
 
+# governance: policy roundtrip, tighten-only override, audit stream
+if platform_key:
+    mt.set_policy(ns, {"memory": {"task_ttl_max_secs": 600}, "audit": {"enabled": True}})
+    doc = mt.get_policy(ns)
+    assert doc["policy"]["memory"]["task_ttl_max_secs"] == 600, doc
+    prof = mt.get_policy(ns, profile="alice")
+    assert prof["effective"]["task_ttl_max_secs"] == 600, prof
+    try:
+        mt.set_policy(ns, {"memory": {"task_ttl_max_secs": 9999}}, profile="alice")
+        raise AssertionError("loosening override must be rejected")
+    except MemoturnError as e:
+        assert e.status == 409, e
+    alice.ingest([{"type": "event", "summary": "audited write", "content": {"n": 1}}])
+    time.sleep(2.6)  # wait out the audit flush interval
+    events = list(mt.audit_events(ns, action="memory."))
+    assert any(e["action"] == "memory.ingest" and e.get("profile") == "alice" for e in events), events
+    assert all("summary" not in e and "content" not in e for e in events), "metadata only"
+
 print("python sdk e2e: ok")

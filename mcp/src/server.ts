@@ -380,6 +380,56 @@ export function buildServer(creds: Creds): McpServer {
   );
 
   server.tool(
+    "policy_get",
+    "Show a namespace's data-governance policy (retention/TTL caps, AI egress rules; platform key), or — with profile — the profile's override plus the effective policy actually enforced.",
+    { namespace, profile: z.string().optional().describe("Profile to inspect (token auth) instead of the namespace policy (platform key)") },
+    async ({ namespace, profile }) =>
+      profile !== undefined
+        ? ok(await api("GET", `/v1/memory/${namespace}/${profile}/policy`))
+        : ok(await api("GET", `/v1/namespaces/${namespace}/policy`, undefined, true)),
+  );
+
+  server.tool(
+    "policy_set",
+    "Set a namespace's data-governance policy (platform key), or — with profile — a tighten-only profile override (admin token; loosening any field is rejected). Pass policy null with profile to clear the override.",
+    {
+      namespace,
+      profile: z.string().optional().describe("Set a profile override instead of the namespace policy"),
+      policy: z
+        .record(z.any())
+        .nullable()
+        .describe("Policy sections (retention, memory, erasure, audit, ai_egress); null clears a profile override"),
+    },
+    async ({ namespace, profile, policy }) =>
+      profile !== undefined
+        ? ok(await api("PUT", `/v1/memory/${namespace}/${profile}/policy`, { policy }))
+        : ok(await api("PUT", `/v1/namespaces/${namespace}/policy`, { policy }, true)),
+  );
+
+  server.tool(
+    "audit_query",
+    "Page through a namespace's audit stream (requires audit.enabled in its policy; platform key or namespace admin token). Events are metadata only — never memory content.",
+    {
+      namespace,
+      from: z.number().optional().describe("Range start, unix ms (default: to - 24h)"),
+      to: z.number().optional().describe("Range end, unix ms (default: now)"),
+      action: z.string().optional().describe("Exact action, or a dot-terminated prefix like `ai.`"),
+      profile: z.string().optional(),
+      outcome: z.enum(["ok", "denied", "error"]).optional(),
+      limit: z.number().optional().describe("Events per page (default 100)"),
+      cursor: z.string().optional().describe("Opaque cursor from the previous page"),
+    },
+    async ({ namespace, from, to, action, profile, outcome, limit, cursor }) => {
+      const qs = new URLSearchParams();
+      for (const [k, v] of Object.entries({ from, to, action, profile, outcome, limit, cursor })) {
+        if (v !== undefined) qs.set(k, String(v));
+      }
+      const suffix = qs.size > 0 ? `?${qs}` : "";
+      return ok(await api("GET", `/v1/namespaces/${namespace}/audit${suffix}`, undefined, true));
+    },
+  );
+
+  server.tool(
     "branch_create",
     "Fork the database copy-on-write. Set ttl for a burner branch (auto-incinerated) — fork, test risky changes, then promote or discard. Destructive ops never touch the parent.",
     { db: z.string().describe("Database name (forks from @main or `from`)"), name: z.string(), from: z.string().optional(), ttl: z.number().optional() },

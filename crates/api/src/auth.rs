@@ -247,6 +247,20 @@ fn bearer_is(headers: &axum::http::HeaderMap, expected: &str) -> bool {
     bearer(headers).is_some_and(|tok| ct_eq(tok, expected))
 }
 
+/// Stable, non-reversible audit identifier for a bearer token: the first
+/// 8 bytes of a domain-separated SHA-256, hex-encoded. Lets an auditor
+/// correlate "same credential" across events without the audit stream ever
+/// holding material that grants access.
+fn audit_token_hash(bearer: &str) -> String {
+    let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
+    ctx.update(b"memoturn-audit-actor-v1\0");
+    ctx.update(bearer.as_bytes());
+    ctx.finish().as_ref()[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 fn deny(code: axum::http::StatusCode, msg: &str) -> axum::response::Response {
     use axum::response::IntoResponse;
     (code, axum::Json(serde_json::json!({ "error": msg }))).into_response()
@@ -295,15 +309,49 @@ pub async fn require_auth(
         };
     }
     if path.starts_with("/v1/databases") || path.starts_with("/v1/namespaces") {
-        return if bearer_is(req.headers(), &keys.platform_key) {
-            next.run(req).await
-        } else {
-            deny(StatusCode::UNAUTHORIZED, "platform key required")
-        };
+        if bearer_is(req.headers(), &keys.platform_key) {
+            req.extensions_mut().insert(crate::audit::Actor::platform());
+            return next.run(req).await;
+        }
+        // Carve-out: a namespace ADMIN token may read its own audit stream —
+        // enterprises pull their trail without holding the platform key.
+        if req.method() == axum::http::Method::GET {
+            if let Some(rest) = path.strip_prefix("/v1/namespaces/") {
+                let mut seg = rest.split('/').filter(|s| !s.is_empty());
+                if let (Some(ns), Some("audit"), None) = (seg.next(), seg.next(), seg.next()) {
+                    if let Some(token) = bearer(req.headers()) {
+                        if let Ok(claims) = keys.verify(token) {
+                            if claims.ns.as_deref() == Some(ns) && claims.scope == Scope::Admin {
+                                let actor = crate::audit::Actor {
+                                    kind: crate::audit::ActorKind::Token,
+                                    token_hash: Some(audit_token_hash(token)),
+                                    scope: Some(claims.scope),
+                                    claim_db: None,
+                                    claim_ns: claims.ns.clone(),
+                                    iat: Some(claims.iat),
+                                };
+                                req.extensions_mut().insert(actor);
+                                req.extensions_mut().insert(claims);
+                                return next.run(req).await;
+                            }
+                        }
+                    }
+                    return deny(
+                        StatusCode::UNAUTHORIZED,
+                        "platform key or namespace admin token required",
+                    );
+                }
+            }
+        }
+        return deny(StatusCode::UNAUTHORIZED, "platform key required");
     }
     if let Some(rest) = path.strip_prefix("/v1/memory/") {
         // Forwarded hop from a peer node: already authenticated at the edge.
+        // The internal Actor marks it so the owner suppresses duplicate
+        // memory.* audit events (the edge already emitted with the client's
+        // identity).
         if internal_ok {
+            req.extensions_mut().insert(crate::audit::Actor::internal());
             return next.run(req).await;
         }
         let mut segments = rest.split('/').filter(|s| !s.is_empty());
@@ -346,6 +394,17 @@ pub async fn require_auth(
                 }
             }
         }
+        // Audit attribution: a stable hash of the credential plus its claims —
+        // never the token itself.
+        let actor = crate::audit::Actor {
+            kind: crate::audit::ActorKind::Token,
+            token_hash: Some(audit_token_hash(token)),
+            scope: Some(claims.scope),
+            claim_db: (!claims.db.is_empty()).then(|| claims.db.clone()),
+            claim_ns: claims.ns.clone(),
+            iat: Some(claims.iat),
+        };
+        req.extensions_mut().insert(actor);
         req.extensions_mut().insert(claims);
         return next.run(req).await;
     }

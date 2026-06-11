@@ -152,6 +152,26 @@ const orchToken  = await mt.createNamespaceToken("acme", "write");
 const profiles = await mt.profiles("acme");       // requires a namespace token
 ```
 
+## Governance and audit
+
+Per-namespace [governance policies](/security/#data-governance-policies) and the audit stream:
+
+```ts
+await mt.policy.set("acme", {
+  memory: { task_ttl_max_secs: 600 },
+  ai_egress: { extract: "deny" },
+  audit: { enabled: true },
+});
+const doc = await mt.policy.get("acme");                      // null when unset
+await mt.policy.setProfile("acme", "alice", { retention: { pitr_secs: 600 } }); // tighten-only
+const eff = await mt.policy.getProfile("acme", "alice");      // override + effective
+
+// Audit stream: async iterator, paginates transparently. Metadata only.
+for await (const evt of mt.auditEvents("acme", { action: "ai.", outcome: "denied" })) {
+  console.log(evt.ts, evt.action, evt.profile);
+}
+```
+
 ## Tests
 
 `npm i && npm run build` builds the package; `npm test` runs the e2e suite and needs a running

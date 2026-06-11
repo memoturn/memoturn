@@ -53,6 +53,7 @@ async fn state_with_store(
         embedder: None,
         governance: std::sync::Arc::new(memoturn_api::governance::PolicyStore::in_memory()),
         embed_provenance: None,
+        audit: memoturn_api::audit::AuditSink::noop(),
     }
 }
 
