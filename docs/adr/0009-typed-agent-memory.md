@@ -47,7 +47,9 @@ etcd). Single-node deployments are unaffected; the data plane reserves the `{ns}
 anchors namespace-token authority so neither becomes an isolation bug.
 
 **Deferred (named):** whole-database TTL for ephemeral profiles; namespace as a real catalog
-column; recall answer synthesis. (Raw-turn recall shipped as `include_turns` — a separate `turns`
+column. (Recall answer synthesis has since shipped — opt-in `/ask` endpoint, same control-plane
+posture as extraction: recall first, then the LLM grounds a prose answer in the recalled
+memories only; see docs/architecture/06. Raw-turn recall shipped as `include_turns` — a separate `turns`
 array, not fused. Server-side extraction shipped as an opt-in `/extract` endpoint: the LLM call
 runs out of the write path and feeds the ordinary ingest, honoring the rejection above; BYO
 remains the default. Auto-embedding shipped the same way: opt-in per node, best-effort — a

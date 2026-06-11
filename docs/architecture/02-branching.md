@@ -58,6 +58,12 @@ Level compaction of the segment log retains restore-to-any-txid within the reten
 (default 24 h fine-grained, 30 d snapshot-grained). Checkpoints are just named txids, so
 "rewind the agent to before the migration" and "restore to 14:32 yesterday" are the same machinery.
 
+As shipped (ADR-0003 update), the retention window is enforced by snapshot-floor pruning:
+`MEMOTURN_PITR_RETENTION_SECS` (default 86400; 0 disables) bounds restore-to-any-boundary,
+`MEMOTURN_PITR_SNAPSHOT_RETENTION_SECS` (default 2592000) keeps older snapshots as coarse
+restore points. Named checkpoints pin their history regardless of age; the floor snapshot is
+never pruned. Level compaction (ltx/1, ltx/2) remains the planned optimization for restore cost.
+
 ## GC
 
 - Segments and snapshots are refcounted by the manifests that reference them: the collector

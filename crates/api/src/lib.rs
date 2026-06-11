@@ -11,6 +11,7 @@
 //! the local copy (replica semantics, txid disclosed); `Memoturn-Min-Txid`
 //! forces a refresh from object storage for read-your-writes.
 
+pub mod answer;
 pub mod auth;
 pub mod embed;
 pub mod extract;
@@ -47,6 +48,9 @@ pub struct AppState {
     /// Server-side auto-embedding (None = unconfigured; ingest/recall simply
     /// skip the vector channel for items/queries without BYO embeddings).
     pub embedder: Option<Arc<dyn embed::Embedder>>,
+    /// Recall answer synthesis (None = unconfigured; the /ask endpoint 503s
+    /// and clients synthesize from /recall themselves).
+    pub answerer: Option<Arc<dyn answer::Answerer>>,
 }
 
 /// Body cap for control/query requests (filters, recall, SQL queries). 1 MiB is
@@ -170,6 +174,7 @@ pub fn router(state: AppState) -> Router {
             get(memories_get).delete(memories_forget),
         )
         .route("/v1/memory/{ns}/{profile}/recall", post(memories_recall))
+        .route("/v1/memory/{ns}/{profile}/ask", post(memories_ask))
         .route(
             "/v1/memory/{ns}/{profile}/extract",
             post(memories_extract).layer(large.clone()),
@@ -1053,6 +1058,42 @@ pub async fn gc_objects(state: &AppState) -> usize {
     n
 }
 
+/// Bound every database's PITR history (docs/architecture/02): prune branch
+/// manifests so the immutable segment log stops growing forever.
+/// `MEMOTURN_PITR_RETENTION_SECS` (default 86400 = 24 h) is the fine-grained
+/// window — restore-to-any-boundary; `MEMOTURN_PITR_SNAPSHOT_RETENTION_SECS`
+/// (default 2592000 = 30 d) keeps older snapshots as coarse restore points.
+/// `MEMOTURN_PITR_RETENTION_SECS=0` disables the pass entirely. Named
+/// checkpoints are pinned regardless of age; child forks keep their own
+/// references. Idempotent and CAS-guarded, so it is safe to run from any
+/// node; dereferenced objects are reclaimed by the next `gc_objects` pass.
+pub async fn enforce_retention(state: &AppState) -> usize {
+    let fine_secs: u64 = std::env::var("MEMOTURN_PITR_RETENTION_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(86_400);
+    if fine_secs == 0 {
+        return 0;
+    }
+    let snap_secs: u64 = std::env::var("MEMOTURN_PITR_SNAPSHOT_RETENTION_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2_592_000);
+    let fine = std::time::Duration::from_secs(fine_secs);
+    let snap = std::time::Duration::from_secs(snap_secs);
+    let Ok(dbs) = state.registry.list().await else {
+        return 0;
+    };
+    let mut n = 0;
+    for db in dbs {
+        match state.replicator.prune_retention(&db.uuid, fine, snap).await {
+            Ok(p) => n += p,
+            Err(e) => tracing::warn!(uuid = %db.uuid, error = %e, "PITR retention failed"),
+        }
+    }
+    n
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1712,6 +1753,112 @@ async fn memories_recall(
         body["turns"] = json!(turns);
     }
     Ok((txid_headers(h.txid()), Json(body)).into_response())
+}
+
+#[derive(Deserialize)]
+struct AskReq {
+    question: String,
+    #[serde(default)]
+    types: Option<Vec<String>>,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    k: Option<u32>,
+    #[serde(default)]
+    include_superseded: bool,
+}
+
+/// Recall answer synthesis: hybrid recall over the profile, then the
+/// control-plane LLM turns the recalled memories into a grounded prose
+/// answer with cited sources. Read-only — the synthesizer never sees
+/// anything recall would not have returned to this caller.
+async fn memories_ask(
+    State(state): State<AppState>,
+    Path((ns, profile)): Path<(String, String)>,
+    headers: HeaderMap,
+    Query(q): Query<HashMap<String, String>>,
+    Json(req): Json<AskReq>,
+) -> Result<Response, ApiError> {
+    let Some(answerer) = state.answerer.clone() else {
+        return Err(ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "answer synthesis is not configured on this node (set MEMOTURN_ASSISTANT_API_KEY)"
+                .into(),
+        ));
+    };
+    if req.question.trim().is_empty() {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "question must not be empty".into(),
+        ));
+    }
+    let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
+    // Unknown profile: no memories, no LLM call — same read posture as recall.
+    if state.registry.get(&name).await.is_err() {
+        return Ok((
+            txid_headers(0),
+            Json(json!({ "answer": null, "sources": [], "memories": [], "txid": 0 })),
+        )
+            .into_response());
+    }
+    let spec = format!("{name}@{branch}");
+    let (h, _, _) = resolve_read(&state, &spec, min_txid_of(&headers)).await?;
+    let types = req
+        .types
+        .map(|ts| {
+            ts.iter()
+                .map(|t| memoturn_docstore::memories::MemoryType::parse(t))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
+    // Auto-embed the question so the vector channel contributes (best-effort,
+    // same degradation as recall).
+    let mut embedding = None;
+    if let Some(embedder) = &state.embedder {
+        match embedder
+            .embed(&[req.question.clone()], embed::EmbedKind::Query)
+            .await
+        {
+            Ok(mut vs) => embedding = vs.pop(),
+            Err(e) => {
+                tracing::warn!(error = %e, "question auto-embedding failed; vector channel skipped")
+            }
+        }
+    }
+    let memories = memoturn_docstore::memories::recall(
+        &h,
+        &memoturn_docstore::memories::RecallQuery {
+            query: Some(req.question.clone()),
+            embedding,
+            topic_key: None,
+            types,
+            session_id: req.session_id,
+            k: capped(req.k.unwrap_or(8)),
+            include_superseded: req.include_superseded,
+        },
+    )
+    .await?;
+    if memories.is_empty() {
+        return Ok((
+            txid_headers(h.txid()),
+            Json(json!({ "answer": null, "sources": [], "memories": [], "txid": h.txid() })),
+        )
+            .into_response());
+    }
+    let out = answerer
+        .answer(&req.question, &memories)
+        .await
+        .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, e))?;
+    Ok((
+        txid_headers(h.txid()),
+        Json(json!({
+            "answer": out.answer,
+            "sources": out.sources,
+            "memories": memories,
+            "txid": h.txid(),
+        })),
+    )
+        .into_response())
 }
 
 async fn memories_get(

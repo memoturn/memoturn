@@ -46,6 +46,7 @@ async fn test_state(dir: &std::path::Path) -> AppState {
         auth: memoturn_api::auth::Auth::Disabled,
         http: reqwest::Client::new(),
         extractor: None,
+        answerer: None,
         embedder: None,
     }
 }
@@ -784,6 +785,99 @@ async fn extract_without_extractor_is_unavailable() {
         "POST",
         &format!("{P}/extract"),
         Some(json!({"turns": [{"role": "user", "content": "hi"}]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+}
+
+/// Test answerer: echoes the top recalled memory back as the answer (the LLM
+/// is out of scope here — answer.rs unit-tests the Claude client).
+struct FixedAnswerer;
+
+#[async_trait::async_trait]
+impl memoturn_api::answer::Answerer for FixedAnswerer {
+    async fn answer(
+        &self,
+        question: &str,
+        memories: &[Value],
+    ) -> Result<memoturn_api::answer::SynthesizedAnswer, String> {
+        assert!(!question.is_empty());
+        assert!(
+            !memories.is_empty(),
+            "ask must not call the LLM on empty recall"
+        );
+        Ok(memoturn_api::answer::SynthesizedAnswer {
+            answer: format!("Per memory: {}", memories[0]["summary"].as_str().unwrap()),
+            sources: vec![memories[0]["id"].as_str().unwrap().to_string()],
+        })
+    }
+}
+
+#[tokio::test]
+async fn ask_synthesizes_answer_from_recalled_memories() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = test_state(dir.path()).await;
+    state.answerer = Some(Arc::new(FixedAnswerer));
+    let app = router(state);
+
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/memories"),
+        Some(json!({"memories": [fact("refund.window", "refunds within 30 days", "30d", vec![1.0, 0.0])]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let id = body["results"][0]["id"].as_str().unwrap().to_string();
+
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/ask"),
+        Some(json!({"question": "what is the refund policy?"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["answer"], json!("Per memory: refunds within 30 days"));
+    assert_eq!(body["sources"], json!([id]));
+    assert!(
+        !body["memories"].as_array().unwrap().is_empty(),
+        "supporting memories are returned for attribution"
+    );
+
+    // Nothing recalled → null answer, no LLM call (FixedAnswerer asserts).
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/ask"),
+        Some(json!({"question": "zzzz qqqq unrelated nonsense"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["answer"], json!(null));
+    assert_eq!(body["sources"], json!([]));
+
+    // Unknown profile: empty answer, never a 404 (reads never create).
+    let (status, body) = call(
+        &app,
+        "POST",
+        "/v1/memory/acme/nobody/ask",
+        Some(json!({"question": "anything?"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["answer"], json!(null));
+}
+
+#[tokio::test]
+async fn ask_without_answerer_is_unavailable() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = router(test_state(dir.path()).await);
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("{P}/ask"),
+        Some(json!({"question": "anything?"})),
     )
     .await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);

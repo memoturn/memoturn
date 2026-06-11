@@ -63,8 +63,21 @@ enum Cmd {
         #[command(subcommand)]
         cmd: TokenCmd,
     },
-    /// Ask the built-in assistant (not yet wired in the prototype).
-    Ask { question: Vec<String> },
+    /// Ask a question answered from a profile's memories (server-side
+    /// recall + answer synthesis; needs MEMOTURN_ASSISTANT_API_KEY on the node).
+    Ask {
+        ns: String,
+        profile: String,
+        question: Vec<String>,
+        /// Memories to recall as context.
+        #[arg(long, default_value_t = 8)]
+        k: u32,
+        #[arg(long)]
+        session: Option<String>,
+        /// Print the full JSON response (answer, sources, memories).
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -543,12 +556,50 @@ async fn main() -> anyhow::Result<()> {
                 .await
             }
         },
-        Cmd::Ask { question } => {
-            let _ = question;
-            bail!(
-                "the built-in assistant ships post-prototype — \
-                 design: docs/architecture/06-mcp-and-assistant.md"
-            );
+        Cmd::Ask {
+            ns,
+            profile,
+            question,
+            k,
+            session,
+            json: raw,
+        } => {
+            let question = question.join(" ");
+            if question.trim().is_empty() {
+                bail!("usage: memoturn ask <ns> <profile> <question…>");
+            }
+            let mut body = json!({"question": question, "k": k});
+            if let Some(s) = session {
+                body["session_id"] = json!(s);
+            }
+            let resp = c
+                .post(format!("{base}/v1/memory/{ns}/{profile}/ask"))
+                .json(&body)
+                .send()
+                .await?;
+            if raw {
+                return show(resp).await;
+            }
+            let status = resp.status();
+            let text = resp.text().await?;
+            if !status.is_success() {
+                bail!("{status}: {text}");
+            }
+            let v: Value = serde_json::from_str(&text).context("response was not JSON")?;
+            match v["answer"].as_str() {
+                Some(answer) => {
+                    println!("{answer}");
+                    if let Some(sources) = v["sources"].as_array() {
+                        if !sources.is_empty() {
+                            let ids: Vec<&str> =
+                                sources.iter().filter_map(|s| s.as_str()).collect();
+                            eprintln!("sources: {}", ids.join(", "));
+                        }
+                    }
+                }
+                None => println!("(no matching memories)"),
+            }
+            Ok(())
         }
     }
 }

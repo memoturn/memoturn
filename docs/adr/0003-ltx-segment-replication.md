@@ -42,5 +42,17 @@ all branch manifests, grace-windowed via `MEMOTURN_GC_GRACE_SECS` (default 600 s
 ADR-0004 update). Manifest commits now CAS-retry on transient conflict (reload + re-fence +
 re-append; orphaned uploads fall to GC), segments verify their checksums on decode, and a Durable
 commit mode (`MEMOTURN_DURABILITY=durable`, or per-request `Memoturn-Durability: durable`) acks a
-write only after segment ship + manifest CAS. PITR retention windows, the lazy page-fault VFS,
-and gRPC mesh transport remain deferred.
+write only after segment ship + manifest CAS. PITR retention windows have also landed (see the
+second update below); the lazy page-fault VFS and gRPC mesh transport remain deferred.
+
+**Update (2026-06, retention):** PITR retention windows shipped as snapshot-floor pruning rather
+than level compaction. A periodic pass (`enforce_retention`, same scheduler slot as the refcount
+GC) picks a retention floor per branch — the newest snapshot older than
+`MEMOTURN_PITR_RETENTION_SECS` (default 86400 = 24 h; 0 disables) — and drops manifest references
+to segments at or below it; snapshots below the floor survive as coarse restore points until
+`MEMOTURN_PITR_SNAPSHOT_RETENTION_SECS` (default 2592000 = 30 d). The floor snapshot is always
+kept (it bases every restore inside the fine window), named checkpoints pin the floor regardless
+of age, and child forks are safe by construction: they carry their own references and the
+refcount GC unions all manifests, so a parent prune never deletes an object a child needs.
+Dereferenced objects fall to the next GC pass. Level compaction (ltx/1, ltx/2 windows) remains
+deferred — it changes restore cost, not retention semantics.

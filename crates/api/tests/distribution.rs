@@ -63,6 +63,7 @@ async fn spawn_node(
         auth: memoturn_api::auth::Auth::Disabled,
         http: reqwest::Client::new(),
         extractor: None,
+        answerer: None,
         embedder: None,
     };
     let app = memoturn_api::router(state.clone());

@@ -33,9 +33,10 @@ separate `memoturn/web` repository.
 `memoturnd` is configured entirely via `MEMOTURN_*` env vars (see `crates/memoturnd/src/main.rs`):
 `MEMOTURN_OBJECT_STORE` (s3:// URL; defaults to local-FS store), `MEMOTURN_ETCD` (real leases vs
 in-process), `MEMOTURN_AUTH`, `MEMOTURN_DATA_DIR`/`MEMOTURN_LISTEN`. Server-side extraction
-(`MEMOTURN_EXTRACT_API_KEY`) and auto-embedding (`MEMOTURN_EMBED_PROVIDER` = `voyage`|`openai`,
-`MEMOTURN_EMBED_API_KEY`, `MEMOTURN_EMBED_BASE_URL` for OpenAI-compatible/local servers) are
-per-node opt-ins that must stay outside the write path.
+(`MEMOTURN_EXTRACT_API_KEY`), recall answer synthesis (`MEMOTURN_ASSISTANT_API_KEY`, falls back
+to the extract key; `MEMOTURN_ASSISTANT_MODEL`) and auto-embedding (`MEMOTURN_EMBED_PROVIDER` =
+`voyage`|`openai`, `MEMOTURN_EMBED_API_KEY`, `MEMOTURN_EMBED_BASE_URL` for OpenAI-compatible/local
+servers) are per-node opt-ins that must stay outside the write path.
 
 Production posture is fail-closed: `MEMOTURN_AUTH=on` requires `MEMOTURN_PLATFORM_KEY` (and a
 key source — `MEMOTURN_AUTH_KEY` from a mounted secret, or `MEMOTURN_PERSIST_AUTH_KEY=1` to
@@ -46,7 +47,9 @@ from the platform key; if unset it is derived from the signing key (fleet-consis
 `MEMOTURN_REQUEST_TIMEOUT` (s, 30), `MEMOTURN_MAX_BODY_BYTES` (32 MiB), `MEMOTURN_MAX_CONCURRENCY`
 (1024), `MEMOTURN_CONTROL_RATE` (control-endpoint req/s, 10), `MEMOTURN_DURABILITY` (`durable`
 ships+CAS before acking the txid; per-request `Memoturn-Durability: durable` header escalates),
-`MEMOTURN_GC_GRACE_SECS` (refcount object GC grace window, 600).
+`MEMOTURN_GC_GRACE_SECS` (refcount object GC grace window, 600), `MEMOTURN_PITR_RETENTION_SECS`
+(fine-grained PITR window, 86400; 0 disables) and `MEMOTURN_PITR_SNAPSHOT_RETENTION_SECS`
+(snapshot-grained tier, 2592000).
 
 ## Architecture
 
@@ -76,7 +79,8 @@ mcp-and-assistant) and
 - `crates/control` — leases, placement, write forwarding (M4)
 - `crates/api` — axum HTTP/JSON server, auth, txid plumbing
 - `crates/memoturnd` — node binary; `crates/cli` — `memoturn` CLI; `crates/bench` — perf harness
-- `mcp/` — MCP server (TypeScript); `sdk/typescript/` — `@memoturn/sdk` (e2e: `npm test`);
+- `mcp/` — MCP server (TypeScript; stdio + streamable HTTP via `--http`/`MEMOTURN_MCP_PORT`,
+  tests: `npm test`); `sdk/typescript/` — `@memoturn/sdk` (e2e: `npm test`);
   `sdk/python/` — `memoturn` (e2e: `python tests/e2e.py`) — both need a running node
 - `examples/memory-agent` — the product loop as a runnable chat agent; `deploy/helm/` — umbrella
   chart (kind-deployable, see docs/deployment-proof.md)

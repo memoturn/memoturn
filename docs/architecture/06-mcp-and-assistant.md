@@ -3,10 +3,16 @@
 ## MCP server (agents are first-class clients)
 
 Memoturn ships an MCP server so any agent framework (Claude, LangGraph, OpenAI Agents SDK)
-connects directly. The shipped server (`mcp/src/index.ts`) speaks **stdio** for local dev;
-remote **streamable-HTTP** is the target production transport.
+connects directly. The shipped server (`mcp/src/server.ts`) speaks **stdio** for local dev and
+**streamable-HTTP** for remote/production (`--http [port]` or `MEMOTURN_MCP_PORT`; endpoint
+`/mcp`). HTTP sessions are stateful with caller-bound credentials: the `Authorization: Bearer`
+token of the initialize request becomes the session's upstream Memoturn credential and is
+pinned — every later request on that session must present the same bearer, so a session id
+alone never grants another caller's scope. Without a bearer the server falls back to its env
+credentials (local dev). The listener binds `127.0.0.1` by default (`MEMOTURN_MCP_HOST=0.0.0.0`
+behind TLS/ingress).
 
-**Tools** (as shipped in `mcp/src/index.ts`):
+**Tools** (as shipped in `mcp/src/server.ts`):
 
 | Tool | Scope required |
 | --- | --- |
@@ -18,6 +24,7 @@ remote **streamable-HTTP** is the target production transport.
 | `vector_upsert / vector_search {db, collection, ...}` | db:write / db:read |
 | `memory_ingest / memory_recall {namespace, profile, ...}` | ns:write / ns:read (or the profile's db token) |
 | `memory_extract {namespace, profile, turns, dry_run?}` (server-side distill; 503 if the node has no extractor) | ns:write |
+| `memory_ask {namespace, profile, question, k?}` (recall + answer synthesis; 503 if the node has no assistant) | ns:read |
 | `memory_get {namespace, profile, id}` (one memory + supersession state) | ns:read |
 | `memory_forget {namespace, profile, id}` (hard delete) | ns:write |
 | `memory_sessions_list {namespace, profile}` | ns:read |
@@ -56,5 +63,15 @@ control-plane LLM infrastructure but is a core data-path feature, documented wit
 data by default**; row-level access only with an explicit per-conversation user grant. Runs
 server-side with tenant-scoped, read-only credentials; all assistant actions are audit-logged.
 
-**Implementation note:** prototype phase ships the design + an `ask` stub; the assistant is a
-post-prototype build (deferred list, [plan](../../README.md)).
+**Implementation note:** prototype phase ships the design; the full assistant (NL→query, schema
+advice, ops copilot) is a post-prototype build (deferred list, [plan](../../README.md)).
+
+**Shipped (2026-06): recall answer synthesis.** The first assistant capability is live as
+`POST /v1/memory/{ns}/{profile}/ask` (read scope): hybrid recall over the profile, then a
+control-plane Claude call turns the recalled memories into a grounded prose answer with cited
+memory ids — the synthesizer sees only what recall already returned to the caller's scope, so
+the data-access posture above holds. Surfaces: CLI `memoturn ask <ns> <profile> <question…>`
+and the MCP `memory_ask` tool. Enabled per node by `MEMOTURN_ASSISTANT_API_KEY` (falls back to
+`MEMOTURN_EXTRACT_API_KEY`; model via `MEMOTURN_ASSISTANT_MODEL`); unconfigured nodes 503 and
+clients synthesize from `/recall` themselves. Like extraction, the LLM call never enters the
+write path.

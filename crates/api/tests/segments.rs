@@ -48,6 +48,7 @@ async fn state_with_store(
         auth: memoturn_api::auth::Auth::Disabled,
         http: reqwest::Client::new(),
         extractor: None,
+        answerer: None,
         embedder: None,
     }
 }

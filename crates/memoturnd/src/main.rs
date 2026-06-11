@@ -289,6 +289,32 @@ async fn main() -> anyhow::Result<()> {
             _ => None,
         };
 
+    // Recall answer synthesis (control-plane LLM; docs/architecture/06).
+    // MEMOTURN_ASSISTANT_API_KEY enables it; falls back to the extraction key
+    // so a node with extraction configured answers /ask for free. Unconfigured
+    // = the /ask endpoint 503s and synthesis stays BYO.
+    let answerer: Option<Arc<dyn memoturn_api::answer::Answerer>> =
+        std::env::var("MEMOTURN_ASSISTANT_API_KEY")
+            .ok()
+            .filter(|k| !k.trim().is_empty())
+            .or_else(|| {
+                std::env::var("MEMOTURN_EXTRACT_API_KEY")
+                    .ok()
+                    .filter(|k| !k.trim().is_empty())
+            })
+            .map(|key| {
+                let model = std::env::var("MEMOTURN_ASSISTANT_MODEL").ok();
+                tracing::info!(
+                    model = model.as_deref().unwrap_or("claude-opus-4-8"),
+                    "recall answer synthesis enabled"
+                );
+                Arc::new(memoturn_api::answer::ClaudeAnswerer::new(
+                    reqwest::Client::new(),
+                    key,
+                    model,
+                )) as Arc<dyn memoturn_api::answer::Answerer>
+            });
+
     // Server-side auto-embedding (MEMOTURN_EMBED_PROVIDER: voyage | openai;
     // openai + MEMOTURN_EMBED_BASE_URL also covers OpenAI-compatible local
     // servers). Unconfigured = vectors stay BYO; ingest/recall silently skip
@@ -310,6 +336,7 @@ async fn main() -> anyhow::Result<()> {
         http: reqwest::Client::new(),
         extractor,
         embedder,
+        answerer,
     };
     {
         let state = state.clone();
@@ -326,9 +353,15 @@ async fn main() -> anyhow::Result<()> {
                 if n > 0 {
                     tracing::info!(swept = n, "expired memory/KV sweep");
                 }
-                // Object refcount GC is heavier (lists object storage); run it
-                // roughly every 10 minutes rather than every tick.
+                // PITR retention + object refcount GC are heavier (they list
+                // object storage); run them roughly every 10 minutes rather
+                // than every tick. Retention first: it dereferences expired
+                // history that a later GC pass then reclaims.
                 if tick % 20 == 0 {
+                    let n = memoturn_api::enforce_retention(&state).await;
+                    if n > 0 {
+                        tracing::info!(pruned = n, "PITR retention");
+                    }
                     let n = memoturn_api::gc_objects(&state).await;
                     if n > 0 {
                         tracing::info!(reclaimed = n, "object refcount GC");

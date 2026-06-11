@@ -124,7 +124,7 @@ cargo test                 # unit + integration tests (67 cross-crate)
 cargo run -p memoturnd     # single node on :8080 (data ./data, objects ./data/objects)
 cargo run -p memoturn-cli -- memory ingest acme alice --summary "..."   # memory/db/branch/sql/kv/sync
 scripts/demo.sh            # the agent-story walkthrough against a running node
-cd mcp && npm i && npm run build   # MCP server (stdio): node dist/index.js
+cd mcp && npm i && npm run build   # MCP server: node dist/index.js (stdio) or --http 8765 (streamable HTTP)
 helm lint deploy/helm/memoturn     # kind-deployable chart (memoturnd + MinIO)
 
 # auth (off by default in dev): per-database Ed25519 JWTs + platform key.

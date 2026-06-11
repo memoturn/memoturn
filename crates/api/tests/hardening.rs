@@ -46,11 +46,17 @@ async fn test_state(dir: &std::path::Path) -> AppState {
         auth: memoturn_api::auth::Auth::Disabled,
         http: reqwest::Client::new(),
         extractor: None,
+        answerer: None,
         embedder: None,
     }
 }
 
-async fn call(app: &axum::Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
+async fn call(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
     call_raw(app, method, uri, body.map(|b| b.to_string().into_bytes())).await
 }
 
@@ -100,7 +106,11 @@ async fn control_endpoints_are_rate_limited() {
     for _ in 0..40 {
         codes.push(status(&app, "GET", "/v1/databases", None).await);
     }
-    assert_ne!(codes[0], StatusCode::TOO_MANY_REQUESTS, "first request not limited");
+    assert_ne!(
+        codes[0],
+        StatusCode::TOO_MANY_REQUESTS,
+        "first request not limited"
+    );
     assert!(
         codes.iter().any(|c| *c == StatusCode::TOO_MANY_REQUESTS),
         "a sustained burst must eventually hit 429; saw {codes:?}"
@@ -137,7 +147,13 @@ async fn benign_pragma_is_allowed() {
     let dir = tempfile::tempdir().unwrap();
     let app = router(test_state(dir.path()).await);
     assert_eq!(
-        status(&app, "POST", "/v1/databases", Some(json!({ "name": "pragdb" }))).await,
+        status(
+            &app,
+            "POST",
+            "/v1/databases",
+            Some(json!({ "name": "pragdb" }))
+        )
+        .await,
         StatusCode::CREATED
     );
     // PRAGMA integrity_check is read-only introspection and must NOT be blocked.
@@ -159,7 +175,13 @@ async fn oversized_filter_depth_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let app = router(test_state(dir.path()).await);
     assert_eq!(
-        status(&app, "POST", "/v1/databases", Some(json!({ "name": "fdb" }))).await,
+        status(
+            &app,
+            "POST",
+            "/v1/databases",
+            Some(json!({ "name": "fdb" }))
+        )
+        .await,
         StatusCode::CREATED
     );
     // Nest $not far past the depth cap (32); the compiler must reject rather
@@ -168,7 +190,13 @@ async fn oversized_filter_depth_is_rejected() {
     for _ in 0..60 {
         filter = json!({ "$not": filter });
     }
-    let st = status(&app, "POST", "/v1/db/fdb/docs/c/find", Some(json!({ "filter": filter }))).await;
+    let st = status(
+        &app,
+        "POST",
+        "/v1/db/fdb/docs/c/find",
+        Some(json!({ "filter": filter })),
+    )
+    .await;
     assert_eq!(st, StatusCode::BAD_REQUEST);
 }
 
@@ -177,12 +205,24 @@ async fn oversized_in_array_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let app = router(test_state(dir.path()).await);
     assert_eq!(
-        status(&app, "POST", "/v1/databases", Some(json!({ "name": "indb" }))).await,
+        status(
+            &app,
+            "POST",
+            "/v1/databases",
+            Some(json!({ "name": "indb" }))
+        )
+        .await,
         StatusCode::CREATED
     );
     let big: Vec<i64> = (0..1001).collect();
     let filter = json!({ "x": { "$in": big } });
-    let st = status(&app, "POST", "/v1/db/indb/docs/c/find", Some(json!({ "filter": filter }))).await;
+    let st = status(
+        &app,
+        "POST",
+        "/v1/db/indb/docs/c/find",
+        Some(json!({ "filter": filter })),
+    )
+    .await;
     assert_eq!(st, StatusCode::BAD_REQUEST);
 }
 

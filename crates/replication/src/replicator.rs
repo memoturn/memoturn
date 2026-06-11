@@ -615,6 +615,111 @@ impl Replicator {
         Ok(deleted)
     }
 
+    /// Bound the PITR window (docs/architecture/02) so the immutable segment
+    /// log stops growing without bound. For every branch of `uuid`, pick a
+    /// retention floor — the newest snapshot older than `fine` — and prune the
+    /// manifest's references to segments at or below it (fine-grained
+    /// restore-to-any-boundary expires) and to snapshots older than
+    /// `snapshot_retention` below the floor (snapshot-grained restore expires
+    /// later). The floor snapshot itself is always kept: it is the restore
+    /// base for everything inside the fine window. Named checkpoints clamp
+    /// the floor — a checkpointed txid stays restorable regardless of age.
+    ///
+    /// Child forks are unaffected: a fork's manifest carries its own
+    /// references to the shared objects, and `gc` unions all manifests, so
+    /// pruning a parent's references never deletes an object a child still
+    /// needs. Dereferenced objects become unreferenced and are reclaimed by
+    /// the next `gc` pass after its grace window. Manifest updates are plain
+    /// CAS without epoch (like rewind); losing a race against a concurrent
+    /// ship just defers that branch to the next pass. Returns the number of
+    /// references pruned.
+    pub async fn prune_retention(
+        &self,
+        uuid: &str,
+        fine: std::time::Duration,
+        snapshot_retention: std::time::Duration,
+    ) -> Result<usize> {
+        let branches_prefix = ObjPath::from(format!("{}/{uuid}/branches", self.root));
+        let manifest_keys: Vec<ObjPath> = self
+            .store
+            .list(Some(&branches_prefix))
+            .map_ok(|m| m.location)
+            .try_collect()
+            .await?;
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let fine_cutoff_ms = now_ms - fine.as_millis() as i64;
+        // The snapshot tier is never shorter than the fine tier.
+        let snap_cutoff_ms = now_ms - snapshot_retention.max(fine).as_millis() as i64;
+
+        let mut pruned = 0;
+        'branches: for mk in manifest_keys {
+            let r = self.store.get(&mk).await?;
+            let version = object_store::UpdateVersion {
+                e_tag: r.meta.e_tag.clone(),
+                version: r.meta.version.clone(),
+            };
+            let bytes = r.bytes().await?;
+            let mut m: Manifest = serde_json::from_slice(&bytes)
+                .map_err(|e| ReplicationError::Corrupt(e.to_string()))?;
+            if m.snapshots.is_empty() {
+                continue;
+            }
+            // Object write times stand in for history age (refs carry no
+            // timestamps). A missing object means a concurrent GC/rewind —
+            // leave the branch for the next pass.
+            let mut ages_ms = Vec::with_capacity(m.snapshots.len());
+            for s in &m.snapshots {
+                match self.store.head(&ObjPath::from(s.key.clone())).await {
+                    Ok(meta) => ages_ms.push(meta.last_modified.timestamp_millis()),
+                    Err(object_store::Error::NotFound { .. }) => continue 'branches,
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            let Some(candidate) = m
+                .snapshots
+                .iter()
+                .zip(&ages_ms)
+                .rev()
+                .find(|(_, &ts)| ts <= fine_cutoff_ms)
+                .map(|(s, _)| s.txid)
+            else {
+                continue; // every snapshot is inside the fine window
+            };
+            let floor_txid = m
+                .checkpoints
+                .values()
+                .copied()
+                .min()
+                .map_or(candidate, |ckpt| candidate.min(ckpt));
+            let Some(floor) = m.snapshot_at(floor_txid).map(|s| s.txid) else {
+                continue;
+            };
+            let before = m.snapshots.len() + m.segments.len();
+            let kept: Vec<SnapshotRef> = m
+                .snapshots
+                .iter()
+                .zip(&ages_ms)
+                .filter(|(s, &ts)| s.txid >= floor || ts > snap_cutoff_ms)
+                .map(|(s, _)| s.clone())
+                .collect();
+            m.snapshots = kept;
+            m.segments.retain(|s| s.max_txid > floor);
+            let after = m.snapshots.len() + m.segments.len();
+            if after == before {
+                continue;
+            }
+            match self.store_manifest(uuid, &m, Some(version)).await {
+                Ok(()) => pruned += before - after,
+                Err(ReplicationError::CasConflict) => continue, // raced a ship
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(pruned)
+    }
+
     /// Delete every object under a database prefix (database deletion).
     pub async fn delete_db(&self, uuid: &str) -> Result<()> {
         let prefix = ObjPath::from(format!("{}/{uuid}", self.root));
@@ -702,6 +807,127 @@ mod tests {
             store.get(&ObjPath::from(orphan_key)).await.is_err(),
             "orphan reclaimed"
         );
+    }
+
+    /// Build a manifest with snapshots at txid 5 and 10 and the contiguous
+    /// segment chain 5-6, 6-10, 10-12 (head 12), all objects present.
+    async fn retention_fixture(
+        store: &Arc<dyn ObjectStore>,
+        r: &Replicator,
+        uuid: &str,
+    ) -> Manifest {
+        let snap5 = format!("v1/{uuid}/snapshots/{:020}-aaaa.db", 5u64);
+        let snap10 = format!("v1/{uuid}/snapshots/{:020}-bbbb.db", 10u64);
+        let segs = [(5u64, 6u64), (6, 10), (10, 12)];
+        put(store, &snap5).await;
+        put(store, &snap10).await;
+        let mut m = Manifest::new("main");
+        m.snapshots.push(SnapshotRef {
+            txid: 5,
+            key: snap5,
+        });
+        m.snapshots.push(SnapshotRef {
+            txid: 10,
+            key: snap10,
+        });
+        for (min, max) in segs {
+            let key = format!("v1/{uuid}/ltx/{min:020}-{max:020}-s{max}.mltx");
+            put(store, &key).await;
+            m.segments.push(SegmentRef {
+                min_txid: min,
+                max_txid: max,
+                key,
+                db_size_pages: 1,
+            });
+        }
+        m.head_txid = 12;
+        r.store_manifest(uuid, &m, None).await.unwrap();
+        m
+    }
+
+    #[tokio::test]
+    async fn retention_prunes_segments_below_floor_then_old_snapshots() {
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let r = Replicator::new(store.clone(), "v1");
+        let uuid = "u3";
+        retention_fixture(&store, &r, uuid).await;
+        tokio::time::sleep(Duration::from_millis(25)).await;
+
+        // Fine window expired, snapshot window generous: the floor is the
+        // newest snapshot (txid 10); segments at or below it are pruned, the
+        // older snapshot survives as a snapshot-grained restore point.
+        let pruned = r
+            .prune_retention(uuid, Duration::ZERO, Duration::from_secs(3600))
+            .await
+            .unwrap();
+        assert_eq!(pruned, 2, "segments 5-6 and 6-10 dereferenced");
+        let m = r.load_manifest(uuid, "main").await.unwrap().unwrap();
+        assert_eq!(
+            m.snapshots.iter().map(|s| s.txid).collect::<Vec<_>>(),
+            vec![5, 10]
+        );
+        assert_eq!(m.segments.len(), 1, "chain above the floor is intact");
+        assert_eq!((m.segments[0].min_txid, m.segments[0].max_txid), (10, 12));
+        assert_eq!(m.head_txid, 12, "retention never moves the head");
+
+        // The dereferenced segments are now orphans: refcount GC reclaims
+        // them, while the still-referenced floor chain survives.
+        let deleted = r.gc(uuid, Duration::ZERO).await.unwrap();
+        assert_eq!(deleted, 2, "pruned segments reclaimed by GC");
+
+        // Snapshot window expired too: the old snapshot goes; the floor stays.
+        let pruned = r
+            .prune_retention(uuid, Duration::ZERO, Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(pruned, 1, "snapshot 5 dereferenced");
+        let m = r.load_manifest(uuid, "main").await.unwrap().unwrap();
+        assert_eq!(
+            m.snapshots.iter().map(|s| s.txid).collect::<Vec<_>>(),
+            vec![10],
+            "the floor snapshot is always kept"
+        );
+
+        // Idempotent: a second pass finds nothing to prune.
+        let pruned = r
+            .prune_retention(uuid, Duration::ZERO, Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(pruned, 0);
+    }
+
+    #[tokio::test]
+    async fn retention_respects_fine_window_and_checkpoint_pins() {
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let r = Replicator::new(store.clone(), "v1");
+
+        // Everything inside the fine window: nothing is prunable.
+        retention_fixture(&store, &r, "u4").await;
+        let pruned = r
+            .prune_retention("u4", Duration::from_secs(3600), Duration::from_secs(3600))
+            .await
+            .unwrap();
+        assert_eq!(pruned, 0, "history inside the fine window is untouched");
+
+        // A named checkpoint at txid 6 clamps the floor below it: the chain
+        // restoring txid 6 (snapshot 5 + segment 5-6) must survive any age.
+        let mut m = retention_fixture(&store, &r, "u5").await;
+        m.checkpoints.insert("pre-deploy".into(), 6);
+        let (_, v) = r
+            .load_manifest_versioned("u5", "main")
+            .await
+            .unwrap()
+            .unwrap();
+        r.store_manifest("u5", &m, Some(v)).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        let pruned = r
+            .prune_retention("u5", Duration::ZERO, Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(pruned, 0, "checkpointed history is pinned");
+        let m = r.load_manifest("u5", "main").await.unwrap().unwrap();
+        assert_eq!(m.segments.len(), 3);
+        assert_eq!(m.snapshots.len(), 2);
     }
 
     #[tokio::test]

@@ -51,6 +51,7 @@ async fn secured_state(dir: &std::path::Path) -> (AppState, Arc<AuthKeys>) {
         auth: Auth::Enabled(keys.clone()),
         http: reqwest::Client::new(),
         extractor: None,
+        answerer: None,
         embedder: None,
     };
     (state, keys)

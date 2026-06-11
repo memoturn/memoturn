@@ -191,6 +191,7 @@ fn required_scope_memory(method: &axum::http::Method, rest: &[&str]) -> Scope {
     use axum::http::Method;
     match rest {
         ["recall"] => Scope::Read,
+        ["ask"] => Scope::Read,       // recall + LLM synthesis, no writes
         ["extract"] => Scope::Write,  // LLM distill → ingest
         ["memories"] => Scope::Write, // POST ingest
         ["memories", _] if *method == Method::GET => Scope::Read,

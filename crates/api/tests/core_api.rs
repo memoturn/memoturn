@@ -44,6 +44,7 @@ async fn test_state(dir: &std::path::Path, hot_cap: u64) -> AppState {
         auth: memoturn_api::auth::Auth::Disabled,
         http: reqwest::Client::new(),
         extractor: None,
+        answerer: None,
         embedder: None,
     }
 }
