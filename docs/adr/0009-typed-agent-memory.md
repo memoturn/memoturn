@@ -46,6 +46,20 @@ registry (split-brain; needs a CAS create through the shared catalog, the way le
 etcd). Single-node deployments are unaffected; the data plane reserves the `{ns}--` delimiter and
 anchors namespace-token authority so neither becomes an isolation bug.
 
+**Update (2026-06): both closed.** (a) Deletion writes a monotonic tombstone through the
+control plane; the auth middleware rejects write tokens whose `iat` predates it. The tombstone
+is also persisted in the registry (which survives pod death via the object-storage catalog
+backup) and re-seeds the control plane at boot, so revocation holds across restarts even on the
+in-process lease table. (b) Every create path — explicit `POST /v1/databases`, ingest
+auto-create, and extract auto-create — agrees the uuid through `LeaseManager::resolve_uuid`
+(CAS in etcd / the shared table) before touching the node-local registry; a racing create
+returns 409 and adopts the canonical record. Deletion drops the catalog mapping
+(`forget_uuid`), so a re-created name mints fresh instead of resolving to the deleted uuid's
+emptied prefix, and nodes holding a registry record older than the deletion tombstone drop it
+on sight (self-heal). Still control-plane production work (doc 03): cluster-wide name catalog
+sync — a node learns of databases created elsewhere only when a write or auto-create lands on
+it, so cross-node *reads* of a never-seen name still 404 until then.
+
 **Deferred (named):** whole-database TTL for ephemeral profiles; namespace as a real catalog
 column. (Recall answer synthesis has since shipped — opt-in `/ask` endpoint, same control-plane
 posture as extraction: recall first, then the LLM grounds a prose answer in the recalled

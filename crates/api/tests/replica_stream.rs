@@ -6,7 +6,7 @@
 use memoturn_api::AppState;
 use memoturn_control::{MemLeaseTable, MemLeases, NodeIdentity};
 use memoturn_engine::{LibsqlEngine, NodeConfig, NodeEngine, Registry};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
 

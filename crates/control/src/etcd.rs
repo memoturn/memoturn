@@ -184,6 +184,15 @@ impl LeaseManager for EtcdLeases {
         ))
     }
 
+    async fn forget_uuid(&self, key: &str) -> Result<()> {
+        let mut client = self.client.lock().await;
+        client
+            .delete(format!("{UUID_PREFIX}{key}"), None)
+            .await
+            .map_err(err)?;
+        Ok(())
+    }
+
     async fn tombstone(&self, key: &str, at_ms: i64) -> Result<()> {
         let tkey = format!("{TOMBSTONE_PREFIX}{key}");
         let mut client = self.client.lock().await;

@@ -107,6 +107,16 @@ impl LeaseManager for MemLeases {
             .clone())
     }
 
+    async fn forget_uuid(&self, key: &str) -> Result<()> {
+        let mut inner = self
+            .table
+            .0
+            .lock()
+            .map_err(|e| ControlError::Corrupt(e.to_string()))?;
+        inner.uuids.remove(key);
+        Ok(())
+    }
+
     async fn tombstone(&self, key: &str, at_ms: i64) -> Result<()> {
         let mut inner = self
             .table
@@ -187,6 +197,27 @@ mod tests {
         // A different profile gets its own uuid.
         let uc = a.resolve_uuid("acme--bob", "uuid-c").await.unwrap();
         assert_ne!(uc, ua);
+    }
+
+    #[tokio::test]
+    async fn forget_uuid_lets_a_recreated_name_mint_fresh() {
+        let table = MemLeaseTable::new();
+        let a = node(&table, "a");
+        let b = node(&table, "b");
+
+        let original = a.resolve_uuid("acme--alice", "uuid-v1").await.unwrap();
+        assert_eq!(original, "uuid-v1");
+
+        // Delete drops the mapping; a re-create converges on a NEW uuid (the
+        // old one's object prefix is gone) instead of resurrecting the old.
+        a.forget_uuid("acme--alice").await.unwrap();
+        let recreated = b.resolve_uuid("acme--alice", "uuid-v2").await.unwrap();
+        assert_eq!(recreated, "uuid-v2");
+        assert_eq!(
+            a.resolve_uuid("acme--alice", "uuid-v3").await.unwrap(),
+            "uuid-v2",
+            "all nodes converge on the recreated uuid"
+        );
     }
 
     #[tokio::test]

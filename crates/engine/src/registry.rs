@@ -34,6 +34,10 @@ impl Registry {
                ttl_at INTEGER,
                created_at INTEGER NOT NULL,
                PRIMARY KEY (db_name, branch)
+             ) WITHOUT ROWID;
+             CREATE TABLE IF NOT EXISTS tombstones (
+               name TEXT PRIMARY KEY,
+               deleted_at INTEGER NOT NULL
              ) WITHOUT ROWID;",
         )
         .await?;
@@ -185,6 +189,43 @@ impl Registry {
             )
             .await?;
         Ok(rec)
+    }
+
+    // ---- tombstones ----
+    // The durable side of token revocation: the control plane (lease table /
+    // etcd) serves the auth hot path, but the in-process table forgets on
+    // restart — the registry copy survives via the object-storage catalog
+    // backup and re-seeds the control plane at boot.
+
+    /// Record a deletion time for `name` (unix-ms, monotonic — never moves
+    /// backwards).
+    pub async fn set_tombstone(&self, name: &str, at_ms: i64) -> Result<()> {
+        self.conn
+            .execute(
+                "INSERT INTO tombstones (name, deleted_at) VALUES (?, ?)
+                 ON CONFLICT(name) DO UPDATE SET deleted_at = MAX(deleted_at, excluded.deleted_at)",
+                vec![Value::Text(name.to_string()), Value::Integer(at_ms)],
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Every recorded deletion (name → unix-ms), for re-seeding the control
+    /// plane at boot.
+    pub async fn tombstones(&self) -> Result<Vec<(String, i64)>> {
+        let r = self
+            .conn
+            .query("SELECT name, deleted_at FROM tombstones", vec![])
+            .await?;
+        Ok(r.rows
+            .into_iter()
+            .map(|row| {
+                (
+                    row[0].as_str().unwrap_or_default().to_string(),
+                    row[1].as_i64().unwrap_or(0),
+                )
+            })
+            .collect())
     }
 
     // ---- branches ----

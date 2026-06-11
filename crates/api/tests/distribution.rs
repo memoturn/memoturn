@@ -4,7 +4,7 @@
 //! the manifest CAS, and replica reads with Memoturn-Min-Txid.
 
 use memoturn_api::AppState;
-use memoturn_control::{LeaseManager, MemLeaseTable, MemLeases, NodeIdentity};
+use memoturn_control::{MemLeaseTable, MemLeases, NodeIdentity};
 use memoturn_engine::{LibsqlEngine, NodeConfig, NodeEngine, Registry};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -431,4 +431,147 @@ async fn replica_read_with_min_txid_refreshes_from_object_storage() {
         "min_txid read must see the write"
     );
     assert!(txid.unwrap() >= new_txid);
+}
+
+async fn ingest_fact(base: &str, ns: &str, profile: &str, summary: &str) -> (u16, Value) {
+    let (status, body, _) = http(
+        "POST",
+        &format!("{base}/v1/memory/{ns}/{profile}/memories"),
+        Some(json!({"memories": [{
+            "type": "fact", "topic_key": "t.k", "summary": summary, "content": {}
+        }]})),
+        &[],
+    )
+    .await;
+    (status, body)
+}
+
+#[tokio::test]
+async fn create_db_converges_through_shared_catalog() {
+    let store = Arc::new(object_store::memory::InMemory::new());
+    let leases = MemLeaseTable::new();
+    let a = spawn_node("node-a", store.clone(), leases.clone()).await;
+    let b = spawn_node("node-b", store, leases).await;
+
+    let (status, body, _) = http(
+        "POST",
+        &format!("{}/v1/databases", a.base),
+        Some(json!({"name": "shared"})),
+        &[],
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+    let uuid_a = body["uuid"].as_str().unwrap().to_string();
+
+    // A racing create on the other node conflicts instead of minting a
+    // divergent uuid — and the loser adopts the canonical record so it can
+    // serve the database locally.
+    let (status, body, _) = http(
+        "POST",
+        &format!("{}/v1/databases", b.base),
+        Some(json!({"name": "shared"})),
+        &[],
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(
+        b.state.registry.get("shared").await.unwrap().uuid,
+        uuid_a,
+        "conflicting create adopts the catalog uuid"
+    );
+}
+
+#[tokio::test]
+async fn deleted_profile_recreates_fresh_instead_of_resurrecting() {
+    let store = Arc::new(object_store::memory::InMemory::new());
+    let leases = MemLeaseTable::new();
+    let a = spawn_node("node-a", store.clone(), leases.clone()).await;
+    let b = spawn_node("node-b", store, leases).await;
+
+    // Auto-create via A, then write via B: both registries converge on one uuid.
+    let (status, body) = ingest_fact(&a.base, "acme", "alice", "v1 via a").await;
+    assert_eq!(status, 201, "{body}");
+    let (status, body) = ingest_fact(&b.base, "acme", "alice", "v1 via b").await;
+    assert_eq!(status, 201, "{body}");
+    let original = a.state.registry.get("acme--alice").await.unwrap().uuid;
+    assert_eq!(
+        b.state.registry.get("acme--alice").await.unwrap().uuid,
+        original,
+        "auto-create converged before the delete"
+    );
+
+    // Delete on A: catalog mapping dropped, tombstone written. B still holds
+    // a stale registry record pointing at the deleted uuid.
+    let (status, _, _) = http(
+        "DELETE",
+        &format!("{}/v1/databases/acme--alice", a.base),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(status, 204);
+
+    // Re-create through B (the node with the stale record): it must drop the
+    // stale record and mint a FRESH uuid — not resurrect the deleted one
+    // whose object-storage prefix is gone.
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await; // cross the tombstone ms
+    let (status, body) = ingest_fact(&b.base, "acme", "alice", "v2 via b").await;
+    assert_eq!(status, 201, "{body}");
+    let recreated = b.state.registry.get("acme--alice").await.unwrap().uuid;
+    assert_ne!(recreated, original, "deleted uuid must not be resurrected");
+
+    // And A converges on the recreated uuid through the catalog.
+    let (status, body) = ingest_fact(&a.base, "acme", "alice", "v2 via a").await;
+    assert_eq!(status, 201, "{body}");
+    assert_eq!(
+        a.state.registry.get("acme--alice").await.unwrap().uuid,
+        recreated
+    );
+
+    // The recreated profile contains only post-delete memories.
+    let (status, body, _) = http(
+        "POST",
+        &format!("{}/v1/memory/acme/alice/recall", b.base),
+        Some(json!({"topic_key": "t.k", "include_superseded": true})),
+        &[],
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let summaries: Vec<&str> = body["memories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["summary"].as_str())
+        .collect();
+    assert!(
+        summaries.iter().all(|s| s.starts_with("v2")),
+        "pre-delete memories must be gone: {summaries:?}"
+    );
+}
+
+#[tokio::test]
+async fn registry_tombstones_reseed_the_control_plane() {
+    let store = Arc::new(object_store::memory::InMemory::new());
+    let node = spawn_node("node-a", store, MemLeaseTable::new()).await;
+
+    // A durable tombstone exists in the registry (written by a delete before
+    // a restart); the fresh in-process control plane knows nothing.
+    node.state
+        .registry
+        .set_tombstone("acme--alice", 12345)
+        .await
+        .unwrap();
+    assert_eq!(
+        node.state.control.deleted_at("acme--alice").await.unwrap(),
+        None
+    );
+
+    // Boot-time re-seed restores the revocation list, so write tokens minted
+    // before the deletion stay revoked across a pod replacement.
+    let n = memoturn_api::seed_tombstones(&node.state).await;
+    assert_eq!(n, 1);
+    assert_eq!(
+        node.state.control.deleted_at("acme--alice").await.unwrap(),
+        Some(12345)
+    );
 }

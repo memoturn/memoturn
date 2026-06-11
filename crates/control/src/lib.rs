@@ -69,6 +69,11 @@ pub trait LeaseManager: Send + Sync {
     /// on a single uuid instead of each node minting a divergent one (which
     /// would split the profile's storage — ADR-0009). Returns the agreed uuid.
     async fn resolve_uuid(&self, key: &str, proposed: &str) -> Result<String>;
+    /// Drop the canonical name→uuid mapping for `key` (database deletion).
+    /// Without this a re-created database of the same name would resolve to
+    /// the deleted uuid — whose object-storage prefix is gone — and a node
+    /// that re-created it locally would diverge from the catalog.
+    async fn forget_uuid(&self, key: &str) -> Result<()>;
     /// Record that database `key` was deleted at `at_ms` (unix-ms). The
     /// recorded time only moves forward. This is the revocation list for
     /// stateless tokens: a write token minted before this time must not be

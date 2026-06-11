@@ -338,6 +338,12 @@ async fn main() -> anyhow::Result<()> {
         embedder,
         answerer,
     };
+    // Re-arm token revocation across restarts: the registry's durable
+    // tombstones re-seed the (possibly fresh) control-plane revocation list.
+    let n = memoturn_api::seed_tombstones(&state).await;
+    if n > 0 {
+        tracing::info!(tombstones = n, "revocation list re-seeded from catalog");
+    }
     {
         let state = state.clone();
         tokio::spawn(async move {

@@ -688,7 +688,31 @@ async fn create_db(
         ));
     }
     // Provisioning is metadata-only: one registry insert, no data-file I/O.
-    let rec = state.registry.create(&req.name).await?;
+    // The uuid is agreed through the shared catalog first (same CAS as the
+    // memory-profile auto-create) so two nodes racing a create for the same
+    // name converge instead of minting divergent uuids (ADR-0009).
+    if let Some(existing) = live_local_record(&state, &req.name).await {
+        // Locally known and live: re-seed a catalog that lost state (process
+        // restart on the in-process lease table), then report the conflict.
+        let _ = state.control.resolve_uuid(&req.name, &existing.uuid).await;
+        return Err(EngineError::AlreadyExists(req.name).into());
+    }
+    let proposed = uuid::Uuid::new_v4().simple().to_string();
+    let canonical = state.control.resolve_uuid(&req.name, &proposed).await?;
+    if canonical != proposed {
+        // The name exists in the shared catalog (created or auto-created on
+        // another node). Adopt it locally so this node can serve it, but the
+        // create itself is a conflict.
+        state
+            .registry
+            .ensure_with_uuid(&req.name, &canonical)
+            .await?;
+        return Err(EngineError::AlreadyExists(req.name).into());
+    }
+    let rec = state
+        .registry
+        .create_with_uuid(&req.name, &canonical)
+        .await?;
     Ok((StatusCode::CREATED, Json(json!(rec))))
 }
 
@@ -743,7 +767,15 @@ async fn delete_db(
     state.replicator.delete_db(&rec.uuid).await?;
     // Revoke stateless tokens minted before now: a write token must not survive
     // deletion to resurrect or mutate a re-created database of the same name.
-    state.control.tombstone(&db, now_ms()).await?;
+    // The registry copy makes revocation durable: the control-plane table is
+    // in-process on a single node and would forget across a restart; the
+    // registry persists via the catalog backup and re-seeds it at boot.
+    let at = now_ms();
+    state.registry.set_tombstone(&db, at).await?;
+    state.control.tombstone(&db, at).await?;
+    // Drop the catalog name→uuid mapping last: a re-created database must mint
+    // a fresh uuid rather than resolve to the deleted one's (now empty) prefix.
+    state.control.forget_uuid(&db).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1053,6 +1085,63 @@ pub async fn gc_objects(state: &AppState) -> usize {
         match state.replicator.gc(&db.uuid, grace).await {
             Ok(d) => n += d,
             Err(e) => tracing::warn!(uuid = %db.uuid, error = %e, "object GC failed"),
+        }
+    }
+    n
+}
+
+/// The local registry record for `name`, unless it predates the cluster-wide
+/// deletion tombstone — i.e. a stale record on a node that did not serve the
+/// delete. Stale records are dropped on sight (self-heal) and reported as
+/// absent, so neither create nor auto-create can re-seed the catalog with a
+/// deleted uuid whose object-storage prefix is gone.
+async fn live_local_record(state: &AppState, name: &str) -> Option<memoturn_engine::DbRecord> {
+    let rec = state.registry.get(name).await.ok()?;
+    let deleted = state.control.deleted_at(name).await.ok().flatten();
+    if deleted.is_some_and(|d| rec.created_at <= d) {
+        tracing::info!(%name, "dropping registry record stale-since deletion");
+        let _ = state.registry.delete(name).await;
+        return None;
+    }
+    Some(rec)
+}
+
+/// Memory-profile auto-create (first ingest/extract): agree the uuid through
+/// the shared catalog before touching the node-local registry, so concurrent
+/// first-ingests across nodes converge on one uuid instead of splitting the
+/// profile's storage (ADR-0009). Metadata-only, instant. A stale write token
+/// cannot resurrect a deleted profile through here: the auth middleware
+/// rejects tokens whose `iat` predates the deletion tombstone before any
+/// handler runs. An existing (live) local record proposes its own uuid, which
+/// re-seeds a catalog that lost state (process restart on the in-process
+/// lease table).
+async fn ensure_profile(state: &AppState, name: &str) -> Result<(), ApiError> {
+    let proposed = match live_local_record(state, name).await {
+        Some(rec) => rec.uuid,
+        None => uuid::Uuid::new_v4().simple().to_string(),
+    };
+    let canonical = state.control.resolve_uuid(name, &proposed).await?;
+    if canonical != proposed {
+        tracing::debug!(%name, "profile uuid adopted from shared catalog");
+    }
+    state.registry.ensure_with_uuid(name, &canonical).await?;
+    Ok(())
+}
+
+/// Re-seed the control plane's revocation list from the registry's durable
+/// tombstones — call once at node start. On a single node the in-process
+/// lease table forgets across restarts; without this, a write token revoked
+/// by a deletion would work again after a pod replacement. Idempotent
+/// (tombstones are monotonic max).
+pub async fn seed_tombstones(state: &AppState) -> usize {
+    let Ok(stones) = state.registry.tombstones().await else {
+        return 0;
+    };
+    let mut n = 0;
+    for (name, at_ms) in stones {
+        match state.control.tombstone(&name, at_ms).await {
+            Ok(()) => n += 1,
+            Err(e) => tracing::warn!(%name, error = %e, "tombstone re-seed failed"),
         }
     }
     n
@@ -1485,15 +1574,7 @@ async fn memories_ingest(
         ));
     }
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
-    // Profiles auto-create on first ingest: metadata-only, instant. The uuid is
-    // agreed through the shared catalog first, so two nodes racing a first
-    // ingest to the same profile converge on one uuid instead of splitting its
-    // storage (ADR-0009 split-brain). A stale write token can no longer
-    // resurrect a deleted profile here: the auth middleware rejects tokens whose
-    // `iat` predates the deletion tombstone before this handler runs.
-    let proposed = uuid::Uuid::new_v4().simple().to_string();
-    let canonical = state.control.resolve_uuid(&name, &proposed).await?;
-    state.registry.ensure_with_uuid(&name, &canonical).await?;
+    ensure_profile(&state, &name).await?;
     let spec = format!("{name}@{branch}");
     let l = route_write!(
         &state,
@@ -1611,7 +1692,7 @@ async fn memories_extract(
     }
 
     // Profiles auto-create on first ingest (same posture as /memories).
-    state.registry.ensure(&name).await?;
+    ensure_profile(&state, &name).await?;
     let spec = format!("{name}@{branch}");
     let ingest_body = json!({ "memories": proposals });
     let l = route_write!(
