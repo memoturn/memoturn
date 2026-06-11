@@ -96,17 +96,26 @@ server:
   controlRate: "" # control-endpoint req/s, default 10
   durability: "" # "" (standard) | durable — ack writes only after they ship
   gcGraceSecs: "" # refcount object-GC grace window, default 600
+  # PITR retention (docs/architecture/02): fine-grained restore-to-any-boundary
+  # window (default 86400 = 24 h; 0 disables the pruning pass) and the
+  # snapshot-grained tier keeping older snapshots as coarse restore points
+  # (default 2592000 = 30 d).
+  pitrRetentionSecs: ""
+  pitrSnapshotRetentionSecs: ""
   # Persist a generated signing key to object storage (UNENCRYPTED) so it
   # survives disposable pods. Prefer auth.existingSecret AUTH_KEY in production.
   persistAuthKey: false
 
 ai:
-  # Opt-in server-side extraction + auto-embedding (docs/architecture/07).
-  # Secret may carry either or both keys: EXTRACT_API_KEY (Claude API),
-  # EMBED_API_KEY (embeddings provider). Empty = both stay bring-your-own.
+  # Opt-in server-side extraction, recall answer synthesis and auto-embedding
+  # (docs/architecture/07 + 06). Secret may carry any of: EXTRACT_API_KEY
+  # (Claude API), ASSISTANT_API_KEY (Claude API; the node falls back to the
+  # extract key when absent, so one key enables both), EMBED_API_KEY
+  # (embeddings provider). Empty = everything stays bring-your-own.
   existingSecret: ""
   # Model overrides (defaults: claude-opus-4-8 / provider default).
   extractModel: ""
+  assistantModel: ""
   embedModel: ""
   # Embeddings provider: voyage (default) | openai. With openai, embedBaseUrl
   # may point at any OpenAI-compatible server (Ollama, vLLM, …) for a
@@ -117,6 +126,26 @@ ai:
 service:
   type: ClusterIP
   port: 8080
+
+mcp:
+  # Remote MCP server (streamable HTTP at /mcp, docs/architecture/06).
+  # Credential-free by design: each MCP session's `Authorization: Bearer` is
+  # pinned at initialize and forwarded to the data plane, so the pod holds no
+  # token. Expose it behind TLS (ingress/gateway) — bearers transit on every
+  # request.
+  enabled: false
+  image:
+    repository: memoturn/mcp
+    tag: 0.1.0
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 8765
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  service:
+    type: ClusterIP
+    port: 8765
 
 networkPolicy:
   # Lock egress to what the node needs (DNS, object store, optional HTTPS for

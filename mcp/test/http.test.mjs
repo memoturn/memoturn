@@ -84,6 +84,12 @@ async function initialize(bearer) {
   return session;
 }
 
+test("health answers without auth or session", async () => {
+  const res = await fetch(base.replace("/mcp", "/health"));
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), "ok");
+});
+
 test("initialize creates a session and tools are listed", async () => {
   const session = await initialize();
   const { res, data } = await rpc(

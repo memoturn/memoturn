@@ -113,7 +113,7 @@ pub fn router(state: AppState) -> Router {
     };
 
     Router::new()
-        .route("/healthz", get(|| async { "ok" }))
+        .route("/health", get(|| async { "ok" }))
         .route(
             "/v1/databases",
             post(create_db).get(list_dbs).layer(rl(control_rl.clone())),

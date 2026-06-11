@@ -1,0 +1,106 @@
+{{- if .Values.mcp.enabled }}
+# Remote MCP server: streamable HTTP at /mcp (docs/architecture/06). The pod
+# holds no Memoturn credentials — each MCP session pins the client's
+# `Authorization: Bearer` at initialize and forwards it to the data plane.
+# Terminate TLS in front of this Service (ingress/gateway): bearers transit
+# on every request.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "memoturn.fullname" . }}-mcp
+  labels: {{- include "memoturn.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.mcp.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memoturn
+      app.kubernetes.io/component: mcp
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memoturn
+        app.kubernetes.io/component: mcp
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      # No K8s API access needed; sessions live in process memory, so >1
+      # replica needs session-affine routing (sessionAffinity below).
+      automountServiceAccountToken: false
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: mcp
+          image: "{{ .Values.mcp.image.repository }}:{{ .Values.mcp.image.tag }}"
+          imagePullPolicy: {{ .Values.mcp.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - containerPort: {{ .Values.mcp.port }}
+              name: mcp
+          env:
+            - name: MEMOTURN_URL
+              value: http://{{ include "memoturn.fullname" . }}:{{ .Values.service.port }}
+            - name: MEMOTURN_MCP_HOST
+              value: "0.0.0.0"
+            - name: MEMOTURN_MCP_PORT
+              value: {{ .Values.mcp.port | quote }}
+          readinessProbe:
+            httpGet: { path: /health, port: mcp }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: mcp }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources: {{- toYaml .Values.mcp.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "memoturn.fullname" . }}-mcp
+  labels: {{- include "memoturn.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.mcp.service.type }}
+  # MCP sessions are pinned to the pod that created them; keep a client's
+  # requests on the same replica.
+  sessionAffinity: ClientIP
+  selector:
+    app.kubernetes.io/name: memoturn
+    app.kubernetes.io/component: mcp
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: {{ .Values.mcp.service.port }}
+      targetPort: mcp
+      name: mcp
+{{- if .Values.networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "memoturn.fullname" . }}-mcp
+  labels: {{- include "memoturn.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: memoturn
+      app.kubernetes.io/component: mcp
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Agents reach the MCP port (typically via an ingress/gateway in front).
+    - ports:
+        - { protocol: TCP, port: {{ .Values.mcp.port }} }
+  egress:
+    # DNS resolution.
+    - ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    # The data plane is the MCP server's only upstream.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: memoturn
+              app.kubernetes.io/component: dataplane
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - { protocol: TCP, port: 8080 }
+{{- end }}
+{{- end }}

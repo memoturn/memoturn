@@ -276,7 +276,7 @@ pub async fn require_auth(
         Auth::Enabled(k) => k.clone(),
     };
     let path = req.uri().path().to_string();
-    if path == "/healthz" {
+    if path == "/health" {
         return next.run(req).await;
     }
     let internal_ok = req

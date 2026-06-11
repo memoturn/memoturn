@@ -98,12 +98,26 @@ spec:
             - name: MEMOTURN_GC_GRACE_SECS
               value: {{ . | quote }}
             {{- end }}
+            {{- with .Values.server.pitrRetentionSecs }}
+            - name: MEMOTURN_PITR_RETENTION_SECS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.server.pitrSnapshotRetentionSecs }}
+            - name: MEMOTURN_PITR_SNAPSHOT_RETENTION_SECS
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.ai.existingSecret }}
             - name: MEMOTURN_EXTRACT_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.ai.existingSecret }}
                   key: EXTRACT_API_KEY
+                  optional: true
+            - name: MEMOTURN_ASSISTANT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ai.existingSecret }}
+                  key: ASSISTANT_API_KEY
                   optional: true
             - name: MEMOTURN_EMBED_API_KEY
               valueFrom:
@@ -114,6 +128,10 @@ spec:
             {{- if .Values.ai.extractModel }}
             - name: MEMOTURN_EXTRACT_MODEL
               value: {{ .Values.ai.extractModel | quote }}
+            {{- end }}
+            {{- if .Values.ai.assistantModel }}
+            - name: MEMOTURN_ASSISTANT_MODEL
+              value: {{ .Values.ai.assistantModel | quote }}
             {{- end }}
             {{- if .Values.ai.embedModel }}
             - name: MEMOTURN_EMBED_MODEL
@@ -163,13 +181,13 @@ spec:
             - name: tmp
               mountPath: /tmp
           startupProbe:
-            httpGet: { path: /healthz, port: http }
+            httpGet: { path: /health, port: http }
             {{- toYaml .Values.dataplane.probes.startup | nindent 12 }}
           readinessProbe:
-            httpGet: { path: /healthz, port: http }
+            httpGet: { path: /health, port: http }
             {{- toYaml .Values.dataplane.probes.readiness | nindent 12 }}
           livenessProbe:
-            httpGet: { path: /healthz, port: http }
+            httpGet: { path: /health, port: http }
             {{- toYaml .Values.dataplane.probes.liveness | nindent 12 }}
           resources: {{- toYaml .Values.dataplane.resources | nindent 12 }}
       volumes:

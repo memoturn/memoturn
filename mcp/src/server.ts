@@ -421,6 +421,11 @@ export function serveHttp(port: number, host = "127.0.0.1"): Promise<HttpServer>
 
   const http = createHttpServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    if (url.pathname === "/health") {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("ok");
+      return;
+    }
     if (url.pathname !== "/mcp") {
       deny(res, 404, "not found (MCP endpoint is /mcp)");
       return;

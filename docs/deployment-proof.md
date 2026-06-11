@@ -26,6 +26,23 @@ Topology: 1× `memoturnd` (Deployment, `emptyDir` cache tier, auth **on**,
 (uid 65532), read-only root filesystem, all capabilities dropped, no API token
 mounted, NetworkPolicy on (DNS + MinIO + optional 443 egress only).
 
+Optional add-ons, all values-driven:
+
+- **Remote MCP** (`mcp.enabled=true`, image `docker build -t memoturn/mcp:0.1.0
+  mcp/`): a credential-free Deployment serving streamable HTTP at `/mcp` —
+  each MCP session pins the client's bearer at initialize and forwards it to
+  the data plane. ClusterIP with `sessionAffinity: ClientIP` (sessions live in
+  pod memory); put TLS in front. Its NetworkPolicy allows egress only to DNS
+  and the data plane, and the data-plane policy admits MCP pods even with
+  `networkPolicy.allowExternalIngress=false`.
+- **Server-side AI** (`ai.existingSecret`): secret keys `EXTRACT_API_KEY`,
+  `ASSISTANT_API_KEY` (recall answer synthesis — falls back to the extract
+  key, so one key enables both), `EMBED_API_KEY`; model overrides via
+  `ai.extractModel` / `ai.assistantModel` / `ai.embedModel`.
+- **PITR retention** (`server.pitrRetentionSecs` /
+  `server.pitrSnapshotRetentionSecs`): bound the segment log per
+  docs/architecture/02; empty = node defaults (24 h / 30 d).
+
 ## HTTP benchmarks through the full stack
 
 `python3 scripts/bench-http.py http://127.0.0.1:8080 --platform-key ... --n 200`

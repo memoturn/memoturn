@@ -23,6 +23,14 @@ spec:
               app.kubernetes.io/name: memoturn
               app.kubernetes.io/component: dataplane
               app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- if .Values.mcp.enabled }}
+        # The remote MCP server proxies agent sessions to the data plane.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: memoturn
+              app.kubernetes.io/component: mcp
+              app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- end }}
         {{- with .Values.networkPolicy.extraIngressFrom }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

@@ -5,7 +5,7 @@
 Memoturn ships an MCP server so any agent framework (Claude, LangGraph, OpenAI Agents SDK)
 connects directly. The shipped server (`mcp/src/server.ts`) speaks **stdio** for local dev and
 **streamable-HTTP** for remote/production (`--http [port]` or `MEMOTURN_MCP_PORT`; endpoint
-`/mcp`). HTTP sessions are stateful with caller-bound credentials: the `Authorization: Bearer`
+`/mcp`, probes at `/health`). HTTP sessions are stateful with caller-bound credentials: the `Authorization: Bearer`
 token of the initialize request becomes the session's upstream Memoturn credential and is
 pinned — every later request on that session must present the same bearer, so a session id
 alone never grants another caller's scope. Without a bearer the server falls back to its env
