@@ -72,6 +72,15 @@ export interface RecallQuery {
   includeTurns?: boolean;
 }
 
+export interface AskResult {
+  /** Grounded prose answer, or null when nothing relevant was recalled. */
+  answer: string | null;
+  /** Ids of the recalled memories the answer rests on. */
+  sources: string[];
+  /** The recalled memories themselves, for attribution/display. */
+  memories: Memory[];
+}
+
 export interface Turn {
   session_id: string;
   seq: number;
@@ -218,6 +227,36 @@ export class MemoryProfile {
       },
     );
     return { memories: r.json.memories, turns: r.json.turns, txid: r.txid };
+  }
+
+  /** Ask a natural-language question over this profile's memories: hybrid
+   * recall, then the node's assistant synthesizes a prose answer citing the
+   * supporting memory ids (opt-in node feature). `answer` is null when
+   * nothing relevant was recalled. Throws MemoturnError 503 when the node
+   * has no assistant — fall back to `recall()` and synthesize yourself. */
+  async ask(
+    question: string,
+    opts?: {
+      types?: MemoryType[];
+      sessionId?: string;
+      k?: number;
+      includeSuperseded?: boolean;
+    },
+  ): Promise<AskResult & Txid> {
+    const r = await this.w.request(
+      "POST",
+      `/v1/memory/${this.namespace}/${this.profile}/ask${this.qs()}`,
+      {
+        body: {
+          question,
+          types: opts?.types,
+          session_id: opts?.sessionId,
+          k: opts?.k,
+          include_superseded: opts?.includeSuperseded,
+        },
+      },
+    );
+    return { answer: r.json.answer, sources: r.json.sources, memories: r.json.memories, txid: r.txid };
   }
 
   /** One memory with its supersession chain, or null. */

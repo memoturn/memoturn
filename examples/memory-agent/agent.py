@@ -15,6 +15,8 @@ Because a profile is one database, the agent's whole mind is operable:
   /checkpoint <name>   snapshot the mind
   /rewind <name>       restore it (forget everything since)
   /memories            show what it knows (active, ranked by recency)
+  /ask <question>      ask the memory directly (server-side answer synthesis,
+                       needs MEMOTURN_ASSISTANT_API_KEY on the node)
   /quit
 
 Restart the script — it still remembers. That's the pitch.
@@ -136,7 +138,7 @@ def main() -> None:
     history: list[dict] = []
 
     print(f"memory-agent · profile {ns}/{user} · session {session_id}")
-    print("commands: /memories /checkpoint <name> /rewind <name> /quit\n")
+    print("commands: /memories /ask <question> /checkpoint <name> /rewind <name> /quit\n")
 
     while True:
         try:
@@ -152,6 +154,21 @@ def main() -> None:
             hits = profile.recall(query="everything you know", k=20, include_superseded=False)
             for m in hits["memories"]:
                 print(f"  [{m['type']}] {m['summary']}")
+            continue
+        if user_message.startswith("/ask "):
+            question = user_message.split(" ", 1)[1]
+            try:
+                asked = profile.ask(question)
+                if asked["answer"] is None:
+                    print("  (no matching memories)")
+                else:
+                    print(f"  {asked['answer']}")
+                    if asked["sources"]:
+                        print(f"  sources: {', '.join(asked['sources'])}")
+            except MemoturnError as e:
+                if e.status != 503:
+                    raise
+                print("  (node has no assistant — set MEMOTURN_ASSISTANT_API_KEY on it)")
             continue
         if user_message.startswith("/checkpoint "):
             name = user_message.split(" ", 1)[1]

@@ -176,6 +176,37 @@ class MemoryProfile:
         )
         return r.json()
 
+    def ask(
+        self,
+        question: str,
+        *,
+        types: Optional[list[str]] = None,
+        session_id: Optional[str] = None,
+        k: int = 8,
+        include_superseded: bool = False,
+    ) -> dict:
+        """Ask a natural-language question over this profile's memories:
+        hybrid recall, then the node's assistant synthesizes a prose answer
+        citing the supporting memory ids (opt-in node feature). Returns
+        ``{answer, sources, memories, txid}``; ``answer`` is None when nothing
+        relevant was recalled. Raises MemoturnError 503 when the node has no
+        assistant — fall back to ``recall()`` and synthesize yourself.
+        """
+        r = self._w.request(
+            "POST",
+            f"/v1/memory/{self.namespace}/{self.profile}/ask{self._qs()}",
+            json=_drop_none(
+                {
+                    "question": question,
+                    "types": types,
+                    "session_id": session_id,
+                    "k": k,
+                    "include_superseded": include_superseded,
+                }
+            ),
+        )
+        return r.json()
+
     def extract(
         self, turns: list[dict], *, session_id: Optional[str] = None, dry_run: bool = False
     ) -> dict:

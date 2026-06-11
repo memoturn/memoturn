@@ -7,7 +7,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from memoturn import Memoturn  # noqa: E402
+from memoturn import Memoturn, MemoturnError  # noqa: E402
 
 url = os.environ.get("MEMOTURN_URL", "http://127.0.0.1:8080")
 platform_key = os.environ.get("MEMOTURN_PLATFORM_KEY")
@@ -77,6 +77,16 @@ t = alice.session("s-1")
 t.append_turn("user", {"text": "I'm vegan now"}, embedding=[0.9, 0.1])
 out = alice.recall(embedding=[0.9, 0.1], include_turns=True, k=2)
 assert len(out["turns"]) == 1, out
+
+# ask: answer synthesis when the node has an assistant; clean 503 otherwise
+try:
+    asked = alice.ask("what is the user's food preference?")
+    assert isinstance(asked["answer"], str) and isinstance(asked["sources"], list), asked
+    assert any(m["summary"] == "vegan since 2026" for m in asked["memories"]), asked
+    print("ask: assistant answered")
+except MemoturnError as e:
+    assert e.status == 503, f"ask must 503 cleanly when unconfigured, got: {e}"
+    print("ask: node has no assistant (503) — skipped")
 
 # sessions lifecycle
 assert [s["id"] for s in alice.sessions()] == ["s-1"]

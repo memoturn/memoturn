@@ -66,6 +66,18 @@ assert.equal(old.superseded_by, r.results[0].id);
 const byVec = await alice.recall({ embedding: [0.1, 0.9], k: 1 });
 assert.equal(byVec.memories[0].summary, "ordered a salad");
 
+// ask: answer synthesis when the node has an assistant; clean 503 otherwise
+try {
+  const asked = await alice.ask("what is the user's food preference?");
+  assert.equal(typeof asked.answer, "string");
+  assert.ok(Array.isArray(asked.sources));
+  assert.ok(asked.memories.some((m) => m.summary === "vegan since 2026"));
+  console.log("ask: assistant answered");
+} catch (e) {
+  assert.equal(e.status, 503, `ask must 503 cleanly when unconfigured, got: ${e}`);
+  console.log("ask: node has no assistant (503) — skipped");
+}
+
 // sessions + transcript layer
 assert.deepEqual((await alice.sessions()).map((s) => s.id), ["s-1"]);
 const t = alice.session("s-1");

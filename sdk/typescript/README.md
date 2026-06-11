@@ -18,6 +18,10 @@ await alice.ingest([
 const { memories } = await alice.recall({ query: "what can this user eat?" });
 // hybrid keyword + topic + vector recall; superseded facts hidden; empty ≠ error
 
+const { answer, sources } = await alice.ask("what can this user eat?");
+// recall + server-side answer synthesis with cited memory ids
+// (node opt-in: MEMOTURN_ASSISTANT_API_KEY; 503 when unconfigured)
+
 // Memory you can operate on (profile = one database):
 await alice.checkpoint("before-autonomous-run");
 await alice.rewind("before-autonomous-run");

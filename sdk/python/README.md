@@ -18,6 +18,10 @@ alice.ingest([
 hits = alice.recall(query="what can this user eat?")
 # hybrid keyword + topic + vector recall; superseded facts hidden; empty ≠ error
 
+asked = alice.ask("what can this user eat?")   # {"answer", "sources", "memories"}
+# recall + server-side answer synthesis with cited memory ids
+# (node opt-in: MEMOTURN_ASSISTANT_API_KEY; 503 when unconfigured)
+
 # Memory you can operate on (profile = one database):
 alice.checkpoint("before-autonomous-run")
 alice.rewind("before-autonomous-run")

@@ -34,6 +34,9 @@ Things to try:
   snaps back (profile = one database).
 - Run a second copy as a different agent against the same profile — they share
   the memories instantly.
+- `/ask what do I eat?` — query the memory directly: server-side recall +
+  answer synthesis with cited memory ids (needs `MEMOTURN_ASSISTANT_API_KEY`
+  on the node).
 
 Extraction runs server-side when the node has `MEMOTURN_EXTRACT_API_KEY`
 (the agent calls `POST .../extract`); otherwise the agent falls back to the same
