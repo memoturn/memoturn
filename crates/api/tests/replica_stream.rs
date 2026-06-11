@@ -64,6 +64,8 @@ async fn spawn_node(
         extractor: None,
         answerer: None,
         embedder: None,
+        governance: std::sync::Arc::new(memoturn_api::governance::PolicyStore::in_memory()),
+        embed_provenance: None,
     };
     let app = memoturn_api::router(state.clone());
     tokio::spawn(async move {

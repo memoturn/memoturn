@@ -1701,6 +1701,7 @@ dependencies = [
  "memoturn-control",
  "memoturn-docstore",
  "memoturn-engine",
+ "memoturn-governance",
  "memoturn-kv",
  "memoturn-replication",
  "object_store",
@@ -1789,6 +1790,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "memoturn-governance"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures",
+ "object_store",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "memoturn-kv"
 version = "0.1.0"
 dependencies = [
@@ -1829,6 +1845,7 @@ dependencies = [
  "memoturn-api",
  "memoturn-control",
  "memoturn-engine",
+ "memoturn-governance",
  "memoturn-replication",
  "object_store",
  "reqwest",

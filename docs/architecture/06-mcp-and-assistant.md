@@ -61,7 +61,8 @@ control-plane LLM infrastructure but is a core data-path feature, documented wit
 
 **Data access posture:** the assistant receives **schema + statistics + EXPLAIN output, never row
 data by default**; row-level access only with an explicit per-conversation user grant. Runs
-server-side with tenant-scoped, read-only credentials; all assistant actions are audit-logged.
+server-side with tenant-scoped, read-only credentials; all assistant actions are audit-logged
+(the per-namespace audit stream that backs this is specified in [08](08-data-governance.md)).
 
 **Implementation note:** prototype phase ships the design; the full assistant (NL→query, schema
 advice, ops copilot) is a post-prototype build (deferred list, [plan](../../README.md)).

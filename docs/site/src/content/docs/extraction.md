@@ -37,12 +37,14 @@ POST /v1/memory/{ns}/{profile}/extract
     { "role": "assistant", "content": "Noted — I'll keep that in mind." }
   ],
   "session_id": "s-417",
+  "source": "claude-code",
   "dry_run": false
 }
 ```
 
 - `turns` — the raw conversation, `{role, content}` per turn.
 - `session_id` — optional; attaches extracted `task` memories and session-scoped semantics.
+- `source` — optional; stamps every extracted memory with [which agent it came from](/memories/#provenance-which-agent-wrote-this).
 - `dry_run` — return the proposed memories without writing anything.
 
 The response reports the proposals and, unless `dry_run` is set, the ingest results — the same
@@ -90,7 +92,7 @@ alice.extract([{"role": "user", "content": "actually I'm vegan now"}], dry_run=T
 ```
 
 MCP — the `memory_extract` tool takes the same `{namespace, profile, turns, session_id?,
-dry_run?}` shape and reports a 503 error when the node has no extractor, so agents can fall
+source?, dry_run?}` shape (`source` defaults from `MEMOTURN_SOURCE`) and reports a 503 error when the node has no extractor, so agents can fall
 back to `memory_ingest` with their own distilled memories. See [MCP server](/mcp/).
 
 ## Default posture
@@ -99,6 +101,11 @@ Bring-your-own extraction remains the default. Use server-side extraction when y
 consistent extraction policy across heterogeneous agents, or when agents are too constrained
 to run their own distillation; keep extraction client-side when you already distill in your
 agent framework or cannot route transcripts through the node's LLM provider.
+
+A namespace can also opt out outright: a
+[governance policy](/security/#data-governance-policies) with `ai_egress.extract: deny` (or
+`ai_egress.ask: deny` for answer synthesis) returns `403` before any transcript reaches the
+model — per tenant, on a node where the feature is otherwise configured.
 
 ## Related pages
 

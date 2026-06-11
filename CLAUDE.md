@@ -53,11 +53,14 @@ from the platform key; if unset it is derived from the signing key (fleet-consis
 ships+CAS before acking the txid; per-request `Memoturn-Durability: durable` header escalates),
 `MEMOTURN_GC_GRACE_SECS` (refcount object GC grace window, 600), `MEMOTURN_PITR_RETENTION_SECS`
 (fine-grained PITR window, 86400; 0 disables) and `MEMOTURN_PITR_SNAPSHOT_RETENTION_SECS`
-(snapshot-grained tier, 2592000).
+(snapshot-grained tier, 2592000). Data governance (ADR-0010): per-namespace policies (retention/
+TTL caps, AI egress rules; tighten-only profile overrides) live in object storage and are read
+through a cache (`MEMOTURN_POLICY_CACHE_SECS`, 30); `MEMOTURN_EMBED_SELF_HOSTED_HOSTS` allowlists
+embedder hosts for the `embed: self_hosted_only` rule; `memoturn policy get|set|clear` on the CLI.
 
 ## Architecture
 
-Authoritative design lives in `docs/architecture/` (00-overview through 07-agent-memory; 06 is
+Authoritative design lives in `docs/architecture/` (00-overview through 08-data-governance; 06 is
 mcp-and-assistant) and
 `docs/adr/`. Read those before changing core semantics. Key invariants:
 
@@ -81,6 +84,7 @@ mcp-and-assistant) and
   memory (`memories.rs`: ingest/supersession/hybrid recall)
 - `crates/kv` — `__memoturn_kv` fast path, TTL, read cache
 - `crates/control` — leases, placement, write forwarding (M4)
+- `crates/governance` — per-namespace policy model + object-storage policy store (ADR-0010)
 - `crates/api` — axum HTTP/JSON server, auth, txid plumbing
 - `crates/memoturnd` — node binary; `crates/cli` — `memoturn` CLI; `crates/bench` — perf harness
 - `mcp/` — MCP server (TypeScript; stdio + streamable HTTP via `--http`/`MEMOTURN_MCP_PORT`,

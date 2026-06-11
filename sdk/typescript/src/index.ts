@@ -25,6 +25,9 @@ export interface MemoturnOptions {
   token?: string;
   /** Platform key for control-plane calls (databases, token minting). */
   platformKey?: string;
+  /** Default provenance for ingested memories (e.g. "claude-code") —
+   * applied when a memory doesn't carry its own `source`. */
+  source?: string;
   /** Custom fetch (tests, polyfills). */
   fetch?: typeof globalThis.fetch;
 }
@@ -45,6 +48,9 @@ export interface MemoryInput {
   /** Bring-your-own embedding (skipped for tasks). */
   embedding?: number[];
   sessionId?: string;
+  /** Originating agent ("claude-code", "cursor", …). Provenance, not
+   * identity: the same memory from two agents dedupes; first writer wins. */
+  source?: string;
   /** Task lifetime in seconds (default 86400). */
   ttl?: number;
 }
@@ -64,6 +70,8 @@ export interface RecallQuery {
   topicKey?: string;
   types?: MemoryType[];
   sessionId?: string;
+  /** Only recall memories ingested by this agent (e.g. "claude-code"). */
+  source?: string;
   /** Max results (default 8). */
   k?: number;
   includeSuperseded?: boolean;
@@ -97,6 +105,7 @@ export interface Memory {
   content: unknown;
   keywords: string | null;
   session_id: string | null;
+  source: string | null;
   created_at: number;
   superseded_by: string | null;
   /** Recall only: fused relevance score and contributing channels. */
@@ -159,7 +168,7 @@ function wire(o: MemoturnOptions): Wire {
 }
 
 /** Camel-case inputs → wire shape. */
-function toWireMemory(m: MemoryInput) {
+function toWireMemory(m: MemoryInput, defaultSource?: string) {
   return {
     type: m.type,
     topic_key: m.topicKey,
@@ -168,6 +177,7 @@ function toWireMemory(m: MemoryInput) {
     keywords: m.keywords,
     embedding: m.embedding,
     session_id: m.sessionId,
+    source: m.source ?? defaultSource,
     ttl: m.ttl,
   };
 }
@@ -183,6 +193,7 @@ export class MemoryProfile {
     readonly namespace: string,
     readonly profile: string,
     private branch?: string,
+    private defaultSource?: string,
   ) {}
 
   private get db(): string {
@@ -195,7 +206,7 @@ export class MemoryProfile {
 
   /** Address a branch of this profile's memory (burner experiments). */
   onBranch(branch: string): MemoryProfile {
-    return new MemoryProfile(this.w, this.namespace, this.profile, branch);
+    return new MemoryProfile(this.w, this.namespace, this.profile, branch, this.defaultSource);
   }
 
   /** Idempotent batch ingest; the profile auto-creates on first call. */
@@ -203,7 +214,7 @@ export class MemoryProfile {
     const r = await this.w.request(
       "POST",
       `/v1/memory/${this.namespace}/${this.profile}/memories${this.qs()}`,
-      { body: { memories: memories.map(toWireMemory) } },
+      { body: { memories: memories.map((m) => toWireMemory(m, this.defaultSource)) } },
     );
     return { results: r.json.results, txid: r.txid };
   }
@@ -220,6 +231,7 @@ export class MemoryProfile {
           topic_key: q.topicKey,
           types: q.types,
           session_id: q.sessionId,
+          source: q.source,
           k: q.k,
           include_superseded: q.includeSuperseded,
           include_turns: q.includeTurns,
@@ -239,6 +251,8 @@ export class MemoryProfile {
     opts?: {
       types?: MemoryType[];
       sessionId?: string;
+      /** Only consider memories ingested by this agent. */
+      source?: string;
       k?: number;
       includeSuperseded?: boolean;
     },
@@ -251,6 +265,7 @@ export class MemoryProfile {
           question,
           types: opts?.types,
           session_id: opts?.sessionId,
+          source: opts?.source,
           k: opts?.k,
           include_superseded: opts?.includeSuperseded,
         },
@@ -278,12 +293,19 @@ export class MemoryProfile {
    * the proposals without writing. 503 when the node has no extractor. */
   async extract(
     turns: { role: string; content: unknown }[],
-    opts?: { sessionId?: string; dryRun?: boolean },
+    opts?: { sessionId?: string; source?: string; dryRun?: boolean },
   ): Promise<{ results?: IngestResult[]; proposed?: unknown[]; txid?: number }> {
     const r = await this.w.request(
       "POST",
       `/v1/memory/${this.namespace}/${this.profile}/extract${this.qs()}`,
-      { body: { turns, session_id: opts?.sessionId, dry_run: opts?.dryRun } },
+      {
+        body: {
+          turns,
+          session_id: opts?.sessionId,
+          source: opts?.source ?? this.defaultSource,
+          dry_run: opts?.dryRun,
+        },
+      },
     );
     return { results: r.json.results, proposed: r.json.proposed, txid: r.txid };
   }
@@ -556,14 +578,16 @@ export class Db {
 
 export class Memoturn {
   private w: Wire;
+  private source?: string;
 
   constructor(opts: MemoturnOptions = {}) {
     this.w = wire(opts);
+    this.source = opts.source;
   }
 
   /** The memory surface: one profile per user/team/agent persona. */
   memory(namespace: string, profile: string): MemoryProfile {
-    return new MemoryProfile(this.w, namespace, profile);
+    return new MemoryProfile(this.w, namespace, profile, undefined, this.source);
   }
 
   /** Profiles under a namespace (requires a namespace token). */

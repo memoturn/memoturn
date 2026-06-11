@@ -68,3 +68,18 @@ array, not fused. Server-side extraction shipped as an opt-in `/extract` endpoin
 runs out of the write path and feeds the ordinary ingest, honoring the rejection above; BYO
 remains the default. Auto-embedding shipped the same way: opt-in per node, best-effort — a
 provider failure degrades recall to keyword+topic and never fails a write.)
+
+**Extension (2026-06, shipped): per-agent provenance.** The cross-agent sharing story needed
+attribution: an optional free-form `source` field (`"claude-code"`, `"cursor"`, …) on the
+memory record, returned everywhere a memory is serialized and filterable at recall
+(single-string filter — the plural `sources` was already taken by `/ask`'s cited-ids response
+key). Source is provenance, not identity: excluded from the content-addressed id (the same
+memory from two agents dedupes; the first writer's attribution sticks — `duplicate`/`revived`
+never overwrite it), and supersession stays profile-wide by `(type, topic_key)` regardless of
+source — cross-agent sharing is the point. Agents won't reliably self-report, so the surfaces
+apply it ambiently: the MCP server defaults from `MEMOTURN_SOURCE` (per-connection config), the
+SDKs from a client-level `source` option, the CLI via `--source`. The column landed post-launch
+with a stateless migrate-on-write (first ingest's atomic batch rolls back at the unknown column
+→ `ALTER TABLE` → one retry; reads tolerate the old schema and never migrate) — stateless
+because branch rewind can resurrect the pre-`source` schema at any time, so migration keys off
+the SQLite error, never off cached state.

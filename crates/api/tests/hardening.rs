@@ -48,6 +48,8 @@ async fn test_state(dir: &std::path::Path) -> AppState {
         extractor: None,
         answerer: None,
         embedder: None,
+        governance: std::sync::Arc::new(memoturn_api::governance::PolicyStore::in_memory()),
+        embed_provenance: None,
     }
 }
 

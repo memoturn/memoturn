@@ -55,6 +55,91 @@ pub fn from_env(http: reqwest::Client) -> Result<Option<Arc<dyn Embedder>>, Stri
     Ok(Some(embedder))
 }
 
+/// Where embeddings go when this node embeds: provider, model, and whether
+/// the endpoint is self-hosted (no external egress). Computed once at startup
+/// from env — no DNS, no per-request cost — and consumed by the `ai_egress`
+/// policy (`embed: self_hosted_only`, ADR-0010).
+#[derive(Debug, Clone)]
+pub struct EmbedProvenance {
+    pub provider: String,
+    pub model: String,
+    pub endpoint_host: String,
+    pub self_hosted: bool,
+}
+
+/// Provenance of the configured embedder, or `None` when unconfigured.
+pub fn provenance_from_env() -> Option<EmbedProvenance> {
+    std::env::var("MEMOTURN_EMBED_API_KEY")
+        .ok()
+        .filter(|k| !k.trim().is_empty())?;
+    let provider = std::env::var("MEMOTURN_EMBED_PROVIDER").unwrap_or_else(|_| "voyage".into());
+    let model = std::env::var("MEMOTURN_EMBED_MODEL").unwrap_or_else(|_| {
+        match provider.as_str() {
+            "openai" => "text-embedding-3-small",
+            _ => "voyage-3.5",
+        }
+        .into()
+    });
+    let base_url = std::env::var("MEMOTURN_EMBED_BASE_URL")
+        .ok()
+        .filter(|u| !u.trim().is_empty());
+    let endpoint_host = match &base_url {
+        Some(u) => url_host(u),
+        None => match provider.as_str() {
+            "openai" => "api.openai.com".into(),
+            _ => "api.voyageai.com".into(),
+        },
+    };
+    let allowlist: Vec<String> = std::env::var("MEMOTURN_EMBED_SELF_HOSTED_HOSTS")
+        .map(|s| s.split(',').map(|h| h.trim().to_string()).collect())
+        .unwrap_or_default();
+    // The default provider endpoints are never self-hosted; only an explicit
+    // base URL pointing somewhere private qualifies. This is an honest,
+    // syntactic check — it trusts the operator's network config; the policy
+    // governs the product's egress features, not the host.
+    let self_hosted = base_url.is_some() && host_is_self_hosted(&endpoint_host, &allowlist);
+    Some(EmbedProvenance {
+        provider,
+        model,
+        endpoint_host,
+        self_hosted,
+    })
+}
+
+/// Host part of a URL: scheme stripped, path/port dropped, IPv6 brackets kept.
+fn url_host(url: &str) -> String {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    let rest = rest.split('/').next().unwrap_or(rest);
+    if let Some(end) = rest.strip_prefix('[').and_then(|r| r.find(']')) {
+        return rest[..end + 2].to_string(); // "[::1]" with brackets
+    }
+    rest.split(':').next().unwrap_or(rest).to_string()
+}
+
+/// Is `host` a self-hosted endpoint? Loopback, RFC1918/link-local addresses,
+/// cluster-internal suffixes, dot-less service names (unroutable on the public
+/// internet), or the operator allowlist (covers a self-hosted server behind a
+/// public-DNS internal load balancer).
+pub fn host_is_self_hosted(host: &str, allowlist: &[String]) -> bool {
+    if allowlist.iter().any(|a| a == host) {
+        return true;
+    }
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    if bare == "localhost" {
+        return true;
+    }
+    if let Ok(ip) = bare.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+            std::net::IpAddr::V6(v6) => v6.is_loopback(),
+        };
+    }
+    host.ends_with(".svc.cluster.local") || host.ends_with(".internal") || !host.contains('.')
+}
+
 /// The model id a configured embedder reports, for the startup log line.
 pub fn configured_model() -> Option<String> {
     std::env::var("MEMOTURN_EMBED_API_KEY")
@@ -215,6 +300,37 @@ impl Embedder for OpenAiEmbedder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn self_hosted_classifier() {
+        let none: &[String] = &[];
+        // Loopback / private / link-local / cluster-internal / bare names.
+        assert!(host_is_self_hosted("localhost", none));
+        assert!(host_is_self_hosted("127.0.0.1", none));
+        assert!(host_is_self_hosted("[::1]", none));
+        assert!(host_is_self_hosted("10.1.2.3", none));
+        assert!(host_is_self_hosted("172.16.0.9", none));
+        assert!(host_is_self_hosted("192.168.1.4", none));
+        assert!(host_is_self_hosted("embed.ml.svc.cluster.local", none));
+        assert!(host_is_self_hosted("vllm.internal", none));
+        assert!(host_is_self_hosted("ollama", none)); // dot-less service name
+                                                      // Public endpoints are not.
+        assert!(!host_is_self_hosted("api.openai.com", none));
+        assert!(!host_is_self_hosted("api.voyageai.com", none));
+        assert!(!host_is_self_hosted("8.8.8.8", none));
+        // The allowlist covers internal LBs with public DNS names.
+        let allow = vec!["embed.corp.example.com".to_string()];
+        assert!(host_is_self_hosted("embed.corp.example.com", &allow));
+        assert!(!host_is_self_hosted("other.example.com", &allow));
+    }
+
+    #[test]
+    fn url_host_extraction() {
+        assert_eq!(url_host("http://localhost:11434/v1"), "localhost");
+        assert_eq!(url_host("https://api.openai.com"), "api.openai.com");
+        assert_eq!(url_host("http://[::1]:8000"), "[::1]");
+        assert_eq!(url_host("http://10.0.0.5:8000/path"), "10.0.0.5");
+    }
 
     /// A minimal `/v1/embeddings` stub returning deterministic vectors; the
     /// `check` closure asserts on the request body shape per provider.

@@ -13,6 +13,7 @@ memoturn-engine = { path = "../engine" }
 memoturn-api = { path = "../api" }
 memoturn-replication = { path = "../replication" }
 memoturn-control = { path = "../control" }
+memoturn-governance = { path = "../governance" }
 reqwest.workspace = true
 object_store.workspace = true
 anyhow.workspace = true

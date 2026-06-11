@@ -15,6 +15,7 @@ pub mod answer;
 pub mod auth;
 pub mod embed;
 pub mod extract;
+pub mod governance;
 pub mod limit;
 pub mod mesh;
 
@@ -51,6 +52,12 @@ pub struct AppState {
     /// Recall answer synthesis (None = unconfigured; the /ask endpoint 503s
     /// and clients synthesize from /recall themselves).
     pub answerer: Option<Arc<dyn answer::Answerer>>,
+    /// Per-namespace data-governance policies (ADR-0010): retention/TTL caps
+    /// and AI egress rules, authoritative in object storage.
+    pub governance: Arc<governance::PolicyStore>,
+    /// Where the configured embedder sends data (None = no embedder); decides
+    /// the `ai_egress.embed = self_hosted_only` policy at startup.
+    pub embed_provenance: Option<embed::EmbedProvenance>,
 }
 
 /// Body cap for control/query requests (filters, recall, SQL queries). 1 MiB is
@@ -204,6 +211,19 @@ pub fn router(state: AppState) -> Router {
             "/v1/namespaces/{ns}/tokens",
             post(create_ns_token).layer(rl(control_rl.clone())),
         )
+        // Data governance (ADR-0010): namespace policy is a control-plane
+        // operation (platform key via the middleware prefix); the per-profile
+        // override rides the memory token model (read to see, admin to set).
+        .route(
+            "/v1/namespaces/{ns}/policy",
+            get(ns_policy_get)
+                .put(ns_policy_put)
+                .layer(rl(control_rl.clone())),
+        )
+        .route(
+            "/v1/memory/{ns}/{profile}/policy",
+            get(profile_policy_get).put(profile_policy_put),
+        )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::require_auth,
@@ -272,6 +292,20 @@ impl From<ReplicationError> for ApiError {
 impl From<ControlError> for ApiError {
     fn from(e: ControlError) -> Self {
         ApiError(StatusCode::SERVICE_UNAVAILABLE, e.to_string())
+    }
+}
+
+impl From<memoturn_governance::GovernanceError> for ApiError {
+    fn from(e: memoturn_governance::GovernanceError) -> Self {
+        use memoturn_governance::GovernanceError::*;
+        let code = match &e {
+            Invalid(_) => StatusCode::BAD_REQUEST,
+            Loosens(_) => StatusCode::CONFLICT,
+            CasConflict => StatusCode::CONFLICT,
+            Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            Corrupt(_) | Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        ApiError(code, e.to_string())
     }
 }
 
@@ -1041,6 +1075,13 @@ pub async fn gc_burner_branches(state: &AppState) -> usize {
 /// must never mutate its replica copy (single-writer invariant).
 pub async fn sweep_expired(state: &AppState) -> u64 {
     let me = state.control.identity().node_id.clone();
+    // uuid → name, to resolve each hot database's namespace policy.
+    let name_of: HashMap<String, String> = state
+        .registry
+        .list()
+        .await
+        .map(|dbs| dbs.into_iter().map(|d| (d.uuid, d.name)).collect())
+        .unwrap_or_default();
     let mut n = 0;
     for (key, h) in state.node.hot_entries() {
         let Ok(Some(owner)) = state.control.lookup(&key).await else {
@@ -1054,6 +1095,24 @@ pub async fn sweep_expired(state: &AppState) -> u64 {
             .await
             .unwrap_or(0);
         n += memoturn_kv::sweep_expired(&h).await.unwrap_or(0);
+        // Policy-driven memory aging (ADR-0010): superseded-history and event
+        // age caps from the namespace policy. Same writer-only contract; cold
+        // databases are swept when they next become hot on their owner (their
+        // object-storage history is still bounded by `enforce_retention`).
+        if let Some(name) = key.split_once('@').and_then(|(uuid, _)| name_of.get(uuid)) {
+            if let Ok(eff) = state.governance.effective_for_db(name).await {
+                let rules = memoturn_docstore::memories::MemoryRules {
+                    event_max_age_secs: eff.event_max_age_secs,
+                    superseded_max_age_secs: eff.superseded_max_age_secs,
+                    superseded_max_count: eff.superseded_max_count,
+                };
+                if rules.any() {
+                    n += memoturn_docstore::memories::enforce_memory_policy(&h, &rules)
+                        .await
+                        .unwrap_or(0);
+                }
+            }
+        }
         if h.txid() > before {
             if let Some((uuid, branch)) = key.split_once('@') {
                 state
@@ -1173,14 +1232,51 @@ pub async fn enforce_retention(state: &AppState) -> usize {
     let Ok(dbs) = state.registry.list().await else {
         return 0;
     };
+    // Namespace policies may tighten (never widen) the env windows per
+    // profile database (ADR-0010): effective = min(env ceiling, policy).
+    // Read fresh — the sweep cadence already bounds staleness.
+    let policies: HashMap<String, memoturn_governance::PolicyDoc> =
+        match state.governance.list().await {
+            Ok(docs) => docs.into_iter().map(|d| (d.namespace.clone(), d)).collect(),
+            Err(e) => {
+                tracing::warn!(error = %e, "policy list failed; retention uses env windows only");
+                HashMap::new()
+            }
+        };
     let mut n = 0;
     for db in dbs {
+        let (fine, snap) = retention_windows(&db.name, fine, snap, &policies);
         match state.replicator.prune_retention(&db.uuid, fine, snap).await {
             Ok(p) => n += p,
             Err(e) => tracing::warn!(uuid = %db.uuid, error = %e, "PITR retention failed"),
         }
     }
     n
+}
+
+/// Effective PITR windows for one database: the env ceilings tightened by the
+/// `{ns}--{profile}` database's namespace policy, if any. Plain databases get
+/// the env windows unchanged. Public for tests.
+#[doc(hidden)]
+pub fn retention_windows(
+    db_name: &str,
+    env_fine: std::time::Duration,
+    env_snap: std::time::Duration,
+    policies: &HashMap<String, memoturn_governance::PolicyDoc>,
+) -> (std::time::Duration, std::time::Duration) {
+    let (mut fine, mut snap) = (env_fine, env_snap);
+    if let Some((ns, profile)) = db_name.split_once("--") {
+        if let Some(doc) = policies.get(ns) {
+            let eff = doc.effective(Some(profile));
+            if let Some(p) = eff.pitr_secs {
+                fine = fine.min(std::time::Duration::from_secs(p));
+            }
+            if let Some(p) = eff.pitr_snapshot_secs {
+                snap = snap.min(std::time::Duration::from_secs(p));
+            }
+        }
+    }
+    (fine, snap)
 }
 
 fn now_ms() -> i64 {
@@ -1495,14 +1591,21 @@ fn profile_db(
 /// Fill in embeddings for items that arrived without one (tasks skip the
 /// vector channel by design). Best-effort: an embedding-provider failure must
 /// never take down ingest — keyword and topic recall still work — so errors
-/// log and degrade rather than fail the write.
+/// log and degrade rather than fail the write. The `ai_egress.embed` policy
+/// gates here (not at the edge handler) because a forwarded ingest embeds on
+/// the owner node — this is the point where bytes would leave the cluster.
 async fn auto_embed_items(
     state: &AppState,
+    ns: &str,
+    profile: &str,
     items: &mut [memoturn_docstore::memories::MemoryInput],
 ) {
     let Some(embedder) = &state.embedder else {
         return;
     };
+    if !governance::embed_allowed(state, ns, profile).await {
+        return;
+    }
     let pending: Vec<usize> = items
         .iter()
         .enumerate()
@@ -1534,6 +1637,62 @@ async fn auto_embed_items(
     }
 }
 
+/// Embed a query/question for the vector channel, best-effort and policy-
+/// gated like `auto_embed_items`. `None` = no embedder, denied by policy, or
+/// provider failure — recall degrades to keyword+topic either way.
+async fn auto_embed_query(
+    state: &AppState,
+    ns: &str,
+    profile: &str,
+    text: &str,
+) -> Option<Vec<f32>> {
+    let embedder = state.embedder.as_ref()?;
+    if !governance::embed_allowed(state, ns, profile).await {
+        return None;
+    }
+    match embedder
+        .embed(&[text.to_string()], embed::EmbedKind::Query)
+        .await
+    {
+        Ok(mut vs) => vs.pop(),
+        Err(e) => {
+            tracing::warn!(error = %e, "query auto-embedding failed; vector channel skipped");
+            None
+        }
+    }
+}
+
+/// Clamp task TTLs to the namespace policy's `memory.task_ttl_max_secs`
+/// (ADR-0010). Clamping (not rejecting) keeps ingest idempotent and agents
+/// unmodified. The owner of a forwarded write re-clamps against the same
+/// policy store, so its clamp is authoritative. A policy-store miss proceeds
+/// uncapped: governance must not join the write path's failure domain
+/// (fail-closed applies to auth and AI egress, not TTL caps).
+async fn clamp_task_ttls(
+    state: &AppState,
+    ns: &str,
+    profile: &str,
+    items: &mut [memoturn_docstore::memories::MemoryInput],
+) {
+    match state.governance.effective(ns, Some(profile)).await {
+        Ok(eff) => {
+            if let Some(cap) = eff.task_ttl_max_secs {
+                for m in items {
+                    if m.mtype == memoturn_docstore::memories::MemoryType::Task {
+                        let requested = m
+                            .ttl_secs
+                            .unwrap_or(memoturn_docstore::memories::DEFAULT_TASK_TTL_SECS);
+                        m.ttl_secs = Some(requested.min(cap));
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(ns, error = %e, "policy unavailable; ingesting without TTL caps")
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct MemoryItemReq {
     #[serde(rename = "type")]
@@ -1549,6 +1708,8 @@ struct MemoryItemReq {
     embedding: Option<Vec<f32>>,
     #[serde(default)]
     session_id: Option<String>,
+    #[serde(default)]
+    source: Option<String>,
     #[serde(default)]
     ttl: Option<u64>,
 }
@@ -1594,12 +1755,14 @@ async fn memories_ingest(
                 keywords: m.keywords,
                 embedding: m.embedding,
                 session_id: m.session_id,
+                source: m.source,
                 ttl_secs: m.ttl,
             })
         })
         .collect::<Result<Vec<_>, memoturn_docstore::DocError>>()?;
     let mut items = items;
-    auto_embed_items(&state, &mut items).await;
+    clamp_task_ttls(&state, &ns, &profile, &mut items).await;
+    auto_embed_items(&state, &ns, &profile, &mut items).await;
     let before = l.h.txid();
     let (outcomes, txid) = memoturn_docstore::memories::ingest(&l.h, items).await?;
     if txid > before {
@@ -1622,6 +1785,8 @@ struct ExtractReq {
     turns: Vec<extract::Turn>,
     #[serde(default)]
     session_id: Option<String>,
+    #[serde(default)]
+    source: Option<String>,
     /// Return the proposed memories without ingesting them.
     #[serde(default)]
     dry_run: bool,
@@ -1640,6 +1805,9 @@ async fn memories_extract(
     let parsed: ExtractReq = serde_json::from_value(req)
         .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
+    // Egress policy before anything else: this endpoint exists to send the
+    // turns to the extractor model, so a denial is a deterministic 403.
+    governance::check_egress(&state, &ns, &profile, governance::EgressOp::Extract).await?;
     let Some(extractor) = state.extractor.clone() else {
         return Err(ApiError(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1675,6 +1843,9 @@ async fn memories_extract(
             }
             if let Some(sid) = &parsed.session_id {
                 item["session_id"] = json!(sid);
+            }
+            if let Some(src) = &parsed.source {
+                item["source"] = json!(src);
             }
             item
         })
@@ -1716,12 +1887,14 @@ async fn memories_extract(
                 keywords: Some(m.keywords),
                 embedding: None,
                 session_id: parsed.session_id.clone(),
+                source: parsed.source.clone(),
                 ttl_secs: None,
             })
         })
         .collect::<Result<Vec<_>, memoturn_docstore::DocError>>()?;
     let mut items = items;
-    auto_embed_items(&state, &mut items).await;
+    clamp_task_ttls(&state, &ns, &profile, &mut items).await;
+    auto_embed_items(&state, &ns, &profile, &mut items).await;
     let before = l.h.txid();
     let (outcomes, txid) = memoturn_docstore::memories::ingest(&l.h, items).await?;
     if txid > before {
@@ -1751,6 +1924,8 @@ struct RecallReq {
     types: Option<Vec<String>>,
     #[serde(default)]
     session_id: Option<String>,
+    #[serde(default)]
+    source: Option<String>,
     #[serde(default)]
     k: Option<u32>,
     #[serde(default)]
@@ -1790,20 +1965,12 @@ async fn memories_recall(
         .transpose()?;
     let k = capped(req.k.unwrap_or(8));
     // Auto-embed bare query strings so the vector (and raw-turn) channels work
-    // for text-only clients. Best-effort: on provider failure recall degrades
-    // to keyword+topic rather than erroring.
+    // for text-only clients. Best-effort and policy-gated: on provider failure
+    // or an embed-deny policy, recall degrades to keyword+topic.
     let mut embedding = req.embedding;
     if embedding.is_none() {
-        if let (Some(query), Some(embedder)) = (&req.query, &state.embedder) {
-            match embedder
-                .embed(&[query.clone()], embed::EmbedKind::Query)
-                .await
-            {
-                Ok(mut vs) => embedding = vs.pop(),
-                Err(e) => {
-                    tracing::warn!(error = %e, "query auto-embedding failed; vector channel skipped")
-                }
-            }
+        if let Some(query) = &req.query {
+            embedding = auto_embed_query(&state, &ns, &profile, query).await;
         }
     }
     let memories = memoturn_docstore::memories::recall(
@@ -1814,6 +1981,7 @@ async fn memories_recall(
             topic_key: req.topic_key,
             types,
             session_id: req.session_id.clone(),
+            source: req.source,
             k,
             include_superseded: req.include_superseded,
         },
@@ -1826,7 +1994,8 @@ async fn memories_recall(
         let Some(emb) = &embedding else {
             return Err(ApiError(
                 StatusCode::BAD_REQUEST,
-                "include_turns requires an embedding (or a query + a configured embedder)".into(),
+                "include_turns requires an embedding (or a query + a configured, policy-permitted embedder)"
+                    .into(),
             ));
         };
         let turns =
@@ -1843,6 +2012,8 @@ struct AskReq {
     types: Option<Vec<String>>,
     #[serde(default)]
     session_id: Option<String>,
+    #[serde(default)]
+    source: Option<String>,
     #[serde(default)]
     k: Option<u32>,
     #[serde(default)]
@@ -1874,6 +2045,9 @@ async fn memories_ask(
         ));
     }
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
+    // Egress policy before recall runs — don't pay recall cost for a denied
+    // request, and the endpoint's purpose is the model call (deny = 403).
+    governance::check_egress(&state, &ns, &profile, governance::EgressOp::Ask).await?;
     // Unknown profile: no memories, no LLM call — same read posture as recall.
     if state.registry.get(&name).await.is_err() {
         return Ok((
@@ -1893,19 +2067,8 @@ async fn memories_ask(
         })
         .transpose()?;
     // Auto-embed the question so the vector channel contributes (best-effort,
-    // same degradation as recall).
-    let mut embedding = None;
-    if let Some(embedder) = &state.embedder {
-        match embedder
-            .embed(&[req.question.clone()], embed::EmbedKind::Query)
-            .await
-        {
-            Ok(mut vs) => embedding = vs.pop(),
-            Err(e) => {
-                tracing::warn!(error = %e, "question auto-embedding failed; vector channel skipped")
-            }
-        }
-    }
+    // same degradation and policy gate as recall).
+    let embedding = auto_embed_query(&state, &ns, &profile, &req.question).await;
     let memories = memoturn_docstore::memories::recall(
         &h,
         &memoturn_docstore::memories::RecallQuery {
@@ -1914,6 +2077,7 @@ async fn memories_ask(
             topic_key: None,
             types,
             session_id: req.session_id,
+            source: req.source,
             k: capped(req.k.unwrap_or(8)),
             include_superseded: req.include_superseded,
         },
@@ -2115,6 +2279,128 @@ async fn create_ns_token(
         StatusCode::CREATED,
         Json(json!({ "token": token, "expires_in": ttl })),
     ))
+}
+
+// ---- data governance: namespace policy + profile overrides (ADR-0010) ----
+
+#[derive(Deserialize)]
+struct PolicyPut {
+    /// The policy sections to set. `null` clears a profile override.
+    policy: serde_json::Value,
+}
+
+fn parse_policy(v: serde_json::Value) -> Result<governance::Policy, ApiError> {
+    serde_json::from_value(v).map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))
+}
+
+/// Namespace policy (platform key via the `/v1/namespaces` middleware gate).
+async fn ns_policy_get(
+    State(state): State<AppState>,
+    Path(ns): Path<String>,
+) -> Result<Response, ApiError> {
+    if !ns_part_ok(&ns) {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "invalid namespace".into(),
+        ));
+    }
+    match state.governance.get(&ns).await? {
+        Some(doc) => Ok(Json(json!({
+            "namespace": doc.namespace,
+            "revision": doc.revision,
+            "updated_at": doc.updated_at,
+            "policy": doc.policy,
+            "profiles": doc.profiles,
+        }))
+        .into_response()),
+        None => Err(ApiError(
+            StatusCode::NOT_FOUND,
+            format!("no policy set for namespace '{ns}'"),
+        )),
+    }
+}
+
+async fn ns_policy_put(
+    State(state): State<AppState>,
+    Path(ns): Path<String>,
+    Json(req): Json<PolicyPut>,
+) -> Result<Response, ApiError> {
+    if !ns_part_ok(&ns) {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "invalid namespace".into(),
+        ));
+    }
+    let policy = parse_policy(req.policy)?;
+    let doc = state.governance.put_namespace(&ns, policy).await?;
+    Ok(Json(json!({
+        "namespace": doc.namespace,
+        "revision": doc.revision,
+        "updated_at": doc.updated_at,
+        "policy": doc.policy,
+    }))
+    .into_response())
+}
+
+/// Profile policy view: the override (if any) plus the effective policy with
+/// the node env ceilings folded in — what will actually be enforced.
+async fn profile_policy_get(
+    State(state): State<AppState>,
+    Path((ns, profile)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    if !ns_part_ok(&ns) || !ns_part_ok(&profile) {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "invalid namespace or profile name".into(),
+        ));
+    }
+    let doc = state.governance.get(&ns).await?;
+    let over = doc.as_ref().and_then(|d| d.profiles.get(&profile));
+    let mut eff = doc
+        .as_ref()
+        .map(|d| d.effective(Some(&profile)))
+        .unwrap_or_default();
+    governance::fold_env_ceilings(&mut eff);
+    Ok(Json(json!({
+        "namespace": ns,
+        "profile": profile,
+        "override": over,
+        "effective": eff,
+        "revision": doc.as_ref().map(|d| d.revision).unwrap_or(0),
+    }))
+    .into_response())
+}
+
+/// Set or clear a profile override (admin scope). Tighten-only: a 409 names
+/// every field that loosens the namespace policy. Works before the profile's
+/// first ingest — governance may precede data.
+async fn profile_policy_put(
+    State(state): State<AppState>,
+    Path((ns, profile)): Path<(String, String)>,
+    Json(req): Json<PolicyPut>,
+) -> Result<Response, ApiError> {
+    if !ns_part_ok(&ns) || !ns_part_ok(&profile) {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "invalid namespace or profile name".into(),
+        ));
+    }
+    let over = if req.policy.is_null() {
+        None
+    } else {
+        Some(parse_policy(req.policy)?)
+    };
+    let doc = state.governance.put_profile(&ns, &profile, over).await?;
+    let mut eff = doc.effective(Some(&profile));
+    governance::fold_env_ceilings(&mut eff);
+    Ok(Json(json!({
+        "namespace": ns,
+        "profile": profile,
+        "override": doc.profiles.get(&profile),
+        "effective": eff,
+        "revision": doc.revision,
+    }))
+    .into_response())
 }
 
 // ---- KV ----

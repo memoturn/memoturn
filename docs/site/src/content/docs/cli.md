@@ -26,10 +26,10 @@ Typed agent memory against `/v1/memory/{ns}/{profile}` — see [memories](/memor
 ```bash
 memoturn memory ingest <ns> <profile> --summary <gist> [--type fact|event|instruction|task]
                                       [--topic <key>] [--content <json>] [--keywords <terms>]
-                                      [--session <id>] [--ttl <secs>]
+                                      [--session <id>] [--source <agent>] [--ttl <secs>]
 memoturn memory recall  <ns> <profile> [<query>] [--topic <key>] [--k 8] [--type <t>]...
-                                      [--include-superseded]
-memoturn memory extract <ns> <profile> [--session <id>] [--dry-run]   # turns JSON on stdin
+                                      [--source <agent>] [--include-superseded]
+memoturn memory extract <ns> <profile> [--session <id>] [--source <agent>] [--dry-run]   # turns JSON on stdin
 memoturn memory get     <ns> <profile> <id>
 memoturn memory forget  <ns> <profile> <id>
 memoturn memory sessions <ns> <profile>
@@ -46,7 +46,9 @@ memoturn memory recall acme alice "what can this user eat?"
 ```
 
 `ingest` stores one memory per invocation; `--content` defaults to `{"summary": <summary>}`, and
-the profile auto-creates on first ingest. `recall` drives the keyword and topic channels; the
+the profile auto-creates on first ingest. `--source` tags the memory with
+[which agent wrote it](/memories/#provenance-which-agent-wrote-this); on `recall` it filters to
+one agent's memories. `recall` drives the keyword and topic channels; the
 vector channel needs an embedding, which the CLI does not compute — use the API or SDKs (or
 enable node-side [auto-embedding](/embeddings/), which embeds bare query strings at recall).
 `extract` reads a JSON array of `{role, content}` turns from stdin and needs a node with
@@ -150,6 +152,26 @@ memoturn token create-ns acme --scope write
 
 See [security](/security/) for token semantics and [configuration](/configuration/) for the
 node-side `MEMOTURN_*` variables.
+
+## policy
+
+Data-governance policies: retention caps, memory aging, task-TTL ceilings, and AI egress rules
+per namespace, with tighten-only per-profile overrides. Namespace-level commands use the
+platform key; profile-level commands use a token (`read` to view, `admin` to set).
+
+```bash
+# set the namespace policy (JSON from --file or stdin)
+memoturn policy set acme --file policy.json
+echo '{"memory": {"task_ttl_max_secs": 600}}' | memoturn policy set acme
+
+# tighten one profile, inspect what is actually enforced, then clear it
+memoturn policy set acme --profile alice --file stricter.json
+memoturn policy get acme --profile alice     # override + effective (env ceilings folded in)
+memoturn policy clear acme --profile alice
+```
+
+A profile override that loosens the namespace policy is rejected (`409`) naming each offending
+field. See [security](/security/#data-governance-policies) for the policy document shape.
 
 ## ask
 

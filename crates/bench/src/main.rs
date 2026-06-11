@@ -305,6 +305,7 @@ async fn main() -> anyhow::Result<()> {
                     )),
                     embedding: Some(emb(i)),
                     session_id: None,
+                    source: None,
                     ttl_secs: None,
                 }
             })
@@ -329,6 +330,7 @@ async fn main() -> anyhow::Result<()> {
                     keywords: Some("preference".into()),
                     embedding: Some(embedding),
                     session_id: None,
+                    source: None,
                     ttl_secs: None,
                 }],
             )
@@ -359,6 +361,7 @@ async fn main() -> anyhow::Result<()> {
                     topic_key: Some(format!("user.topic-{}", i % 50)),
                     types: None,
                     session_id: None,
+                    source: None,
                     k: 8,
                     include_superseded: false,
                 },

@@ -35,6 +35,8 @@ profiles is structural — no operation touches two profiles. Full semantics:
 | DELETE | `/v1/memory/{ns}/{profile}/memories/{id}` | Forget (hard delete) |
 | GET | `/v1/memory/{ns}/{profile}/sessions` | List sessions |
 | DELETE | `/v1/memory/{ns}/{profile}/sessions/{sid}` | End session: delete its task memories (`?turns=true` drops the transcript too) |
+| GET | `/v1/memory/{ns}/{profile}/policy` | The profile's [governance policy](/security/#data-governance-policies): override + effective values (read scope) |
+| PUT | `/v1/memory/{ns}/{profile}/policy` | Set or clear a tighten-only profile override (admin scope; loosening is `409`) |
 | GET | `/v1/memory/{ns}` | List profiles in the namespace (namespace token) |
 
 ### Ingest
@@ -50,7 +52,7 @@ POST /v1/memory/acme/alice/memories
   { "type": "fact", "topic_key": "user.editor-theme", "summary": "prefers dark mode",
     "content": {"preference": "dark"}, "keywords": "theme ui", "embedding": [0.1, 0.2] },
   { "type": "event", "summary": "deployed v2 to prod",
-    "content": {"version": "v2"}, "session_id": "s-417" },
+    "content": {"version": "v2"}, "session_id": "s-417", "source": "claude-code" },
   { "type": "task", "summary": "follow up on refund #88", "content": {}, "ttl": 86400 }
 ] }
 ```
@@ -68,6 +70,9 @@ POST /v1/memory/acme/alice/memories
 `status` is `created`, `revived` (an old superseded memory re-asserted and active again), or
 `duplicate` (already active). Ingesting a `fact` or `instruction` whose `topic_key` has an active
 memory supersedes the old row in the same transaction — history is preserved, not deleted.
+`source` records [which agent wrote the memory](/memories/#provenance-which-agent-wrote-this);
+it is excluded from the content hash, so `duplicate`/`revived` keep the first writer's
+attribution.
 
 ### Recall
 
@@ -78,7 +83,7 @@ rows are dropped; each hit reports the channels that found it. An empty result i
 ```json
 POST /v1/memory/acme/alice/recall
 { "query": "what theme does the user like?", "embedding": [0.1, 0.2],
-  "topic_key": "user.editor-theme", "types": ["fact"], "k": 8 }
+  "topic_key": "user.editor-theme", "types": ["fact"], "source": "claude-code", "k": 8 }
 ```
 
 ```json
@@ -86,12 +91,14 @@ POST /v1/memory/acme/alice/recall
 { "memories": [
     { "id": "mem_9f2c...", "type": "fact", "topic_key": "user.editor-theme",
       "summary": "prefers dark mode", "content": {"preference": "dark"},
-      "keywords": "theme ui", "session_id": null, "created_at": 1765000000,
-      "superseded_by": null, "score": 0.064, "channels": ["topic", "keyword", "vector"] }
+      "keywords": "theme ui", "session_id": null, "source": "claude-code",
+      "created_at": 1765000000, "superseded_by": null, "score": 0.064,
+      "channels": ["topic", "keyword", "vector"] }
   ],
   "txid": 42 }
 ```
 
+`session_id` and `source` narrow recall to one session's or one agent's memories;
 `include_superseded: true` exposes superseded rows; `include_turns: true` (requires `embedding`)
 additionally searches the verbatim transcript and returns matching turns in a separate `turns`
 array, never mixed into the fused ranking. See [sessions](/sessions/).
@@ -101,12 +108,14 @@ array, never mixed into the fused ranking. See [sessions](/sessions/).
 Opt-in per node (`MEMOTURN_EXTRACT_API_KEY`); unconfigured nodes return `503`. The LLM call runs
 before any database write and is structured-output-constrained; proposals then flow through the
 ordinary idempotent ingest. `dry_run: true` returns proposals without writing. See
-[extraction](/extraction/).
+[extraction](/extraction/). A namespace whose
+[governance policy](/security/#data-governance-policies) sets `ai_egress.extract: deny` gets a
+`403` before any model is called (the same applies to `/ask` via `ai_egress.ask`).
 
 ```json
 POST /v1/memory/acme/alice/extract
 { "turns": [ {"role": "user", "content": "I'm vegan now"} ],
-  "session_id": "s-417", "dry_run": false }
+  "session_id": "s-417", "source": "claude-code", "dry_run": false }
 ```
 
 ## Data-plane API
@@ -206,6 +215,8 @@ Platform routes, authenticated with the platform key.
 | POST | `/v1/databases/{db}/branches/{branch}/rewind` | Rewind to a checkpoint or txid (`{to}`) |
 | POST | `/v1/databases/{db}/tokens` | Mint a per-database token (`{scope, expires_in}`) |
 | POST | `/v1/namespaces/{ns}/tokens` | Mint a namespace token covering every profile under it |
+| GET | `/v1/namespaces/{ns}/policy` | The namespace [governance policy](/security/#data-governance-policies) |
+| PUT | `/v1/namespaces/{ns}/policy` | Set the namespace governance policy (retention, memory aging, AI egress) |
 | GET | `/v1/databases/{db}/usage` | Usage counters |
 
 ```json

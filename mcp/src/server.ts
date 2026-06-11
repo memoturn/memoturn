@@ -216,6 +216,13 @@ export function buildServer(creds: Creds): McpServer {
   const profile = z
     .string()
     .describe("Memory profile — one isolated store per user/team/agent persona, e.g. user-alice");
+  const source = z
+    .string()
+    .optional()
+    .describe("Originating agent for provenance, e.g. claude-code (defaults to MEMOTURN_SOURCE)");
+  // Read at call time, not module load: MEMOTURN_SOURCE is per-connection
+  // config (each coding agent's MCP entry sets its own) and tests set it late.
+  const defaultSource = () => process.env.MEMOTURN_SOURCE || undefined;
 
   server.tool(
     "memory_ingest",
@@ -233,13 +240,18 @@ export function buildServer(creds: Creds): McpServer {
             keywords: z.string().optional().describe("Extra space-separated search terms"),
             embedding: z.array(z.number()).optional(),
             session_id: z.string().optional(),
+            source,
             ttl: z.number().optional().describe("Task lifetime in seconds (default 86400)"),
           }),
         )
         .describe("Memories to store"),
     },
     async ({ namespace, profile, memories }) =>
-      ok(await api("POST", `/v1/memory/${namespace}/${profile}/memories`, { memories })),
+      ok(
+        await api("POST", `/v1/memory/${namespace}/${profile}/memories`, {
+          memories: memories.map((m) => ({ ...m, source: m.source ?? defaultSource() })),
+        }),
+      ),
   );
 
   server.tool(
@@ -252,6 +264,7 @@ export function buildServer(creds: Creds): McpServer {
       embedding: z.array(z.number()).optional(),
       topic_key: z.string().optional(),
       types: z.array(z.enum(["fact", "event", "instruction", "task"])).optional(),
+      source: source.describe("Only recall memories ingested by this agent, e.g. claude-code"),
       k: z.number().optional(),
       include_superseded: z.boolean().optional(),
       include_turns: z
@@ -272,6 +285,7 @@ export function buildServer(creds: Creds): McpServer {
       question: z.string().describe("Natural-language question, e.g. 'what does the user eat?'"),
       k: z.number().optional().describe("Memories to recall as context (default 8)"),
       session_id: z.string().optional(),
+      source: source.describe("Only consider memories ingested by this agent, e.g. claude-code"),
     },
     async ({ namespace, profile, ...body }) =>
       ok(await api("POST", `/v1/memory/${namespace}/${profile}/ask`, body)),
@@ -287,10 +301,16 @@ export function buildServer(creds: Creds): McpServer {
         .array(z.object({ role: z.string(), content: z.any() }))
         .describe("Raw conversation turns to distill"),
       session_id: z.string().optional(),
+      source,
       dry_run: z.boolean().optional().describe("Propose without ingesting"),
     },
     async ({ namespace, profile, ...body }) =>
-      ok(await api("POST", `/v1/memory/${namespace}/${profile}/extract`, body)),
+      ok(
+        await api("POST", `/v1/memory/${namespace}/${profile}/extract`, {
+          ...body,
+          source: body.source ?? defaultSource(),
+        }),
+      ),
   );
 
   server.tool(

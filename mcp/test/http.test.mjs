@@ -8,12 +8,17 @@ import { createServer } from "node:http";
 // The stub Memoturn node must be configured before importing the server
 // module (MEMOTURN_URL is read at module load).
 const upstream = createServer((req, res) => {
-  upstream.requests.push({
-    path: req.url,
-    authorization: req.headers.authorization ?? null,
+  let raw = "";
+  req.on("data", (c) => (raw += c));
+  req.on("end", () => {
+    upstream.requests.push({
+      path: req.url,
+      authorization: req.headers.authorization ?? null,
+      body: raw ? JSON.parse(raw) : null,
+    });
+    res.writeHead(200, { "content-type": "application/json", "Memoturn-Txid": "7" });
+    res.end(JSON.stringify({ memories: [], txid: 7 }));
   });
-  res.writeHead(200, { "content-type": "application/json", "Memoturn-Txid": "7" });
-  res.end(JSON.stringify({ memories: [], txid: 7 }));
 });
 upstream.requests = [];
 await new Promise((r) => upstream.listen(0, "127.0.0.1", r));
@@ -153,4 +158,56 @@ test("session bearer flows through to the Memoturn node", async () => {
   assert.equal(upstream.requests.length, 1);
   assert.equal(upstream.requests[0].path, "/v1/memory/acme/alice/recall");
   assert.equal(upstream.requests[0].authorization, "Bearer agent-jwt");
+});
+
+test("memory_ingest applies MEMOTURN_SOURCE default and explicit source wins", async () => {
+  const session = await initialize("agent-jwt");
+  process.env.MEMOTURN_SOURCE = "claude-code";
+  try {
+    upstream.requests.length = 0;
+    const { data } = await rpc(
+      {
+        jsonrpc: "2.0",
+        id: 9,
+        method: "tools/call",
+        params: {
+          name: "memory_ingest",
+          arguments: {
+            namespace: "acme",
+            profile: "alice",
+            memories: [
+              { type: "fact", summary: "prefers dark mode", content: { v: 1 } },
+              { type: "fact", summary: "uses zsh", content: { v: 2 }, source: "cursor" },
+            ],
+          },
+        },
+      },
+      { session, bearer: "agent-jwt" },
+    );
+    assert.equal(data[0].result.isError ?? false, false);
+    const sent = upstream.requests[0].body.memories;
+    assert.equal(sent[0].source, "claude-code");
+    assert.equal(sent[1].source, "cursor");
+  } finally {
+    delete process.env.MEMOTURN_SOURCE;
+  }
+});
+
+test("memory_recall forwards the source filter", async () => {
+  const session = await initialize("agent-jwt");
+  upstream.requests.length = 0;
+  const { data } = await rpc(
+    {
+      jsonrpc: "2.0",
+      id: 10,
+      method: "tools/call",
+      params: {
+        name: "memory_recall",
+        arguments: { namespace: "acme", profile: "alice", query: "shell", source: "cursor" },
+      },
+    },
+    { session, bearer: "agent-jwt" },
+  );
+  assert.equal(data[0].result.isError ?? false, false);
+  assert.equal(upstream.requests[0].body.source, "cursor");
 });

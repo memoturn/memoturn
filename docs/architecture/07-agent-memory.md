@@ -19,7 +19,10 @@ namespace                e.g. an application, environment, or tenant
   different database files with different manifests and leases.
 - "Memory across all agents" = every agent acting for Alice reads and writes `acme--alice`.
   Concurrency is already solved: single writer *node* per database, write forwarding from every
-  other node, `txid`/`min_txid` for read-your-writes.
+  other node, `txid`/`min_txid` for read-your-writes. Per-agent attribution rides the `source`
+  field: agents won't reliably self-report, so the surfaces apply it ambiently — the MCP server
+  defaults it from `MEMOTURN_SOURCE` (each coding agent's MCP config sets its own), and the SDKs
+  take a client-level `source` used as the ingest default.
 - **Sessions** are optional groupings scoped to a profile (different profiles may reuse session
   IDs). Task memories attach to sessions and expire; sessions also index the raw transcript layer.
 - Profiles are auto-created on first ingest (metadata-only, instant). Recall against a profile
@@ -37,6 +40,7 @@ namespace                e.g. an application, environment, or tenant
 | `keywords` | optional space-separated terms; FTS-indexed alongside `summary` |
 | `embedding` | optional, bring-your-own by default; powers the vector channel. With **auto-embedding** enabled (`MEMOTURN_EMBED_API_KEY`), the node embeds `summary + keywords` at ingest and bare `query` strings at recall — best-effort: a provider failure degrades to keyword+topic, never failing the write. Provider is `MEMOTURN_EMBED_PROVIDER` (`voyage` default, `voyage-3.5`; or `openai`, `text-embedding-3-small`); `openai` + `MEMOTURN_EMBED_BASE_URL` reaches any OpenAI-compatible server (Ollama, vLLM, …) for a self-hosted, zero-egress embedder |
 | `session_id` | optional grouping; required semantics only for tasks |
+| `source` | optional provenance: which agent wrote this (`"claude-code"`, `"cursor"`, …). Free-form, returned everywhere a memory is serialized, filterable at recall. Provenance, not identity — excluded from the content-addressed id, so the same memory from two agents dedupes and the first writer's attribution sticks (`duplicate`/`revived` never overwrite it); supersession likewise stays profile-wide regardless of source, because cross-agent sharing is the point |
 | `superseded_by` / `superseded_at` | set when a newer memory replaces this one; history preserved |
 | `expires_at` | tasks only (default 24 h TTL) |
 
@@ -52,7 +56,9 @@ namespace                e.g. an application, environment, or tenant
 Supersession is a state machine, not a delete: ingesting a fact with an existing active
 `topic_key` marks the previous row `superseded_by = <new id>` in the same transaction. Recall
 filters superseded rows by default; `include_superseded: true` (or fetching a memory by id)
-exposes the full chain. `DELETE` (forget) is the only hard removal.
+exposes the full chain. `DELETE` (forget) is the only hard removal. By default history is kept
+indefinitely; a namespace governance policy can cap superseded-history age/count, event age,
+and task TTLs ([08](08-data-governance.md), ADR-0010).
 
 ## Ingest
 
@@ -81,7 +87,7 @@ extractions.
 ### Server-side extraction (optional)
 
 `POST /v1/memory/{ns}/{profile}/extract` with `{ "turns": [{role, content}], "session_id"?,
-"dry_run"? }` distills a transcript into typed memories with a control-plane LLM call, then feeds
+"source"?, "dry_run"? }` distills a transcript into typed memories with a control-plane LLM call, then feeds
 the proposals through the ordinary idempotent ingest (same supersession, same `duplicate`
 reporting; `dry_run` returns proposals without writing). The LLM call happens **before** any
 database write — credentials, cost, and latency never enter the write path — and the call is
@@ -98,7 +104,11 @@ return 503 and extraction stays BYO.
   "topic_key": "user.editor-theme", "types": ["fact"], "k": 8 }
 ```
 
-At least one of `query` / `embedding` / `topic_key`. Three channels run inside the profile DB:
+At least one of `query` / `embedding` / `topic_key`. Optional filters: `types`, `session_id`,
+`source` (only memories one agent ingested), `include_superseded`. Filters are pushed into each
+channel's SQL — not just post-applied — so wanted rows aren't starved out of the candidate
+window by higher-ranked rows that the filter would discard. Three channels run inside the
+profile DB:
 
 | Channel | Mechanism | RRF weight |
 | --- | --- | --- |
@@ -157,3 +167,11 @@ Because a profile is a database, [02-branching](02-branching.md) applies verbati
 external-content index), `__memoturn_memories_vec` (F32_BLOB + DiskANN, created lazily at the
 client's embedding dimension), `__memoturn_memory_sessions`. All carry the reserved prefix —
 unreachable from user SQL — and all replicate, fork, and rewind with the database as one unit.
+
+Schema evolution is **migrate-on-write, stateless**: the `source` column was added after launch,
+so a pre-`source` database migrates via failed-batch retry — the first ingest's atomic batch
+rolls back at the unknown column, an `ALTER TABLE ADD COLUMN` runs, the batch retries once.
+Reads never migrate: recall and get retry a column-less SELECT (serializing `source` as null),
+and a source-filtered channel on an un-migrated DB is correctly empty. Statelessness is load-
+bearing — branch rewind can resurrect the old schema at any time, so migration keys off the
+SQLite error, never off cached state; replicas inherit the migration as physical pages.

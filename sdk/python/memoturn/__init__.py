@@ -115,11 +115,19 @@ class MemoryProfile:
     so ``checkpoint``/``rewind``/``fork`` operate on the whole memory atomically.
     """
 
-    def __init__(self, wire: _Wire, namespace: str, profile: str, branch: Optional[str] = None):
+    def __init__(
+        self,
+        wire: _Wire,
+        namespace: str,
+        profile: str,
+        branch: Optional[str] = None,
+        source: Optional[str] = None,
+    ):
         self._w = wire
         self.namespace = namespace
         self.profile = profile
         self._branch = branch
+        self._source = source
 
     @property
     def _db(self) -> str:
@@ -130,14 +138,20 @@ class MemoryProfile:
 
     def on_branch(self, branch: str) -> "MemoryProfile":
         """Address a branch of this profile's memory (burner experiments)."""
-        return MemoryProfile(self._w, self.namespace, self.profile, branch)
+        return MemoryProfile(self._w, self.namespace, self.profile, branch, self._source)
 
     def ingest(self, memories: list[dict]) -> dict:
         """Idempotent batch ingest; the profile auto-creates on first call.
 
         Each memory: ``{type, topic_key?, summary, content, keywords?,
-        embedding?, session_id?, ttl?}``.
+        embedding?, session_id?, source?, ttl?}``. ``source`` (originating
+        agent, e.g. "claude-code") defaults to the client-level ``source``.
         """
+        if self._source is not None:
+            memories = [
+                m if m.get("source") is not None else {**m, "source": self._source}
+                for m in memories
+            ]
         r = self._w.request(
             "POST",
             f"/v1/memory/{self.namespace}/{self.profile}/memories{self._qs()}",
@@ -153,11 +167,15 @@ class MemoryProfile:
         topic_key: Optional[str] = None,
         types: Optional[list[str]] = None,
         session_id: Optional[str] = None,
+        source: Optional[str] = None,
         k: int = 8,
         include_superseded: bool = False,
         include_turns: bool = False,
     ) -> dict:
-        """Hybrid recall; empty ``memories`` means nothing relevant (never pads)."""
+        """Hybrid recall; empty ``memories`` means nothing relevant (never pads).
+
+        ``source`` filters to memories ingested by one agent (e.g. "claude-code").
+        """
         r = self._w.request(
             "POST",
             f"/v1/memory/{self.namespace}/{self.profile}/recall{self._qs()}",
@@ -168,6 +186,7 @@ class MemoryProfile:
                     "topic_key": topic_key,
                     "types": types,
                     "session_id": session_id,
+                    "source": source,
                     "k": k,
                     "include_superseded": include_superseded,
                     "include_turns": include_turns,
@@ -182,6 +201,7 @@ class MemoryProfile:
         *,
         types: Optional[list[str]] = None,
         session_id: Optional[str] = None,
+        source: Optional[str] = None,
         k: int = 8,
         include_superseded: bool = False,
     ) -> dict:
@@ -200,6 +220,7 @@ class MemoryProfile:
                     "question": question,
                     "types": types,
                     "session_id": session_id,
+                    "source": source,
                     "k": k,
                     "include_superseded": include_superseded,
                 }
@@ -208,16 +229,29 @@ class MemoryProfile:
         return r.json()
 
     def extract(
-        self, turns: list[dict], *, session_id: Optional[str] = None, dry_run: bool = False
+        self,
+        turns: list[dict],
+        *,
+        session_id: Optional[str] = None,
+        source: Optional[str] = None,
+        dry_run: bool = False,
     ) -> dict:
         """Server-side extraction (opt-in node feature): distill raw turns into
         typed memories with a control-plane LLM, then ingest. ``dry_run``
         returns proposals without writing. 503 when the node has no extractor.
+        ``source`` defaults to the client-level ``source``.
         """
         r = self._w.request(
             "POST",
             f"/v1/memory/{self.namespace}/{self.profile}/extract{self._qs()}",
-            json=_drop_none({"turns": turns, "session_id": session_id, "dry_run": dry_run}),
+            json=_drop_none(
+                {
+                    "turns": turns,
+                    "session_id": session_id,
+                    "source": source if source is not None else self._source,
+                    "dry_run": dry_run,
+                }
+            ),
         )
         return r.json()
 
@@ -454,13 +488,15 @@ class Memoturn:
         *,
         token: Optional[str] = None,
         platform_key: Optional[str] = None,
+        source: Optional[str] = None,
         http_client: Optional[httpx.Client] = None,
     ):
         self._w = _Wire(url, token, platform_key, http_client)
+        self._source = source
 
     def memory(self, namespace: str, profile: str) -> MemoryProfile:
         """The memory surface: one profile per user/team/agent persona."""
-        return MemoryProfile(self._w, namespace, profile)
+        return MemoryProfile(self._w, namespace, profile, source=self._source)
 
     def profiles(self, namespace: str) -> list[dict]:
         """Profiles under a namespace (requires a namespace token)."""

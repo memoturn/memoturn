@@ -1,0 +1,18 @@
+[package]
+name = "memoturn-governance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+object_store.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+bytes.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

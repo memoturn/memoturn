@@ -111,6 +111,39 @@ its own etcd, gateways, data plane, and regional object-storage bucket — so th
 directly onto residency requirements: a profile created in the EU cell stays in the EU cluster
 and its EU bucket. The global control plane sits on the provisioning path, never the data path.
 
+## Data governance policies
+
+Enterprises can enforce data-handling rules per namespace with a **governance policy** — a JSON
+document set with the platform key and enforced on every node:
+
+```bash
+curl -X PUT $MEMOTURN_URL/v1/namespaces/acme/policy \
+  -H "Authorization: Bearer $PLATFORM_KEY" \
+  -d '{"policy": {
+        "retention": {"pitr_secs": 3600},
+        "memory":    {"task_ttl_max_secs": 600, "superseded_max_count": 20},
+        "ai_egress": {"extract": "deny", "embed": "self_hosted_only"}
+      }}'
+```
+
+- **Retention caps** tighten the node's point-in-time-recovery windows for every profile under
+  the namespace; **memory rules** cap task TTLs (clamped at ingest) and age out superseded
+  history and old events automatically.
+- **AI egress rules** govern the optional AI features per tenant: `extract`/`ask` set to `deny`
+  return a deterministic `403` before any model is called; `embed` set to `deny` degrades
+  exactly like an unconfigured embedder (writes succeed, keyword recall keeps working), and
+  `self_hosted_only` permits embedding only through a self-hosted endpoint
+  (loopback, private-network, cluster-internal, or `MEMOTURN_EMBED_SELF_HOSTED_HOSTS`).
+- **Profiles can tighten, never loosen**: `PUT /v1/memory/{ns}/{profile}/policy` (admin token)
+  accepts only overrides at least as strict as the namespace policy — a loosening override is a
+  `409` naming each offending field. The effective policy is always the strictest of node
+  config, namespace, and profile.
+- Policies live in object storage next to the data they govern and converge on every node within
+  the policy cache window (default 30 s) — no restarts. Egress checks fail closed; retention and
+  TTL clamps never block writes.
+
+See [Configuration](/configuration/#data-governance) and the [CLI](/cli/#policy).
+
 ## Operational notes
 
 - Without `MEMOTURN_ETCD`, a node that looks multi-node — auth on, or a non-loopback

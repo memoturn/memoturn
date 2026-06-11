@@ -48,6 +48,8 @@ async fn test_state(dir: &std::path::Path) -> AppState {
         extractor: None,
         answerer: None,
         embedder: None,
+        governance: std::sync::Arc::new(memoturn_api::governance::PolicyStore::in_memory()),
+        embed_provenance: None,
     }
 }
 
@@ -1008,4 +1010,310 @@ async fn invalid_inputs_are_rejected() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     let (status, _) = call(&app, "POST", &format!("{P}/recall"), Some(json!({}))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn ingest_stores_source_and_recall_filters_by_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = router(test_state(dir.path()).await);
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/memories"),
+        Some(json!({"memories": [
+            {"type": "event", "summary": "refactored the auth module",
+             "content": {"n": 1}, "keywords": "auth", "source": "claude-code"},
+            {"type": "event", "summary": "reviewed the auth module",
+             "content": {"n": 2}, "keywords": "auth", "source": "cursor"},
+            {"type": "event", "summary": "deployed the auth module",
+             "content": {"n": 3}, "keywords": "auth"},
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let first_id = body["results"][0]["id"].as_str().unwrap().to_string();
+
+    // Unfiltered recall returns every memory's source, including null.
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/recall"),
+        Some(json!({"query": "auth", "k": 10})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let hits = body["memories"].as_array().unwrap();
+    assert_eq!(hits.len(), 3, "{body}");
+    let sources: Vec<&Value> = hits.iter().map(|m| &m["source"]).collect();
+    assert!(sources.contains(&&json!("claude-code")), "{body}");
+    assert!(sources.contains(&&json!("cursor")), "{body}");
+    assert!(sources.contains(&&Value::Null), "{body}");
+
+    // Source filter narrows to one agent's memories.
+    let (_, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/recall"),
+        Some(json!({"query": "auth", "source": "cursor"})),
+    )
+    .await;
+    let hits = body["memories"].as_array().unwrap();
+    assert_eq!(hits.len(), 1, "{body}");
+    assert_eq!(hits[0]["source"], json!("cursor"));
+
+    // get() carries source too.
+    let (status, body) = call(&app, "GET", &format!("{P}/memories/{first_id}"), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["source"], json!("claude-code"));
+}
+
+#[tokio::test]
+async fn duplicate_and_revival_do_not_overwrite_source() {
+    // Source is provenance, not identity: it is excluded from the
+    // content-addressed id, so the first writer's attribution sticks.
+    let dir = tempfile::tempdir().unwrap();
+    let app = router(test_state(dir.path()).await);
+    let mem = |source: &str| {
+        json!({"memories": [{"type": "fact", "topic_key": "user.shell",
+            "summary": "uses zsh", "content": {"shell": "zsh"}, "source": source}]})
+    };
+    let (_, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/memories"),
+        Some(mem("claude-code")),
+    )
+    .await;
+    let id = body["results"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(body["results"][0]["status"], json!("created"));
+
+    // Identical content from another agent → duplicate, attribution unchanged.
+    let (_, body) = call(&app, "POST", &format!("{P}/memories"), Some(mem("cursor"))).await;
+    assert_eq!(body["results"][0]["status"], json!("duplicate"));
+    assert_eq!(body["results"][0]["id"].as_str().unwrap(), id);
+    let (_, body) = call(&app, "GET", &format!("{P}/memories/{id}"), None).await;
+    assert_eq!(body["source"], json!("claude-code"));
+
+    // Supersede, then re-assert from another agent → revived, source still
+    // the original writer's (revive clears the tombstone, nothing else).
+    call(
+        &app,
+        "POST",
+        &format!("{P}/memories"),
+        Some(
+            json!({"memories": [{"type": "fact", "topic_key": "user.shell",
+            "summary": "uses fish", "content": {"shell": "fish"}, "source": "cursor"}]}),
+        ),
+    )
+    .await;
+    let (_, body) = call(&app, "POST", &format!("{P}/memories"), Some(mem("cursor"))).await;
+    assert_eq!(body["results"][0]["status"], json!("revived"), "{body}");
+    let (_, body) = call(&app, "GET", &format!("{P}/memories/{id}"), None).await;
+    assert_eq!(body["source"], json!("claude-code"));
+}
+
+#[tokio::test]
+async fn supersession_crosses_sources() {
+    // Cross-agent sharing is the point: supersession stays profile-wide by
+    // (type, topic_key) regardless of which agent wrote either memory.
+    let dir = tempfile::tempdir().unwrap();
+    let app = router(test_state(dir.path()).await);
+    let (_, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/memories"),
+        Some(
+            json!({"memories": [{"type": "fact", "topic_key": "user.editor",
+            "summary": "uses vim", "content": {"editor": "vim"}, "source": "claude-code"}]}),
+        ),
+    )
+    .await;
+    let first_id = body["results"][0]["id"].as_str().unwrap().to_string();
+    let (_, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/memories"),
+        Some(
+            json!({"memories": [{"type": "fact", "topic_key": "user.editor",
+            "summary": "uses helix", "content": {"editor": "helix"}, "source": "cursor"}]}),
+        ),
+    )
+    .await;
+    assert_eq!(
+        body["results"][0]["superseded"],
+        json!([first_id]),
+        "{body}"
+    );
+    let (_, body) = call(&app, "GET", &format!("{P}/memories/{first_id}"), None).await;
+    assert!(!body["superseded_by"].is_null(), "{body}");
+}
+
+#[tokio::test]
+async fn source_filter_is_not_starved_by_higher_ranked_other_sources() {
+    // Same shape as the type-filter regression: many memories from one agent
+    // outrank one from another for the same keyword; a source-filtered recall
+    // must still find it (filter pushed into the channel SQL).
+    let dir = tempfile::tempdir().unwrap();
+    let app = router(test_state(dir.path()).await);
+    let mut mems: Vec<Value> = (0..60)
+        .map(|i| {
+            json!({"type": "event", "summary": format!("deploy event {i}"),
+            "content": {"n": i}, "keywords": "deploy release", "source": "claude-code"})
+        })
+        .collect();
+    mems.push(json!({"type": "event", "summary": "deploy reviewed",
+        "content": {}, "keywords": "deploy", "source": "cursor"}));
+    call(
+        &app,
+        "POST",
+        &format!("{P}/memories"),
+        Some(json!({"memories": mems})),
+    )
+    .await;
+
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/recall"),
+        Some(json!({"query": "deploy", "source": "cursor", "k": 5})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let hits = body["memories"].as_array().unwrap();
+    assert_eq!(hits.len(), 1, "{body}");
+    assert_eq!(hits[0]["summary"], json!("deploy reviewed"));
+}
+
+/// The pre-`source` schema, as shipped before the column existed. Seeded
+/// directly to prove the migrate-on-write/read-tolerance contract against a
+/// real old database (a rewound branch can resurrect this schema at any time).
+const OLD_DDL: &[&str] = &[
+    "CREATE TABLE __memoturn_memories (
+       id TEXT NOT NULL UNIQUE,
+       type TEXT NOT NULL CHECK (type IN ('fact','event','instruction','task')),
+       topic_key TEXT,
+       summary TEXT NOT NULL,
+       content BLOB NOT NULL,
+       keywords TEXT NOT NULL DEFAULT '',
+       session_id TEXT,
+       created_at INTEGER NOT NULL,
+       expires_at INTEGER,
+       superseded_by TEXT,
+       superseded_at INTEGER
+     )",
+    "CREATE INDEX __memoturn_memories_active
+       ON __memoturn_memories (type, topic_key) WHERE superseded_by IS NULL",
+    "CREATE INDEX __memoturn_memories_session
+       ON __memoturn_memories (session_id) WHERE session_id IS NOT NULL",
+    "CREATE VIRTUAL TABLE __memoturn_memories_fts
+       USING fts5(summary, keywords, content=__memoturn_memories, content_rowid=rowid)",
+    "CREATE TABLE __memoturn_memory_sessions (
+       id TEXT PRIMARY KEY,
+       created_at INTEGER NOT NULL,
+       last_active_at INTEGER NOT NULL
+     ) WITHOUT ROWID",
+];
+
+#[tokio::test]
+async fn old_schema_db_migrates_on_first_write_and_reads_never_migrate() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = test_state(dir.path()).await;
+    let registry = state.registry.clone();
+    let node = state.node.clone();
+    let app = router(state);
+
+    // Seed a profile database with the pre-`source` schema and one row.
+    let rec = registry.create("acme--support-bot").await.unwrap();
+    let file = node.db_file(&rec.uuid, "main");
+    let h = node
+        .handle(&format!("{}@main", rec.uuid), &file)
+        .await
+        .unwrap();
+    let mut stmts: Vec<(String, Vec<memoturn_engine::Value>)> =
+        OLD_DDL.iter().map(|d| (d.to_string(), vec![])).collect();
+    stmts.push((
+        "INSERT INTO __memoturn_memories
+           (id, type, topic_key, summary, content, keywords, session_id, created_at)
+         VALUES ('mem_old', 'event', NULL, 'legacy deploy ran', jsonb('{\"n\":0}'), 'deploy', NULL, 1)"
+            .to_string(),
+        vec![],
+    ));
+    stmts.push((
+        "INSERT INTO __memoturn_memories_fts (rowid, summary, keywords)
+         SELECT rowid, summary, keywords FROM __memoturn_memories WHERE id = 'mem_old'"
+            .to_string(),
+        vec![],
+    ));
+    h.write_trusted_batch(&stmts).await.unwrap();
+    let source_col_missing = || async {
+        h.read_trusted("SELECT source FROM __memoturn_memories LIMIT 0", vec![])
+            .await
+            .is_err()
+    };
+    assert!(
+        source_col_missing().await,
+        "seed must lack the source column"
+    );
+
+    // Reads work against the old schema and never migrate it.
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/recall"),
+        Some(json!({"query": "deploy"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["memories"][0]["summary"], json!("legacy deploy ran"));
+    assert_eq!(body["memories"][0]["source"], Value::Null, "{body}");
+
+    // A source-filtered recall on an un-migrated DB is empty, not an error.
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/recall"),
+        Some(json!({"query": "deploy", "source": "cursor"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["memories"], json!([]));
+
+    // get() tolerates the old schema too.
+    let (status, body) = call(&app, "GET", &format!("{P}/memories/mem_old"), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["source"], Value::Null);
+    assert!(source_col_missing().await, "reads must not migrate");
+
+    // First write migrates (failed batch → ALTER → retry) and lands the row.
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/memories"),
+        Some(
+            json!({"memories": [{"type": "event", "summary": "deploy reviewed",
+            "content": {}, "keywords": "deploy", "source": "cursor"}]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert!(!source_col_missing().await, "first write must migrate");
+
+    // Both generations now recall together, old row's source null.
+    let (_, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/recall"),
+        Some(json!({"query": "deploy", "k": 10})),
+    )
+    .await;
+    let hits = body["memories"].as_array().unwrap();
+    assert_eq!(hits.len(), 2, "{body}");
+    let (_, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/recall"),
+        Some(json!({"query": "deploy", "source": "cursor"})),
+    )
+    .await;
+    assert_eq!(body["memories"].as_array().unwrap().len(), 1, "{body}");
 }

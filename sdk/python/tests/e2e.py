@@ -108,6 +108,21 @@ burner = alice.fork("exp", ttl=3600)
 burner.ingest([{"type": "event", "summary": "risky experiment ran", "content": {}}])
 assert alice.recall(query="risky experiment")["memories"] == []
 
+# source provenance: client-level default, explicit override, recall filter
+coder = Memoturn(url, token=token, platform_key=platform_key, source="claude-code").memory(ns, "alice")
+r = coder.ingest(
+    [
+        {"type": "event", "summary": "refactored the auth module", "content": {"pr": 41}},
+        {"type": "event", "summary": "reviewed the auth module", "content": {"pr": 42}, "source": "cursor"},
+    ]
+)
+assert all(x["status"] == "created" for x in r["results"]), r
+by_src = {m["source"] for m in alice.recall(query="auth module")["memories"]}
+assert by_src == {"claude-code", "cursor"}, by_src
+only_cursor = alice.recall(query="auth module", source="cursor")["memories"]
+assert [m["source"] for m in only_cursor] == ["cursor"], only_cursor
+assert alice.get(r["results"][0]["id"])["source"] == "claude-code"
+
 # forget is the only hard delete
 assert alice.forget(vegan_id) is True
 assert alice.forget(vegan_id) is False

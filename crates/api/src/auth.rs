@@ -198,6 +198,8 @@ fn required_scope_memory(method: &axum::http::Method, rest: &[&str]) -> Scope {
         ["memories", _] => Scope::Write, // DELETE forget
         ["sessions"] => Scope::Read,
         ["sessions", _] => Scope::Write, // DELETE end-session
+        ["policy"] if *method == Method::GET => Scope::Read,
+        ["policy"] => Scope::Admin, // PUT tighten-only override (ADR-0010)
         _ => Scope::Admin,
     }
 }

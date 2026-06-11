@@ -324,6 +324,27 @@ async fn main() -> anyhow::Result<()> {
     if let Some(model) = memoturn_api::embed::configured_model() {
         tracing::info!(%model, "auto-embedding enabled");
     }
+    let embed_provenance = memoturn_api::embed::provenance_from_env();
+    if let Some(p) = &embed_provenance {
+        tracing::info!(
+            host = %p.endpoint_host,
+            self_hosted = p.self_hosted,
+            "embedder egress provenance"
+        );
+    }
+
+    // Per-namespace data-governance policies (ADR-0010): authoritative in
+    // object storage, read through a per-node cache — policy changes converge
+    // on every node within the cache TTL without a restart.
+    let policy_cache_secs: u64 = std::env::var("MEMOTURN_POLICY_CACHE_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(30);
+    let governance = Arc::new(memoturn_governance::PolicyStore::new(
+        store.clone(),
+        "v1",
+        Duration::from_secs(policy_cache_secs),
+    ));
 
     let state = AppState {
         node,
@@ -337,6 +358,8 @@ async fn main() -> anyhow::Result<()> {
         extractor,
         embedder,
         answerer,
+        governance,
+        embed_provenance,
     };
     // Re-arm token revocation across restarts: the registry's durable
     // tombstones re-seed the (possibly fresh) control-plane revocation list.
