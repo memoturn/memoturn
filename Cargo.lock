@@ -1775,6 +1775,7 @@ dependencies = [
  "memoturn-governance",
  "memoturn-kv",
  "memoturn-replication",
+ "memoturn-strata",
  "object_store",
  "reqwest",
  "ring",

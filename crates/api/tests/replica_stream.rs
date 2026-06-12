@@ -72,6 +72,7 @@ async fn spawn_node(
             std::sync::Arc::new(object_store::memory::InMemory::new()),
             "v1",
         )),
+        strata: None,
     };
     let app = memoturn_api::router(state.clone());
     tokio::spawn(async move {

@@ -59,6 +59,7 @@ async fn state_with_store(
             std::sync::Arc::new(object_store::memory::InMemory::new()),
             "v1",
         )),
+        strata: None,
     }
 }
 

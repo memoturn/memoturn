@@ -1,6 +1,6 @@
 # ADR-0011: Object-native typed storage engine (ground-up candidate)
 
-**Status:** proposed · 2026-06
+**Status:** accepted · 2026-06
 
 **Decision:** design and prototype a ground-up, object-storage-native, log-structured storage
 engine — `memoturn-strata` — that serves the **typed surfaces only** (agent memory, documents,
@@ -64,3 +64,13 @@ on this engine; rewind/PITR work at any txid in the fine window (the boundary-on
 falls away); cold wake needs no full-file restore (the ≤16 MB practical limit and the deferred
 lazy-VFS item dissolve); an idle database holds no node state at all; and the immutable-segment
 block cache never invalidates.
+
+**Update (2026-06, graduation):** the per-database engine seam landed.
+`MEMOTURN_STRATA_NAMESPACES` (`*` or a namespace list) routes the selected `{ns}--{profile}`
+databases' typed surfaces — memory, KV, docs, transcripts, branching, `/sync` — through strata
+end-to-end on the real HTTP API, sharing the registry/lease/forwarding plumbing with libSQL
+databases on the same node (disjoint object-store roots: `v1` vs `v2-strata`). `/sql` and
+standalone vector collections reject with a clear error on strata databases; verifiable-erasure
+coupons remain deferred (the engine's filtered-compaction erasure exists; the coupon/receipt
+machinery still assumes the libSQL object layout). The flag is experimental and intentionally
+absent from the published docs until those gaps close.

@@ -12,6 +12,7 @@ memoturn-docstore = { path = "../docstore" }
 memoturn-replication = { path = "../replication" }
 memoturn-control = { path = "../control" }
 memoturn-governance = { path = "../governance" }
+memoturn-strata = { path = "../strata" }
 base64.workspace = true
 bytes.workspace = true
 futures.workspace = true

@@ -61,6 +61,7 @@ async fn secured_state(dir: &std::path::Path) -> (AppState, Arc<AuthKeys>) {
             std::sync::Arc::new(object_store::memory::InMemory::new()),
             "v1",
         )),
+        strata: None,
     };
     (state, keys)
 }

@@ -395,6 +395,19 @@ async fn main() -> anyhow::Result<()> {
     // any database prefix so the trail survives deletion.
     let erasures = Arc::new(memoturn_governance::ErasureLedger::new(store.clone(), "v1"));
 
+    // The strata engine behind a flag (ADR-0011): memory profiles in the
+    // listed namespaces (`*` = all) serve their typed surfaces from the
+    // object-native engine instead of libSQL. Same object store, disjoint
+    // root — the two engines never read each other's manifests.
+    let strata =
+        memoturn_api::strata_backend::StrataHost::from_env(store.clone(), data_dir.join("strata"));
+    if let Some(_h) = &strata {
+        tracing::info!(
+            namespaces = %std::env::var("MEMOTURN_STRATA_NAMESPACES").unwrap_or_default(),
+            "strata engine enabled for selected namespaces"
+        );
+    }
+
     let state = AppState {
         node,
         registry,
@@ -411,6 +424,7 @@ async fn main() -> anyhow::Result<()> {
         embed_provenance,
         audit: audit.clone(),
         erasures,
+        strata,
     };
     // Re-arm token revocation across restarts: the registry's durable
     // tombstones re-seed the (possibly fresh) control-plane revocation list.
