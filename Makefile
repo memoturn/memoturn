@@ -3,7 +3,7 @@
 # docs.memoturn.ai lives in docs/site (cd docs/site && npm run dev|deploy); the
 # memoturn.ai marketing site lives in the private memoturn/web repo.
 
-.PHONY: help node test bench demo demos check fmt venv e2e
+.PHONY: help node test bench demo demos check fmt venv e2e up down
 
 help: ## list targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -40,3 +40,9 @@ e2e: ## SDK + MCP + examples e2e suites (TS SDK needs a node: `make node` first)
 	cd mcp && npm ci --silent && npm test
 	cd sdk/typescript && npm ci --silent && npm test
 	$(MAKE) demos
+
+up: ## local multi-node cluster (etcd + minio + 2 memoturnd) on :8080/:8081
+	docker compose up --build -d
+
+down: ## tear down the compose cluster (keeps volumes)
+	docker compose down
