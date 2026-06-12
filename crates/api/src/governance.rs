@@ -32,9 +32,9 @@ pub(crate) async fn check_egress(
         .await
         .map_err(|e| {
             tracing::warn!(ns, error = %e, "policy unavailable; refusing AI egress (fail closed)");
-            ApiError(
+            ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
-                "governance policy unavailable; refusing AI egress".into(),
+                "governance policy unavailable; refusing AI egress",
             )
         })?;
     let (rule, field) = match op {
@@ -45,7 +45,7 @@ pub(crate) async fn check_egress(
         EgressRule::Allow => Ok(()),
         // self_hosted_only is rejected for extract/ask at validation; treat a
         // racing/legacy value as deny.
-        _ => Err(ApiError(
+        _ => Err(ApiError::new(
             StatusCode::FORBIDDEN,
             format!("ai egress denied by policy (ai_egress.{field} = deny for namespace '{ns}')"),
         )),

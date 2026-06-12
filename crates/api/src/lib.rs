@@ -15,10 +15,13 @@ pub mod answer;
 pub mod audit;
 pub mod auth;
 pub mod embed;
+pub mod error;
 pub mod extract;
 pub mod governance;
 pub mod limit;
 pub mod mesh;
+
+use error::{ApiError, ErrorCode};
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
@@ -270,67 +273,56 @@ fn parse_spec(spec: &str) -> (&str, &str) {
 }
 
 // ---- error mapping ----
-
-struct ApiError(StatusCode, String);
-
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        let mut resp = (self.0, Json(json!({ "error": self.1 }))).into_response();
-        // Backpressure rejections (per-DB write-queue shed, control rate
-        // limit) tell well-behaved clients when to come back.
-        if self.0 == StatusCode::TOO_MANY_REQUESTS {
-            resp.headers_mut()
-                .insert("Retry-After", axum::http::HeaderValue::from_static("1"));
-        }
-        resp
-    }
-}
+// The envelope itself lives in `error`; these map crate errors onto it.
 
 impl From<EngineError> for ApiError {
     fn from(e: EngineError) -> Self {
-        let code = match &e {
-            EngineError::NotFound(_) => StatusCode::NOT_FOUND,
-            EngineError::AlreadyExists(_) => StatusCode::CONFLICT,
-            EngineError::Reserved => StatusCode::FORBIDDEN,
-            EngineError::Overloaded(_) => StatusCode::TOO_MANY_REQUESTS,
-            EngineError::Sql(_) => StatusCode::BAD_REQUEST,
-            EngineError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        let (status, code) = match &e {
+            // The engine's NotFound is registry-only: a database lookup.
+            EngineError::NotFound(_) => (StatusCode::NOT_FOUND, ErrorCode::DatabaseNotFound),
+            EngineError::AlreadyExists(_) => (StatusCode::CONFLICT, ErrorCode::AlreadyExists),
+            EngineError::Reserved => (StatusCode::FORBIDDEN, ErrorCode::Forbidden),
+            EngineError::Overloaded(_) => (StatusCode::TOO_MANY_REQUESTS, ErrorCode::Overloaded),
+            EngineError::Sql(_) => (StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest),
+            EngineError::Io(_) => (StatusCode::INTERNAL_SERVER_ERROR, ErrorCode::Internal),
         };
-        ApiError(code, e.to_string())
+        ApiError::new(status, e.to_string()).with_code(code)
     }
 }
 
 impl From<ReplicationError> for ApiError {
     fn from(e: ReplicationError) -> Self {
-        let code = match &e {
-            ReplicationError::BranchNotFound(_) => StatusCode::NOT_FOUND,
-            ReplicationError::NoSnapshot(_) => StatusCode::CONFLICT,
-            ReplicationError::ZombieFenced { .. } => StatusCode::CONFLICT,
-            ReplicationError::CasConflict => StatusCode::CONFLICT,
-            ReplicationError::Engine(_) => StatusCode::BAD_REQUEST,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        let (status, code) = match &e {
+            ReplicationError::BranchNotFound(_) => {
+                (StatusCode::NOT_FOUND, ErrorCode::BranchNotFound)
+            }
+            ReplicationError::NoSnapshot(_) => (StatusCode::CONFLICT, ErrorCode::Conflict),
+            ReplicationError::ZombieFenced { .. } => (StatusCode::CONFLICT, ErrorCode::Conflict),
+            ReplicationError::CasConflict => (StatusCode::CONFLICT, ErrorCode::Conflict),
+            ReplicationError::Engine(_) => (StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, ErrorCode::Internal),
         };
-        ApiError(code, e.to_string())
+        ApiError::new(status, e.to_string()).with_code(code)
     }
 }
 
 impl From<ControlError> for ApiError {
     fn from(e: ControlError) -> Self {
-        ApiError(StatusCode::SERVICE_UNAVAILABLE, e.to_string())
+        ApiError::new(StatusCode::SERVICE_UNAVAILABLE, e.to_string())
     }
 }
 
 impl From<memoturn_governance::GovernanceError> for ApiError {
     fn from(e: memoturn_governance::GovernanceError) -> Self {
         use memoturn_governance::GovernanceError::*;
-        let code = match &e {
+        let status = match &e {
             Invalid(_) => StatusCode::BAD_REQUEST,
             Loosens(_) => StatusCode::CONFLICT,
             CasConflict => StatusCode::CONFLICT,
             Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Corrupt(_) | Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
-        ApiError(code, e.to_string())
+        ApiError::new(status, e.to_string())
     }
 }
 
@@ -339,7 +331,7 @@ impl From<memoturn_docstore::DocError> for ApiError {
         use memoturn_docstore::DocError::*;
         match e {
             Engine(inner) => inner.into(),
-            other => ApiError(StatusCode::BAD_REQUEST, other.to_string()),
+            other => ApiError::new(StatusCode::BAD_REQUEST, other.to_string()),
         }
     }
 }
@@ -369,10 +361,11 @@ async fn open_local(state: &AppState, uuid: &str, branch: &str) -> Result<Arc<Db
     if !file.exists() {
         let restored = state.replicator.restore(uuid, branch, None, &file).await?;
         if restored.is_none() && branch != "main" {
-            return Err(ApiError(
+            return Err(ApiError::new(
                 StatusCode::NOT_FOUND,
                 format!("branch has no state in object storage: {branch}"),
-            ));
+            )
+            .with_code(ErrorCode::BranchNotFound));
         }
     }
     let key = format!("{uuid}@{branch}");
@@ -386,10 +379,10 @@ async fn resolve_write(state: &AppState, spec: &str) -> Result<WriteRoute, ApiEr
     let (name, branch) = parse_spec(spec);
     let rec = state.registry.get(name).await?;
     if !state.registry.branch_exists(name, branch).await? {
-        return Err(ApiError(
-            StatusCode::NOT_FOUND,
-            format!("branch not found: {branch}"),
-        ));
+        return Err(
+            ApiError::new(StatusCode::NOT_FOUND, format!("branch not found: {branch}"))
+                .with_code(ErrorCode::BranchNotFound),
+        );
     }
     let key = format!("{}@{branch}", rec.uuid);
     match state.control.resolve_owner(&key).await? {
@@ -432,10 +425,10 @@ async fn resolve_read(
     let (name, branch) = parse_spec(spec);
     let rec = state.registry.get(name).await?;
     if !state.registry.branch_exists(name, branch).await? {
-        return Err(ApiError(
-            StatusCode::NOT_FOUND,
-            format!("branch not found: {branch}"),
-        ));
+        return Err(
+            ApiError::new(StatusCode::NOT_FOUND, format!("branch not found: {branch}"))
+                .with_code(ErrorCode::BranchNotFound),
+        );
     }
     let key = format!("{}@{branch}", rec.uuid);
     let mut h = open_local(state, &rec.uuid, branch).await?;
@@ -522,7 +515,7 @@ async fn replica_ingest(
             .get(name)
             .and_then(|v| v.to_str().ok())
             .map(str::to_string)
-            .ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("missing {name}")))
+            .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, format!("missing {name}")))
     };
     let (uuid, branch, kind) = (
         hdr("Memoturn-Db-Uuid")?,
@@ -534,10 +527,7 @@ async fn replica_ingest(
     // Never let a stale push clobber writer state on the current owner.
     if let Ok(Some(owner)) = state.control.lookup(&key).await {
         if owner.node_id == state.control.identity().node_id {
-            return Err(ApiError(
-                StatusCode::CONFLICT,
-                "node owns this branch".into(),
-            ));
+            return Err(ApiError::new(StatusCode::CONFLICT, "node owns this branch"));
         }
     }
 
@@ -579,7 +569,7 @@ async fn replica_ingest(
             image
         }
         other => {
-            return Err(ApiError(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 format!("unknown kind {other}"),
             ))
@@ -647,7 +637,7 @@ async fn forward(
     let resp = req
         .send()
         .await
-        .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, format!("forward to {addr}: {e}")))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, format!("forward to {addr}: {e}")))?;
     let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let mut headers = HeaderMap::new();
     if let Some(txid) = resp.headers().get("Memoturn-Txid") {
@@ -660,7 +650,7 @@ async fn forward(
     let body = resp
         .bytes()
         .await
-        .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, e.to_string()))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, e.to_string()))?;
     Ok((status, headers, body).into_response())
 }
 
@@ -741,9 +731,9 @@ async fn create_db(
     // token covers every `{ns}--*`, so a plain database containing `--` would
     // silently fall inside a namespace's authority (see auth::Claims::covers_db).
     if req.name.contains('@') || req.name.contains('/') || req.name.contains("--") {
-        return Err(ApiError(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid database name".into(),
+            "invalid database name",
         ));
     }
     // Provisioning is metadata-only: one registry insert, no data-file I/O.
@@ -789,16 +779,16 @@ async fn create_token(
     Json(req): Json<CreateToken>,
 ) -> Result<impl IntoResponse, ApiError> {
     let auth::Auth::Enabled(keys) = &state.auth else {
-        return Err(ApiError(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "auth is disabled on this node".into(),
+            "auth is disabled on this node",
         ));
     };
     state.registry.get(&db).await?;
     let ttl = req.expires_in.unwrap_or(3600) as i64;
     let token = keys
         .mint(&db, req.scope, ttl)
-        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     // Audit token minting into the profile's namespace stream (only memory
     // databases have one; plain databases have no governance namespace).
     if let Some((ns, profile)) = db.split_once("--") {
@@ -879,7 +869,7 @@ async fn sql(
     Json(req): Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
     let parsed: SqlRequest = serde_json::from_value(req.clone())
-        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
     for stmt in &parsed.stmts {
         guard_reserved(&stmt.q)?;
     }
@@ -891,9 +881,9 @@ async fn sql(
                 .iter()
                 .all(|s| memoturn_engine::is_read_only(&s.q))
         {
-            return Err(ApiError(
+            return Err(ApiError::new(
                 StatusCode::FORBIDDEN,
-                "write scope required for mutating SQL".into(),
+                "write scope required for mutating SQL",
             ));
         }
     }
@@ -947,7 +937,7 @@ async fn branch_create(
     Json(req): Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
     let parsed: CreateBranch = serde_json::from_value(req.clone())
-        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
     let (name, _) = parse_spec(&db);
     let parent = parsed.from.as_deref().unwrap_or("main");
     let spec = format!("{name}@{parent}");
@@ -996,10 +986,7 @@ async fn branch_delete(
 ) -> Result<impl IntoResponse, ApiError> {
     let (name, _) = parse_spec(&db);
     if branch == "main" {
-        return Err(ApiError(
-            StatusCode::BAD_REQUEST,
-            "cannot delete main".into(),
-        ));
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "cannot delete main"));
     }
     let rec = state.registry.get(name).await?;
     state.registry.delete_branch(name, &branch).await?;
@@ -1024,7 +1011,7 @@ async fn branch_checkpoint(
     Json(req): Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
     let parsed: CheckpointReq = serde_json::from_value(req.clone())
-        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
     let (name, _) = parse_spec(&db);
     let spec = format!("{name}@{branch}");
     let l = route_write!(
@@ -1060,7 +1047,7 @@ async fn branch_rewind(
     Json(req): Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
     let parsed: RewindReq = serde_json::from_value(req.clone())
-        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
     let (name, _) = parse_spec(&db);
     let spec = format!("{name}@{branch}");
     let l = route_write!(
@@ -1350,7 +1337,7 @@ async fn docs_insert(
     Json(req): Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
     let parsed: DocsInsert = serde_json::from_value(req.clone())
-        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
     let l = route_write!(&state, &db, &format!("/v1/db/{db}/docs/{coll}/insert"), req);
     let (ids, txid) = memoturn_docstore::insert(&l.h, &coll, parsed.docs).await?;
     settle(&state, &l, false).await?;
@@ -1417,7 +1404,7 @@ async fn docs_update(
     Json(req): Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
     let parsed: DocsUpdate = serde_json::from_value(req.clone())
-        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
     let l = route_write!(&state, &db, &format!("/v1/db/{db}/docs/{coll}/update"), req);
     let (modified, txid) =
         memoturn_docstore::update_docs(&l.h, &coll, &parsed.filter, &parsed.update, parsed.multi)
@@ -1445,7 +1432,7 @@ async fn docs_delete(
     Json(req): Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
     let parsed: DocsDelete = serde_json::from_value(req.clone())
-        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
     let l = route_write!(&state, &db, &format!("/v1/db/{db}/docs/{coll}/delete"), req);
     let (deleted, txid) =
         memoturn_docstore::delete_docs(&l.h, &coll, &parsed.filter, parsed.multi).await?;
@@ -1470,7 +1457,7 @@ async fn docs_create_index(
     Json(req): Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
     let parsed: CreateIndexReq = serde_json::from_value(req.clone())
-        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
     let l = route_write!(
         &state,
         &db,
@@ -1496,7 +1483,7 @@ async fn vectors_upsert(
     Json(req): Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
     let parsed: VectorUpsert = serde_json::from_value(req.clone())
-        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
     let l = route_write!(&state, &db, &format!("/v1/db/{db}/vectors/{coll}"), req);
     let txid =
         memoturn_docstore::vectors::upsert(&l.h, &coll, &parsed.id, &parsed.embedding).await?;
@@ -1544,7 +1531,7 @@ async fn memory_append(
     Json(req): Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
     let parsed: AppendTurn = serde_json::from_value(req.clone())
-        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
     let l = route_write!(
         &state,
         &db,
@@ -1625,9 +1612,9 @@ fn profile_db(
     q: &HashMap<String, String>,
 ) -> Result<(String, String), ApiError> {
     if !ns_part_ok(ns) || !ns_part_ok(profile) {
-        return Err(ApiError(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid namespace or profile name".into(),
+            "invalid namespace or profile name",
         ));
     }
     let branch = q
@@ -1885,9 +1872,9 @@ async fn memories_ingest(
 ) -> Result<Response, ApiError> {
     let actor = actor.map(|e| e.0);
     let parsed: IngestReq = serde_json::from_value(req.clone())
-        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
     if parsed.memories.len() > MAX_INGEST_BATCH {
-        return Err(ApiError(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             format!("ingest batch exceeds {MAX_INGEST_BATCH} memories; split the request"),
         ));
@@ -1999,7 +1986,7 @@ async fn memories_extract(
     let actor = actor.map(|e| e.0);
     let turns_bytes = req["turns"].to_string().len();
     let parsed: ExtractReq = serde_json::from_value(req)
-        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
     let (audit_on, _) = audit_gate(&state, &ns, &profile).await;
     // Egress policy before anything else: this endpoint exists to send the
@@ -2019,15 +2006,16 @@ async fn memories_extract(
         return Err(e);
     }
     let Some(extractor) = state.extractor.clone() else {
-        return Err(ApiError(
+        return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
-            "extraction is not configured on this node (set MEMOTURN_EXTRACT_API_KEY)".into(),
-        ));
+            "extraction is not configured on this node (set MEMOTURN_EXTRACT_API_KEY)",
+        )
+        .with_code(ErrorCode::Unconfigured));
     };
     if parsed.turns.is_empty() {
-        return Err(ApiError(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "turns must not be empty".into(),
+            "turns must not be empty",
         ));
     }
 
@@ -2063,7 +2051,7 @@ async fn memories_extract(
                         .actor(actor.as_ref()),
                 );
             }
-            return Err(ApiError(StatusCode::BAD_GATEWAY, e));
+            return Err(ApiError::new(StatusCode::BAD_GATEWAY, e));
         }
     };
     let proposals: Vec<serde_json::Value> = extracted
@@ -2226,7 +2214,7 @@ async fn memories_recall(
     // profile / not yet replicated here".
     if state.registry.get(&name).await.is_err() {
         if min_txid_of(&headers).is_some_and(|m| m > 0) {
-            return Err(ApiError(StatusCode::NOT_FOUND, "profile not found".into()));
+            return Err(ApiError::new(StatusCode::NOT_FOUND, "profile not found"));
         }
         return Ok((txid_headers(0), Json(json!({ "memories": [], "txid": 0 }))).into_response());
     }
@@ -2280,10 +2268,9 @@ async fn memories_recall(
     let mut body = json!({ "memories": memories, "txid": h.txid() });
     if req.include_turns {
         let Some(emb) = &embedding else {
-            return Err(ApiError(
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "include_turns requires an embedding (or a query + a configured, policy-permitted embedder)"
-                    .into(),
+                "include_turns requires an embedding (or a query + a configured, policy-permitted embedder)",
             ));
         };
         let turns =
@@ -2322,16 +2309,16 @@ async fn memories_ask(
 ) -> Result<Response, ApiError> {
     let actor = actor.map(|e| e.0);
     let Some(answerer) = state.answerer.clone() else {
-        return Err(ApiError(
+        return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
-            "answer synthesis is not configured on this node (set MEMOTURN_ASSISTANT_API_KEY)"
-                .into(),
-        ));
+            "answer synthesis is not configured on this node (set MEMOTURN_ASSISTANT_API_KEY)",
+        )
+        .with_code(ErrorCode::Unconfigured));
     };
     if req.question.trim().is_empty() {
-        return Err(ApiError(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "question must not be empty".into(),
+            "question must not be empty",
         ));
     }
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
@@ -2435,7 +2422,7 @@ async fn memories_ask(
                         .actor(actor.as_ref()),
                 );
             }
-            return Err(ApiError(StatusCode::BAD_GATEWAY, e));
+            return Err(ApiError::new(StatusCode::BAD_GATEWAY, e));
         }
     };
     Ok((
@@ -2476,7 +2463,7 @@ async fn memories_get(
             }
             Ok((txid_headers(h.txid()), Json(memory)).into_response())
         }
-        None => Err(ApiError(StatusCode::NOT_FOUND, "memory not found".into())),
+        None => Err(ApiError::new(StatusCode::NOT_FOUND, "memory not found")),
     }
 }
 
@@ -2539,7 +2526,7 @@ async fn memories_forget(
     }
     let (deleted, txid) = forgotten?;
     if deleted == 0 {
-        return Err(ApiError(StatusCode::NOT_FOUND, "memory not found".into()));
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "memory not found"));
     }
     let mut resp_headers = txid_headers(txid);
     if purge {
@@ -2587,7 +2574,7 @@ async fn memory_sessions_list(
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
     if state.registry.get(&name).await.is_err() {
         if min_txid_of(&headers).is_some_and(|m| m > 0) {
-            return Err(ApiError(StatusCode::NOT_FOUND, "profile not found".into()));
+            return Err(ApiError::new(StatusCode::NOT_FOUND, "profile not found"));
         }
         return Ok((txid_headers(0), Json(json!({ "sessions": [], "txid": 0 }))).into_response());
     }
@@ -2677,10 +2664,7 @@ async fn profiles_list(
     Path(ns): Path<String>,
 ) -> Result<Response, ApiError> {
     if !ns_part_ok(&ns) {
-        return Err(ApiError(
-            StatusCode::BAD_REQUEST,
-            "invalid namespace".into(),
-        ));
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "invalid namespace"));
     }
     let prefix = format!("{ns}--");
     // The registry prefix scan is a byte range, so a sibling namespace whose
@@ -2714,21 +2698,18 @@ async fn create_ns_token(
     Json(req): Json<CreateNsToken>,
 ) -> Result<impl IntoResponse, ApiError> {
     let auth::Auth::Enabled(keys) = &state.auth else {
-        return Err(ApiError(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "auth is disabled on this node".into(),
+            "auth is disabled on this node",
         ));
     };
     if !ns_part_ok(&ns) {
-        return Err(ApiError(
-            StatusCode::BAD_REQUEST,
-            "invalid namespace".into(),
-        ));
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "invalid namespace"));
     }
     let ttl = req.expires_in.unwrap_or(3600) as i64;
     let token = keys
         .mint_ns(&ns, req.scope, ttl)
-        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     // Namespace-token mints gate on the namespace-level audit policy.
     if let Ok(eff) = state.governance.effective(&ns, None).await {
         if eff.audit_enabled {
@@ -2754,7 +2735,7 @@ struct PolicyPut {
 }
 
 fn parse_policy(v: serde_json::Value) -> Result<governance::Policy, ApiError> {
-    serde_json::from_value(v).map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))
+    serde_json::from_value(v).map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))
 }
 
 /// Namespace policy (platform key via the `/v1/namespaces` middleware gate).
@@ -2763,10 +2744,7 @@ async fn ns_policy_get(
     Path(ns): Path<String>,
 ) -> Result<Response, ApiError> {
     if !ns_part_ok(&ns) {
-        return Err(ApiError(
-            StatusCode::BAD_REQUEST,
-            "invalid namespace".into(),
-        ));
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "invalid namespace"));
     }
     match state.governance.get(&ns).await? {
         Some(doc) => Ok(Json(json!({
@@ -2777,7 +2755,7 @@ async fn ns_policy_get(
             "profiles": doc.profiles,
         }))
         .into_response()),
-        None => Err(ApiError(
+        None => Err(ApiError::new(
             StatusCode::NOT_FOUND,
             format!("no policy set for namespace '{ns}'"),
         )),
@@ -2790,10 +2768,7 @@ async fn ns_policy_put(
     Json(req): Json<PolicyPut>,
 ) -> Result<Response, ApiError> {
     if !ns_part_ok(&ns) {
-        return Err(ApiError(
-            StatusCode::BAD_REQUEST,
-            "invalid namespace".into(),
-        ));
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "invalid namespace"));
     }
     let policy = parse_policy(req.policy)?;
     let doc = state.governance.put_namespace(&ns, policy).await?;
@@ -2823,9 +2798,9 @@ async fn profile_policy_get(
     Path((ns, profile)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {
     if !ns_part_ok(&ns) || !ns_part_ok(&profile) {
-        return Err(ApiError(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid namespace or profile name".into(),
+            "invalid namespace or profile name",
         ));
     }
     let doc = state.governance.get(&ns).await?;
@@ -2866,10 +2841,7 @@ async fn ns_audit_read(
     Query(p): Query<AuditReadParams>,
 ) -> Result<Response, ApiError> {
     if !ns_part_ok(&ns) {
-        return Err(ApiError(
-            StatusCode::BAD_REQUEST,
-            "invalid namespace".into(),
-        ));
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "invalid namespace"));
     }
     let to_ms = p.to.unwrap_or_else(now_ms);
     let q = audit::AuditQuery {
@@ -2885,7 +2857,7 @@ async fn ns_audit_read(
         .audit
         .read_range(&ns, &q)
         .await
-        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
     Ok(Json(json!({
         "events": page.events,
         "next_cursor": page.next_cursor,
@@ -2943,7 +2915,7 @@ async fn memories_erase(
 ) -> Result<Response, ApiError> {
     let actor = actor.map(|e| e.0);
     let parsed: EraseReq = serde_json::from_value(req.clone())
-        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
     let targets = [
         parsed.memory_id.is_some(),
         parsed.topic_key.is_some(),
@@ -2953,15 +2925,15 @@ async fn memories_erase(
     .filter(|t| **t)
     .count();
     if targets != 1 {
-        return Err(ApiError(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "exactly one of memory_id, topic_key (with type), or session_id".into(),
+            "exactly one of memory_id, topic_key (with type), or session_id",
         ));
     }
     if parsed.topic_key.is_some() && parsed.mtype.is_none() {
-        return Err(ApiError(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "topic_key erasure requires type (fact | instruction)".into(),
+            "topic_key erasure requires type (fact | instruction)",
         ));
     }
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
@@ -2990,16 +2962,16 @@ async fn memories_erase(
         if let Some(id) = &parsed.memory_id {
             let (deleted, txid) = memoturn_docstore::memories::forget(&l.h, id).await?;
             if deleted == 0 {
-                return Err(ApiError(StatusCode::NOT_FOUND, "memory not found".into()));
+                return Err(ApiError::new(StatusCode::NOT_FOUND, "memory not found"));
             }
             Ok((vec![id.clone()], txid))
         } else if let (Some(key), Some(mtype)) = (&parsed.topic_key, &parsed.mtype) {
             let mtype = memoturn_docstore::memories::MemoryType::parse(mtype)?;
             let (ids, txid) = memoturn_docstore::memories::forget_topic(&l.h, mtype, key).await?;
             if ids.is_empty() {
-                return Err(ApiError(
+                return Err(ApiError::new(
                     StatusCode::NOT_FOUND,
-                    "no memories on that topic".into(),
+                    "no memories on that topic",
                 ));
             }
             Ok((ids, txid))
@@ -3113,7 +3085,7 @@ async fn erasure_get(
     let (name, _) = profile_db(&ns, &profile, &headers, &q)?;
     match state.erasures.get(&name, &id).await? {
         Some(coupon) => Ok(Json(serde_json::to_value(coupon).unwrap_or_default()).into_response()),
-        None => Err(ApiError(StatusCode::NOT_FOUND, "erasure not found".into())),
+        None => Err(ApiError::new(StatusCode::NOT_FOUND, "erasure not found")),
     }
 }
 
@@ -3292,9 +3264,9 @@ async fn profile_policy_put(
 ) -> Result<Response, ApiError> {
     let actor = actor.map(|e| e.0);
     if !ns_part_ok(&ns) || !ns_part_ok(&profile) {
-        return Err(ApiError(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid namespace or profile name".into(),
+            "invalid namespace or profile name",
         ));
     }
     let over = if req.policy.is_null() {
@@ -3365,7 +3337,7 @@ async fn kv_get(
     let (h, _, _) = resolve_read(&state, &db, min_txid_of(&headers)).await?;
     match memoturn_kv::get(&h, &ns, &key).await? {
         Some(entry) => Ok((txid_headers(entry.txid), entry.value).into_response()),
-        None => Err(ApiError(StatusCode::NOT_FOUND, "key not found".into())),
+        None => Err(ApiError::new(StatusCode::NOT_FOUND, "key not found")),
     }
 }
 
