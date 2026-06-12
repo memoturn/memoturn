@@ -420,7 +420,7 @@ async fn unsupported_surfaces_reject_cleanly_and_libsql_coexists() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
-    // Verifiable erasure coupons are deferred (plain forget works).
+    // Erasing a memory that doesn't exist is a 404, not a silent coupon.
     let (status, _) = call(
         &app,
         "POST",
@@ -428,7 +428,7 @@ async fn unsupported_surfaces_reject_cleanly_and_libsql_coexists() {
         Some(json!({"memory_id": "mem_00000000000000000000000000000000"})),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(status, StatusCode::NOT_FOUND);
 
     // An unselected namespace on the same node runs the libSQL path —
     // including the SQL surface the strata profile just got refused.
@@ -458,3 +458,181 @@ async fn unsupported_surfaces_reject_cleanly_and_libsql_coexists() {
     .await;
     assert_eq!(body["memories"].as_array().unwrap().len(), 1, "{body}");
 }
+
+#[tokio::test]
+async fn erasure_lifecycle_completes_with_receipt_on_strata() {
+    std::env::set_var("MEMOTURN_GC_GRACE_SECS", "0");
+    let dir = tempfile::tempdir().unwrap();
+    let state = test_state(dir.path()).await;
+    let app = router(state.clone());
+
+    // Two generations on one topic, each flushed — pre-erasure history
+    // exists in segments, not just the WAL tail.
+    for v in ["1 Main St", "2 Oak Ave"] {
+        let (status, body) = call(
+            &app,
+            "POST",
+            &format!("{P}/memories"),
+            Some(json!({"memories": [
+                {"type": "fact", "topic_key": "user.address", "summary": format!("lives at {v}"),
+                 "content": {"v": v}, "keywords": "address home"},
+            ]})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        call(&app, "POST", &format!("/v1/db/{DB}/sync"), Some(json!({}))).await;
+    }
+
+    // Erase the whole topic chain: 202 + a pending coupon.
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/erasures"),
+        Some(json!({"topic_key": "user.address", "type": "fact"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let erasure_id = body["erasure_id"].as_str().unwrap().to_string();
+    let forget_txid = body["txid"].as_u64().unwrap();
+
+    // Rewind the grace window, then drive the maintenance passes exactly as
+    // the node's tick orders them (same shape as the libSQL erasure test).
+    let mut coupon = state.erasures.get(DB, &erasure_id).await.unwrap().unwrap();
+    coupon.grace_until = 0;
+    state.erasures.update(&coupon).await.unwrap();
+    memoturn_api::process_erasures(&state).await;
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    memoturn_api::gc_objects(&state).await;
+    memoturn_api::finalize_erasures(&state).await;
+
+    let coupon = state.erasures.get(DB, &erasure_id).await.unwrap().unwrap();
+    assert_eq!(
+        serde_json::to_value(coupon.status).unwrap(),
+        json!("completed"),
+        "{coupon:?}"
+    );
+    let receipt = coupon.receipt.expect("signed receipt");
+    let evidence = serde_json::to_value(&receipt).unwrap();
+    assert!(
+        evidence.to_string().contains("clean"),
+        "receipt carries the listing evidence: {evidence}"
+    );
+
+    // Nothing on the topic survives — not even superseded history.
+    let (_, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/recall"),
+        Some(json!({"topic_key": "user.address", "include_superseded": true, "k": 16})),
+    )
+    .await;
+    assert_eq!(body["memories"].as_array().unwrap().len(), 0, "{body}");
+    // And the engine-level proof passes below the forget txid.
+    let host = state.strata.as_ref().unwrap();
+    let rec = state.registry.get(DB).await.unwrap();
+    let ev = host
+        .store
+        .verify_erased_before(&rec.uuid, forget_txid)
+        .await
+        .unwrap();
+    assert!(ev.clean, "{ev:?}");
+}
+
+#[tokio::test]
+async fn maintenance_sweep_reclaims_expired_tasks_and_kv() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = test_state(dir.path()).await;
+    let app = router(state.clone());
+
+    // A task that expires immediately and a KV key with zero TTL.
+    let (status, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/memories"),
+        Some(json!({"memories": [
+            {"type": "task", "summary": "ephemeral follow-up", "content": {}, "ttl": 0},
+            {"type": "fact", "topic_key": "k", "summary": "durable", "content": {"v": 1}},
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    call(
+        &app,
+        "PUT",
+        &format!("/v1/db/{DB}/kv/app/tmp?ttl=0"),
+        Some(json!("x")),
+    )
+    .await;
+
+    let swept = memoturn_api::sweep_expired(&state).await;
+    assert!(swept >= 2, "task + kv swept, got {swept}");
+    let (_, body) = call(
+        &app,
+        "POST",
+        &format!("{P}/recall"),
+        Some(json!({"query": "ephemeral follow-up durable", "include_superseded": true, "k": 16})),
+    )
+    .await;
+    let summaries: Vec<_> = body["memories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["summary"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(summaries, vec!["durable".to_string()], "{body}");
+}
+
+#[tokio::test]
+async fn background_flusher_converges_replicas_without_sync() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = test_state(dir.path()).await;
+    let app = router(state.clone());
+
+    // A Standard-mode write: acked on the local log only, shipped by the
+    // host's background flusher (no /sync, no durable header).
+    let (status, body) = call(
+        &app,
+        "PUT",
+        &format!("/v1/db/{DB_FLUSH}/kv/app/flushed"),
+        Some(json!("standard-write")),
+    )
+    .await;
+    // KV put auto-creates nothing: the profile must exist first.
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    call(
+        &app,
+        "POST",
+        "/v1/memory/acme/flush-probe/memories",
+        Some(json!({"memories": [{"type": "event", "summary": "seed", "content": {}}]})),
+    )
+    .await;
+    let (status, _) = call(
+        &app,
+        "PUT",
+        &format!("/v1/db/{DB_FLUSH}/kv/app/flushed"),
+        Some(json!("standard-write")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // A fresh replica reads from object storage alone; it must converge
+    // within a few flusher intervals (200 ms each).
+    let host = state.strata.as_ref().unwrap();
+    let rec = state.registry.get(DB_FLUSH).await.unwrap();
+    let mut converged = false;
+    for _ in 0..20 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let Ok(replica) = host.store.replica(&rec.uuid, "main").await else {
+            continue;
+        };
+        let v =
+            replica.with_view(|v| memoturn_strata::surface::kv::get(v, "app", "flushed").unwrap());
+        if v == Some(b"\"standard-write\"".to_vec()) {
+            converged = true;
+            break;
+        }
+    }
+    assert!(converged, "background flusher shipped the standard write");
+}
+
+const DB_FLUSH: &str = "acme--flush-probe";

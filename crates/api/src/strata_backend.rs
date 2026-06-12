@@ -90,11 +90,43 @@ impl StrataHost {
         } else {
             Selection::Namespaces(spec.split(',').map(|s| s.trim().to_string()).collect())
         };
-        Arc::new(Self {
+        let host = Arc::new(Self {
             selection,
             store: Store::new(object, STRATA_ROOT, data_dir),
             dbs: AsyncMutex::new(HashMap::new()),
-        })
+        });
+        host.spawn_flusher(std::time::Duration::from_millis(200));
+        host
+    }
+
+    /// The background flusher: every owned handle ships its unshipped record
+    /// tail on a debounced interval — the Standard-mode durability loop
+    /// (≤200 ms RPO window, matching the libSQL shipper's posture). Ship is a
+    /// no-op when nothing is pending; a fenced zombie's ship fails silently
+    /// by design. The task holds a weak ref and ends when the host drops.
+    fn spawn_flusher(self: &Arc<Self>, interval: std::time::Duration) {
+        let weak = Arc::downgrade(self);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(interval).await;
+                let Some(host) = weak.upgrade() else { break };
+                let dbs: Vec<Db> = host.dbs.lock().await.values().cloned().collect();
+                for db in dbs {
+                    let _ = db.ship().await;
+                }
+            }
+        });
+    }
+
+    /// Owned writer handles, keyed `uuid@branch` (the maintenance sweeps
+    /// iterate these — only branches this node owns may be swept).
+    pub async fn owned(&self) -> Vec<(String, Db)> {
+        self.dbs
+            .lock()
+            .await
+            .iter()
+            .map(|(k, d)| (k.clone(), d.clone()))
+            .collect()
     }
 
     /// Does this database run on strata? Only `{ns}--{profile}` memory
@@ -251,8 +283,9 @@ pub async fn route_read(
 }
 
 /// Submit one typed write with the request's effective durability. Durable
-/// acks ride the engine's conditional WAL-chunk PUT; Standard writes ship
-/// via a fire-and-forget flush (the prototype's background flusher).
+/// acks ride the engine's conditional WAL-chunk PUT before returning;
+/// Standard writes are acked on the local-log fsync and shipped by the
+/// host's background flusher (≤200 ms).
 pub async fn submit(
     db: &Db,
     req: WriteRequest,
@@ -263,15 +296,7 @@ pub async fn submit(
     } else {
         Durability::Standard
     };
-    let out = db.submit(req, durability).await?;
-    if !durable {
-        let db = db.clone();
-        tokio::spawn(async move {
-            // A fenced zombie's ship fails by design; nothing to surface.
-            let _ = db.ship().await;
-        });
-    }
-    Ok(out)
+    Ok(db.submit(req, durability).await?)
 }
 
 fn unexpected_output() -> ApiError {

@@ -352,18 +352,24 @@ in** with its tests, not linked. Public API mirrors today's typed call shapes so
 backend trait can swap engines per-database.
 
 **Deferred, by name:** shared node-log multiplexing; owner→replica push streams; per-segment
-posting blocks and the phase-2 HNSW snapshot; gRPC; verifiable-erasure coupons on this engine
-(the filtered-compaction erasure exists; the coupon/receipt machinery still assumes the libSQL
-object layout); the strata-side sweep loop for task/KV TTL (lazy expiry filters reads; the
-physical sweep endpoint exists but is not yet on the node maintenance tick).
+posting blocks and the phase-2 HNSW snapshot; gRPC; the snapshot-grained retention pass on the
+node tick (compaction + `prune_retention` exist in the crate; scheduling them per-database is
+not yet wired — refcount GC and erasure rewrites run today).
 
 ## Running it (experimental flag)
 
 `MEMOTURN_STRATA_NAMESPACES=*` (or a comma-separated namespace list) routes the selected
 `{ns}--{profile}` databases through strata end-to-end: memory ingest/recall/extract/forget,
-sessions, KV, docs, transcripts, fork/checkpoint/rewind, and `/sync` (= flush, the durability
-point). Registry, tokens, leases, write forwarding, governance gates, and audit are shared
-plumbing and behave identically. `/sql` and standalone vector collections return a clear error
-on strata databases. Both engines coexist per-database on one node; object-store roots are
-disjoint (`v1` vs `v2-strata`), so neither engine's maintenance passes read the other's
-manifests. See `crates/api/src/strata_backend.rs` and `crates/api/tests/strata_engine.rs`.
+sessions, KV, docs, transcripts, fork/checkpoint/rewind, `/sync` (= flush, the durability
+point), and **verifiable erasure** — the coupon flow rides the engine's filtered-compaction
+rewrite (`erase_below`), the same `process → GC → finalize` maintenance ordering, and the same
+signed receipt, with the absence proof listing the strata root's txid-named keys (no
+`secure_delete` step exists because erased history is rewritten into new objects by
+construction). Registry, tokens, leases, write forwarding, governance gates (including
+`purge_on_forget`), and audit are shared plumbing and behave identically. The node maintenance
+tick sweeps strata profiles too (task/KV TTL + policy aging over owned handles), and a
+background flusher ships each owned handle's Standard-mode tail every ≤200 ms. `/sql` and
+standalone vector collections return a clear error on strata databases. Both engines coexist
+per-database on one node; object-store roots are disjoint (`v1` vs `v2-strata`), so neither
+engine's maintenance passes read the other's manifests. See
+`crates/api/src/strata_backend.rs` and `crates/api/tests/strata_engine.rs`.
