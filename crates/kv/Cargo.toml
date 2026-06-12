@@ -3,6 +3,7 @@ name = "memoturn-kv"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 memoturn-engine = { path = "../engine" }
@@ -13,3 +14,6 @@ base64.workspace = true
 [dev-dependencies]
 tokio.workspace = true
 tempfile.workspace = true
+
+[lints]
+workspace = true

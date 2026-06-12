@@ -136,7 +136,7 @@ pub fn router(state: AppState) -> Router {
             "/v1/databases/{db}",
             axum::routing::delete(delete_db).layer(rl(control_rl.clone())),
         )
-        .route("/v1/db/{db}/sql", post(sql).layer(large.clone()))
+        .route("/v1/db/{db}/sql", post(sql).layer(large))
         .route("/v1/db/{db}/sync", post(sync_db))
         .route("/v1/db/{db}/branches", post(branch_create).get(branch_list))
         .route(
@@ -151,37 +151,34 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/db/{db}/kv/{ns}", get(kv_list))
         .route(
             "/v1/db/{db}/kv/{ns}/{key}",
-            get(kv_get)
-                .put(kv_put)
-                .delete(kv_delete)
-                .layer(large.clone()),
+            get(kv_get).put(kv_put).delete(kv_delete).layer(large),
         )
         .route(
             "/v1/db/{db}/docs/{coll}/insert",
-            post(docs_insert).layer(large.clone()),
+            post(docs_insert).layer(large),
         )
         .route("/v1/db/{db}/docs/{coll}/find", post(docs_find))
         .route(
             "/v1/db/{db}/docs/{coll}/update",
-            post(docs_update).layer(large.clone()),
+            post(docs_update).layer(large),
         )
         .route("/v1/db/{db}/docs/{coll}/delete", post(docs_delete))
         .route("/v1/db/{db}/docs/{coll}/indexes", post(docs_create_index))
         .route(
             "/v1/db/{db}/vectors/{coll}",
-            post(vectors_upsert).layer(large.clone()),
+            post(vectors_upsert).layer(large),
         )
         .route("/v1/db/{db}/vectors/{coll}/search", post(vectors_search))
         .route(
             "/v1/db/{db}/memory/{session}/turns",
-            post(memory_append).get(memory_window).layer(large.clone()),
+            post(memory_append).get(memory_window).layer(large),
         )
         .route("/v1/db/{db}/memory/{session}/search", post(memory_search))
         // Agent memory: namespace > profile > memory (docs/architecture/07).
         .route("/v1/memory/{ns}", get(profiles_list))
         .route(
             "/v1/memory/{ns}/{profile}/memories",
-            post(memories_ingest).layer(large.clone()),
+            post(memories_ingest).layer(large),
         )
         .route(
             "/v1/memory/{ns}/{profile}/memories/{id}",
@@ -191,7 +188,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/memory/{ns}/{profile}/ask", post(memories_ask))
         .route(
             "/v1/memory/{ns}/{profile}/extract",
-            post(memories_extract).layer(large.clone()),
+            post(memories_extract).layer(large),
         )
         .route(
             "/v1/memory/{ns}/{profile}/sessions",
@@ -204,11 +201,11 @@ pub fn router(state: AppState) -> Router {
         // Node-internal replica stream (NetworkPolicy/mTLS-isolated in prod).
         .route(
             "/internal/replica/subscribe",
-            post(replica_subscribe).layer(large.clone()),
+            post(replica_subscribe).layer(large),
         )
         .route(
             "/internal/replica/ingest",
-            post(replica_ingest).layer(large.clone()),
+            post(replica_ingest).layer(large),
         )
         .route(
             "/v1/databases/{db}/tokens",
@@ -1654,7 +1651,7 @@ async fn auto_embed_items(
     profile: &str,
     items: &mut [memoturn_docstore::memories::MemoryInput],
 ) {
-    let Some(embedder) = &state.embedder else {
+    let Some(_embedder) = &state.embedder else {
         return;
     };
     let pending: Vec<usize> = items
@@ -3135,7 +3132,7 @@ pub async fn process_erasures(state: &AppState) -> usize {
         if coupon.grace_until > now {
             continue;
         }
-        let Some((&ref request_branch, &t)) = coupon.forget_txid.iter().next() else {
+        let Some((request_branch, &t)) = coupon.forget_txid.iter().next() else {
             continue;
         };
         // A fully deleted database is the strongest erasure — nothing to

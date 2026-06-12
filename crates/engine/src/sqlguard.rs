@@ -102,7 +102,7 @@ pub fn guard(sql: &str) -> Result<()> {
         }
         match first {
             "attach" => return Err(EngineError::Reserved),
-            "vacuum" if words.iter().any(|w| *w == "into") => return Err(EngineError::Reserved),
+            "vacuum" if words.contains(&"into") => return Err(EngineError::Reserved),
             "pragma" if words.get(1) == Some(&"writable_schema") => {
                 return Err(EngineError::Reserved)
             }

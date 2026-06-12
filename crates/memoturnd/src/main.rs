@@ -144,14 +144,13 @@ async fn main() -> anyhow::Result<()> {
                     bytes.hash(&mut h);
                     h.finish()
                 };
-                if hash != last_hash {
-                    if store
+                if hash != last_hash
+                    && store
                         .put(&catalog_key, object_store::PutPayload::from(bytes))
                         .await
                         .is_ok()
-                    {
-                        last_hash = hash;
-                    }
+                {
+                    last_hash = hash;
                 }
             }
         });
@@ -438,7 +437,7 @@ async fn main() -> anyhow::Result<()> {
                 // object storage); run them roughly every 10 minutes rather
                 // than every tick. Retention first: it dereferences expired
                 // history that a later GC pass then reclaims.
-                if tick % 20 == 0 {
+                if tick.is_multiple_of(20) {
                     // Erasures first: they dereference history that the same
                     // pass's GC then physically reclaims, and the verifier
                     // (which counts raw keys) runs after GC.

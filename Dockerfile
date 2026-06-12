@@ -1,5 +1,5 @@
 # memoturnd node image
-FROM rust:1-slim AS build
+FROM rust:1.96-slim AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates

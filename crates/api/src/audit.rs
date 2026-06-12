@@ -215,7 +215,9 @@ impl AuditEvent {
 }
 
 enum Msg {
-    Event(AuditEvent),
+    /// Boxed: events are much larger than the flush ack, and the channel
+    /// moves `Msg` values around.
+    Event(Box<AuditEvent>),
     /// Flush every buffer now and ack — graceful shutdown and tests.
     Flush(oneshot::Sender<()>),
 }
@@ -273,7 +275,7 @@ impl AuditSink {
     pub fn emit(&self, mut evt: AuditEvent) {
         let Some(tx) = &self.tx else { return };
         evt.node = self.node_id.clone();
-        if tx.try_send(Msg::Event(evt)).is_err() {
+        if tx.try_send(Msg::Event(Box::new(evt))).is_err() {
             let n = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
             if n.is_power_of_two() {
                 tracing::warn!(dropped = n, "audit channel full; events dropped");
@@ -531,7 +533,7 @@ async fn flusher(
             msg = rx.recv() => match msg {
                 Some(Msg::Event(evt)) => {
                     let buf = buffers.entry(evt.ns.clone()).or_default();
-                    buf.push(evt);
+                    buf.push(*evt);
                     if buf.len() >= FLUSH_AT_EVENTS {
                         let ns = buffers.iter().find(|(_, b)| b.len() >= FLUSH_AT_EVENTS)
                             .map(|(ns, _)| ns.clone());

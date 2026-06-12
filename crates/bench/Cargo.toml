@@ -3,6 +3,7 @@ name = "memoturn-bench"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 [[bin]]
 name = "memoturn-bench"
@@ -18,3 +19,6 @@ tokio.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 tempfile.workspace = true
+
+[lints]
+workspace = true

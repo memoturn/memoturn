@@ -20,7 +20,7 @@ pub enum EgressOp {
 /// been loadable (cold cache + unreachable store) the request is refused —
 /// the right posture for a compliance control, and with a warm cache the
 /// window is cold-boot-only.
-pub async fn check_egress(
+pub(crate) async fn check_egress(
     state: &AppState,
     ns: &str,
     profile: &str,

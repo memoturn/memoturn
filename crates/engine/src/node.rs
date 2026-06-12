@@ -293,7 +293,7 @@ impl DbHandle {
             let mut q = self.write_queue.lock().expect("write queue poisoned");
             if q.len() >= self.queue_cap {
                 let shed = self.shed_total.fetch_add(1, Ordering::Relaxed) + 1;
-                if shed == 1 || shed % 100 == 0 {
+                if shed == 1 || shed.is_multiple_of(100) {
                     tracing::warn!(
                         db = %self.path.display(),
                         pending = q.len(),
