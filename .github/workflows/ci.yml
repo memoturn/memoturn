@@ -1,0 +1,79 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  # Everything that needs a live memoturnd: one debug build, one shared
+  # node, three suites (TS SDK, Python SDK, examples).
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: e2e
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: cargo build -p memoturnd
+      - name: start node
+        run: |
+          mkdir -p /tmp/mt-data
+          MEMOTURN_DATA_DIR=/tmp/mt-data MEMOTURN_LISTEN=127.0.0.1:8080 \
+            MEMOTURN_SINGLE_NODE=1 ./target/debug/memoturnd &
+          for i in $(seq 1 60); do
+            curl -fsS localhost:8080/health && break
+            sleep 0.5
+          done
+          curl -fsS localhost:8080/health
+      - name: typescript sdk e2e
+        run: cd sdk/typescript && npm ci && npm test
+        env:
+          MEMOTURN_URL: http://127.0.0.1:8080
+      - run: pip install -r examples/requirements.txt
+      - name: python sdk e2e
+        run: python sdk/python/tests/e2e.py
+        env:
+          MEMOTURN_URL: http://127.0.0.1:8080
+      - name: examples e2e (reuses the running node)
+        run: python3 examples/run_e2e.py
+        env:
+          MEMOTURN_URL: http://127.0.0.1:8080
+
+  # No memoturnd needed: MCP tests stub the upstream; docs site just builds.
+  node-surfaces:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: mcp tests
+        run: cd mcp && npm ci && npm test
+      - name: docs site build
+        run: cd docs/site && npm ci && npm run build
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: helm lint deploy/helm/memoturn
