@@ -23,8 +23,28 @@ mt = Memoturn(
 )
 ```
 
-Errors raise `MemoturnError` with the HTTP `status` attached. Mutating calls include the
-response's `txid` — see [consistency](/consistency/).
+Errors raise `MemoturnError` with the HTTP `status` and a stable machine-readable `code`
+(`branch_not_found`, `unconfigured`, `overloaded`, … — see [errors](/errors/)). Lookups by id
+return `None` on 404 (`get`, `erasure`, `kv.get`) and `forget` returns `False`. Mutating calls
+include the response's `txid` — see [consistency](/consistency/).
+
+Both clients are context managers; the package ships `py.typed` with `TypedDict` results
+(plain dicts at runtime, typed for mypy/IDEs).
+
+### Async
+
+`AsyncMemoturn` mirrors the sync surface method-for-method over `httpx.AsyncClient`:
+
+```python
+from memoturn import AsyncMemoturn
+
+async with AsyncMemoturn(url, token=token) as mt:
+    bob = mt.memory("acme", "bob")
+    await bob.ingest([...])
+    hits = await bob.recall(query="…")
+    async for event in mt.audit_events("acme"):
+        ...
+```
 
 ## Memory API
 

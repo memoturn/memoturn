@@ -44,6 +44,7 @@ export default defineConfig({
 					label: "Integrations",
 					items: [
 						{ label: "MCP server", slug: "mcp" },
+						{ label: "Ask & answer synthesis", slug: "ask" },
 						{ label: "Server-side extraction", slug: "extraction" },
 						{ label: "Auto-embedding", slug: "embeddings" },
 					],
@@ -56,6 +57,8 @@ export default defineConfig({
 						{ label: "Security & tokens", slug: "security" },
 						{ label: "Scaling & tiering", slug: "scaling" },
 						{ label: "Observability", slug: "observability" },
+						{ label: "Point-in-time recovery", slug: "pitr" },
+						{ label: "Troubleshooting", slug: "troubleshooting" },
 					],
 				},
 				{
@@ -65,6 +68,7 @@ export default defineConfig({
 						{ label: "CLI", slug: "cli" },
 						{ label: "TypeScript SDK", slug: "sdk-typescript" },
 						{ label: "Python SDK", slug: "sdk-python" },
+						{ label: "Errors", slug: "errors" },
 					],
 				},
 				{ label: "Roadmap", slug: "roadmap" },

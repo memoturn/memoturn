@@ -3,7 +3,7 @@
 # docs.memoturn.ai lives in docs/site (cd docs/site && npm run dev|deploy); the
 # memoturn.ai marketing site lives in the private memoturn/web repo.
 
-.PHONY: help node test bench demo demos check fmt venv e2e up down
+.PHONY: help node test bench demo demos check fmt venv e2e up down release-check
 
 help: ## list targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -46,3 +46,16 @@ up: ## local multi-node cluster (etcd + minio + 2 memoturnd) on :8080/:8081
 
 down: ## tear down the compose cluster (keeps volumes)
 	docker compose down
+
+release-check: ## verify all surfaces carry the same version (lockstep 0.x)
+	@v=$$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2); \
+	ok=1; \
+	for spec in \
+	  "sdk/typescript/package.json:\"version\": \"$$v\"" \
+	  "mcp/package.json:\"version\": \"$$v\"" \
+	  "sdk/python/pyproject.toml:version = \"$$v\"" \
+	  "deploy/helm/memoturn/Chart.yaml:version: $$v"; do \
+	  f=$${spec%%:*}; pat=$${spec#*:}; \
+	  grep -qF "$$pat" $$f || { echo "version drift: $$f does not carry $$v"; ok=0; }; \
+	done; \
+	[ $$ok -eq 1 ] && echo "release-check: all surfaces at $$v"
