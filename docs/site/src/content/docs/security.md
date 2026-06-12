@@ -79,6 +79,9 @@ The SQL escape hatch (`POST /v1/db/{db}/sql`) is walled in:
   gets `403`.
 - **No sandbox escapes.** `ATTACH`, `VACUUM INTO`, and `PRAGMA writable_schema` are rejected.
   Benign read-only PRAGMAs (`integrity_check`, `table_info`) still work.
+- **No transaction control.** `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, and `RELEASE` are
+  rejected (trigger bodies excepted): a statement batch is already one atomic unit, and the
+  engine owns transaction boundaries.
 
 ## Token revocation
 

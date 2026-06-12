@@ -44,7 +44,8 @@ profiles is structural — no operation touches two profiles. Full semantics:
 
 ### Ingest
 
-One batch is one transaction and one `txid`. Memory IDs are content-addressed, so re-ingesting
+A batch is atomic and returns one `txid`; concurrent batches may group-commit and share a
+`txid`. Memory IDs are content-addressed, so re-ingesting
 the same memory is a no-op reported as `duplicate`. Embeddings are bring-your-own by default;
 with node-side [auto-embedding](/embeddings/) enabled, omitted embeddings are filled in outside
 the write path.
@@ -157,7 +158,9 @@ POST /v1/db/agent-42/sql
 
 User SQL cannot reference reserved `__memoturn_` tables (KV, docs, memories, transcripts),
 however the name is quoted. Sandbox escapes — `ATTACH`, `VACUUM INTO`, `PRAGMA writable_schema` —
-are rejected; benign read-only PRAGMAs (`integrity_check`, `table_info`) pass. Mutating
+are rejected, and so is transaction control (`BEGIN`, `COMMIT`, `SAVEPOINT`, …; trigger bodies
+are fine): each statement batch is already one atomic unit, and the engine owns transaction
+boundaries. Benign read-only PRAGMAs (`integrity_check`, `table_info`) pass. Mutating
 statements need `write` scope; a read token gets `403`.
 
 ### KV

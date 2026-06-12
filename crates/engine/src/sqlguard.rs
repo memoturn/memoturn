@@ -46,14 +46,24 @@ fn lex(sql: &str) -> Result<Vec<Sig>> {
         .collect())
 }
 
+/// Statement-leading keywords that drive SQLite transaction control. The
+/// engine owns transactions — and group-commits concurrent requests into one
+/// transaction with per-request savepoints (`DbHandle`), so a user-issued
+/// `COMMIT`/`ROLLBACK`/`SAVEPOINT` could break other requests' atomicity, not
+/// just its own. (`end` is COMMIT's alias; trigger bodies are handled below.)
+const TXN_CONTROL: &[&str] = &["begin", "commit", "end", "rollback", "savepoint", "release"];
+
 pub fn guard(sql: &str) -> Result<()> {
-    // Fast path: nothing that could touch a reserved table or escape the
-    // sandbox. `attach`/`vacuum`/`pragma` are cheap to scan for and rare.
+    // Fast path: nothing that could touch a reserved table, escape the
+    // sandbox, or control transactions. The txn-control words make this scan
+    // hit more often (`end` matches every CASE expression), but a false hit
+    // only costs the lexer pass below.
     let lower = sql.to_ascii_lowercase();
     if !lower.contains(RESERVED_PREFIX)
         && !lower.contains("attach")
         && !lower.contains("vacuum")
         && !lower.contains("pragma")
+        && !TXN_CONTROL.iter().any(|w| lower.contains(w))
     {
         return Ok(());
     }
@@ -68,7 +78,11 @@ pub fn guard(sql: &str) -> Result<()> {
         return Err(EngineError::Reserved);
     }
 
-    // Per-statement sandbox-escape checks, keyed on the leading keyword.
+    // Per-statement checks, keyed on the leading keyword. `CREATE TRIGGER …
+    // BEGIN body; END` carries semicolons inside the body, so its segments
+    // would otherwise look statement-leading; while inside a trigger body
+    // only the closing `END` is treated specially.
+    let mut in_trigger = false;
     for stmt in sig.split(|s| matches!(s, Sig::Semi)) {
         let words: Vec<&str> = stmt
             .iter()
@@ -80,11 +94,25 @@ pub fn guard(sql: &str) -> Result<()> {
         let Some(&first) = words.first() else {
             continue;
         };
+        if in_trigger {
+            if first == "end" {
+                in_trigger = false;
+            }
+            continue;
+        }
         match first {
             "attach" => return Err(EngineError::Reserved),
             "vacuum" if words.iter().any(|w| *w == "into") => return Err(EngineError::Reserved),
             "pragma" if words.get(1) == Some(&"writable_schema") => {
                 return Err(EngineError::Reserved)
+            }
+            w if TXN_CONTROL.contains(&w) => {
+                return Err(EngineError::Sql(
+                    "transaction control is managed by the engine".into(),
+                ))
+            }
+            "create" if words.contains(&"trigger") && words.contains(&"begin") => {
+                in_trigger = true;
             }
             _ => {}
         }
@@ -140,6 +168,43 @@ mod tests {
         assert!(guard("PRAGMA writable_schema = ON").is_err());
         // Plain VACUUM (no file target) is harmless and allowed.
         assert!(guard("VACUUM").is_ok());
+    }
+
+    #[test]
+    fn blocks_transaction_control_but_not_lookalikes() {
+        // The engine group-commits concurrent requests into one transaction;
+        // user transaction control would break round atomicity.
+        assert!(guard("COMMIT").is_err());
+        assert!(guard("END").is_err());
+        assert!(guard("BEGIN").is_err());
+        assert!(guard("BEGIN IMMEDIATE").is_err());
+        assert!(guard("ROLLBACK").is_err());
+        assert!(guard("SAVEPOINT sp1").is_err());
+        assert!(guard("RELEASE sp1").is_err());
+        assert!(guard("SELECT 1; COMMIT").is_err());
+        assert!(guard("INSERT INTO t VALUES (1); ROLLBACK TO sp1").is_err());
+        // Lookalikes inside expressions and identifiers stay allowed.
+        assert!(guard("SELECT CASE WHEN x > 1 THEN 'a' ELSE 'b' END FROM t").is_ok());
+        assert!(guard("SELECT * FROM commits WHERE released = 1").is_ok());
+        assert!(guard("SELECT * FROM t WHERE name = 'Wendy'").is_ok());
+        // Trigger bodies legitimately contain BEGIN … stmt; … END.
+        assert!(guard(
+            "CREATE TRIGGER trg AFTER INSERT ON t BEGIN \
+             UPDATE t2 SET n = n + 1; INSERT INTO log VALUES (new.id); END;"
+        )
+        .is_ok());
+        // …but a trigger cannot smuggle a reserved table.
+        assert!(guard(
+            "CREATE TRIGGER trg AFTER INSERT ON t BEGIN \
+             DELETE FROM __memoturn_kv; END;"
+        )
+        .is_err());
+        // Statements after a closed trigger body are checked again.
+        assert!(guard(
+            "CREATE TRIGGER trg AFTER INSERT ON t BEGIN \
+             UPDATE t2 SET n = 1; END; COMMIT"
+        )
+        .is_err());
     }
 
     #[test]

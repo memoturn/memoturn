@@ -58,7 +58,8 @@ The request surface is bounded by default; every knob is per node.
 | `MEMOTURN_REQUEST_TIMEOUT` | `30` | Per-request wall-clock budget, in seconds. |
 | `MEMOTURN_MAX_BODY_BYTES` | `33554432` (32 MiB) | Body cap for data-bearing writes; larger requests return `413`. |
 | `MEMOTURN_MAX_CONCURRENCY` | `1024` | Global in-flight request cap. |
-| `MEMOTURN_CONTROL_RATE` | `10` | Control-endpoint requests per second (with burst headroom); sustained overruns return `429`. |
+| `MEMOTURN_CONTROL_RATE` | `10` | Control-endpoint requests per second (with burst headroom); sustained overruns return `429` with `Retry-After`. |
+| `MEMOTURN_WRITE_QUEUE_DEPTH` | `256` | Per-database write-queue cap. Concurrent writes to one database group-commit into shared rounds; writes arriving past this many pending return `429` with `Retry-After` instead of queueing without bound — see [Scaling](/scaling/#the-per-database-write-ceiling). |
 | `MEMOTURN_DURABILITY` | standard | `durable` acks every write only after its segment ships and the manifest CAS lands in object storage. The default acks on local WAL fsync and ships asynchronously. A request can escalate itself with the `Memoturn-Durability: durable` header — see [Consistency & txid](/consistency/#durability-modes). |
 | `MEMOTURN_GC_GRACE_SECS` | `600` | Grace window before the refcount object GC reclaims unreferenced segments and manifests. |
 

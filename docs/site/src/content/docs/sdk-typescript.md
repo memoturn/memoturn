@@ -36,7 +36,7 @@ and [memories](/memories/).
 ```ts
 const alice = mt.memory("acme", "alice");
 
-// Idempotent batch ingest; one batch = one transaction = one txid.
+// Idempotent batch ingest; the batch is atomic and returns one txid.
 const { results, txid } = await alice.ingest([
   { type: "fact", topicKey: "user.diet", summary: "vegetarian since 2024",
     content: { diet: "vegetarian" }, keywords: "food preference", embedding },

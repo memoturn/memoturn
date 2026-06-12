@@ -87,6 +87,7 @@ pub async fn enforce(limiter: RateLimit, req: Request, next: Next) -> Response {
     } else {
         (
             StatusCode::TOO_MANY_REQUESTS,
+            [("Retry-After", "1")],
             axum::Json(serde_json::json!({ "error": "rate limit exceeded" })),
         )
             .into_response()

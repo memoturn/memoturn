@@ -42,8 +42,12 @@ Available today on every node:
 - **`txid` on every read response** — replication lag is directly observable from the client
   side by comparing writer and replica txids (see [Consistency](/consistency/)).
 - **Request-surface guardrails** — body cap (`413`), request timeout, global concurrency cap,
-  and a control-endpoint rate limit (`429`), all tunable per node — see
+  a control-endpoint rate limit (`429`), and a per-database write-queue cap (`429` +
+  `Retry-After`), all tunable per node — see
   [Configuration](/configuration/#request-limits--durability).
+- **Write-pressure logs** — a database whose write queue is backing up (or shedding) gets a
+  per-database `write pressure` warning every 30 s with queue depth, sheds, and the group-commit
+  coalescing factor — see [Scaling](/scaling/#the-per-database-write-ceiling).
 
 ## Measured: prototype, single node
 

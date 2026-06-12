@@ -12,7 +12,7 @@ mod value;
 mod wal;
 
 pub use libsql_engine::LibsqlEngine;
-pub use node::{DbHandle, NodeConfig, NodeEngine, Stmt};
+pub use node::{DbHandle, NodeConfig, NodeEngine, Stmt, WriteStats};
 pub use registry::{BranchRecord, DbRecord, Registry};
 pub use value::{QueryResult, Value};
 pub use wal::{CaptureOutcome, WalCapture, WalCursor};
@@ -31,6 +31,10 @@ pub enum EngineError {
     AlreadyExists(String),
     #[error("reserved table access denied")]
     Reserved,
+    /// Per-database write queue is full — the hot-profile backpressure
+    /// signal (HTTP 429 + Retry-After upstream). Carries the queue depth.
+    #[error("database write queue full ({0} writes pending); retry later")]
+    Overloaded(usize),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }

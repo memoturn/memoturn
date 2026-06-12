@@ -78,17 +78,22 @@ Every data-plane route assumes hostile input:
   a false positive, because the check keys off identifier tokens. Read-scoped tokens are held to
   read-only statements by conservative keyword classification: a mutating keyword anywhere in the
   statement — including inside a CTE body — fails closed. `ATTACH`, `VACUUM INTO`, and
-  `PRAGMA writable_schema` escapes are forbidden; benign PRAGMAs (`integrity_check`,
-  `table_info`, …) pass.
+  `PRAGMA writable_schema` escapes are forbidden, as is transaction control (`BEGIN`, `COMMIT`,
+  `SAVEPOINT`, …; trigger bodies excepted) — the engine owns transactions and group-commits
+  concurrent writes ([01](01-storage-engine.md#per-database-write-ceiling)); benign PRAGMAs
+  (`integrity_check`, `table_info`, …) pass.
 - **Query caps:** document filters are depth-capped (32) and `$in`/`$nin` arrays size-capped
   (1000 items); any client-requested result count (`limit`, recall/search `k`) is clamped to
-  1000; memory ingest accepts at most 1000 memories per batch (one batch = one transaction, so an
+  1000; memory ingest accepts at most 1000 memories per batch (a batch is one atomic unit, so an
   unbounded batch is an unbounded lock hold).
 - **Request surface:** control/query bodies cap at 1 MiB and data-bearing writes at 32 MiB
   (`MEMOTURN_MAX_BODY_BYTES`; oversize → 413 before allocation); per-request wall clock
   `MEMOTURN_REQUEST_TIMEOUT` (default 30 s); a global in-flight cap `MEMOTURN_MAX_CONCURRENCY`
-  (default 1024); and a shared token bucket over the credential/control endpoints,
-  `MEMOTURN_CONTROL_RATE` (default 10 req/s, 429 on excess). CORS is deny-by-default.
+  (default 1024); a shared token bucket over the credential/control endpoints,
+  `MEMOTURN_CONTROL_RATE` (default 10 req/s, 429 on excess); and a per-database write-queue cap,
+  `MEMOTURN_WRITE_QUEUE_DEPTH` (default 256 — writes to a saturated database are shed with 429 +
+  `Retry-After`, see [01](01-storage-engine.md#per-database-write-ceiling)). CORS is
+  deny-by-default.
 
 ## Memory
 

@@ -61,6 +61,11 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(50_000);
+    let write_queue_cap: usize = std::env::var("MEMOTURN_WRITE_QUEUE_DEPTH")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(256);
     let store_url = std::env::var("MEMOTURN_OBJECT_STORE")
         .unwrap_or_else(|_| format!("file://{}", data_dir.join("objects").display()));
 
@@ -70,10 +75,42 @@ async fn main() -> anyhow::Result<()> {
         NodeConfig {
             data_dir: data_dir.clone(),
             hot_cap,
+            write_queue_cap,
             ..Default::default()
         },
     ));
     let store = build_object_store(&store_url)?;
+
+    {
+        // Write-pressure reporter (docs/architecture/01, "Per-database write
+        // ceiling" layer 1): surface per-DB queueing and sheds in the logs so
+        // a hot database saturating its single writer is visible, not just a
+        // mystery latency cliff. Quiet when there is nothing to report.
+        let node = node.clone();
+        tokio::spawn(async move {
+            let mut last_shed: std::collections::HashMap<String, u64> = Default::default();
+            loop {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                let mut next = std::collections::HashMap::new();
+                for (key, h) in node.hot_entries() {
+                    let s = h.write_stats();
+                    let prev = last_shed.get(&key).copied().unwrap_or(0);
+                    if s.queued > 0 || s.shed > prev {
+                        tracing::warn!(
+                            db = %key,
+                            queued = s.queued,
+                            shed_30s = s.shed - prev,
+                            writes = s.writes,
+                            commit_rounds = s.rounds,
+                            "write pressure"
+                        );
+                    }
+                    next.insert(key, s.shed);
+                }
+                last_shed = next;
+            }
+        });
+    }
 
     // Prototype catalog durability: nodes are disposable (emptyDir), so the
     // node-local catalog is restored from / backed up to object storage. In

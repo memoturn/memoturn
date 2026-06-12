@@ -65,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
             data_dir: dir.path().to_path_buf(),
             hot_cap: 1000,
             hot_idle: Duration::from_secs(300),
+            ..Default::default()
         },
     ));
     let registry =

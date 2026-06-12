@@ -29,6 +29,7 @@ async fn spawn_node(
             data_dir: dir.path().to_path_buf(),
             hot_cap: 100,
             hot_idle: Duration::from_secs(60),
+            ..Default::default()
         },
     ));
     let registry = Arc::new(
