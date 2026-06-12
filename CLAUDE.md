@@ -49,7 +49,9 @@ from the platform key; if unset it is derived from the signing key (fleet-consis
 `MEMOTURN_ETCD` the node refuses to start when it looks multi-node (auth on or a non-loopback
 `MEMOTURN_ADVERTISE`) unless `MEMOTURN_SINGLE_NODE=1`. Request-surface and durability knobs:
 `MEMOTURN_REQUEST_TIMEOUT` (s, 30), `MEMOTURN_MAX_BODY_BYTES` (32 MiB), `MEMOTURN_MAX_CONCURRENCY`
-(1024), `MEMOTURN_CONTROL_RATE` (control-endpoint req/s, 10), `MEMOTURN_DURABILITY` (`durable`
+(1024), `MEMOTURN_CONTROL_RATE` (control-endpoint req/s, 10), `MEMOTURN_WRITE_QUEUE_DEPTH`
+(per-database write-queue cap, 256 — writes past it are shed with 429 + Retry-After; concurrent
+writes to one DB group-commit into shared-txid rounds), `MEMOTURN_DURABILITY` (`durable`
 ships+CAS before acking the txid; per-request `Memoturn-Durability: durable` header escalates),
 `MEMOTURN_GC_GRACE_SECS` (refcount object GC grace window, 600), `MEMOTURN_PITR_RETENTION_SECS`
 (fine-grained PITR window, 86400; 0 disables) and `MEMOTURN_PITR_SNAPSHOT_RETENTION_SECS`

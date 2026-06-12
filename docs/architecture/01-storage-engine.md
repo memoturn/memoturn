@@ -156,15 +156,22 @@ fleet capacity changes that: the fleet scales *across* databases, never *within*
 
 The ceiling is managed in layers, cheapest first:
 
-1. **Make saturation visible, not mysterious** *(planned)*. Per-DB write-rate and apply-queue
-   metrics; past a queue-depth threshold the node sheds that DB's writes with `429` +
-   `Retry-After` instead of letting latency collapse. (`MEMOTURN_MAX_CONCURRENCY` is node-global
-   and protects the node, not the hot DB.)
-2. **Group commit** *(planned, node-local)*. Coalesce concurrently arriving write requests for
-   the same DB into one transaction-and-fsync round: each request becomes a savepoint (per-
-   request atomicity and error reporting preserved), the WAL fsync amortizes across all of them,
-   and they share a `txid`. Raises the ceiling by roughly the coalescing factor with no invariant
-   touched — commit point, epoch fencing, and segment shipping are unchanged.
+1. **Make saturation visible, not mysterious** *(implemented)*. Each handle counts writes,
+   commit rounds, sheds, and current queue depth (`DbHandle::write_stats`); `memoturnd` logs a
+   per-DB "write pressure" line every 30 s when a queue is nonempty or writes were shed. Past
+   `MEMOTURN_WRITE_QUEUE_DEPTH` pending writes (default 256) the node sheds that DB's writes
+   with `429` + `Retry-After` (`EngineError::Overloaded`) instead of letting latency collapse.
+   (`MEMOTURN_MAX_CONCURRENCY` is node-global and protects the node, not the hot DB.)
+2. **Group commit** *(implemented, node-local)*. Concurrently arriving write requests for the
+   same DB coalesce into one transaction: callers queue, the caller that wins the write lock
+   drains a bounded round (≤64 requests), brackets each request in a savepoint (per-request
+   atomicity and error reporting preserved — a failed request rolls back alone), bumps the txid
+   once, and commits once. Participants share the round's `txid`; per-commit overhead (commit
+   record, meta-page write, fsync in Durable mode) amortizes across the round. Raises the
+   ceiling by roughly the coalescing factor with no invariant touched — commit point, epoch
+   fencing, and segment shipping are unchanged. Corollary: user SQL must never issue
+   transaction control (`COMMIT`, `SAVEPOINT`, …) inside a round, so the SQL guard rejects
+   statement-leading transaction-control keywords (trigger bodies excepted).
 3. **Engine headroom: the Turso swap** ([ADR-0001](../adr/0001-libsql-as-library.md)). Turso's
    MVCC / concurrent-writes work lifts intra-handle serialization on the owner node. Behind the
    `SqlEngine` trait this is an upgrade, not a redesign — still one owner node, still one

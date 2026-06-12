@@ -53,6 +53,23 @@ agent scale. Instead:
 
 Each cell caps its active set; beyond that you add cells, never grow etcd.
 
+## The per-database write ceiling
+
+Single-writer semantics mean one database's write throughput is bounded by one node's writer —
+the fleet scales *across* databases, never *within* one. Reads don't share the cap (replicas and
+caches absorb them), and per-user profiles sit far below it. Two mechanisms manage the boundary:
+
+- **Group commit.** Concurrent writes to the same database coalesce into one transaction:
+  each request keeps its own atomicity (a failed one rolls back alone) and they commit
+  together, sharing the resulting `txid`. Per-commit overhead amortizes across the round, so
+  bursty fan-in — many agents writing into one shared profile — raises throughput by roughly
+  the coalescing factor automatically.
+- **Backpressure, not latency collapse.** Past `MEMOTURN_WRITE_QUEUE_DEPTH` pending writes
+  (default 256), further writes to that database return `429` with `Retry-After`, and the node
+  logs per-database write-pressure lines (queue depth, sheds, coalescing factor). Sustained
+  `429`s on one profile are a data-modeling signal: split heavy independent writers into
+  separate [profiles](/profiles/).
+
 Multi-node is enforced, not assumed: without `MEMOTURN_ETCD`, a node refuses to start when it
 looks multi-node unless `MEMOTURN_SINGLE_NODE=1`, and the Helm chart refuses `replicas > 1`
 without etcd (see [Deployment](/deployment/)). The lease lifecycle is integration-tested against

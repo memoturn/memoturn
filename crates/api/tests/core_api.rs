@@ -19,6 +19,7 @@ async fn test_state(dir: &std::path::Path, hot_cap: u64) -> AppState {
             data_dir: dir.to_path_buf(),
             hot_cap,
             hot_idle: Duration::from_secs(60),
+            ..Default::default()
         },
     ));
     let registry = Arc::new(

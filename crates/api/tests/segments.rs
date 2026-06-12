@@ -24,6 +24,7 @@ async fn state_with_store(
             data_dir: dir.to_path_buf(),
             hot_cap: 100,
             hot_idle: Duration::from_secs(60),
+            ..Default::default()
         },
     ));
     let registry = Arc::new(

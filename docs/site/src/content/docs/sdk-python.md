@@ -35,7 +35,7 @@ and [memories](/memories/).
 ```python
 alice = mt.memory("acme", "alice")
 
-# Idempotent batch ingest; one batch = one transaction = one txid.
+# Idempotent batch ingest; the batch is atomic and returns one txid.
 res = alice.ingest([
     {"type": "fact", "topic_key": "user.diet", "summary": "vegetarian since 2024",
      "content": {"diet": "vegetarian"}, "keywords": "food preference",

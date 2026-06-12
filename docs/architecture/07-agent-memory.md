@@ -83,7 +83,9 @@ and task TTLs ([08](08-data-governance.md), ADR-0010).
 `revived` means the exact memory existed but was superseded and is now active again (re-asserting
 an old fact reinstates it); `duplicate` is reserved for re-ingesting an already-active memory.
 
-One batch = one transaction = one `txid`, so batches cap at 1000 memories (an unbounded batch
+A batch is atomic and reports one `txid` — concurrent batches may group-commit into a shared
+transaction and shared `txid` ([01](01-storage-engine.md#per-database-write-ceiling)); per-batch
+atomicity is preserved by savepoints. Batches cap at 1000 memories (an unbounded batch
 would be an unbounded lock hold — chunk larger loads); extraction (deciding *what* is memorable)
 is the client's job by default — the same BYO posture as embeddings. Raw turns still flow through the
 transcript API (`/v1/db/{db}/memory/{session}/turns`) verbatim, so nothing is lost between

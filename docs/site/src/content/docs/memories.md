@@ -103,8 +103,9 @@ and [Python](/sdk-python/) SDKs take a client-level `source` applied to every in
 
 ## Batch ingest
 
-`POST /v1/memory/{ns}/{profile}/memories` takes a batch; one batch is one transaction and returns
-one `txid`. Batches cap at 1,000 memories per request. The profile [auto-creates](/profiles/) on
+`POST /v1/memory/{ns}/{profile}/memories` takes a batch; a batch is atomic and returns one
+`txid` (concurrent batches may group-commit and share a `txid`). Batches cap at 1,000 memories
+per request. The profile [auto-creates](/profiles/) on
 first ingest.
 
 ```json

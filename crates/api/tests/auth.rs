@@ -24,6 +24,7 @@ async fn secured_state(dir: &std::path::Path) -> (AppState, Arc<AuthKeys>) {
             data_dir: dir.to_path_buf(),
             hot_cap: 100,
             hot_idle: Duration::from_secs(60),
+            ..Default::default()
         },
     ));
     let registry = Arc::new(

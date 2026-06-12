@@ -278,7 +278,14 @@ struct ApiError(StatusCode, String);
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (self.0, Json(json!({ "error": self.1 }))).into_response()
+        let mut resp = (self.0, Json(json!({ "error": self.1 }))).into_response();
+        // Backpressure rejections (per-DB write-queue shed, control rate
+        // limit) tell well-behaved clients when to come back.
+        if self.0 == StatusCode::TOO_MANY_REQUESTS {
+            resp.headers_mut()
+                .insert("Retry-After", axum::http::HeaderValue::from_static("1"));
+        }
+        resp
     }
 }
 
@@ -288,6 +295,7 @@ impl From<EngineError> for ApiError {
             EngineError::NotFound(_) => StatusCode::NOT_FOUND,
             EngineError::AlreadyExists(_) => StatusCode::CONFLICT,
             EngineError::Reserved => StatusCode::FORBIDDEN,
+            EngineError::Overloaded(_) => StatusCode::TOO_MANY_REQUESTS,
             EngineError::Sql(_) => StatusCode::BAD_REQUEST,
             EngineError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };

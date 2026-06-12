@@ -60,8 +60,8 @@ The LLM call happens **before** any database write — never inside it. The sequ
 2. The call is structured-output-constrained: the model can only produce schema-valid typed
    memories (`fact` / `event` / `instruction` / `task`, with `topic_key`, `summary`,
    `content`).
-3. The validated proposals enter the ordinary idempotent ingest — one batch, one transaction,
-   one `txid`, with supersession applied by topic key.
+3. The validated proposals enter the ordinary idempotent ingest — one atomic batch, one
+   `txid`, with supersession applied by topic key.
 
 Provider credentials, per-call cost, and LLM latency therefore never touch the write path,
 and a slow or failing extraction call cannot stall or corrupt a write. Everything after step 2
