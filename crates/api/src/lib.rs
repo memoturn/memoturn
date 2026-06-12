@@ -20,6 +20,7 @@ pub mod extract;
 pub mod governance;
 pub mod limit;
 pub mod mesh;
+pub mod strata_backend;
 
 use error::{ApiError, ErrorCode};
 
@@ -68,6 +69,10 @@ pub struct AppState {
     /// Erasure coupons (ADR-0010 phase 3): durable records of verifiable
     /// erasures, in object storage outside any database's prefix.
     pub erasures: Arc<memoturn_governance::ErasureLedger>,
+    /// The strata engine behind a flag (ADR-0011): `{ns}--{profile}` databases
+    /// whose namespace is listed in `MEMOTURN_STRATA_NAMESPACES` serve their
+    /// typed surfaces from `memoturn-strata` instead of libSQL. `None` = off.
+    pub strata: Option<Arc<strata_backend::StrataHost>>,
 }
 
 /// Body cap for control/query requests (filters, recall, SQL queries). 1 MiB is
@@ -264,8 +269,17 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// The strata host, iff this database is strata-selected.
+fn strata_host(state: &AppState, db_name: &str) -> Option<Arc<strata_backend::StrataHost>> {
+    state
+        .strata
+        .as_ref()
+        .filter(|h| h.selects(db_name))
+        .cloned()
+}
+
 /// `name[@branch]` → (name, branch); `@main` implicit.
-fn parse_spec(spec: &str) -> (&str, &str) {
+pub(crate) fn parse_spec(spec: &str) -> (&str, &str) {
     match spec.split_once('@') {
         Some((name, branch)) if !branch.is_empty() => (name, branch),
         _ => (spec, "main"),
@@ -827,6 +841,10 @@ async fn delete_db(
             .await?;
     }
     state.replicator.delete_db(&rec.uuid).await?;
+    if let Some(host) = strata_host(&state, &db) {
+        host.evict_db(&rec.uuid).await;
+        host.store.delete_db(&rec.uuid).await?;
+    }
     // Revoke stateless tokens minted before now: a write token must not survive
     // deletion to resurrect or mutate a re-created database of the same name.
     // The registry copy makes revocation durable: the control-plane table is
@@ -887,6 +905,14 @@ async fn sql(
             ));
         }
     }
+    // The strata engine has no SQL surface (ADR-0011) — typed APIs only.
+    if strata_host(&state, parse_spec(&db).0).is_some() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "this database runs on the strata engine, which has no SQL surface; use the docs/KV/memory APIs",
+        )
+        .with_code(ErrorCode::InvalidRequest));
+    }
     let l = route_write!(&state, &db, &format!("/v1/db/{db}/sql"), req);
     let before = l.h.txid();
     let (results, txid) = l.h.write_batch(&parsed.stmts).await?;
@@ -906,6 +932,27 @@ async fn sync_db(
     State(state): State<AppState>,
     Path(db): Path<String>,
 ) -> Result<Response, ApiError> {
+    if let Some(host) = strata_host(&state, parse_spec(&db).0) {
+        let d = match strata_backend::route_write(&state, &host, &db).await? {
+            strata_backend::SRoute::Remote { addr } => {
+                return forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::POST,
+                    &format!("/v1/db/{db}/sync"),
+                    Some(json!({})),
+                    None,
+                )
+                .await
+            }
+            strata_backend::SRoute::Local(d) => d,
+        };
+        // Flush folds the memtable + WAL tail into a segment and advances
+        // the manifest — the strata durability point.
+        d.flush().await?;
+        let txid = d.head().await;
+        return Ok((txid_headers(txid), Json(json!({ "txid": txid }))).into_response());
+    }
     let l = route_write!(&state, &db, &format!("/v1/db/{db}/sync"), json!({}));
     state
         .shipper
@@ -941,6 +988,40 @@ async fn branch_create(
     let (name, _) = parse_spec(&db);
     let parent = parsed.from.as_deref().unwrap_or("main");
     let spec = format!("{name}@{parent}");
+    if let Some(host) = strata_host(&state, name) {
+        let d = match strata_backend::route_write(&state, &host, &spec).await? {
+            strata_backend::SRoute::Remote { addr } => {
+                return forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::POST,
+                    &format!("/v1/db/{db}/branches"),
+                    Some(req),
+                    None,
+                )
+                .await
+            }
+            strata_backend::SRoute::Local(d) => d,
+        };
+        let ttl_at = parsed.ttl.map(|t| now_ms() + (t as i64) * 1000);
+        // Fork flushes first, then one manifest create — O(1), no data copied.
+        let manifest = d.fork(&parsed.name, ttl_at).await?;
+        let rec = state
+            .registry
+            .create_branch(name, &parsed.name, parsed.ttl)
+            .await?;
+        return Ok((
+            StatusCode::CREATED,
+            Json(json!({
+                "branch": rec.branch,
+                "parent": parent,
+                "fork_txid": manifest.head_txid,
+                "ttl_at": rec.ttl_at,
+                "spec": format!("{name}@{}", rec.branch),
+            })),
+        )
+            .into_response());
+    }
     let l = route_write!(&state, &spec, &format!("/v1/db/{db}/branches"), req);
     // Fork is CoW over the snapshot store: ship parent head, then one manifest write.
     state
@@ -992,6 +1073,11 @@ async fn branch_delete(
     state.registry.delete_branch(name, &branch).await?;
     let key = format!("{}@{branch}", rec.uuid);
     state.control.release(&key).await?;
+    if let Some(host) = strata_host(&state, name) {
+        host.evict_branch(&rec.uuid, &branch).await;
+        host.store.delete_branch(&rec.uuid, &branch).await?;
+        return Ok(StatusCode::NO_CONTENT);
+    }
     state
         .node
         .evict_and_remove(&key, &state.node.db_dir(&rec.uuid, &branch))
@@ -1014,6 +1100,28 @@ async fn branch_checkpoint(
         .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
     let (name, _) = parse_spec(&db);
     let spec = format!("{name}@{branch}");
+    if let Some(host) = strata_host(&state, name) {
+        let d = match strata_backend::route_write(&state, &host, &spec).await? {
+            strata_backend::SRoute::Remote { addr } => {
+                return forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::POST,
+                    &format!("/v1/db/{db}/branches/{branch}/checkpoint"),
+                    Some(req),
+                    None,
+                )
+                .await
+            }
+            strata_backend::SRoute::Local(d) => d,
+        };
+        let txid = d.checkpoint(&parsed.name).await?;
+        return Ok((
+            txid_headers(txid),
+            Json(json!({ "checkpoint": parsed.name, "txid": txid })),
+        )
+            .into_response());
+    }
     let l = route_write!(
         &state,
         &spec,
@@ -1050,6 +1158,31 @@ async fn branch_rewind(
         .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
     let (name, _) = parse_spec(&db);
     let spec = format!("{name}@{branch}");
+    if let Some(host) = strata_host(&state, name) {
+        let d = match strata_backend::route_write(&state, &host, &spec).await? {
+            strata_backend::SRoute::Remote { addr } => {
+                return forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::POST,
+                    &format!("/v1/db/{db}/branches/{branch}/rewind"),
+                    Some(req),
+                    None,
+                )
+                .await
+            }
+            strata_backend::SRoute::Local(d) => d,
+        };
+        // Rewind works at any txid in the window — no boundary restriction
+        // on this engine (ADR-0011); no local rematerialization either, the
+        // writer just discards its memtable and reloads refs.
+        let txid = d.rewind(&parsed.to).await?;
+        return Ok((
+            txid_headers(txid),
+            Json(json!({ "rewound_to": txid, "epoch": d.epoch() })),
+        )
+            .into_response());
+    }
     let l = route_write!(
         &state,
         &spec,
@@ -1098,6 +1231,12 @@ pub async fn gc_burner_branches(state: &AppState) -> usize {
         }
         let key = format!("{}@{}", rec.uuid, b.branch);
         let _ = state.control.release(&key).await;
+        if let Some(host) = strata_host(state, &b.db_name) {
+            host.evict_branch(&rec.uuid, &b.branch).await;
+            let _ = host.store.delete_branch(&rec.uuid, &b.branch).await;
+            n += 1;
+            continue;
+        }
         let _ = state
             .node
             .evict_and_remove(&key, &state.node.db_dir(&rec.uuid, &b.branch))
@@ -1338,6 +1477,38 @@ async fn docs_insert(
 ) -> Result<Response, ApiError> {
     let parsed: DocsInsert = serde_json::from_value(req.clone())
         .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
+    if let Some(host) = strata_host(&state, parse_spec(&db).0) {
+        let d = match strata_backend::route_write(&state, &host, &db).await? {
+            strata_backend::SRoute::Remote { addr } => {
+                return forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::POST,
+                    &format!("/v1/db/{db}/docs/{coll}/insert"),
+                    Some(req),
+                    None,
+                )
+                .await
+            }
+            strata_backend::SRoute::Local(d) => d,
+        };
+        let (out, txid) = strata_backend::submit(
+            &d,
+            memoturn_strata::WriteRequest::DocInsert {
+                collection: coll.clone(),
+                docs: parsed.docs,
+            },
+            false,
+        )
+        .await?;
+        let ids = strata_backend::expect_ids(out)?;
+        return Ok((
+            StatusCode::CREATED,
+            txid_headers(txid),
+            Json(json!({ "ids": ids, "txid": txid })),
+        )
+            .into_response());
+    }
     let l = route_write!(&state, &db, &format!("/v1/db/{db}/docs/{coll}/insert"), req);
     let (ids, txid) = memoturn_docstore::insert(&l.h, &coll, parsed.docs).await?;
     settle(&state, &l, false).await?;
@@ -1366,13 +1537,36 @@ async fn docs_find(
     Path((db, coll)): Path<(String, String)>,
     headers: HeaderMap,
     Json(req): Json<DocsFind>,
-) -> Result<impl IntoResponse, ApiError> {
-    let (h, _, _) = resolve_read(&state, &db, min_txid_of(&headers)).await?;
+) -> Result<Response, ApiError> {
     let filter = if req.filter.is_null() {
         json!({})
     } else {
         req.filter
     };
+    if let Some(host) = strata_host(&state, parse_spec(&db).0) {
+        let r = strata_backend::route_read(&state, &host, &db).await?;
+        let docs = r
+            .with_view(|v| {
+                memoturn_strata::surface::docs::find(
+                    v,
+                    &coll,
+                    &filter,
+                    memoturn_strata::surface::docs::FindOpts {
+                        sort: req.sort.clone(),
+                        limit: capped(req.limit.unwrap_or(100)),
+                        skip: req.skip.unwrap_or(0),
+                    },
+                )
+            })
+            .await?;
+        let txid = r.head().await;
+        return Ok((
+            txid_headers(txid),
+            Json(json!({ "docs": docs, "txid": txid })),
+        )
+            .into_response());
+    }
+    let (h, _, _) = resolve_read(&state, &db, min_txid_of(&headers)).await?;
     let docs = memoturn_docstore::find(
         &h,
         &coll,
@@ -1387,7 +1581,8 @@ async fn docs_find(
     Ok((
         txid_headers(h.txid()),
         Json(json!({ "docs": docs, "txid": h.txid() })),
-    ))
+    )
+        .into_response())
 }
 
 #[derive(Deserialize)]
@@ -1405,6 +1600,39 @@ async fn docs_update(
 ) -> Result<Response, ApiError> {
     let parsed: DocsUpdate = serde_json::from_value(req.clone())
         .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
+    if let Some(host) = strata_host(&state, parse_spec(&db).0) {
+        let d = match strata_backend::route_write(&state, &host, &db).await? {
+            strata_backend::SRoute::Remote { addr } => {
+                return forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::POST,
+                    &format!("/v1/db/{db}/docs/{coll}/update"),
+                    Some(req),
+                    None,
+                )
+                .await
+            }
+            strata_backend::SRoute::Local(d) => d,
+        };
+        let (out, txid) = strata_backend::submit(
+            &d,
+            memoturn_strata::WriteRequest::DocUpdate {
+                collection: coll.clone(),
+                filter: parsed.filter,
+                update: parsed.update,
+                multi: parsed.multi,
+            },
+            false,
+        )
+        .await?;
+        let modified = strata_backend::expect_count(out)?;
+        return Ok((
+            txid_headers(txid),
+            Json(json!({ "modified": modified, "txid": txid })),
+        )
+            .into_response());
+    }
     let l = route_write!(&state, &db, &format!("/v1/db/{db}/docs/{coll}/update"), req);
     let (modified, txid) =
         memoturn_docstore::update_docs(&l.h, &coll, &parsed.filter, &parsed.update, parsed.multi)
@@ -1433,6 +1661,38 @@ async fn docs_delete(
 ) -> Result<Response, ApiError> {
     let parsed: DocsDelete = serde_json::from_value(req.clone())
         .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
+    if let Some(host) = strata_host(&state, parse_spec(&db).0) {
+        let d = match strata_backend::route_write(&state, &host, &db).await? {
+            strata_backend::SRoute::Remote { addr } => {
+                return forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::POST,
+                    &format!("/v1/db/{db}/docs/{coll}/delete"),
+                    Some(req),
+                    None,
+                )
+                .await
+            }
+            strata_backend::SRoute::Local(d) => d,
+        };
+        let (out, txid) = strata_backend::submit(
+            &d,
+            memoturn_strata::WriteRequest::DocDelete {
+                collection: coll.clone(),
+                filter: parsed.filter,
+                multi: parsed.multi,
+            },
+            false,
+        )
+        .await?;
+        let deleted = strata_backend::expect_count(out)?;
+        return Ok((
+            txid_headers(txid),
+            Json(json!({ "deleted": deleted, "txid": txid })),
+        )
+            .into_response());
+    }
     let l = route_write!(&state, &db, &format!("/v1/db/{db}/docs/{coll}/delete"), req);
     let (deleted, txid) =
         memoturn_docstore::delete_docs(&l.h, &coll, &parsed.filter, parsed.multi).await?;
@@ -1458,6 +1718,32 @@ async fn docs_create_index(
 ) -> Result<Response, ApiError> {
     let parsed: CreateIndexReq = serde_json::from_value(req.clone())
         .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
+    if let Some(host) = strata_host(&state, parse_spec(&db).0) {
+        let d = match strata_backend::route_write(&state, &host, &db).await? {
+            strata_backend::SRoute::Remote { addr } => {
+                return forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::POST,
+                    &format!("/v1/db/{db}/docs/{coll}/indexes"),
+                    Some(req),
+                    None,
+                )
+                .await
+            }
+            strata_backend::SRoute::Local(d) => d,
+        };
+        strata_backend::submit(
+            &d,
+            memoturn_strata::WriteRequest::DocCreateIndex {
+                collection: coll.clone(),
+                path: parsed.path.clone(),
+            },
+            false,
+        )
+        .await?;
+        return Ok((StatusCode::CREATED, Json(json!({ "indexed": parsed.path }))).into_response());
+    }
     let l = route_write!(
         &state,
         &db,
@@ -1470,6 +1756,26 @@ async fn docs_create_index(
 }
 
 // ---- vectors ----
+
+/// Verifiable-erasure coupons (ADR-0010 phase 3) are deferred on the strata
+/// engine: the engine erases via filtered compaction, but the coupon/receipt
+/// machinery still assumes the libSQL object layout (named in ADR-0011).
+fn strata_no_erasure() -> ApiError {
+    ApiError::new(
+        StatusCode::NOT_IMPLEMENTED,
+        "verifiable erasure is not yet available on the strata engine; plain forget works",
+    )
+}
+
+/// Standalone vector collections are not part of the strata typed surface
+/// (memory embeddings ride ingest); the route stays libSQL-only.
+fn strata_no_vector_collections() -> ApiError {
+    ApiError::new(
+        StatusCode::BAD_REQUEST,
+        "vector collections are not available on the strata engine; memory embeddings ride /memories ingest",
+    )
+    .with_code(ErrorCode::InvalidRequest)
+}
 
 #[derive(Deserialize)]
 struct VectorUpsert {
@@ -1484,6 +1790,9 @@ async fn vectors_upsert(
 ) -> Result<Response, ApiError> {
     let parsed: VectorUpsert = serde_json::from_value(req.clone())
         .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
+    if strata_host(&state, parse_spec(&db).0).is_some() {
+        return Err(strata_no_vector_collections());
+    }
     let l = route_write!(&state, &db, &format!("/v1/db/{db}/vectors/{coll}"), req);
     let txid =
         memoturn_docstore::vectors::upsert(&l.h, &coll, &parsed.id, &parsed.embedding).await?;
@@ -1504,6 +1813,9 @@ async fn vectors_search(
     headers: HeaderMap,
     Json(req): Json<VectorSearch>,
 ) -> Result<impl IntoResponse, ApiError> {
+    if strata_host(&state, parse_spec(&db).0).is_some() {
+        return Err(strata_no_vector_collections());
+    }
     let (h, _, _) = resolve_read(&state, &db, min_txid_of(&headers)).await?;
     let hits =
         memoturn_docstore::vectors::search(&h, &coll, &req.vector, capped(req.k.unwrap_or(10)))
@@ -1532,6 +1844,40 @@ async fn memory_append(
 ) -> Result<Response, ApiError> {
     let parsed: AppendTurn = serde_json::from_value(req.clone())
         .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e.to_string()))?;
+    if let Some(host) = strata_host(&state, parse_spec(&db).0) {
+        let d = match strata_backend::route_write(&state, &host, &db).await? {
+            strata_backend::SRoute::Remote { addr } => {
+                return forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::POST,
+                    &format!("/v1/db/{db}/memory/{session}/turns"),
+                    Some(req),
+                    None,
+                )
+                .await
+            }
+            strata_backend::SRoute::Local(d) => d,
+        };
+        let (out, txid) = strata_backend::submit(
+            &d,
+            memoturn_strata::WriteRequest::TurnAppend {
+                session: session.clone(),
+                role: parsed.role,
+                content: parsed.content,
+                embedding: parsed.embedding,
+            },
+            false,
+        )
+        .await?;
+        let seq = strata_backend::expect_seq(out)?;
+        return Ok((
+            StatusCode::CREATED,
+            txid_headers(txid),
+            Json(json!({ "seq": seq, "txid": txid })),
+        )
+            .into_response());
+    }
     let l = route_write!(
         &state,
         &db,
@@ -1560,11 +1906,22 @@ async fn memory_window(
     Path((db, session)): Path<(String, String)>,
     headers: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
-) -> Result<impl IntoResponse, ApiError> {
-    let (h, _, _) = resolve_read(&state, &db, min_txid_of(&headers)).await?;
+) -> Result<Response, ApiError> {
     let last: u32 = q.get("last").and_then(|s| s.parse().ok()).unwrap_or(20);
+    if let Some(host) = strata_host(&state, parse_spec(&db).0) {
+        let r = strata_backend::route_read(&state, &host, &db).await?;
+        let turns = r
+            .with_view(|v| memoturn_strata::surface::transcript::get_window(v, &session, last))
+            .await?;
+        return Ok((
+            txid_headers(r.head().await),
+            Json(json!({ "turns": turns })),
+        )
+            .into_response());
+    }
+    let (h, _, _) = resolve_read(&state, &db, min_txid_of(&headers)).await?;
     let turns = memoturn_docstore::memory::get_window(&h, &session, last).await?;
-    Ok((txid_headers(h.txid()), Json(json!({ "turns": turns }))))
+    Ok((txid_headers(h.txid()), Json(json!({ "turns": turns }))).into_response())
 }
 
 #[derive(Deserialize)]
@@ -1579,7 +1936,25 @@ async fn memory_search(
     Path((db, session)): Path<(String, String)>,
     headers: HeaderMap,
     Json(req): Json<MemorySearch>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<Response, ApiError> {
+    if let Some(host) = strata_host(&state, parse_spec(&db).0) {
+        let r = strata_backend::route_read(&state, &host, &db).await?;
+        let turns = r
+            .with_view(|v| {
+                memoturn_strata::surface::transcript::search(
+                    v,
+                    Some(&session),
+                    &req.vector,
+                    capped(req.k.unwrap_or(5)),
+                )
+            })
+            .await?;
+        return Ok((
+            txid_headers(r.head().await),
+            Json(json!({ "turns": turns })),
+        )
+            .into_response());
+    }
     let (h, _, _) = resolve_read(&state, &db, min_txid_of(&headers)).await?;
     let turns = memoturn_docstore::memory::search_semantic(
         &h,
@@ -1588,7 +1963,7 @@ async fn memory_search(
         capped(req.k.unwrap_or(5)),
     )
     .await?;
-    Ok((txid_headers(h.txid()), Json(json!({ "turns": turns }))))
+    Ok((txid_headers(h.txid()), Json(json!({ "turns": turns }))).into_response())
 }
 
 // ---- agent memory: namespace > profile > memory (07, ADR-0009) ----
@@ -1884,34 +2259,70 @@ async fn memories_ingest(
     ensure_profile(&state, &name).await?;
     let (audit_on, _) = audit_gate(&state, &ns, &profile).await;
     let spec = format!("{name}@{branch}");
-    let l = match resolve_write(&state, &spec).await? {
-        WriteRoute::Remote { addr } => {
-            let resp = forward(
-                &state,
-                &addr,
-                reqwest::Method::POST,
-                &format!("/v1/memory/{ns}/{profile}/memories?branch={}", enc(&branch)),
-                Some(req),
-                None,
-            )
-            .await?;
-            if audit_on && !is_internal(&actor) {
-                let mut evt = audit::AuditEvent::new("memory.ingest", &ns)
-                    .profile(&profile)
-                    .branch(&branch)
-                    .count(n_items)
-                    .actor(actor.as_ref());
-                if let Some(t) = forwarded_txid(&resp) {
-                    evt = evt.txid(t);
+    enum IngestRoute {
+        Sql(LocalWrite),
+        Strata(memoturn_strata::Db),
+    }
+    let route = if let Some(host) = strata_host(&state, &name) {
+        match strata_backend::route_write(&state, &host, &spec).await? {
+            strata_backend::SRoute::Local(d) => IngestRoute::Strata(d),
+            strata_backend::SRoute::Remote { addr } => {
+                let resp = forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::POST,
+                    &format!("/v1/memory/{ns}/{profile}/memories?branch={}", enc(&branch)),
+                    Some(req),
+                    None,
+                )
+                .await?;
+                if audit_on && !is_internal(&actor) {
+                    let mut evt = audit::AuditEvent::new("memory.ingest", &ns)
+                        .profile(&profile)
+                        .branch(&branch)
+                        .count(n_items)
+                        .actor(actor.as_ref());
+                    if let Some(t) = forwarded_txid(&resp) {
+                        evt = evt.txid(t);
+                    }
+                    if !resp.status().is_success() {
+                        evt = evt.outcome("error");
+                    }
+                    state.audit.emit(evt);
                 }
-                if !resp.status().is_success() {
-                    evt = evt.outcome("error");
-                }
-                state.audit.emit(evt);
+                return Ok(resp);
             }
-            return Ok(resp);
         }
-        WriteRoute::Local(l) => l,
+    } else {
+        match resolve_write(&state, &spec).await? {
+            WriteRoute::Remote { addr } => {
+                let resp = forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::POST,
+                    &format!("/v1/memory/{ns}/{profile}/memories?branch={}", enc(&branch)),
+                    Some(req),
+                    None,
+                )
+                .await?;
+                if audit_on && !is_internal(&actor) {
+                    let mut evt = audit::AuditEvent::new("memory.ingest", &ns)
+                        .profile(&profile)
+                        .branch(&branch)
+                        .count(n_items)
+                        .actor(actor.as_ref());
+                    if let Some(t) = forwarded_txid(&resp) {
+                        evt = evt.txid(t);
+                    }
+                    if !resp.status().is_success() {
+                        evt = evt.outcome("error");
+                    }
+                    state.audit.emit(evt);
+                }
+                return Ok(resp);
+            }
+            WriteRoute::Local(l) => IngestRoute::Sql(l),
+        }
     };
     let items = parsed
         .memories
@@ -1933,15 +2344,39 @@ async fn memories_ingest(
     let mut items = items;
     clamp_task_ttls(&state, &ns, &profile, &mut items).await;
     auto_embed_items(&state, &ns, &profile, &mut items).await;
-    let before = l.h.txid();
-    let (outcomes, txid) = memoturn_docstore::memories::ingest(&l.h, items).await?;
-    if txid > before {
-        settle(&state, &l, request_durable(&headers)).await?;
-    }
-    let results: Vec<_> = outcomes
-        .into_iter()
-        .map(|o| json!({ "id": o.id, "status": o.status, "superseded": o.superseded }))
-        .collect();
+    let (results, txid): (Vec<serde_json::Value>, u64) = match route {
+        IngestRoute::Strata(d) => {
+            let items = strata_backend::to_strata_items(items)?;
+            let (out, txid) = strata_backend::submit(
+                &d,
+                memoturn_strata::WriteRequest::MemIngest(items),
+                request_durable(&headers),
+            )
+            .await?;
+            let outcomes = strata_backend::expect_ingest(out)?;
+            (
+                outcomes
+                    .into_iter()
+                    .map(|o| json!({ "id": o.id, "status": o.status, "superseded": o.superseded }))
+                    .collect(),
+                txid,
+            )
+        }
+        IngestRoute::Sql(l) => {
+            let before = l.h.txid();
+            let (outcomes, txid) = memoturn_docstore::memories::ingest(&l.h, items).await?;
+            if txid > before {
+                settle(&state, &l, request_durable(&headers)).await?;
+            }
+            (
+                outcomes
+                    .into_iter()
+                    .map(|o| json!({ "id": o.id, "status": o.status, "superseded": o.superseded }))
+                    .collect(),
+                txid,
+            )
+        }
+    };
     if audit_on && !is_internal(&actor) {
         state.audit.emit(
             audit::AuditEvent::new("memory.ingest", &ns)
@@ -2096,6 +2531,86 @@ async fn memories_extract(
     let spec = format!("{name}@{branch}");
     let n_proposals = proposals.len() as u64;
     let ingest_body = json!({ "memories": proposals });
+    if let Some(host) = strata_host(&state, &name) {
+        let d = match strata_backend::route_write(&state, &host, &spec).await? {
+            strata_backend::SRoute::Remote { addr } => {
+                let resp = forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::POST,
+                    &format!("/v1/memory/{ns}/{profile}/memories?branch={}", enc(&branch)),
+                    Some(ingest_body),
+                    None,
+                )
+                .await?;
+                if audit_on && !is_internal(&actor) {
+                    let mut evt = audit::AuditEvent::new("memory.extract", &ns)
+                        .profile(&profile)
+                        .branch(&branch)
+                        .count(n_proposals)
+                        .actor(actor.as_ref());
+                    if let Some(t) = forwarded_txid(&resp) {
+                        evt = evt.txid(t);
+                    }
+                    if !resp.status().is_success() {
+                        evt = evt.outcome("error");
+                    }
+                    state.audit.emit(evt);
+                }
+                return Ok(resp);
+            }
+            strata_backend::SRoute::Local(d) => d,
+        };
+        let mut items = extracted
+            .into_iter()
+            .map(|m| {
+                Ok(memoturn_docstore::memories::MemoryInput {
+                    mtype: memoturn_docstore::memories::MemoryType::parse(&m.mtype)?,
+                    topic_key: if matches!(m.mtype.as_str(), "fact" | "instruction") {
+                        m.topic_key
+                    } else {
+                        None
+                    },
+                    summary: m.summary,
+                    content: json!({"text": m.details}),
+                    keywords: Some(m.keywords),
+                    embedding: None,
+                    session_id: parsed.session_id.clone(),
+                    source: parsed.source.clone(),
+                    ttl_secs: None,
+                })
+            })
+            .collect::<Result<Vec<_>, memoturn_docstore::DocError>>()?;
+        clamp_task_ttls(&state, &ns, &profile, &mut items).await;
+        auto_embed_items(&state, &ns, &profile, &mut items).await;
+        let sitems = strata_backend::to_strata_items(items)?;
+        let (out, txid) = strata_backend::submit(
+            &d,
+            memoturn_strata::WriteRequest::MemIngest(sitems),
+            request_durable(&headers),
+        )
+        .await?;
+        let results: Vec<_> = strata_backend::expect_ingest(out)?
+            .into_iter()
+            .map(|o| json!({ "id": o.id, "status": o.status, "superseded": o.superseded }))
+            .collect();
+        if audit_on && !is_internal(&actor) {
+            state.audit.emit(
+                audit::AuditEvent::new("memory.extract", &ns)
+                    .profile(&profile)
+                    .branch(&branch)
+                    .txid(txid)
+                    .count(results.len() as u64)
+                    .actor(actor.as_ref()),
+            );
+        }
+        return Ok((
+            StatusCode::CREATED,
+            txid_headers(txid),
+            Json(json!({ "results": results, "txid": txid })),
+        )
+            .into_response());
+    }
     let l = match resolve_write(&state, &spec).await? {
         WriteRoute::Remote { addr } => {
             let resp = forward(
@@ -2219,7 +2734,6 @@ async fn memories_recall(
         return Ok((txid_headers(0), Json(json!({ "memories": [], "txid": 0 }))).into_response());
     }
     let spec = format!("{name}@{branch}");
-    let (h, _, _) = resolve_read(&state, &spec, min_txid_of(&headers)).await?;
     let types = req
         .types
         .map(|ts| {
@@ -2238,46 +2752,95 @@ async fn memories_recall(
             embedding = auto_embed_query(&state, &ns, &profile, query).await;
         }
     }
-    let memories = memoturn_docstore::memories::recall(
-        &h,
-        &memoturn_docstore::memories::RecallQuery {
+    // Engine dispatch: identical query semantics, same RRF channels/weights.
+    let (memories, turns, txid) = if let Some(host) = strata_host(&state, &name) {
+        let r = strata_backend::route_read(&state, &host, &spec).await?;
+        let sq = memoturn_strata::RecallQuery {
             query: req.query,
             embedding: embedding.clone(),
             topic_key: req.topic_key,
-            types,
+            types: strata_backend::to_strata_types(types)?,
             session_id: req.session_id.clone(),
             source: req.source,
             k,
             include_superseded: req.include_superseded,
-        },
-    )
-    .await?;
+        };
+        let memories = r
+            .with_view(|v| memoturn_strata::surface::memory::recall(v, &sq))
+            .await?;
+        let turns = if req.include_turns {
+            let Some(emb) = &embedding else {
+                return Err(recall_needs_embedding());
+            };
+            Some(
+                r.with_view(|v| {
+                    memoturn_strata::surface::transcript::search(
+                        v,
+                        req.session_id.as_deref(),
+                        emb,
+                        k,
+                    )
+                })
+                .await?,
+            )
+        } else {
+            None
+        };
+        (memories, turns, r.head().await)
+    } else {
+        let (h, _, _) = resolve_read(&state, &spec, min_txid_of(&headers)).await?;
+        let memories = memoturn_docstore::memories::recall(
+            &h,
+            &memoturn_docstore::memories::RecallQuery {
+                query: req.query,
+                embedding: embedding.clone(),
+                topic_key: req.topic_key,
+                types,
+                session_id: req.session_id.clone(),
+                source: req.source,
+                k,
+                include_superseded: req.include_superseded,
+            },
+        )
+        .await?;
+        let turns = if req.include_turns {
+            let Some(emb) = &embedding else {
+                return Err(recall_needs_embedding());
+            };
+            Some(
+                memoturn_docstore::memory::search_turns(&h, req.session_id.as_deref(), emb, k)
+                    .await?,
+            )
+        } else {
+            None
+        };
+        (memories, turns, h.txid())
+    };
     let (audit_on, include_reads) = audit_gate(&state, &ns, &profile).await;
     if audit_on && include_reads {
         state.audit.emit(
             audit::AuditEvent::new("memory.recall", &ns)
                 .profile(&profile)
                 .branch(&branch)
-                .txid(h.txid())
+                .txid(txid)
                 .count(memories.len() as u64)
                 .actor(actor.as_ref()),
         );
     }
     // Raw-turn channel: verbatim transcript moments alongside (not fused
     // with) typed memories — turns aren't memories, so they rank separately.
-    let mut body = json!({ "memories": memories, "txid": h.txid() });
-    if req.include_turns {
-        let Some(emb) = &embedding else {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "include_turns requires an embedding (or a query + a configured, policy-permitted embedder)",
-            ));
-        };
-        let turns =
-            memoturn_docstore::memory::search_turns(&h, req.session_id.as_deref(), emb, k).await?;
+    let mut body = json!({ "memories": memories, "txid": txid });
+    if let Some(turns) = turns {
         body["turns"] = json!(turns);
     }
-    Ok((txid_headers(h.txid()), Json(body)).into_response())
+    Ok((txid_headers(txid), Json(body)).into_response())
+}
+
+fn recall_needs_embedding() -> ApiError {
+    ApiError::new(
+        StatusCode::BAD_REQUEST,
+        "include_turns requires an embedding (or a query + a configured, policy-permitted embedder)",
+    )
 }
 
 #[derive(Deserialize)]
@@ -2347,7 +2910,6 @@ async fn memories_ask(
             .into_response());
     }
     let spec = format!("{name}@{branch}");
-    let (h, _, _) = resolve_read(&state, &spec, min_txid_of(&headers)).await?;
     let types = req
         .types
         .map(|ts| {
@@ -2359,34 +2921,54 @@ async fn memories_ask(
     // Auto-embed the question so the vector channel contributes (best-effort,
     // same degradation and policy gate as recall).
     let embedding = auto_embed_query(&state, &ns, &profile, &req.question).await;
-    let memories = memoturn_docstore::memories::recall(
-        &h,
-        &memoturn_docstore::memories::RecallQuery {
+    let (memories, txid) = if let Some(host) = strata_host(&state, &name) {
+        let r = strata_backend::route_read(&state, &host, &spec).await?;
+        let sq = memoturn_strata::RecallQuery {
             query: Some(req.question.clone()),
             embedding,
             topic_key: None,
-            types,
+            types: strata_backend::to_strata_types(types)?,
             session_id: req.session_id,
             source: req.source,
             k: capped(req.k.unwrap_or(8)),
             include_superseded: req.include_superseded,
-        },
-    )
-    .await?;
+        };
+        let memories = r
+            .with_view(|v| memoturn_strata::surface::memory::recall(v, &sq))
+            .await?;
+        (memories, r.head().await)
+    } else {
+        let (h, _, _) = resolve_read(&state, &spec, min_txid_of(&headers)).await?;
+        let memories = memoturn_docstore::memories::recall(
+            &h,
+            &memoturn_docstore::memories::RecallQuery {
+                query: Some(req.question.clone()),
+                embedding,
+                topic_key: None,
+                types,
+                session_id: req.session_id,
+                source: req.source,
+                k: capped(req.k.unwrap_or(8)),
+                include_superseded: req.include_superseded,
+            },
+        )
+        .await?;
+        (memories, h.txid())
+    };
     if audit_on && include_reads {
         state.audit.emit(
             audit::AuditEvent::new("memory.ask", &ns)
                 .profile(&profile)
                 .branch(&branch)
-                .txid(h.txid())
+                .txid(txid)
                 .count(memories.len() as u64)
                 .actor(actor.as_ref()),
         );
     }
     if memories.is_empty() {
         return Ok((
-            txid_headers(h.txid()),
-            Json(json!({ "answer": null, "sources": [], "memories": [], "txid": h.txid() })),
+            txid_headers(txid),
+            Json(json!({ "answer": null, "sources": [], "memories": [], "txid": txid })),
         )
             .into_response());
     }
@@ -2426,12 +3008,12 @@ async fn memories_ask(
         }
     };
     Ok((
-        txid_headers(h.txid()),
+        txid_headers(txid),
         Json(json!({
             "answer": out.answer,
             "sources": out.sources,
             "memories": memories,
-            "txid": h.txid(),
+            "txid": txid,
         })),
     )
         .into_response())
@@ -2447,8 +3029,17 @@ async fn memories_get(
     let actor = actor.map(|e| e.0);
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
     let spec = format!("{name}@{branch}");
-    let (h, _, _) = resolve_read(&state, &spec, min_txid_of(&headers)).await?;
-    match memoturn_docstore::memories::get(&h, &id).await? {
+    let (found, txid) = if let Some(host) = strata_host(&state, &name) {
+        let r = strata_backend::route_read(&state, &host, &spec).await?;
+        let found = r
+            .with_view(|v| memoturn_strata::surface::memory::get(v, &id))
+            .await?;
+        (found, r.head().await)
+    } else {
+        let (h, _, _) = resolve_read(&state, &spec, min_txid_of(&headers)).await?;
+        (memoturn_docstore::memories::get(&h, &id).await?, h.txid())
+    };
+    match found {
         Some(memory) => {
             let (audit_on, include_reads) = audit_gate(&state, &ns, &profile).await;
             if audit_on && include_reads {
@@ -2457,11 +3048,11 @@ async fn memories_get(
                         .profile(&profile)
                         .branch(&branch)
                         .resource(&id)
-                        .txid(h.txid())
+                        .txid(txid)
                         .actor(actor.as_ref()),
                 );
             }
-            Ok((txid_headers(h.txid()), Json(memory)).into_response())
+            Ok((txid_headers(txid), Json(memory)).into_response())
         }
         None => Err(ApiError::new(StatusCode::NOT_FOUND, "memory not found")),
     }
@@ -2483,6 +3074,63 @@ async fn memories_forget(
         .unwrap_or_default();
     let audit_on = eff.audit_enabled;
     let spec = format!("{name}@{branch}");
+    if let Some(host) = strata_host(&state, &name) {
+        // `purge_on_forget` upgrades a forget into a tracked verifiable
+        // erasure; the coupon machinery is not wired for this engine yet.
+        if eff.purge_on_forget {
+            return Err(strata_no_erasure());
+        }
+        let d = match strata_backend::route_write(&state, &host, &spec).await? {
+            strata_backend::SRoute::Remote { addr } => {
+                let resp = forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::DELETE,
+                    &format!(
+                        "/v1/memory/{ns}/{profile}/memories/{}?branch={}",
+                        enc(&id),
+                        enc(&branch)
+                    ),
+                    None,
+                    None,
+                )
+                .await?;
+                if audit_on && !is_internal(&actor) && resp.status().is_success() {
+                    let mut evt = audit::AuditEvent::new("memory.forget", &ns)
+                        .profile(&profile)
+                        .branch(&branch)
+                        .resource(&id)
+                        .actor(actor.as_ref());
+                    if let Some(t) = forwarded_txid(&resp) {
+                        evt = evt.txid(t);
+                    }
+                    state.audit.emit(evt);
+                }
+                return Ok(resp);
+            }
+            strata_backend::SRoute::Local(d) => d,
+        };
+        let (out, txid) = strata_backend::submit(
+            &d,
+            memoturn_strata::WriteRequest::MemForget { id: id.clone() },
+            request_durable(&headers),
+        )
+        .await?;
+        if strata_backend::expect_count(out)? == 0 {
+            return Err(ApiError::new(StatusCode::NOT_FOUND, "memory not found"));
+        }
+        if audit_on && !is_internal(&actor) {
+            state.audit.emit(
+                audit::AuditEvent::new("memory.forget", &ns)
+                    .profile(&profile)
+                    .branch(&branch)
+                    .resource(&id)
+                    .txid(txid)
+                    .actor(actor.as_ref()),
+            );
+        }
+        return Ok((txid_headers(txid), StatusCode::NO_CONTENT).into_response());
+    }
     let l = match resolve_write(&state, &spec).await? {
         WriteRoute::Remote { addr } => {
             let resp = forward(
@@ -2579,12 +3227,23 @@ async fn memory_sessions_list(
         return Ok((txid_headers(0), Json(json!({ "sessions": [], "txid": 0 }))).into_response());
     }
     let spec = format!("{name}@{branch}");
-    let (h, _, _) = resolve_read(&state, &spec, min_txid_of(&headers)).await?;
     let limit: u32 = capped(q.get("limit").and_then(|s| s.parse().ok()).unwrap_or(100));
-    let sessions = memoturn_docstore::memories::list_sessions(&h, limit).await?;
+    let (sessions, txid) = if let Some(host) = strata_host(&state, &name) {
+        let r = strata_backend::route_read(&state, &host, &spec).await?;
+        let sessions = r
+            .with_view(|v| memoturn_strata::surface::memory::list_sessions(v, limit))
+            .await?;
+        (sessions, r.head().await)
+    } else {
+        let (h, _, _) = resolve_read(&state, &spec, min_txid_of(&headers)).await?;
+        (
+            memoturn_docstore::memories::list_sessions(&h, limit).await?,
+            h.txid(),
+        )
+    };
     Ok((
-        txid_headers(h.txid()),
-        Json(json!({ "sessions": sessions, "txid": h.txid() })),
+        txid_headers(txid),
+        Json(json!({ "sessions": sessions, "txid": txid })),
     )
         .into_response())
 }
@@ -2609,6 +3268,59 @@ async fn memory_session_end(
         format!("session:{sid}")
     };
     let spec = format!("{name}@{branch}");
+    if let Some(host) = strata_host(&state, &name) {
+        let d = match strata_backend::route_write(&state, &host, &spec).await? {
+            strata_backend::SRoute::Remote { addr } => {
+                let turns_qs = if drop_turns { "&turns=true" } else { "" };
+                let resp = forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::DELETE,
+                    &format!(
+                        "/v1/memory/{ns}/{profile}/sessions/{}?branch={}{turns_qs}",
+                        enc(&sid),
+                        enc(&branch)
+                    ),
+                    None,
+                    None,
+                )
+                .await?;
+                if audit_on && !is_internal(&actor) && resp.status().is_success() {
+                    let mut evt = audit::AuditEvent::new("memory.session_end", &ns)
+                        .profile(&profile)
+                        .branch(&branch)
+                        .resource(&resource)
+                        .actor(actor.as_ref());
+                    if let Some(t) = forwarded_txid(&resp) {
+                        evt = evt.txid(t);
+                    }
+                    state.audit.emit(evt);
+                }
+                return Ok(resp);
+            }
+            strata_backend::SRoute::Local(d) => d,
+        };
+        let (_, txid) = strata_backend::submit(
+            &d,
+            memoturn_strata::WriteRequest::MemEndSession {
+                session: sid.clone(),
+                drop_turns,
+            },
+            false,
+        )
+        .await?;
+        if audit_on && !is_internal(&actor) {
+            state.audit.emit(
+                audit::AuditEvent::new("memory.session_end", &ns)
+                    .profile(&profile)
+                    .branch(&branch)
+                    .resource(&resource)
+                    .txid(txid)
+                    .actor(actor.as_ref()),
+            );
+        }
+        return Ok((txid_headers(txid), StatusCode::NO_CONTENT).into_response());
+    }
     let l = match resolve_write(&state, &spec).await? {
         WriteRoute::Remote { addr } => {
             let turns_qs = if drop_turns { "&turns=true" } else { "" };
@@ -2937,6 +3649,12 @@ async fn memories_erase(
         ));
     }
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
+    // Verifiable-erasure coupons are not wired for the strata engine yet
+    // (the engine's filtered-compaction erasure exists; the coupon/receipt
+    // machinery still assumes the libSQL object layout).
+    if strata_host(&state, &name).is_some() {
+        return Err(strata_no_erasure());
+    }
     let spec = format!("{name}@{branch}");
     let l = match resolve_write(&state, &spec).await? {
         WriteRoute::Remote { addr } => {
@@ -3309,6 +4027,35 @@ async fn kv_put(
     Query(params): Query<KvPutParams>,
     body: Bytes,
 ) -> Result<Response, ApiError> {
+    if let Some(host) = strata_host(&state, parse_spec(&db).0) {
+        let d = match strata_backend::route_write(&state, &host, &db).await? {
+            strata_backend::SRoute::Remote { addr } => {
+                let qs = params.ttl.map(|t| format!("?ttl={t}")).unwrap_or_default();
+                return forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::PUT,
+                    &format!("/v1/db/{db}/kv/{ns}/{key}{qs}"),
+                    None,
+                    Some(body.to_vec()),
+                )
+                .await;
+            }
+            strata_backend::SRoute::Local(d) => d,
+        };
+        let (_, txid) = strata_backend::submit(
+            &d,
+            memoturn_strata::WriteRequest::KvPut {
+                ns: ns.clone(),
+                key: key.clone(),
+                value: body.to_vec(),
+                ttl_secs: params.ttl,
+            },
+            false,
+        )
+        .await?;
+        return Ok((txid_headers(txid), Json(json!({ "txid": txid }))).into_response());
+    }
     let l = match resolve_write(&state, &db).await? {
         WriteRoute::Remote { addr } => {
             let qs = params.ttl.map(|t| format!("?ttl={t}")).unwrap_or_default();
@@ -3334,6 +4081,16 @@ async fn kv_get(
     Path((db, ns, key)): Path<(String, String, String)>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
+    if let Some(host) = strata_host(&state, parse_spec(&db).0) {
+        let r = strata_backend::route_read(&state, &host, &db).await?;
+        let value = r
+            .with_view(|v| memoturn_strata::surface::kv::get(v, &ns, &key))
+            .await?;
+        return match value {
+            Some(value) => Ok((txid_headers(r.head().await), value).into_response()),
+            None => Err(ApiError::new(StatusCode::NOT_FOUND, "key not found")),
+        };
+    }
     let (h, _, _) = resolve_read(&state, &db, min_txid_of(&headers)).await?;
     match memoturn_kv::get(&h, &ns, &key).await? {
         Some(entry) => Ok((txid_headers(entry.txid), entry.value).into_response()),
@@ -3345,6 +4102,32 @@ async fn kv_delete(
     State(state): State<AppState>,
     Path((db, ns, key)): Path<(String, String, String)>,
 ) -> Result<Response, ApiError> {
+    if let Some(host) = strata_host(&state, parse_spec(&db).0) {
+        let d = match strata_backend::route_write(&state, &host, &db).await? {
+            strata_backend::SRoute::Remote { addr } => {
+                return forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::DELETE,
+                    &format!("/v1/db/{db}/kv/{ns}/{key}"),
+                    None,
+                    None,
+                )
+                .await;
+            }
+            strata_backend::SRoute::Local(d) => d,
+        };
+        let (_, txid) = strata_backend::submit(
+            &d,
+            memoturn_strata::WriteRequest::KvDelete {
+                ns: ns.clone(),
+                key: key.clone(),
+            },
+            false,
+        )
+        .await?;
+        return Ok((txid_headers(txid), StatusCode::NO_CONTENT).into_response());
+    }
     let l = match resolve_write(&state, &db).await? {
         WriteRoute::Remote { addr } => {
             return forward(
@@ -3369,12 +4152,19 @@ async fn kv_list(
     Path((db, ns)): Path<(String, String)>,
     headers: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
-) -> Result<impl IntoResponse, ApiError> {
-    let (h, _, _) = resolve_read(&state, &db, min_txid_of(&headers)).await?;
+) -> Result<Response, ApiError> {
     let prefix = q.get("prefix").map(String::as_str).unwrap_or("");
     let limit: u32 = capped(q.get("limit").and_then(|s| s.parse().ok()).unwrap_or(100));
+    if let Some(host) = strata_host(&state, parse_spec(&db).0) {
+        let r = strata_backend::route_read(&state, &host, &db).await?;
+        let keys = r
+            .with_view(|v| memoturn_strata::surface::kv::list(v, &ns, prefix, limit))
+            .await?;
+        return Ok((txid_headers(r.head().await), Json(json!({ "keys": keys }))).into_response());
+    }
+    let (h, _, _) = resolve_read(&state, &db, min_txid_of(&headers)).await?;
     let keys = memoturn_kv::list(&h, &ns, prefix, limit).await?;
-    Ok((txid_headers(h.txid()), Json(json!({ "keys": keys }))))
+    Ok((txid_headers(h.txid()), Json(json!({ "keys": keys }))).into_response())
 }
 
 #[cfg(test)]

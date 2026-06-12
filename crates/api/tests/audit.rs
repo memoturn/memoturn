@@ -59,6 +59,7 @@ async fn test_state(dir: &std::path::Path) -> AppState {
             std::sync::Arc::new(object_store::memory::InMemory::new()),
             "v1",
         )),
+        strata: None,
     }
 }
 

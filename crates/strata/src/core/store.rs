@@ -645,6 +645,11 @@ impl Db {
         self.shared.inner.lock().await.head
     }
 
+    /// The writer-ownership epoch this handle was opened at.
+    pub fn epoch(&self) -> u64 {
+        self.shared.epoch
+    }
+
     /// Submit one typed request. Group commit: concurrent submitters share a
     /// round and its txid; per-request staging failures fail that request
     /// alone (the savepoint replacement).

@@ -352,6 +352,18 @@ in** with its tests, not linked. Public API mirrors today's typed call shapes so
 backend trait can swap engines per-database.
 
 **Deferred, by name:** shared node-log multiplexing; owner→replica push streams; per-segment
-posting blocks and the phase-2 HNSW snapshot; gRPC; governance policy wiring and audit (they
-live above the engine and are unaffected); auto-embedding and `/extract` (run before any write,
-unaffected); `memoturnd` integration.
+posting blocks and the phase-2 HNSW snapshot; gRPC; verifiable-erasure coupons on this engine
+(the filtered-compaction erasure exists; the coupon/receipt machinery still assumes the libSQL
+object layout); the strata-side sweep loop for task/KV TTL (lazy expiry filters reads; the
+physical sweep endpoint exists but is not yet on the node maintenance tick).
+
+## Running it (experimental flag)
+
+`MEMOTURN_STRATA_NAMESPACES=*` (or a comma-separated namespace list) routes the selected
+`{ns}--{profile}` databases through strata end-to-end: memory ingest/recall/extract/forget,
+sessions, KV, docs, transcripts, fork/checkpoint/rewind, and `/sync` (= flush, the durability
+point). Registry, tokens, leases, write forwarding, governance gates, and audit are shared
+plumbing and behave identically. `/sql` and standalone vector collections return a clear error
+on strata databases. Both engines coexist per-database on one node; object-store roots are
+disjoint (`v1` vs `v2-strata`), so neither engine's maintenance passes read the other's
+manifests. See `crates/api/src/strata_backend.rs` and `crates/api/tests/strata_engine.rs`.

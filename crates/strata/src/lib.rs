@@ -44,6 +44,7 @@ pub mod fuse;
 pub use core::manifest::{Manifest, ParentRef, SegmentRef};
 pub use core::ops::{Durability, WriteOutput, WriteRequest};
 pub use core::store::{Db, ErasureEvidence, PruneBeforeOutcome, Replica, Store};
+pub use core::view::View;
 pub use surface::memory::{IngestOutcome, MemoryInput, MemoryRules, MemoryType, RecallQuery};
 
 pub type Txid = u64;

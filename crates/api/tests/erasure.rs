@@ -56,6 +56,7 @@ async fn test_state(dir: &std::path::Path) -> AppState {
         embed_provenance: None,
         audit: memoturn_api::audit::AuditSink::noop(),
         erasures: Arc::new(memoturn_governance::ErasureLedger::new(store, "v1")),
+        strata: None,
     }
 }
 
