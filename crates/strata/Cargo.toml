@@ -1,0 +1,28 @@
+[package]
+name = "memoturn-strata"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Ground-up object-native typed storage engine (prototype, ADR-0011)"
+
+[lints]
+workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+object_store = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+uuid = { workspace = true }
+sha2 = { workspace = true }
+moka = { workspace = true, features = ["sync"] }
+postcard = { workspace = true }
+crc32fast = { workspace = true }
+lz4_flex = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

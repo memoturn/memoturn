@@ -94,4 +94,5 @@ agents natively speak JSON — with SQL kept as the power-user escape hatch.
 | [06-mcp-and-assistant](06-mcp-and-assistant.md) | MCP tools, built-in assistant |
 | [07-agent-memory](07-agent-memory.md) | namespaces, profiles, typed memories, supersession, hybrid recall |
 | [08-data-governance](08-data-governance.md) | per-namespace policies: retention/TTL caps, AI egress, audit, erasure |
+| [09-object-native-engine](09-object-native-engine.md) | ground-up candidate engine: typed surfaces on an object-native LSM (prototype) |
 | [docs/adr](../adr) | one record per locked decision |
