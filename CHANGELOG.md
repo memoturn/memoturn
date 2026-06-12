@@ -6,6 +6,15 @@ chart (see docs/development.md).
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-06-11
+
+Initial prototype: typed agent memory (`namespace > profile > memory`, supersession, hybrid
+recall, server-side extraction/ask as node opt-ins), multi-model substrate
+(docs/KV/SQL/vectors/transcript) on embedded libSQL, object storage as source of truth, O(1)
+manifest branching with burner branches and PITR, etcd writer leases with epoch fencing,
+fail-closed auth with per-database/namespace JWTs, data governance (policies, audit streams,
+verifiable erasure), CLI, TypeScript + Python SDKs, MCP server, Helm chart, runnable examples.
+
 ### Added
 
 - Structured error codes: every error response is `{ "error": <message>, "code": <stable code> }`
@@ -22,12 +31,3 @@ chart (see docs/development.md).
 - CI: fmt/clippy/test, SDK + examples e2e against a shared node, MCP tests, docs build, helm lint.
 - Docs: errors reference, troubleshooting, point-in-time recovery, and ask/answer-synthesis
   pages; READMEs for `examples/`, `docs/`, `mcp/`, `bench/`; `docs/development.md`.
-
-## [0.1.0] — 2026-06
-
-Initial prototype: typed agent memory (`namespace > profile > memory`, supersession, hybrid
-recall, server-side extraction/ask as node opt-ins), multi-model substrate
-(docs/KV/SQL/vectors/transcript) on embedded libSQL, object storage as source of truth, O(1)
-manifest branching with burner branches and PITR, etcd writer leases with epoch fencing,
-fail-closed auth with per-database/namespace JWTs, data governance (policies, audit streams,
-verifiable erasure), CLI, TypeScript + Python SDKs, MCP server, Helm chart, runnable examples.
