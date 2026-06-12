@@ -17,12 +17,21 @@ Because a profile is one database, the agent's whole mind is operable:
   /memories            show what it knows (active, ranked by recency)
   /ask <question>      ask the memory directly (server-side answer synthesis,
                        needs MEMOTURN_ASSISTANT_API_KEY on the node)
+  /remember <json>     ingest one memory object directly (no LLM involved)
+  /expect <substring> :: <query>
+                       assert recall(query) mentions substring — turns a
+                       piped script into an e2e check (exit 1 on any miss)
   /quit
 
 Restart the script — it still remembers. That's the pitch.
 
-Env: ANTHROPIC_API_KEY (required), MEMOTURN_URL (default :8080),
-     MEMOTURN_TOKEN (when the node has auth on).
+Pipe a script for a non-interactive run (see script.txt, used by
+examples/run_e2e.py):  python agent.py demo alice < script.txt
+
+Env: ANTHROPIC_API_KEY (optional — without it, chat replies degrade to the
+     raw recall results and extraction only runs server-side),
+     MEMOTURN_URL (default :8080), MEMOTURN_TOKEN (when the node has auth on),
+     MEMORY_AGENT_MODEL (default claude-opus-4-8).
 Usage: python agent.py [namespace] [profile]      (default: demo alice)
 """
 
@@ -92,6 +101,8 @@ def extract_memories(profile, claude, turns: list[dict], session_id: str) -> lis
     except MemoturnError as e:
         if e.status != 503:
             raise
+    if claude is None:  # no node extractor and no client key — nothing to extract with
+        return []
     # Client-side fallback: Claude structured outputs guarantee schema-valid JSON.
     transcript = "\n".join(f"{t['role']}: {t['content']}" for t in turns)
     response = claude.messages.create(
@@ -136,20 +147,29 @@ def main() -> None:
         source="memory-agent",
     )
     profile = mt.memory(ns, user)
-    claude = anthropic.Anthropic()  # ANTHROPIC_API_KEY from env
+    claude = anthropic.Anthropic() if os.environ.get("ANTHROPIC_API_KEY") else None
     session_id = f"s-{uuid.uuid4().hex[:8]}"
     history: list[dict] = []
+    interactive = sys.stdin.isatty()
+    expect_failures = 0
 
     print(f"memory-agent · profile {ns}/{user} · session {session_id}")
-    print("commands: /memories /ask <question> /checkpoint <name> /rewind <name> /quit\n")
+    if claude is None:
+        print("(no ANTHROPIC_API_KEY — replies degrade to raw recall results)")
+    print(
+        "commands: /memories /ask <q> /remember <json> /expect <s> :: <q> "
+        "/checkpoint <name> /rewind <name> /quit\n"
+    )
 
     while True:
         try:
-            user_message = input("you> ").strip()
+            user_message = input("you> " if interactive else "").strip()
         except (EOFError, KeyboardInterrupt):
             break
-        if not user_message:
+        if not user_message or user_message.startswith("#"):
             continue
+        if not interactive:
+            print(f"you> {user_message}")  # echo piped input so the run reads like a session
 
         if user_message == "/quit":
             break
@@ -157,6 +177,39 @@ def main() -> None:
             hits = profile.recall(query="everything you know", k=20, include_superseded=False)
             for m in hits["memories"]:
                 print(f"  [{m['type']}] {m['summary']}")
+            if not hits["memories"]:
+                print(
+                    "  (none matched — without MEMOTURN_EMBED_API_KEY on the node, "
+                    "recall needs keyword overlap with the stored memories)"
+                )
+            continue
+        if user_message.startswith("/remember "):
+            try:
+                memory = json.loads(user_message.split(" ", 1)[1])
+            except json.JSONDecodeError as e:
+                print(f"  bad JSON: {e}")
+                continue
+            result = profile.ingest([memory])["results"][0]
+            line = f"  {result['status']} {result['id']}"
+            if result.get("superseded"):
+                line += f" — superseded {', '.join(result['superseded'])}"
+            print(line)
+            continue
+        if user_message.startswith("/expect "):
+            needle, sep, query = user_message[len("/expect ") :].partition(" :: ")
+            if not sep:
+                print("  usage: /expect <substring> :: <query>")
+                continue
+            needle, query = needle.strip(), query.strip()
+            hits = profile.recall(query=query, k=8)["memories"]
+            if any(needle in m["summary"] for m in hits):
+                print(f"  ok — recall('{query}') mentions '{needle}'")
+            else:
+                expect_failures += 1
+                print(
+                    f"  FAIL — recall('{query}') has no '{needle}': "
+                    f"{[m['summary'] for m in hits]}"
+                )
             continue
         if user_message.startswith("/ask "):
             question = user_message.split(" ", 1)[1]
@@ -188,18 +241,21 @@ def main() -> None:
         # 1. Recall → 2. answer with the memories in context.
         memories = recall_block(profile, user_message)
         history.append({"role": "user", "content": user_message})
-        response = claude.messages.create(
-            model=MODEL,
-            max_tokens=16000,
-            thinking={"type": "adaptive"},
-            system=(
-                f"You are a personal assistant for one user. What you remember about them "
-                f"from prior conversations:\n{memories}\n\n"
-                f"Use these memories naturally; don't recite them. Be concise."
-            ),
-            messages=history,
-        )
-        reply = next(b.text for b in response.content if b.type == "text")
+        if claude is None:
+            reply = f"(no LLM key — what I recalled for that:\n{memories})"
+        else:
+            response = claude.messages.create(
+                model=MODEL,
+                max_tokens=16000,
+                thinking={"type": "adaptive"},
+                system=(
+                    f"You are a personal assistant for one user. What you remember about them "
+                    f"from prior conversations:\n{memories}\n\n"
+                    f"Use these memories naturally; don't recite them. Be concise."
+                ),
+                messages=history,
+            )
+            reply = next(b.text for b in response.content if b.type == "text")
         history.append({"role": "assistant", "content": reply})
         print(f"agent> {reply}\n")
 
@@ -218,6 +274,10 @@ def main() -> None:
         )
         if new_ids:
             print(f"  ({len(new_ids)} new memor{'y' if len(new_ids) == 1 else 'ies'} stored)\n")
+
+    if expect_failures:
+        print(f"\n{expect_failures} /expect check(s) FAILED")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
