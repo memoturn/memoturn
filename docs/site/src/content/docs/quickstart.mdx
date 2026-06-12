@@ -169,5 +169,8 @@ For the full walkthrough — transcript layer, scratch KV, raw-turn recall — r
 - [MCP server](/mcp/) — give any agent these operations as tools.
 - [SDKs](/sdk-typescript/) — TypeScript and [Python](/sdk-python/) clients.
 - [Deployment](/deployment/) — Kubernetes, object storage, and multi-node clusters.
-- `examples/memory-agent` in the [repository](https://github.com/memoturn/memoturn) — a runnable chat
-  agent whose memory survives restarts.
+- [`examples/`](https://github.com/memoturn/memoturn/tree/main/examples) in the repository —
+  runnable use-case demos: `memory-agent` (a chat agent whose memory survives restarts, scriptable
+  via `agent.py … < script.txt`), `support-agent`, `multi-agent`, `what-if`, and `governance`.
+  Each narrates its story against a real node and asserts the outcomes; `make demos` runs them
+  all, spawning a throwaway node if none is up.

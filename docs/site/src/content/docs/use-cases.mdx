@@ -80,6 +80,28 @@ at ≤15 s. All prototype numbers are p50, single node; reproduce with
 
 [Deployment](/deployment/) · [Scaling](/scaling/) · [Architecture](/architecture/)
 
+## Memory under compliance
+
+A regulated tenant needs more than isolation: a per-namespace **governance policy** caps
+retention and task TTLs, restricts AI egress to self-hosted models (or denies it outright), and
+turns on an append-only audit stream — metadata only, never memory content. Profile overrides
+can tighten the policy but never loosen it. When a user invokes their right to be forgotten,
+**verifiable erasure** hard-deletes the memory now, rewrites object-storage history after a
+grace window, and proves it with a signed receipt — and an erasure blocked by a checkpoint or
+branch says so instead of silently failing.
+
+[Security & governance](/security/#data-governance-policies) · [CLI](/cli/)
+
+## Run them
+
+Every use case on this page has a runnable demo in
+[`examples/`](https://github.com/memoturn/memoturn/tree/main/examples): `memory-agent` (the
+assistant loop), `support-agent` (per-customer profiles and ticket supersession), `multi-agent`
+(shared memory with source provenance), `what-if` (burner-branch speculation), and `governance`
+(policy, audit, erasure). Each narrates its story against a real node and asserts the outcomes,
+so the suite doubles as an end-to-end check — `make demos` runs them all, spawning a throwaway
+node if none is up.
+
 <CTA
 	kicker="memory for AI agents"
 	title="Give your agents a memory you can operate on."
