@@ -97,8 +97,10 @@ mcp-and-assistant) and
 - `mcp/` — MCP server (TypeScript; stdio + streamable HTTP via `--http`/`MEMOTURN_MCP_PORT`,
   tests: `npm test`); `sdk/typescript/` — `@memoturn/sdk` (e2e: `npm test`);
   `sdk/python/` — `memoturn` (e2e: `python tests/e2e.py`) — both need a running node
-- `examples/memory-agent` — the product loop as a runnable chat agent; `deploy/helm/` — umbrella
-  chart (kind-deployable, see docs/deployment-proof.md)
+- `examples/` — runnable use-case demos that double as e2e checks (`make demos` runs them all,
+  spawning a temp node if none is up): `memory-agent` (the product loop as a chat agent, scriptable
+  via `agent.py ... < script.txt`), `support-agent`, `multi-agent`, `what-if`, `governance`;
+  `deploy/helm/` — umbrella chart (kind-deployable, see docs/deployment-proof.md)
 
 ## Conventions
 

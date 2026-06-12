@@ -1,0 +1,21 @@
+# A deterministic conversation for the memory-agent, runnable non-interactively:
+#
+#   python agent.py <namespace> alice < script.txt
+#
+# /remember ingests directly (no LLM), /expect asserts on recall — the agent
+# exits 1 if any /expect misses, so this doubles as an e2e check. The one
+# free-text line exercises the chat path: with ANTHROPIC_API_KEY it gets a
+# real Claude reply, without it the agent replies with the raw recall results.
+/remember {"type":"fact","topic_key":"user.diet","summary":"vegetarian since 2024","content":{"diet":"vegetarian"},"keywords":"diet food preference vegetarian"}
+/remember {"type":"fact","topic_key":"user.seat","summary":"prefers aisle seats","content":{},"keywords":"seat aisle travel flight"}
+/expect vegetarian :: what diet food preference
+/remember {"type":"fact","topic_key":"user.diet","summary":"pescatarian since 2026","content":{"diet":"pescatarian"},"keywords":"diet food preference fish"}
+/expect pescatarian :: what diet food preference
+/checkpoint sane
+/remember {"type":"fact","topic_key":"user.diet","summary":"eats only concrete","content":{},"keywords":"diet concrete"}
+/rewind sane
+/expect pescatarian :: what diet food preference
+/expect aisle :: seat flight travel
+I'm booking a flight and a dinner reservation — anything I should keep in mind?
+/memories
+/quit
