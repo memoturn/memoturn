@@ -1299,6 +1299,49 @@ pub async fn sweep_expired(state: &AppState) -> u64 {
             }
         }
     }
+    // The strata pass: same writer-only contract over the host's owned
+    // handles. Deletes are ordinary writes — the host's background flusher
+    // ships them; recall already filters expired rows lazily in between.
+    if let Some(host) = state.strata.clone() {
+        for (key, d) in host.owned().await {
+            let Ok(Some(owner)) = state.control.lookup(&key).await else {
+                continue;
+            };
+            if owner.node_id != me {
+                continue;
+            }
+            for req in [
+                memoturn_strata::WriteRequest::MemSweepExpired,
+                memoturn_strata::WriteRequest::KvSweep,
+            ] {
+                if let Ok((memoturn_strata::WriteOutput::Count(c), _)) =
+                    d.submit(req, memoturn_strata::Durability::Standard).await
+                {
+                    n += c;
+                }
+            }
+            if let Some(name) = key.split_once('@').and_then(|(uuid, _)| name_of.get(uuid)) {
+                if let Ok(eff) = state.governance.effective_for_db(name).await {
+                    let rules = memoturn_strata::MemoryRules {
+                        event_max_age_secs: eff.event_max_age_secs,
+                        superseded_max_age_secs: eff.superseded_max_age_secs,
+                        superseded_max_count: eff.superseded_max_count,
+                    };
+                    if rules.any() {
+                        if let Ok((memoturn_strata::WriteOutput::Count(c), _)) = d
+                            .submit(
+                                memoturn_strata::WriteRequest::MemEnforcePolicy(rules),
+                                memoturn_strata::Durability::Standard,
+                            )
+                            .await
+                        {
+                            n += c;
+                        }
+                    }
+                }
+            }
+        }
+    }
     n
 }
 
@@ -1321,6 +1364,14 @@ pub async fn gc_objects(state: &AppState) -> usize {
         match state.replicator.gc(&db.uuid, grace).await {
             Ok(d) => n += d,
             Err(e) => tracing::warn!(uuid = %db.uuid, error = %e, "object GC failed"),
+        }
+        // Strata databases GC under their own root (dereferenced segments,
+        // absorbed WAL chunks) — same refcount-union + grace contract.
+        if let Some(host) = strata_host(state, &db.name) {
+            match host.store.gc(&db.uuid, grace).await {
+                Ok(d) => n += d,
+                Err(e) => tracing::warn!(uuid = %db.uuid, error = %e, "strata object GC failed"),
+            }
         }
     }
     n
@@ -1756,16 +1807,6 @@ async fn docs_create_index(
 }
 
 // ---- vectors ----
-
-/// Verifiable-erasure coupons (ADR-0010 phase 3) are deferred on the strata
-/// engine: the engine erases via filtered compaction, but the coupon/receipt
-/// machinery still assumes the libSQL object layout (named in ADR-0011).
-fn strata_no_erasure() -> ApiError {
-    ApiError::new(
-        StatusCode::NOT_IMPLEMENTED,
-        "verifiable erasure is not yet available on the strata engine; plain forget works",
-    )
-}
 
 /// Standalone vector collections are not part of the strata typed surface
 /// (memory embeddings ride ingest); the route stays libSQL-only.
@@ -3075,11 +3116,6 @@ async fn memories_forget(
     let audit_on = eff.audit_enabled;
     let spec = format!("{name}@{branch}");
     if let Some(host) = strata_host(&state, &name) {
-        // `purge_on_forget` upgrades a forget into a tracked verifiable
-        // erasure; the coupon machinery is not wired for this engine yet.
-        if eff.purge_on_forget {
-            return Err(strata_no_erasure());
-        }
         let d = match strata_backend::route_write(&state, &host, &spec).await? {
             strata_backend::SRoute::Remote { addr } => {
                 let resp = forward(
@@ -3119,6 +3155,35 @@ async fn memories_forget(
         if strata_backend::expect_count(out)? == 0 {
             return Err(ApiError::new(StatusCode::NOT_FOUND, "memory not found"));
         }
+        let mut resp_headers = txid_headers(txid);
+        // `purge_on_forget` upgrades the forget into a tracked erasure. No
+        // secure_delete equivalent is needed: the history rewrite is a
+        // filtered compaction into new objects (ADR-0011). Flush first — the
+        // coupon must never promise an erasure whose post-`T` state is not
+        // yet in object storage.
+        if eff.purge_on_forget {
+            d.flush().await?;
+            let rec = state.registry.get(&name).await?;
+            let target = memoturn_governance::ErasureTarget {
+                memory_id: Some(id.clone()),
+                ..Default::default()
+            };
+            let coupon = create_erasure_coupon_at(
+                &state,
+                &ns,
+                &profile,
+                &rec.uuid,
+                &branch,
+                target,
+                vec![id.clone()],
+                txid,
+                &actor,
+            )
+            .await?;
+            if let Ok(v) = coupon.id.parse() {
+                resp_headers.insert("Memoturn-Erasure-Id", v);
+            }
+        }
         if audit_on && !is_internal(&actor) {
             state.audit.emit(
                 audit::AuditEvent::new("memory.forget", &ns)
@@ -3129,7 +3194,7 @@ async fn memories_forget(
                     .actor(actor.as_ref()),
             );
         }
-        return Ok((txid_headers(txid), StatusCode::NO_CONTENT).into_response());
+        return Ok((resp_headers, StatusCode::NO_CONTENT).into_response());
     }
     let l = match resolve_write(&state, &spec).await? {
         WriteRoute::Remote { addr } => {
@@ -3649,13 +3714,92 @@ async fn memories_erase(
         ));
     }
     let (name, branch) = profile_db(&ns, &profile, &headers, &q)?;
-    // Verifiable-erasure coupons are not wired for the strata engine yet
-    // (the engine's filtered-compaction erasure exists; the coupon/receipt
-    // machinery still assumes the libSQL object layout).
-    if strata_host(&state, &name).is_some() {
-        return Err(strata_no_erasure());
-    }
     let spec = format!("{name}@{branch}");
+    if let Some(host) = strata_host(&state, &name) {
+        let d = match strata_backend::route_write(&state, &host, &spec).await? {
+            strata_backend::SRoute::Remote { addr } => {
+                return forward(
+                    &state,
+                    &addr,
+                    reqwest::Method::POST,
+                    &format!("/v1/memory/{ns}/{profile}/erasures?branch={}", enc(&branch)),
+                    Some(req),
+                    None,
+                )
+                .await;
+            }
+            strata_backend::SRoute::Local(d) => d,
+        };
+        // The forget itself; no secure_delete equivalent is needed — the
+        // history rewrite is a filtered compaction into new objects.
+        let (memory_ids, txid) = if let Some(id) = &parsed.memory_id {
+            let (out, txid) = strata_backend::submit(
+                &d,
+                memoturn_strata::WriteRequest::MemForget { id: id.clone() },
+                true,
+            )
+            .await?;
+            if strata_backend::expect_count(out)? == 0 {
+                return Err(ApiError::new(StatusCode::NOT_FOUND, "memory not found"));
+            }
+            (vec![id.clone()], txid)
+        } else if let (Some(key), Some(mtype)) = (&parsed.topic_key, &parsed.mtype) {
+            let (out, txid) = strata_backend::submit(
+                &d,
+                memoturn_strata::WriteRequest::MemForgetTopic {
+                    mtype: memoturn_strata::MemoryType::parse(mtype)?,
+                    topic: key.clone(),
+                },
+                true,
+            )
+            .await?;
+            let ids = strata_backend::expect_ids(out)?;
+            if ids.is_empty() {
+                return Err(ApiError::new(
+                    StatusCode::NOT_FOUND,
+                    "no memories on that topic",
+                ));
+            }
+            (ids, txid)
+        } else {
+            let sid = parsed.session_id.clone().unwrap_or_default();
+            let (_, txid) = strata_backend::submit(
+                &d,
+                memoturn_strata::WriteRequest::MemEndSession {
+                    session: sid,
+                    drop_turns: parsed.turns,
+                },
+                true,
+            )
+            .await?;
+            (Vec::new(), txid)
+        };
+        // Coupon ordering: post-`T` state durable in object storage first.
+        d.flush().await?;
+        let rec = state.registry.get(&name).await?;
+        let target = memoturn_governance::ErasureTarget {
+            memory_id: parsed.memory_id,
+            topic_key: parsed.topic_key,
+            mtype: parsed.mtype,
+            session_id: parsed.session_id,
+            turns: parsed.turns,
+        };
+        let coupon = create_erasure_coupon_at(
+            &state, &ns, &profile, &rec.uuid, &branch, target, memory_ids, txid, &actor,
+        )
+        .await?;
+        return Ok((
+            StatusCode::ACCEPTED,
+            txid_headers(txid),
+            Json(json!({
+                "erasure_id": coupon.id,
+                "status": coupon.status,
+                "txid": txid,
+                "grace_until": coupon.grace_until,
+            })),
+        )
+            .into_response());
+    }
     let l = match resolve_write(&state, &spec).await? {
         WriteRoute::Remote { addr } => {
             // The owner performs the forget and creates the coupon (it holds
@@ -3747,6 +3891,26 @@ async fn create_erasure_coupon(
         .shipper
         .flush_one(&l.uuid, &l.branch, &l.h, l.epoch)
         .await?;
+    create_erasure_coupon_at(
+        state, ns, profile, &l.uuid, &l.branch, target, memory_ids, txid, actor,
+    )
+    .await
+}
+
+/// The engine-agnostic half: build, persist, and audit the coupon. Callers
+/// must already have made the post-`T` state durable in object storage.
+#[allow(clippy::too_many_arguments)]
+async fn create_erasure_coupon_at(
+    state: &AppState,
+    ns: &str,
+    profile: &str,
+    uuid: &str,
+    branch: &str,
+    target: memoturn_governance::ErasureTarget,
+    memory_ids: Vec<String>,
+    txid: u64,
+    actor: &Option<audit::Actor>,
+) -> Result<memoturn_governance::ErasureCoupon, ApiError> {
     let eff = state
         .governance
         .effective(ns, Some(profile))
@@ -3756,12 +3920,12 @@ async fn create_erasure_coupon(
     let coupon = memoturn_governance::ErasureCoupon {
         id: format!("ers_{}", &uuid::Uuid::new_v4().simple().to_string()[..16]),
         db: format!("{ns}--{profile}"),
-        uuid: l.uuid.clone(),
+        uuid: uuid.to_string(),
         target,
         memory_ids,
         requested_at: now,
         grace_until: now + (eff.erasure_grace_secs as i64) * 1000,
-        forget_txid: std::collections::BTreeMap::from([(l.branch.clone(), txid)]),
+        forget_txid: std::collections::BTreeMap::from([(branch.to_string(), txid)]),
         status: memoturn_governance::ErasureStatus::Pending,
         blocked_by: None,
         completed_at: None,
@@ -3773,7 +3937,7 @@ async fn create_erasure_coupon(
         state.audit.emit(
             audit::AuditEvent::new("erasure.requested", ns)
                 .profile(profile)
-                .branch(&l.branch)
+                .branch(branch)
                 .resource(&coupon.id)
                 .txid(txid)
                 .count(coupon.memory_ids.len() as u64)
@@ -3836,6 +4000,49 @@ pub async fn process_erasures(state: &AppState) -> usize {
         }
         branches.sort();
         branches.dedup();
+        // Strata databases rewrite history below `T` with the engine's
+        // filtered compaction (ADR-0011) — one pass erases the row, its FTS
+        // postings, and its vector together; dereferenced objects fall to GC.
+        if let Some(host) = strata_host(state, &coupon.db) {
+            let mut blocked = memoturn_governance::BlockedBy::default();
+            for b in &branches {
+                let Ok(Some(m)) = host.store.manifest(&coupon.uuid, b).await else {
+                    continue;
+                };
+                // Same live-content rule as libSQL: a branch that isn't the
+                // erased one and didn't fork from it at or after `T` holds
+                // the datum as LIVE content — rewriting can't help.
+                if b != request_branch {
+                    let post_t_child = m
+                        .parent
+                        .as_ref()
+                        .is_some_and(|p| &p.branch == request_branch && p.fork_txid >= t);
+                    if !post_t_child {
+                        blocked.branches.push(b.clone());
+                        continue;
+                    }
+                }
+                let spec = format!("{}@{b}", coupon.db);
+                // A remote owner's pass handles its branches; transient
+                // route errors defer to the next tick.
+                if let Ok(strata_backend::SRoute::Local(d)) =
+                    strata_backend::route_write(state, &host, &spec).await
+                {
+                    match d.erase_below(t).await {
+                        Ok(()) => acted += 1,
+                        Err(memoturn_strata::StrataError::ErasureBlocked(names)) => {
+                            blocked.checkpoints.extend(names)
+                        }
+                        Err(e) => {
+                            tracing::warn!(db = %coupon.db, branch = %b, error = %e,
+                                "strata erasure rewrite deferred")
+                        }
+                    }
+                }
+            }
+            update_coupon_blockers(state, &mut coupon, blocked).await;
+            continue;
+        }
         let mut blocked = memoturn_governance::BlockedBy::default();
         for b in &branches {
             let Ok(Some(m)) = state.replicator.load_manifest(&coupon.uuid, b).await else {
@@ -3885,25 +4092,36 @@ pub async fn process_erasures(state: &AppState) -> usize {
                 }
             }
         }
-        blocked.checkpoints.sort();
-        blocked.checkpoints.dedup();
-        let status = if blocked.any() {
-            memoturn_governance::ErasureStatus::Blocked
-        } else {
-            memoturn_governance::ErasureStatus::Pending
-        };
-        let blocked = blocked.any().then_some(blocked);
-        if status != coupon.status
-            || serde_json::to_value(&blocked).ok() != serde_json::to_value(&coupon.blocked_by).ok()
-        {
-            coupon.status = status;
-            coupon.blocked_by = blocked;
-            if let Err(e) = state.erasures.update(&coupon).await {
-                tracing::warn!(id = %coupon.id, error = %e, "erasure coupon update failed");
-            }
-        }
+        update_coupon_blockers(state, &mut coupon, blocked).await;
     }
     acted
+}
+
+/// Persist a coupon's blocker outcome from one maintenance pass (shared by
+/// both engines' arms): Blocked when anything pins history below `T`,
+/// otherwise back to Pending so `finalize_erasures` can prove and receipt.
+async fn update_coupon_blockers(
+    state: &AppState,
+    coupon: &mut memoturn_governance::ErasureCoupon,
+    mut blocked: memoturn_governance::BlockedBy,
+) {
+    blocked.checkpoints.sort();
+    blocked.checkpoints.dedup();
+    let status = if blocked.any() {
+        memoturn_governance::ErasureStatus::Blocked
+    } else {
+        memoturn_governance::ErasureStatus::Pending
+    };
+    let blocked = blocked.any().then_some(blocked);
+    if status != coupon.status
+        || serde_json::to_value(&blocked).ok() != serde_json::to_value(&coupon.blocked_by).ok()
+    {
+        coupon.status = status;
+        coupon.blocked_by = blocked;
+        if let Err(e) = state.erasures.update(coupon).await {
+            tracing::warn!(id = %coupon.id, error = %e, "erasure coupon update failed");
+        }
+    }
 }
 
 /// Prove and receipt erasures whose history rewrite has fully landed: every
@@ -3924,25 +4142,32 @@ pub async fn finalize_erasures(state: &AppState) -> usize {
         let Some(&t) = coupon.forget_txid.values().next() else {
             continue;
         };
-        let ev = match state.replicator.verify_erased_before(&coupon.uuid, t).await {
-            Ok(ev) => ev,
-            Err(e) => {
-                tracing::warn!(id = %coupon.id, error = %e, "erasure verification deferred");
-                continue;
+        // Evidence comes from whichever engine owns the database's layout:
+        // both proofs are listings of txid-named keys, just different roots.
+        let ev_json = if let Some(host) = strata_host(state, &coupon.db) {
+            match host.store.verify_erased_before(&coupon.uuid, t).await {
+                Ok(ev) if ev.clean => serde_json::to_value(&ev).unwrap_or_else(|_| json!({})),
+                Ok(_) => continue, // objects still pending GC — next pass
+                Err(e) => {
+                    tracing::warn!(id = %coupon.id, error = %e, "strata erasure verification deferred");
+                    continue;
+                }
+            }
+        } else {
+            match state.replicator.verify_erased_before(&coupon.uuid, t).await {
+                Ok(ev) if ev.clean => serde_json::to_value(&ev).unwrap_or_else(|_| json!({})),
+                Ok(_) => continue, // objects still pending GC — next pass
+                Err(e) => {
+                    tracing::warn!(id = %coupon.id, error = %e, "erasure verification deferred");
+                    continue;
+                }
             }
         };
-        if !ev.clean {
-            continue; // objects still pending GC — next pass
-        }
         let der = match &state.auth {
             auth::Auth::Enabled(keys) => Some(keys.signing_der().to_vec()),
             auth::Auth::Disabled => None,
         };
-        let payload = memoturn_governance::receipt_payload(
-            &coupon,
-            now,
-            serde_json::to_value(&ev).unwrap_or_else(|_| json!({})),
-        );
+        let payload = memoturn_governance::receipt_payload(&coupon, now, ev_json);
         let receipt = match memoturn_governance::sign_receipt(der.as_deref(), payload) {
             Ok(r) => r,
             Err(e) => {

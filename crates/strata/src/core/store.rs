@@ -88,6 +88,12 @@ impl Store {
         self.data_dir.join(uuid).join(format!("{branch}.log"))
     }
 
+    /// One branch's manifest, if it exists (maintenance passes inspect
+    /// parents/checkpoints without opening a writer).
+    pub async fn manifest(&self, uuid: &str, branch: &str) -> Result<Option<Manifest>> {
+        manifest::load(&self.object, &self.root, uuid, branch).await
+    }
+
     // ---- ownership takeover (the fence protocol, 09 § fencing) ----
 
     /// Open a branch for writing: bump the epoch (manifest CAS — the single

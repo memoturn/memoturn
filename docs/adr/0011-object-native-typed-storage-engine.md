@@ -70,7 +70,12 @@ block cache never invalidates.
 databases' typed surfaces — memory, KV, docs, transcripts, branching, `/sync` — through strata
 end-to-end on the real HTTP API, sharing the registry/lease/forwarding plumbing with libSQL
 databases on the same node (disjoint object-store roots: `v1` vs `v2-strata`). `/sql` and
-standalone vector collections reject with a clear error on strata databases; verifiable-erasure
-coupons remain deferred (the engine's filtered-compaction erasure exists; the coupon/receipt
-machinery still assumes the libSQL object layout). The flag is experimental and intentionally
-absent from the published docs until those gaps close.
+standalone vector collections reject with a clear error on strata databases. The flag is
+experimental and intentionally absent from the published docs until the deferred gaps close.
+
+**Update (2026-06, maintenance parity):** verifiable-erasure coupons now ride this engine —
+the same coupon/grace/receipt flow, with the history rewrite as `erase_below` filtered
+compaction and the absence proof listing the strata root (no `secure_delete` step exists
+because erased history is rewritten into new objects by construction). The node maintenance
+tick sweeps strata profiles (task/KV TTL + policy aging) and a background flusher ships
+Standard-mode tails every ≤200 ms, replacing the per-write fire-and-forget ship.
