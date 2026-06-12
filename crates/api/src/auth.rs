@@ -273,9 +273,9 @@ fn audit_token_hash(bearer: &str) -> String {
         .collect()
 }
 
-fn deny(code: axum::http::StatusCode, msg: &str) -> axum::response::Response {
+fn deny(status: axum::http::StatusCode, msg: &str) -> axum::response::Response {
     use axum::response::IntoResponse;
-    (code, axum::Json(serde_json::json!({ "error": msg }))).into_response()
+    crate::error::ApiError::new(status, msg).into_response()
 }
 
 /// Is this token revoked for `db_name` by a deletion tombstone? A write token

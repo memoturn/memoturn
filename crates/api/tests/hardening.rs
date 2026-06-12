@@ -280,3 +280,135 @@ async fn recall_k_is_clamped_not_unbounded() {
         "result set stays within the cap"
     );
 }
+
+// ---- error envelope: { "error": <string>, "code": <stable code> } ----
+
+/// The envelope shape is a public contract: both keys present, `error` a
+/// human string, `code` a stable snake_case identifier clients branch on.
+#[tokio::test]
+async fn error_envelope_carries_message_and_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = router(test_state(dir.path()).await);
+
+    let (st, body) = call(
+        &app,
+        "POST",
+        "/v1/db/nope/sql",
+        Some(json!({ "stmts": [{ "q": "select 1" }] })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+    assert!(body["error"].is_string(), "error stays a bare string");
+    assert_eq!(body["code"], "database_not_found");
+}
+
+#[tokio::test]
+async fn branch_not_found_has_its_own_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = router(test_state(dir.path()).await);
+    let (st, _) = call(
+        &app,
+        "POST",
+        "/v1/databases",
+        Some(json!({ "name": "envdb" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED);
+
+    let (st, body) = call(
+        &app,
+        "POST",
+        "/v1/db/envdb@ghost/sql",
+        Some(json!({ "stmts": [{ "q": "select 1" }] })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "branch_not_found");
+}
+
+#[tokio::test]
+async fn conflict_and_bad_request_codes() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = router(test_state(dir.path()).await);
+    let (st, _) = call(
+        &app,
+        "POST",
+        "/v1/databases",
+        Some(json!({ "name": "dup" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED);
+
+    let (st, body) = call(
+        &app,
+        "POST",
+        "/v1/databases",
+        Some(json!({ "name": "dup" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "already_exists");
+
+    let (st, body) = call(
+        &app,
+        "POST",
+        "/v1/db/dup/sql",
+        Some(json!({ "stmts": [{ "q": "definitely not sql" }] })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "invalid_request");
+}
+
+#[tokio::test]
+async fn unconfigured_ai_optins_are_distinguishable() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = router(test_state(dir.path()).await);
+
+    // No extractor on the test node: clients see `unconfigured`, the signal
+    // to fall back to bring-your-own extraction.
+    let (st, body) = call(
+        &app,
+        "POST",
+        "/v1/memory/acme/alice/extract",
+        Some(json!({ "turns": [{ "role": "user", "content": "hi" }] })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["code"], "unconfigured");
+
+    let (st, body) = call(
+        &app,
+        "POST",
+        "/v1/memory/acme/alice/ask",
+        Some(json!({ "question": "hi" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["code"], "unconfigured");
+}
+
+#[tokio::test]
+async fn rate_limit_envelope_keeps_retry_after_and_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = router(test_state(dir.path()).await);
+    // Hammer a control endpoint past its budget; the shed response must keep
+    // both the Retry-After header and the overloaded code.
+    for i in 0..200 {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v1/databases")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({ "name": format!("rl{i}") }).to_string()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        if resp.status() == StatusCode::TOO_MANY_REQUESTS {
+            assert_eq!(resp.headers().get("Retry-After").unwrap(), "1");
+            let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+            let body: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(body["code"], "overloaded");
+            return;
+        }
+    }
+    panic!("control rate limit never tripped");
+}
