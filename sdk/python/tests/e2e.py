@@ -86,6 +86,7 @@ try:
     print("ask: assistant answered")
 except MemoturnError as e:
     assert e.status == 503, f"ask must 503 cleanly when unconfigured, got: {e}"
+    assert e.code == "unconfigured", f"503 must carry the unconfigured code, got: {e.code}"
     print("ask: node has no assistant (503) — skipped")
 
 # sessions lifecycle
@@ -152,5 +153,86 @@ if platform_key:
     events = list(mt.audit_events(ns, action="memory."))
     assert any(e["action"] == "memory.ingest" and e.get("profile") == "alice" for e in events), events
     assert all("summary" not in e and "content" not in e for e in events), "metadata only"
+
+# error codes: stable machine-readable branch points
+try:
+    mt.db(f"{ns}--alice@ghost").sql("SELECT 1")
+    raise AssertionError("missing branch must 404")
+except MemoturnError as e:
+    assert e.status == 404 and e.code == "branch_not_found", (e.status, e.code)
+
+# context manager closes only owned clients
+with Memoturn(url, token=token, platform_key=platform_key) as ctx_mt:
+    assert ctx_mt.db(f"{ns}--alice").kv.get("scratch", "plan") == "step 1"
+
+
+# ---- async twin: same flow, AsyncMemoturn ----
+async def async_flow() -> None:
+    from memoturn import AsyncMemoturn
+
+    async with AsyncMemoturn(url, token=token, platform_key=platform_key) as amt:
+        bob = amt.memory(ns, "bob")
+        r = await bob.ingest(
+            [
+                {
+                    "type": "fact",
+                    "topic_key": "user.lang",
+                    "summary": "prefers rust",
+                    "content": {"lang": "rust"},
+                    "keywords": "language preference",
+                    "embedding": [1, 0],
+                }
+            ]
+        )
+        assert r["results"][0]["status"] == "created", r
+        rust_id = r["results"][0]["id"]
+
+        r = await bob.ingest(
+            [
+                {
+                    "type": "fact",
+                    "topic_key": "user.lang",
+                    "summary": "prefers zig now",
+                    "content": {"lang": "zig"},
+                    "keywords": "language preference",
+                    "embedding": [0.9, 0.1],
+                }
+            ]
+        )
+        assert r["results"][0]["superseded"] == [rust_id], r
+
+        hits = (await bob.recall(query="language preference"))["memories"]
+        assert hits[0]["summary"] == "prefers zig now", hits
+        got = await bob.get(rust_id)
+        assert got is not None and got["superseded_by"] == r["results"][0]["id"]
+        assert await bob.get("mem_does_not_exist") is None
+
+        t = bob.session("as-1")
+        await t.append_turn("user", {"text": "zig it is"}, embedding=[0.9, 0.1])
+        assert len(await t.get_window(last=5)) == 1
+        await bob.end_session("as-1", turns=True)
+
+        await bob.checkpoint("sane")
+        await bob.ingest([{"type": "fact", "topic_key": "user.lang", "summary": "brainfuck", "content": {}}])
+        await bob.rewind("sane")
+        after = (await bob.recall(topic_key="user.lang"))["memories"]
+        assert after[0]["summary"] == "prefers zig now", after
+
+        adb = amt.db(f"{ns}--bob")
+        await adb.kv.put("scratch", "plan", "async step")
+        assert await adb.kv.get("scratch", "plan") == "async step"
+        assert await adb.kv.get("scratch", "missing") is None
+
+        try:
+            await amt.db(f"{ns}--bob@ghost").sql("SELECT 1")
+            raise AssertionError("missing branch must 404")
+        except MemoturnError as e:
+            assert e.status == 404 and e.code == "branch_not_found", (e.status, e.code)
+
+
+import asyncio  # noqa: E402
+
+asyncio.run(async_flow())
+print("python sdk async e2e: ok")
 
 print("python sdk e2e: ok")
