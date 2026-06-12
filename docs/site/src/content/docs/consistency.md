@@ -38,6 +38,13 @@ deposed primary can never link its segments into the manifest. Details in
 - Write responses (SQL, doc, KV, memory ingest) return the committed `txid`; feed it back as
   `min_txid` on subsequent reads.
 
+Despite the name, `txid` is a commit-round sequence number, not strictly one ID per request:
+concurrent writes to the same database may
+[group-commit](/scaling/#the-per-database-write-ceiling) into a single round and be acknowledged
+with the same `txid`. Each request in a round keeps its own atomicity — a failed one rolls back
+alone. The property to rely on is ordering: state at `txid` N reflects every write acknowledged
+with a `txid` ≤ N, so a shared `txid` is always a safe `min_txid` floor.
+
 ```bash
 # write, capture txid
 curl -si -X POST https://agent-42.us-east.memoturn.dev/v1/sql \

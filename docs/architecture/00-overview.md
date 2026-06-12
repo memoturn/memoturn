@@ -69,7 +69,10 @@ agents natively speak JSON — with SQL kept as the power-user escape hatch.
    mitigation ladder in [01](01-storage-engine.md#per-database-write-ceiling).
 2. **Reads carry `txid`.** Primary reads are strongly consistent. Replica/cached reads are
    eventually consistent within a bounded window (~1 s in-region; `max_age` backstop) and always
-   disclose their `txid`. Clients pass `min_txid` for read-your-writes.
+   disclose their `txid`. Clients pass `min_txid` for read-your-writes. Despite the name, `txid`
+   is a commit-round sequence, not one ID per request — group-committed writes share a round's
+   `txid` ([01](01-storage-engine.md#per-database-write-ceiling)); the contract is ordering
+   (state at `txid` N reflects every write acked with `txid` ≤ N), which shared IDs preserve.
 3. **Durability modes.** *Standard*: local WAL fsync, RPO ≤ ~1 s on node loss. *Durable*: commit
    acked only after the segment ships and the manifest CAS lands in object storage, RPO 0 — node
    default via `MEMOTURN_DURABILITY=durable`, or per-request escalation with a
