@@ -1,0 +1,1356 @@
+# Memoturn HTTP API — hand-maintained spec, kept honest by
+# crates/api/tests/openapi.rs (the path+method set must match the router) and
+# the /sync-docs workflow. Node-internal routes (/internal/replica/*) are
+# deliberately absent. Published at docs.memoturn.ai/openapi.yaml.
+openapi: 3.1.0
+info:
+  title: Memoturn API
+  version: 0.1.0
+  description: |
+    The agent-memory database. The headline surface is typed agent memory —
+    `namespace > profile > memory`, where a profile is one database — with
+    supersession and hybrid recall. The multi-model substrate (docs, KV, SQL,
+    vectors, transcript, branching) is exposed under `/v1/db/{db}`.
+
+    `{db}` is a spec `name[@branch]` (`@main` implicit). Every response that
+    touches a database carries the `Memoturn-Txid` header; replicas serve
+    eventually-consistent reads and `Memoturn-Min-Txid` forces read-your-writes.
+
+    Errors use one envelope: `{ "error": <message>, "code": <stable code> }`.
+    Two responses bypass it (middleware defaults): 408 request timeout and
+    413 payload too large — clients fall back to the status code there.
+servers:
+  - url: http://127.0.0.1:8080
+
+security:
+  - bearer: []
+
+tags:
+  - name: memory
+    description: Typed agent memory — ingest, recall, ask, extract, sessions, erasure
+  - name: transcript
+    description: Verbatim per-session transcript layer
+  - name: substrate
+    description: Docs / KV / SQL / vectors on one database
+  - name: branching
+    description: O(1) copy-on-write branches, checkpoints, rewind
+  - name: control
+    description: Databases, tokens (platform key)
+  - name: governance
+    description: Policies and the audit stream (ADR-0010)
+
+paths:
+  /health:
+    get:
+      operationId: health
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: '`ok`'
+          content:
+            text/plain:
+              schema: { type: string }
+
+  # ---- control plane ----
+
+  /v1/databases:
+    post:
+      tags: [control]
+      operationId: createDatabase
+      summary: Create a database
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DatabaseInfo" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/Overloaded" }
+    get:
+      tags: [control]
+      operationId: listDatabases
+      summary: List databases
+      responses:
+        "200":
+          description: All databases
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  databases:
+                    type: array
+                    items: { $ref: "#/components/schemas/DatabaseInfo" }
+
+  /v1/databases/{db}:
+    delete:
+      tags: [control]
+      operationId: deleteDatabase
+      summary: Delete a database (tombstones revoke older write tokens)
+      parameters: [{ $ref: "#/components/parameters/dbName" }]
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/databases/{db}/tokens:
+    post:
+      tags: [control]
+      operationId: createToken
+      summary: Mint a per-database JWT (platform key)
+      parameters: [{ $ref: "#/components/parameters/dbName" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TokenRequest" }
+      responses:
+        "200":
+          description: The signed token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/namespaces/{ns}/tokens:
+    post:
+      tags: [control]
+      operationId: createNamespaceToken
+      summary: Mint a namespace JWT covering every profile under it (platform key)
+      parameters: [{ $ref: "#/components/parameters/ns" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TokenRequest" }
+      responses:
+        "200":
+          description: The signed token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ---- agent memory ----
+
+  /v1/memory/{ns}:
+    get:
+      tags: [memory]
+      operationId: listProfiles
+      summary: List profiles under a namespace (namespace token)
+      parameters: [{ $ref: "#/components/parameters/ns" }]
+      responses:
+        "200":
+          description: Profiles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles:
+                    type: array
+                    items: { type: object }
+
+  /v1/memory/{ns}/{profile}/memories:
+    post:
+      tags: [memory]
+      operationId: ingestMemories
+      summary: Idempotent batch ingest (profile auto-creates on first call)
+      description: |
+        fact/instruction memories with a `topic_key` supersede the previous
+        memory on that topic; exact duplicates dedupe (`status: duplicate`).
+      parameters:
+        - { $ref: "#/components/parameters/ns" }
+        - { $ref: "#/components/parameters/profile" }
+        - { $ref: "#/components/parameters/branch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [memories]
+              properties:
+                memories:
+                  type: array
+                  items: { $ref: "#/components/schemas/MemoryInput" }
+      responses:
+        "201":
+          description: Per-memory outcomes
+          headers:
+            Memoturn-Txid: { $ref: "#/components/headers/Memoturn-Txid" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: "#/components/schemas/IngestItem" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "429": { $ref: "#/components/responses/Overloaded" }
+
+  /v1/memory/{ns}/{profile}/memories/{id}:
+    get:
+      tags: [memory]
+      operationId: getMemory
+      summary: One memory with its supersession chain
+      parameters:
+        - { $ref: "#/components/parameters/ns" }
+        - { $ref: "#/components/parameters/profile" }
+        - { $ref: "#/components/parameters/memoryId" }
+        - { $ref: "#/components/parameters/branch" }
+      responses:
+        "200":
+          description: The memory
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Memory" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [memory]
+      operationId: forgetMemory
+      summary: Hard-delete one memory
+      parameters:
+        - { $ref: "#/components/parameters/ns" }
+        - { $ref: "#/components/parameters/profile" }
+        - { $ref: "#/components/parameters/memoryId" }
+        - { $ref: "#/components/parameters/branch" }
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/memory/{ns}/{profile}/recall:
+    post:
+      tags: [memory]
+      operationId: recall
+      summary: Hybrid recall (keyword + topic + vector, RRF-fused)
+      description: Empty `memories` means nothing relevant — never padded.
+      parameters:
+        - { $ref: "#/components/parameters/ns" }
+        - { $ref: "#/components/parameters/profile" }
+        - { $ref: "#/components/parameters/branch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecallRequest" }
+      responses:
+        "200":
+          description: Ranked memories (and turns when `include_turns`)
+          headers:
+            Memoturn-Txid: { $ref: "#/components/headers/Memoturn-Txid" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  memories:
+                    type: array
+                    items: { $ref: "#/components/schemas/Memory" }
+                  turns:
+                    type: array
+                    items: { $ref: "#/components/schemas/Turn" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+
+  /v1/memory/{ns}/{profile}/ask:
+    post:
+      tags: [memory]
+      operationId: ask
+      summary: Recall + server-side answer synthesis with cited memory ids
+      description: |
+        Node opt-in (`MEMOTURN_ASSISTANT_API_KEY`). Unconfigured nodes return
+        503 with code `unconfigured` — recall and synthesize client-side.
+      parameters:
+        - { $ref: "#/components/parameters/ns" }
+        - { $ref: "#/components/parameters/profile" }
+        - { $ref: "#/components/parameters/branch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AskRequest" }
+      responses:
+        "200":
+          description: Grounded answer (`answer` null when nothing relevant)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AskResult" }
+        "503": { $ref: "#/components/responses/Unconfigured" }
+
+  /v1/memory/{ns}/{profile}/extract:
+    post:
+      tags: [memory]
+      operationId: extract
+      summary: Server-side extraction of typed memories from raw turns
+      description: |
+        Node opt-in (`MEMOTURN_EXTRACT_API_KEY`); off the write path.
+        Unconfigured nodes return 503 with code `unconfigured` — extraction
+        stays bring-your-own. `dry_run` proposes without writing.
+      parameters:
+        - { $ref: "#/components/parameters/ns" }
+        - { $ref: "#/components/parameters/profile" }
+        - { $ref: "#/components/parameters/branch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [turns]
+              properties:
+                turns:
+                  type: array
+                  items: { type: object }
+                session_id: { type: string }
+                source: { type: string }
+                dry_run: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Extracted (and unless dry_run, ingested) memories
+          content:
+            application/json:
+              schema: { type: object }
+        "503": { $ref: "#/components/responses/Unconfigured" }
+
+  /v1/memory/{ns}/{profile}/sessions:
+    get:
+      tags: [memory]
+      operationId: listSessions
+      summary: List a profile's sessions
+      parameters:
+        - { $ref: "#/components/parameters/ns" }
+        - { $ref: "#/components/parameters/profile" }
+        - { $ref: "#/components/parameters/branch" }
+      responses:
+        "200":
+          description: Sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items: { type: object }
+
+  /v1/memory/{ns}/{profile}/sessions/{sid}:
+    delete:
+      tags: [memory]
+      operationId: endSession
+      summary: End a session (its task memories go; `?turns=true` drops the transcript)
+      parameters:
+        - { $ref: "#/components/parameters/ns" }
+        - { $ref: "#/components/parameters/profile" }
+        - name: sid
+          in: path
+          required: true
+          schema: { type: string }
+        - { $ref: "#/components/parameters/branch" }
+        - name: turns
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "204": { description: Ended }
+
+  /v1/memory/{ns}/{profile}/erasures:
+    post:
+      tags: [memory]
+      operationId: erase
+      summary: Verifiable erasure (hard-forget now, history rewrite + signed receipt)
+      description: |
+        ADR-0010 phase 3. Target exactly one of `memory_id`, `topic_key`
+        (with `type`), or `session_id`. Poll the coupon for the Ed25519
+        receipt once the grace window elapses.
+      parameters:
+        - { $ref: "#/components/parameters/ns" }
+        - { $ref: "#/components/parameters/profile" }
+        - { $ref: "#/components/parameters/branch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                memory_id: { type: string }
+                topic_key: { type: string }
+                type: { type: string }
+                session_id: { type: string }
+                turns: { type: boolean }
+      responses:
+        "200":
+          description: The erasure coupon
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErasureCoupon" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+    get:
+      tags: [memory]
+      operationId: listErasures
+      summary: Erasure coupons for this profile, newest first
+      parameters:
+        - { $ref: "#/components/parameters/ns" }
+        - { $ref: "#/components/parameters/profile" }
+        - { $ref: "#/components/parameters/branch" }
+      responses:
+        "200":
+          description: Coupons
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  erasures:
+                    type: array
+                    items: { $ref: "#/components/schemas/ErasureCoupon" }
+
+  /v1/memory/{ns}/{profile}/erasures/{id}:
+    get:
+      tags: [memory]
+      operationId: getErasure
+      summary: One erasure coupon (completed carries the signed receipt)
+      parameters:
+        - { $ref: "#/components/parameters/ns" }
+        - { $ref: "#/components/parameters/profile" }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - { $ref: "#/components/parameters/branch" }
+      responses:
+        "200":
+          description: The coupon
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErasureCoupon" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/memory/{ns}/{profile}/policy:
+    get:
+      tags: [governance]
+      operationId: getProfilePolicy
+      summary: A profile's override plus the effective policy enforced (read token)
+      parameters:
+        - { $ref: "#/components/parameters/ns" }
+        - { $ref: "#/components/parameters/profile" }
+      responses:
+        "200":
+          description: Override + effective policy
+          content:
+            application/json:
+              schema: { type: object }
+    put:
+      tags: [governance]
+      operationId: setProfilePolicy
+      summary: Tighten-only profile override (admin token; loosening is a 409)
+      parameters:
+        - { $ref: "#/components/parameters/ns" }
+        - { $ref: "#/components/parameters/profile" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                policy: { type: [object, "null"] }
+      responses:
+        "200":
+          description: Stored
+          content:
+            application/json:
+              schema: { type: object }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  # ---- transcript ----
+
+  /v1/db/{db}/memory/{session}/turns:
+    post:
+      tags: [transcript]
+      operationId: appendTurn
+      summary: Append a verbatim turn
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/session" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role, content]
+              properties:
+                role: { type: string }
+                content: {}
+                embedding:
+                  type: array
+                  items: { type: number }
+      responses:
+        "200":
+          description: Appended
+          headers:
+            Memoturn-Txid: { $ref: "#/components/headers/Memoturn-Txid" }
+          content:
+            application/json:
+              schema: { type: object }
+    get:
+      tags: [transcript]
+      operationId: getWindow
+      summary: Last N turns of a session
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/session" }
+        - name: last
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Turns
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  turns:
+                    type: array
+                    items: { $ref: "#/components/schemas/Turn" }
+
+  /v1/db/{db}/memory/{session}/search:
+    post:
+      tags: [transcript]
+      operationId: searchTurns
+      summary: Semantic search over a session's transcript
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/session" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vector]
+              properties:
+                vector:
+                  type: array
+                  items: { type: number }
+                k: { type: integer, default: 5 }
+      responses:
+        "200":
+          description: Nearest turns
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  turns:
+                    type: array
+                    items: { $ref: "#/components/schemas/Turn" }
+
+  # ---- substrate ----
+
+  /v1/db/{db}/sql:
+    post:
+      tags: [substrate]
+      operationId: sql
+      summary: Atomic SQL batch (user SQL cannot touch reserved __memoturn_ tables)
+      parameters: [{ $ref: "#/components/parameters/dbSpec" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stmts]
+              properties:
+                stmts:
+                  type: array
+                  items:
+                    type: object
+                    required: [q]
+                    properties:
+                      q: { type: string }
+                      params: { type: array }
+      responses:
+        "200":
+          description: Per-statement results
+          headers:
+            Memoturn-Txid: { $ref: "#/components/headers/Memoturn-Txid" }
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/Overloaded" }
+
+  /v1/db/{db}/sync:
+    post:
+      tags: [substrate]
+      operationId: syncDb
+      summary: Ship this branch's state to object storage now (durability point)
+      parameters: [{ $ref: "#/components/parameters/dbSpec" }]
+      responses:
+        "200":
+          description: Shipped
+          headers:
+            Memoturn-Txid: { $ref: "#/components/headers/Memoturn-Txid" }
+          content:
+            application/json:
+              schema: { type: object }
+
+  /v1/db/{db}/kv/{ns}:
+    get:
+      tags: [substrate]
+      operationId: kvList
+      summary: List keys in a KV namespace
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/kvNs" }
+        - name: prefix
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100 }
+      responses:
+        "200":
+          description: Keys
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items: { type: string }
+
+  /v1/db/{db}/kv/{ns}/{key}:
+    get:
+      tags: [substrate]
+      operationId: kvGet
+      summary: Read a value (raw body)
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/kvNs" }
+        - { $ref: "#/components/parameters/kvKey" }
+      responses:
+        "200":
+          description: The value
+          content:
+            text/plain:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [substrate]
+      operationId: kvPut
+      summary: Write a value (raw body; `?ttl=` seconds for expiry)
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/kvNs" }
+        - { $ref: "#/components/parameters/kvKey" }
+        - name: ttl
+          in: query
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema: { type: string }
+      responses:
+        "200":
+          description: Written
+          headers:
+            Memoturn-Txid: { $ref: "#/components/headers/Memoturn-Txid" }
+          content:
+            application/json:
+              schema: { type: object }
+        "429": { $ref: "#/components/responses/Overloaded" }
+    delete:
+      tags: [substrate]
+      operationId: kvDelete
+      summary: Delete a key
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/kvNs" }
+        - { $ref: "#/components/parameters/kvKey" }
+      responses:
+        "204": { description: Deleted }
+
+  /v1/db/{db}/docs/{coll}/insert:
+    post:
+      tags: [substrate]
+      operationId: docsInsert
+      summary: Insert documents
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/coll" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [docs]
+              properties:
+                docs:
+                  type: array
+                  items: { type: object }
+      responses:
+        "200":
+          description: Inserted ids
+          headers:
+            Memoturn-Txid: { $ref: "#/components/headers/Memoturn-Txid" }
+          content:
+            application/json:
+              schema: { type: object }
+
+  /v1/db/{db}/docs/{coll}/find:
+    post:
+      tags: [substrate]
+      operationId: docsFind
+      summary: Query documents (Mongo-style filter subset)
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/coll" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                filter: { type: object }
+                sort: { type: object }
+                limit: { type: integer }
+                skip: { type: integer }
+      responses:
+        "200":
+          description: Matching documents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  docs:
+                    type: array
+                    items: { type: object }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+
+  /v1/db/{db}/docs/{coll}/update:
+    post:
+      tags: [substrate]
+      operationId: docsUpdate
+      summary: Update matching documents
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/coll" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filter, update]
+              properties:
+                filter: { type: object }
+                update: { type: object }
+                multi: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Update outcome
+          content:
+            application/json:
+              schema: { type: object }
+
+  /v1/db/{db}/docs/{coll}/delete:
+    post:
+      tags: [substrate]
+      operationId: docsDelete
+      summary: Delete matching documents
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/coll" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filter]
+              properties:
+                filter: { type: object }
+                multi: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Delete outcome
+          content:
+            application/json:
+              schema: { type: object }
+
+  /v1/db/{db}/docs/{coll}/indexes:
+    post:
+      tags: [substrate]
+      operationId: docsCreateIndex
+      summary: Create an index on a document path
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/coll" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path: { type: string }
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema: { type: object }
+
+  /v1/db/{db}/vectors/{coll}:
+    post:
+      tags: [substrate]
+      operationId: vectorsUpsert
+      summary: Upsert a vector
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/coll" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, embedding]
+              properties:
+                id: { type: string }
+                embedding:
+                  type: array
+                  items: { type: number }
+      responses:
+        "200":
+          description: Upserted
+          headers:
+            Memoturn-Txid: { $ref: "#/components/headers/Memoturn-Txid" }
+          content:
+            application/json:
+              schema: { type: object }
+
+  /v1/db/{db}/vectors/{coll}/search:
+    post:
+      tags: [substrate]
+      operationId: vectorsSearch
+      summary: ANN search
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/coll" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vector]
+              properties:
+                vector:
+                  type: array
+                  items: { type: number }
+                k: { type: integer, default: 10 }
+      responses:
+        "200":
+          description: Nearest hits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hits:
+                    type: array
+                    items: { type: object }
+
+  # ---- branching ----
+
+  /v1/db/{db}/branches:
+    post:
+      tags: [branching]
+      operationId: branchCreate
+      summary: Fork copy-on-write (`ttl` makes it a burner branch)
+      parameters: [{ $ref: "#/components/parameters/dbSpec" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                from: { type: string }
+                ttl: { type: integer }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { type: object }
+        "409": { $ref: "#/components/responses/Conflict" }
+    get:
+      tags: [branching]
+      operationId: branchList
+      summary: List branches
+      parameters: [{ $ref: "#/components/parameters/dbSpec" }]
+      responses:
+        "200":
+          description: Branches
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  branches:
+                    type: array
+                    items: { type: object }
+
+  /v1/db/{db}/branches/{branch}:
+    delete:
+      tags: [branching]
+      operationId: branchDelete
+      summary: Delete a branch
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/branchName" }
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/db/{db}/branches/{branch}/checkpoint:
+    post:
+      tags: [branching]
+      operationId: checkpoint
+      summary: Tag the current state with a checkpoint name
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/branchName" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200":
+          description: Checkpointed
+          content:
+            application/json:
+              schema: { type: object }
+
+  /v1/db/{db}/branches/{branch}/rewind:
+    post:
+      tags: [branching]
+      operationId: rewind
+      summary: Rewind a branch to a checkpoint name or txid
+      parameters:
+        - { $ref: "#/components/parameters/dbSpec" }
+        - { $ref: "#/components/parameters/branchName" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              properties:
+                to: { type: string }
+      responses:
+        "200":
+          description: Rewound
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---- governance ----
+
+  /v1/namespaces/{ns}/policy:
+    get:
+      tags: [governance]
+      operationId: getNamespacePolicy
+      summary: The namespace policy document (platform key)
+      parameters: [{ $ref: "#/components/parameters/ns" }]
+      responses:
+        "200":
+          description: The policy
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [governance]
+      operationId: setNamespacePolicy
+      summary: Set the namespace policy (platform key)
+      parameters: [{ $ref: "#/components/parameters/ns" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                policy: { type: [object, "null"] }
+      responses:
+        "200":
+          description: Stored
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+
+  /v1/namespaces/{ns}/audit:
+    get:
+      tags: [governance]
+      operationId: readAudit
+      summary: Read the namespace audit stream (cursor-paginated, oldest first)
+      description: |
+        Requires `audit.enabled` in the namespace policy; platform key or a
+        namespace admin token. Events are metadata only — never memory content.
+      parameters:
+        - { $ref: "#/components/parameters/ns" }
+        - name: from
+          in: query
+          schema: { type: integer, description: unix ms }
+        - name: to
+          in: query
+          schema: { type: integer, description: unix ms }
+        - name: action
+          in: query
+          schema: { type: string, description: exact action or dot-terminated prefix }
+        - name: profile
+          in: query
+          schema: { type: string }
+        - name: outcome
+          in: query
+          schema: { type: string, enum: [ok, denied, error] }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: A page of events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items: { type: object }
+                  next_cursor: { type: [string, "null"] }
+                  complete: { type: boolean }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Three credential kinds: the platform key (control plane), per-database
+        JWTs, and namespace JWTs covering every profile under a namespace.
+        Scopes: read < write < admin. With MEMOTURN_AUTH=off (dev) no
+        credential is required.
+
+  headers:
+    Memoturn-Txid:
+      description: |
+        Transaction id after this operation. Send it back as
+        `Memoturn-Min-Txid` on reads for read-your-writes on replicas.
+      schema: { type: integer }
+
+  parameters:
+    dbName:
+      name: db
+      in: path
+      required: true
+      schema: { type: string }
+      description: Database name (no branch suffix)
+    dbSpec:
+      name: db
+      in: path
+      required: true
+      schema: { type: string }
+      description: Database spec `name[@branch]` (`@main` implicit)
+    ns:
+      name: ns
+      in: path
+      required: true
+      schema: { type: string }
+      description: Namespace
+    profile:
+      name: profile
+      in: path
+      required: true
+      schema: { type: string }
+      description: Memory profile (one database, `{ns}--{profile}`)
+    branch:
+      name: branch
+      in: query
+      required: false
+      schema: { type: string }
+      description: Address a branch of the profile's memory
+    memoryId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    session:
+      name: session
+      in: path
+      required: true
+      schema: { type: string }
+    kvNs:
+      name: ns
+      in: path
+      required: true
+      schema: { type: string }
+      description: KV namespace
+    kvKey:
+      name: key
+      in: path
+      required: true
+      schema: { type: string }
+    coll:
+      name: coll
+      in: path
+      required: true
+      schema: { type: string }
+      description: Collection name
+    branchName:
+      name: branch
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    InvalidRequest:
+      description: Malformed request
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Unauthorized:
+      description: Missing/invalid credential
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Forbidden:
+      description: Credential doesn't cover this database/scope
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    NotFound:
+      description: Not found (`code` distinguishes database/branch/memory/…)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Conflict:
+      description: Conflict (`already_exists`, CAS conflict, tighten-only violation)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Overloaded:
+      description: Backpressure shed — honor Retry-After
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds until the queue is expected to drain
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Unconfigured:
+      description: AI opt-in not configured on this node (code `unconfigured`)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error, code]
+      properties:
+        error:
+          type: string
+          description: Human-readable message
+        code:
+          type: string
+          description: Stable machine-readable code
+          enum:
+            - unauthorized
+            - forbidden
+            - not_found
+            - database_not_found
+            - branch_not_found
+            - already_exists
+            - conflict
+            - invalid_request
+            - payload_too_large
+            - request_timeout
+            - overloaded
+            - unconfigured
+            - unavailable
+            - internal
+
+    DatabaseInfo:
+      type: object
+      properties:
+        name: { type: string }
+        uuid: { type: string }
+        created_at: { type: integer }
+
+    TokenRequest:
+      type: object
+      required: [scope]
+      properties:
+        scope: { type: string, enum: [read, write, admin] }
+        expires_in: { type: integer, description: seconds }
+
+    TokenResponse:
+      type: object
+      properties:
+        token: { type: string }
+
+    MemoryInput:
+      type: object
+      required: [type, summary, content]
+      properties:
+        type: { type: string, enum: [fact, event, instruction, task] }
+        topic_key:
+          type: string
+          description: Supersession key for fact/instruction (e.g. user.diet)
+        summary: { type: string, description: One-line gist; keyword-searchable }
+        content: { description: Full memory payload (JSON) }
+        keywords: { type: string, description: Extra space-separated search terms }
+        embedding:
+          type: array
+          items: { type: number }
+          description: Bring-your-own embedding (or node auto-embeds)
+        session_id: { type: string }
+        source:
+          type: string
+          description: Originating agent — provenance, not identity
+        ttl: { type: integer, description: Task lifetime in seconds (default 86400) }
+
+    IngestItem:
+      type: object
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [created, duplicate] }
+        superseded:
+          type: array
+          items: { type: string }
+
+    Memory:
+      type: object
+      properties:
+        id: { type: string }
+        type: { type: string }
+        topic_key: { type: [string, "null"] }
+        summary: { type: string }
+        content: {}
+        keywords: { type: [string, "null"] }
+        session_id: { type: [string, "null"] }
+        source: { type: [string, "null"] }
+        created_at: { type: integer }
+        superseded_by: { type: [string, "null"] }
+        score: { type: number, description: Recall only — fused relevance }
+        channels:
+          type: array
+          items: { type: string }
+        supersedes:
+          type: array
+          items: { type: string }
+          description: get() only — ids this memory superseded
+
+    RecallRequest:
+      type: object
+      properties:
+        query: { type: string, description: Free text for the keyword channel }
+        embedding:
+          type: array
+          items: { type: number }
+        topic_key: { type: string, description: Exact-match channel (weighted highest) }
+        types:
+          type: array
+          items: { type: string }
+        session_id: { type: string }
+        source: { type: string, description: Only memories ingested by this agent }
+        k: { type: integer, default: 8, maximum: 1000 }
+        include_superseded: { type: boolean, default: false }
+        include_turns:
+          type: boolean
+          default: false
+          description: Also search the transcript (requires embedding)
+
+    AskRequest:
+      type: object
+      required: [question]
+      properties:
+        question: { type: string }
+        types:
+          type: array
+          items: { type: string }
+        session_id: { type: string }
+        source: { type: string }
+        k: { type: integer, default: 8 }
+        include_superseded: { type: boolean, default: false }
+
+    AskResult:
+      type: object
+      properties:
+        answer: { type: [string, "null"] }
+        sources:
+          type: array
+          items: { type: string }
+        memories:
+          type: array
+          items: { $ref: "#/components/schemas/Memory" }
+
+    Turn:
+      type: object
+      properties:
+        session_id: { type: string }
+        seq: { type: integer }
+        role: { type: string }
+        content: {}
+        distance: { type: number }
+
+    ErasureCoupon:
+      type: object
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [pending, completed] }
+        target: { type: object }
+        requested_at: { type: integer }
+        completed_at: { type: [integer, "null"] }
+        receipt:
+          type: object
+          description: Ed25519-signed proof of the history rewrite
