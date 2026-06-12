@@ -92,6 +92,16 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// First-run check: probe the node, report credentials, optionally mint
+    /// a token, and print ready-to-paste exports. Config is env vars only —
+    /// the same MEMOTURN_* vars every other surface reads.
+    Init {
+        /// Mint a write token for this database (needs MEMOTURN_PLATFORM_KEY).
+        #[arg(long)]
+        db: Option<String>,
+    },
+    /// Emit shell completions (e.g. `memoturn completions zsh > _memoturn`).
+    Completions { shell: clap_complete::Shell },
 }
 
 #[derive(Subcommand)]
@@ -306,8 +316,8 @@ enum MemoryCmd {
         ns: String,
         profile: String,
         /// Erase one memory by id.
-        #[arg(long)]
-        memory: Option<String>,
+        #[arg(long = "memory-id", alias = "memory")]
+        memory_id: Option<String>,
         /// Erase a topic's whole supersession chain (requires --type).
         #[arg(long)]
         topic: Option<String>,
@@ -361,6 +371,20 @@ enum KvCmd {
     },
 }
 
+/// What to try next, keyed on the error envelope's machine-readable code.
+fn hint(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "database_not_found" => "list databases: `memoturn db list` — create: `memoturn db create <name>`",
+        "branch_not_found" => "list branches: `memoturn branch list <db>`",
+        "unauthorized" => "set MEMOTURN_TOKEN (mint one: `memoturn token create <db> --scope write`) or MEMOTURN_PLATFORM_KEY",
+        "forbidden" => "the credential is valid but doesn't cover this database/scope — check which token is set",
+        "overloaded" => "the node is shedding load; retry after the Retry-After interval",
+        "unconfigured" => "this node has no assistant/extractor — set MEMOTURN_ASSISTANT_API_KEY / MEMOTURN_EXTRACT_API_KEY on it, or fall back to recall",
+        "unavailable" => "the control plane (leases/policy store) is unreachable; check MEMOTURN_ETCD and object storage",
+        _ => return None,
+    })
+}
+
 async fn show(resp: reqwest::Response) -> anyhow::Result<()> {
     let status = resp.status();
     let txid = resp
@@ -370,6 +394,12 @@ async fn show(resp: reqwest::Response) -> anyhow::Result<()> {
         .map(str::to_string);
     let text = resp.text().await?;
     if !status.is_success() {
+        let code = serde_json::from_str::<Value>(&text)
+            .ok()
+            .and_then(|v| v["code"].as_str().map(str::to_string));
+        if let Some(h) = code.as_deref().and_then(hint) {
+            eprintln!("hint: {h}");
+        }
         bail!("{status}: {text}");
     }
     match serde_json::from_str::<Value>(&text) {
@@ -385,6 +415,16 @@ async fn show(resp: reqwest::Response) -> anyhow::Result<()> {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    if let Cmd::Completions { shell } = cli.cmd {
+        use clap::CommandFactory;
+        clap_complete::generate(
+            shell,
+            &mut Cli::command(),
+            "memoturn",
+            &mut std::io::stdout(),
+        );
+        return Ok(());
+    }
     // Control-plane commands authenticate with the platform key; data-plane
     // commands with the per-database token. Either falls back to the other.
     // Namespace-level policy is control-plane; profile-level rides the token.
@@ -753,14 +793,14 @@ async fn main() -> anyhow::Result<()> {
             MemoryCmd::Erase {
                 ns,
                 profile,
-                memory,
+                memory_id,
                 topic,
                 mtype,
                 session,
                 turns,
             } => {
                 let mut body = serde_json::Map::new();
-                if let Some(m) = memory {
+                if let Some(m) = memory_id {
                     body.insert("memory_id".into(), json!(m));
                 }
                 if let Some(t) = topic {
@@ -872,5 +912,65 @@ async fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
+        Cmd::Init { db } => {
+            println!("memoturn init — checking {base}");
+            match c.get(format!("{base}/health")).send().await {
+                Ok(r) if r.status().is_success() => println!("node:         reachable (health ok)"),
+                Ok(r) => println!(
+                    "node:         responded {} — is this a memoturnd?",
+                    r.status()
+                ),
+                Err(e) => {
+                    println!("node:         UNREACHABLE — start one with `make node` or `cargo run -p memoturnd`");
+                    bail!("could not reach {base}: {e}");
+                }
+            }
+            println!(
+                "token:        {}",
+                if cli.token.is_some() {
+                    "set (MEMOTURN_TOKEN)"
+                } else {
+                    "not set"
+                }
+            );
+            println!(
+                "platform key: {}",
+                if cli.platform_key.is_some() {
+                    "set (MEMOTURN_PLATFORM_KEY)"
+                } else {
+                    "not set"
+                }
+            );
+            let mut exports = vec![format!("export MEMOTURN_URL={base}")];
+            if let Some(db) = db {
+                if cli.platform_key.is_none() {
+                    bail!("--db mints a token, which needs MEMOTURN_PLATFORM_KEY");
+                }
+                let resp = c
+                    .post(format!("{base}/v1/databases/{db}/tokens"))
+                    .json(&json!({"scope": "write"}))
+                    .send()
+                    .await?;
+                let status = resp.status();
+                let text = resp.text().await?;
+                if !status.is_success() {
+                    bail!("token mint failed — {status}: {text}");
+                }
+                let v: Value = serde_json::from_str(&text).context("response was not JSON")?;
+                let token = v["token"].as_str().context("no token in response")?;
+                println!("minted:       write token for `{db}`");
+                exports.push(format!("export MEMOTURN_TOKEN={token}"));
+            } else if cli.token.is_none() && cli.platform_key.is_none() {
+                println!("              (auth-off dev node assumed; none needed)");
+            }
+            println!("\npaste into your shell:");
+            for e in &exports {
+                println!("  {e}");
+            }
+            eprintln!("\ncompletions: `memoturn completions zsh` (or bash/fish/...)");
+            Ok(())
+        }
+        // Handled before the client is built; unreachable here.
+        Cmd::Completions { .. } => Ok(()),
     }
 }
