@@ -19,8 +19,11 @@ pub struct Shipper {
     /// storage remains the convergence path).
     sink: Option<Arc<dyn SegmentSink>>,
     /// key `uuid@branch` → (uuid, branch, handle, writer epoch)
-    dirty: Mutex<HashMap<String, (String, String, Arc<DbHandle>, u64)>>,
+    dirty: Mutex<HashMap<String, DirtyBranch>>,
 }
+
+/// (uuid, branch, handle, writer epoch)
+type DirtyBranch = (String, String, Arc<DbHandle>, u64);
 
 impl Shipper {
     pub fn new(

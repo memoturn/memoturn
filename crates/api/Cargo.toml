@@ -3,6 +3,7 @@ name = "memoturn-api"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 memoturn-engine = { path = "../engine" }
@@ -33,3 +34,6 @@ tracing.workspace = true
 tempfile.workspace = true
 tower.workspace = true
 http-body-util.workspace = true
+
+[lints]
+workspace = true

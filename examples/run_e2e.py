@@ -97,7 +97,7 @@ def main() -> None:
         import httpx  # noqa: F401
     except ImportError:
         raise SystemExit(
-            "the demos need httpx — run: pip install -r examples/requirements.txt"
+            "the demos need httpx — run: make venv (or pip install -r examples/requirements.txt)"
         )
     if os.environ.get("ANTHROPIC_API_KEY"):
         print("ANTHROPIC_API_KEY set — the demos' LLM layers will run too")

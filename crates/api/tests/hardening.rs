@@ -120,7 +120,7 @@ async fn control_endpoints_are_rate_limited() {
         "first request not limited"
     );
     assert!(
-        codes.iter().any(|c| *c == StatusCode::TOO_MANY_REQUESTS),
+        codes.contains(&StatusCode::TOO_MANY_REQUESTS),
         "a sustained burst must eventually hit 429; saw {codes:?}"
     );
 }
