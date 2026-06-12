@@ -24,8 +24,14 @@ const mt = memoturn({
 });
 ```
 
-Errors throw `MemoturnError` with the HTTP `status` attached. Mutating calls return the
-response's `txid` — see [consistency](/consistency/).
+Errors throw `MemoturnError` with the HTTP `status` and a stable machine-readable `code`
+(`branch_not_found`, `unconfigured`, `overloaded`, … — see [errors](/errors/)). Mutating calls
+return the response's `txid` — see [consistency](/consistency/).
+
+Transient failures retry automatically: network errors, 502/503/504, and 429 honoring
+`Retry-After`, with exponential backoff. Plain 500 and other 4xx never retry. Configure with
+`memoturn({ retries: 0 })` to opt out (a network error can fire after the request was sent, so
+a non-idempotent call may double-send under retry; memory ingest is idempotent by design).
 
 ## Memory API
 

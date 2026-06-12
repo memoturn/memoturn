@@ -121,6 +121,10 @@ context as possible. To aid this:
 
 ## Development
 
+The working loop, toolchain, and versioning policy live in
+[docs/development.md](docs/development.md); `make help` lists the task-runner targets
+(`make check` before pushing). Env vars: copy [.env.example](.env.example).
+
 ```bash
 cargo build                # build the workspace
 cargo test                 # unit + integration tests (67 cross-crate)

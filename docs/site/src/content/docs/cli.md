@@ -32,7 +32,7 @@ memoturn memory recall  <ns> <profile> [<query>] [--topic <key>] [--k 8] [--type
 memoturn memory extract <ns> <profile> [--session <id>] [--source <agent>] [--dry-run]   # turns JSON on stdin
 memoturn memory get     <ns> <profile> <id>
 memoturn memory forget  <ns> <profile> <id>
-memoturn memory erase   <ns> <profile> (--memory id | --topic key --type fact | --session sid [--turns])
+memoturn memory erase   <ns> <profile> (--memory-id id | --topic key --type fact | --session sid [--turns])
 memoturn memory erasures <ns> <profile> [id]
 memoturn memory sessions <ns> <profile>
 memoturn memory profiles <ns>
@@ -195,9 +195,40 @@ memoturn audit export acme --action ai. --outcome denied > denials.jsonl
 
 ## ask
 
-Asks the built-in assistant. The assistant ships post-prototype; in the current build the
-command exits with an error pointing at the design document. See [roadmap](/roadmap/).
+A natural-language question answered from a profile's memories: server-side
+[recall + answer synthesis](/ask/) with cited memory ids. Needs a node with
+`MEMOTURN_ASSISTANT_API_KEY`; unconfigured nodes return 503 `unconfigured`.
 
 ```bash
-memoturn ask "why is recall empty for profile alice?"
+memoturn ask acme alice "what can this user eat?"          # answer; sources on stderr
+memoturn ask acme alice "..." --json                       # full {answer, sources, memories}
+memoturn ask acme alice "..." --source claude-code --k 12  # recall filters
 ```
+
+## init
+
+First-run check: probes the node at `MEMOTURN_URL`, reports which credentials are set, and
+prints ready-to-paste `export` lines. With `--db <name>` (and the platform key) it also mints a
+write token for that database.
+
+```bash
+memoturn init                  # reachability + credential report
+memoturn init --db agent-1     # + mint and print a write token
+```
+
+## completions
+
+Shell completions for bash, zsh, fish, elvish, and PowerShell:
+
+```bash
+memoturn completions zsh > "${fpath[1]}/_memoturn"   # zsh
+memoturn completions bash > /etc/bash_completion.d/memoturn
+```
+
+## Errors
+
+Failures print the response (with its machine-readable `code` — see [errors](/errors/)) plus
+an actionable hint on stderr, e.g. a 404 `branch_not_found` suggests `memoturn branch list <db>`.
+
+Flag naming: CLI flags are idiomatic spellings of the wire fields — `--topic` sends
+`topic_key`, `--session` sends `session_id`, `--memory-id` sends `memory_id`.

@@ -26,8 +26,10 @@ helm lint deploy/helm/memoturn        # chart lint
 scripts/demo.sh                       # end-to-end demo against a local node
 ```
 
-The Makefile at the repo root wraps the common tasks: `make node|test|bench|demo` (see
-`make help`). The docs site (docs.memoturn.ai) lives in `docs/site` — Astro Starlight, deployed
+The Makefile at the repo root wraps the common tasks: `make node|test|bench|demo|demos` (see
+`make help`). Run `make check` (fmt + clippy -D warnings + tests) before finishing any change;
+`make up|down` runs the local multi-node compose cluster; `make release-check` guards the
+lockstep version policy (docs/development.md). The docs site (docs.memoturn.ai) lives in `docs/site` — Astro Starlight, deployed
 as Cloudflare Workers static assets (`cd docs/site && npm run dev|build|deploy`). Only
 `docs/site/src/content/docs/` is published; `docs/architecture/` and `docs/adr/` are internal
 design docs. After changing product surfaces (env vars, CLI, API, MCP, SDKs, Helm), run
