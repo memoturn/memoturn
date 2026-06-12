@@ -30,6 +30,12 @@ export interface MemoturnOptions {
   source?: string;
   /** Custom fetch (tests, polyfills). */
   fetch?: typeof globalThis.fetch;
+  /** Retries for transient failures — network errors, 502/503/504, and 429
+   * (honoring Retry-After). Plain 500 and other 4xx never retry. Default 2;
+   * 0 disables. A network error can fire after a request was sent, so a
+   * non-idempotent call may double-send under retry; memory ingest is
+   * idempotent by design, but disable retries if you add calls that aren't. */
+  retries?: number;
 }
 
 export type Scope = "read" | "write" | "admin";
@@ -119,13 +125,64 @@ export interface Txid {
   txid: number;
 }
 
+/** Stable machine-readable error codes (the `code` field of the error
+ * envelope). 408/413 responses bypass the envelope server-side; their code is
+ * derived from the status here. */
+export type ErrorCode =
+  | "unauthorized"
+  | "forbidden"
+  | "not_found"
+  | "database_not_found"
+  | "branch_not_found"
+  | "already_exists"
+  | "conflict"
+  | "invalid_request"
+  | "payload_too_large"
+  | "request_timeout"
+  | "overloaded"
+  | "unconfigured"
+  | "unavailable"
+  | "internal";
+
+function codeForStatus(status: number): ErrorCode {
+  switch (status) {
+    case 400:
+      return "invalid_request";
+    case 401:
+      return "unauthorized";
+    case 403:
+      return "forbidden";
+    case 404:
+      return "not_found";
+    case 408:
+      return "request_timeout";
+    case 409:
+      return "conflict";
+    case 413:
+      return "payload_too_large";
+    case 429:
+      return "overloaded";
+    case 503:
+      return "unavailable";
+    default:
+      return "internal";
+  }
+}
+
 export class MemoturnError extends Error {
+  /** Machine-readable code to branch on (e.g. `branch_not_found`,
+   * `unconfigured`). Falls back to a status-derived code for the
+   * envelope-less 408/413 responses. */
+  public code: ErrorCode;
+
   constructor(
     public status: number,
     message: string,
+    code?: string,
   ) {
     super(`Memoturn ${status}: ${message}`);
     this.name = "MemoturnError";
+    this.code = (code as ErrorCode) ?? codeForStatus(status);
   }
 }
 
@@ -137,9 +194,20 @@ interface Wire {
   ): Promise<{ status: number; txid: number; json: any; text: string }>;
 }
 
+/** Transient statuses worth retrying. Plain 500 is excluded: it signals a
+ * bug, not a blip. */
+const RETRYABLE = new Set([429, 502, 503, 504]);
+
+function backoffMs(attempt: number): number {
+  return 200 * 2 ** attempt + Math.random() * 100;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 function wire(o: MemoturnOptions): Wire {
   const base = (o.url ?? "http://127.0.0.1:8080").replace(/\/+$/, "");
   const f = o.fetch ?? globalThis.fetch;
+  const retries = o.retries ?? 2;
   return {
     async request(method, path, opts = {}) {
       const cred = opts.platform ? (o.platformKey ?? o.token) : (o.token ?? o.platformKey);
@@ -152,17 +220,34 @@ function wire(o: MemoturnOptions): Wire {
       } else if (opts.raw !== undefined) {
         body = opts.raw;
       }
-      const res = await f(`${base}${path}`, { method, headers, body });
-      const text = await res.text();
-      let json: any;
-      try {
-        json = JSON.parse(text);
-      } catch {
-        json = undefined;
+      for (let attempt = 0; ; attempt++) {
+        let res: Response;
+        try {
+          res = await f(`${base}${path}`, { method, headers, body });
+        } catch (e) {
+          // Network error — usually pre-send, but see MemoturnOptions.retries.
+          if (attempt < retries) {
+            await sleep(backoffMs(attempt));
+            continue;
+          }
+          throw e;
+        }
+        if (RETRYABLE.has(res.status) && attempt < retries) {
+          const after = Number(res.headers.get("Retry-After"));
+          await sleep(Math.max(Number.isFinite(after) ? after * 1000 : 0, backoffMs(attempt)));
+          continue;
+        }
+        const text = await res.text();
+        let json: any;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          json = undefined;
+        }
+        if (!res.ok) throw new MemoturnError(res.status, json?.error ?? text, json?.code);
+        const txid = Number(res.headers.get("Memoturn-Txid") ?? json?.txid ?? 0);
+        return { status: res.status, txid, json, text };
       }
-      if (!res.ok) throw new MemoturnError(res.status, json?.error ?? text);
-      const txid = Number(res.headers.get("Memoturn-Txid") ?? json?.txid ?? 0);
-      return { status: res.status, txid, json, text };
     },
   };
 }

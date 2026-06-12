@@ -38,5 +38,36 @@ db = mt.db("acme--alice")                          # docs/kv/vectors/sql/branche
 Tokens: `mt.create_namespace_token("acme", "write")` (orchestrator — all `acme` profiles) or
 `mt.create_token("acme--alice", "write")` (agent — one profile). Both need the platform key.
 
-Install: `pip install -e .` — E2E (needs a running node): `python tests/e2e.py`.
+## Async
+
+Agents on an event loop use the twin client — same surface, awaited:
+
+```python
+from memoturn import AsyncMemoturn
+
+async with AsyncMemoturn(url, token=token) as mt:
+    bob = mt.memory("acme", "bob")
+    await bob.ingest([...])
+    hits = await bob.recall(query="…")
+    async for event in mt.audit_events("acme"):
+        ...
+```
+
+The sync client is a context manager too (`with Memoturn(...) as mt:`); both
+close the underlying `httpx` client on exit unless you passed your own.
+
+## Errors & typing
+
+Lookups by id return `None` on 404 (`get`, `erasure`, `kv.get`) and `forget`
+returns `False`; everything else raises `MemoturnError` with `.status` and a
+stable `.code` (`branch_not_found`, `unconfigured`, `overloaded`, …) —
+`unconfigured` means the node has no assistant/extractor, so fall back to the
+bring-your-own path.
+
+The package ships `py.typed`; results are `TypedDict`s (still plain dicts at
+runtime), so `mypy`/IDEs see `hits["memories"][0]["summary"]` without any
+conversion cost. Check with `python -m mypy memoturn`.
+
+Install: `pip install -e .` — E2E, sync + async (needs a running node):
+`python tests/e2e.py`.
 Full spec: [docs/architecture/07-agent-memory.md](../../docs/architecture/07-agent-memory.md).
