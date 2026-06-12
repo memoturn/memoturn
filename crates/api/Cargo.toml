@@ -34,6 +34,7 @@ tracing.workspace = true
 tempfile.workspace = true
 tower.workspace = true
 http-body-util.workspace = true
+serde_yaml = "0.9"
 
 [lints]
 workspace = true

@@ -5,6 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "astro dev",
+		"prebuild": "cp ../api/openapi.yaml public/openapi.yaml",
 		"build": "astro build",
 		"preview": "astro build && wrangler dev",
 		"typecheck": "astro check",

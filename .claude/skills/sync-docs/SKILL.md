@@ -24,7 +24,7 @@ Page map — which source surfaces feed which pages:
 | --- | --- |
 | `MEMOTURN_*` env vars (`crates/memoturnd/src/main.rs`) | `configuration.md`, `security.md` |
 | CLI commands/flags (`crates/cli/src/main.rs`) | `cli.md`, `quickstart.mdx` |
-| HTTP routes / auth (`crates/api`) | `api-rest.md`, `security.md`, `consistency.md` |
+| HTTP routes / auth (`crates/api`) | `api-rest.md`, `security.md`, `consistency.md`, `docs/api/openapi.yaml` (drift test: `cargo test -p memoturn-api openapi`) |
 | MCP tools (`mcp/src`) | `mcp.md` |
 | SDKs (`sdk/typescript`, `sdk/python`) | `sdk-typescript.md`, `sdk-python.md` |
 | Helm chart / K8s (`deploy/helm`) | `deployment.md`, `scaling.md`, `observability.md` |

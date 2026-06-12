@@ -7,6 +7,10 @@ HTTP/JSON is Memoturn's primary protocol: stateless, serverless-friendly, and tr
 from agent tools. The surface has three groups: the agent-memory API (per
 [profile](/profiles/)), the data-plane API (per database), and the control-plane platform API.
 
+A machine-readable [OpenAPI 3.1 spec](/openapi.yaml) covers every route below — use it for
+codegen, request validation, or exploring the API in any OpenAPI viewer. A test in the
+repository keeps it in lockstep with the router.
+
 Addressing: one base URL per database (`https://{db}.{region}.memoturn.dev`). Against a single
 node — the prototype default — the same data-plane routes are addressed as `/v1/db/{db}/...`,
 where `{db}` may be `name` or `name@branch`. A branch can also be selected with the
