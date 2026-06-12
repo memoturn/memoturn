@@ -16,7 +16,9 @@ hosting millions of tiny databases. Object storage is the source of truth; local
   foundation. It is the likely future: same file format, so we keep a swap path.
 
 All access goes through an internal **`SqlEngine` trait** (open/execute/wal-hook/checkpoint).
-No libSQL types escape `crates/engine`, so the engine can be swapped per-database later.
+No libSQL types escape `crates/engine`, so the engine can be swapped per-database later. A
+ground-up candidate engine for the typed surfaces (no SQL) is designed and prototyped in
+[09-object-native-engine](09-object-native-engine.md) / ADR-0011.
 
 **Language: Rust** ([ADR-0002](../adr/0002-rust-data-plane.md)) — deterministic memory at
 millions-of-objects density (no GC), first-class libSQL bindings, and the ecosystem the design

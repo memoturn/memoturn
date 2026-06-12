@@ -94,6 +94,9 @@ mcp-and-assistant) and
 - `crates/kv` — `__memoturn_kv` fast path, TTL, read cache
 - `crates/control` — leases, placement, write forwarding (M4)
 - `crates/governance` — per-namespace policy model + object-storage policy store (ADR-0010)
+- `crates/strata` — standalone prototype of the ground-up object-native typed engine (ADR-0011,
+  docs/architecture/09); not wired into memoturnd; bench smoke:
+  `cargo test -p memoturn-strata --release -- --ignored bench_`
 - `crates/api` — axum HTTP/JSON server, auth, txid plumbing
 - `crates/memoturnd` — node binary; `crates/cli` — `memoturn` CLI; `crates/bench` — perf harness
 - `mcp/` — MCP server (TypeScript; stdio + streamable HTTP via `--http`/`MEMOTURN_MCP_PORT`,
