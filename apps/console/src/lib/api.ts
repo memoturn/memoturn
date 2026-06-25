@@ -170,6 +170,8 @@ export const api = {
   playgroundChat: (body: PlaygroundRequest) => post<PlaygroundResponse>(`/v1/playground/chat`, body),
   listProviders: () => get<{ data: ProviderConnection[] }>(`/v1/providers`).then((r) => r.data),
   addProvider: (provider: string, apiKey: string) => post(`/v1/providers`, { provider, apiKey }),
+  getRetention: () => get<{ days: number }>(`/v1/retention`),
+  setRetention: (days: number) => post<{ days: number }>(`/v1/retention`, { days }),
   listEvaluators: () => get<{ data: Evaluator[] }>(`/v1/evaluators`).then((r) => r.data),
   createEvaluator: (body: {
     name: string;
@@ -219,6 +221,42 @@ export interface SessionSummary {
   first_seen: string;
   last_seen: string;
   total_cost: number;
+}
+
+/** Stream a playground completion (SSE), invoking onDelta for each text chunk. */
+export async function streamPlayground(
+  body: PlaygroundRequest,
+  onDelta: (delta: string) => void,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/v1/playground/stream`, {
+    method: "POST",
+    headers: headers({ "content-type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) throw new Error(`stream failed: ${res.status}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() ?? "";
+    for (const part of parts) {
+      const line = part.split("\n").find((l) => l.startsWith("data:"));
+      if (!line) continue;
+      const data = line.slice(5).trim();
+      if (data === "[DONE]") return;
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed.delta) onDelta(parsed.delta);
+        if (parsed.error) throw new Error(parsed.error);
+      } catch {
+        /* ignore non-JSON keepalives */
+      }
+    }
+  }
 }
 
 /** Download the traces export (NDJSON) for the active project via an object URL. */

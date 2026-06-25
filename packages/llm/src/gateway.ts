@@ -1,6 +1,8 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateText } from "ai";
+import { generateText, streamText } from "ai";
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Provider gateway — one entrypoint for chat completions used by the playground and
@@ -67,4 +69,29 @@ export async function generate(input: GenerateInput): Promise<GenerateResult> {
     content: result.text,
     usage: { promptTokens, completionTokens, totalTokens: u.totalTokens ?? promptTokens + completionTokens },
   };
+}
+
+/** Streaming variant — yields text deltas. Mock streams the canned reply word by word. */
+export async function* generateStream(input: GenerateInput): AsyncGenerator<string> {
+  const { provider, model, messages, temperature, maxTokens, apiKey } = input;
+
+  if (provider === "mock") {
+    const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+    const content = `[mock:${model}] ${lastUser.slice(0, 400)}`;
+    for (const word of content.split(" ")) {
+      yield word + " ";
+      await sleep(15);
+    }
+    return;
+  }
+
+  if (!apiKey) throw new Error(`no API key configured for provider '${provider}'`);
+  const languageModel = provider === "anthropic" ? createAnthropic({ apiKey })(model) : createOpenAI({ apiKey })(model);
+  const result = streamText({
+    model: languageModel,
+    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    temperature,
+    maxOutputTokens: maxTokens,
+  });
+  for await (const delta of result.textStream) yield delta;
 }

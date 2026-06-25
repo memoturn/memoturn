@@ -38,6 +38,7 @@ model Project {
   providers   ProviderConnection[]
   auditLogs   AuditLog[]
   reviewQueues ReviewQueue[]
+  retention   RetentionPolicy?
 
   @@unique([workspaceId, slug])
 }
@@ -308,6 +309,16 @@ model ReviewQueue {
   items       ReviewItem[]
 
   @@unique([projectId, name])
+}
+
+// Data retention: traces/observations/scores older than `days` are deleted by the
+// worker's daily retention job (and on-demand via the API). 0 = keep forever.
+model RetentionPolicy {
+  id        String   @id @default(cuid())
+  projectId String   @unique
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  days      Int      @default(0)
+  updatedAt DateTime @updatedAt
 }
 
 model ReviewItem {

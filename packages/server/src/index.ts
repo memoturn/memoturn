@@ -10,5 +10,6 @@ export * from "./playground.js";
 export * from "./evaluators.js";
 export * from "./review.js";
 export * from "./export.js";
+export * from "./retention.js";
 export * from "./otel.js";
 export * from "./ingest.js";

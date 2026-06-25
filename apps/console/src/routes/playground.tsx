@@ -1,6 +1,6 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { api, type PlaygroundResponse } from "../lib/api";
+import { api, streamPlayground, type PlaygroundResponse } from "../lib/api";
 
 export const Route = createFileRoute("/playground")({ component: PlaygroundPage });
 
@@ -10,6 +10,8 @@ function PlaygroundPage() {
   const [system, setSystem] = useState("You are a helpful assistant.");
   const [userMsg, setUserMsg] = useState("Explain what memoturn is in one sentence.");
   const [temperature, setTemperature] = useState(0.2);
+  const [streaming, setStreaming] = useState(true);
+  const [streamed, setStreamed] = useState("");
   const [result, setResult] = useState<PlaygroundResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -24,17 +26,19 @@ function PlaygroundPage() {
     setBusy(true);
     setError(null);
     setResult(null);
+    setStreamed("");
+    const messages = [
+      { role: "system" as const, content: system },
+      { role: "user" as const, content: userMsg },
+    ];
     try {
-      const res = await api.playgroundChat({
-        provider,
-        model,
-        temperature,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userMsg },
-        ],
-      });
-      setResult(res);
+      if (streaming) {
+        await streamPlayground({ provider, model, temperature, messages }, (delta) =>
+          setStreamed((prev) => prev + delta),
+        );
+      } else {
+        setResult(await api.playgroundChat({ provider, model, temperature, messages }));
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -61,6 +65,9 @@ function PlaygroundPage() {
           onChange={(e) => setTemperature(Number(e.target.value))}
           style={{ width: 90 }}
         />
+        <label className="inline-check">
+          <input type="checkbox" checked={streaming} onChange={(e) => setStreaming(e.target.checked)} /> stream
+        </label>
         <button onClick={run} disabled={busy}>
           {busy ? "Running…" : "Run"}
         </button>
@@ -72,6 +79,12 @@ function PlaygroundPage() {
       <textarea className="pg-input" value={userMsg} onChange={(e) => setUserMsg(e.target.value)} rows={4} />
 
       {error && <div className="empty" style={{ marginTop: 16 }}>{error}</div>}
+      {streamed && (
+        <>
+          <h2>Response (streaming)</h2>
+          <pre>{streamed}</pre>
+        </>
+      )}
       {result && (
         <>
           <h2>Response</h2>

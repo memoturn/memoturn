@@ -20,6 +20,14 @@ function SettingsPage() {
     },
   });
 
+  const { data: retention } = useQuery({ queryKey: ["retention"], queryFn: () => api.getRetention() });
+  const [days, setDays] = useState<number | null>(null);
+  const saveRetention = useMutation({
+    mutationFn: () => api.setRetention(days ?? 0),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["retention"] }),
+  });
+  const daysValue = days ?? retention?.days ?? 0;
+
   return (
     <div>
       <h1>Settings</h1>
@@ -59,6 +67,22 @@ function SettingsPage() {
           </tbody>
         </table>
       )}
+
+      <h2>Data retention</h2>
+      <p className="obs-meta">Delete traces/observations/scores older than N days (0 = keep forever). A daily worker job enforces this.</p>
+      <div className="filters">
+        <input
+          type="number"
+          min="0"
+          value={daysValue}
+          onChange={(e) => setDays(Number(e.target.value))}
+          style={{ width: 100 }}
+        />
+        <span className="obs-meta" style={{ alignSelf: "center" }}>days</span>
+        <button disabled={saveRetention.isPending} onClick={() => saveRetention.mutate()}>
+          {saveRetention.isPending ? "Saving…" : "Save retention"}
+        </button>
+      </div>
     </div>
   );
 }

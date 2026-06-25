@@ -1,5 +1,5 @@
 import { isoNow, newId } from "@memoturn/core";
-import { type ChatMessage, generate, type Provider } from "@memoturn/llm";
+import { type ChatMessage, generate, generateStream, type Provider } from "@memoturn/llm";
 import { submitBatch } from "./ingest.js";
 import { resolveProviderKey } from "./providers.js";
 
@@ -59,4 +59,10 @@ export async function runPlayground(projectId: string, input: PlaygroundInput, o
   });
 
   return { ...result, traceId };
+}
+
+/** Streaming playground — yields text deltas (no trace recording). */
+export async function* streamPlayground(projectId: string, input: PlaygroundInput): AsyncGenerator<string> {
+  const apiKey = await resolveProviderKey(projectId, input.provider);
+  yield* generateStream({ ...input, apiKey });
 }

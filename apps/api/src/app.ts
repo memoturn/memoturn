@@ -26,14 +26,19 @@ import {
   otlpToEvents,
   recordAudit,
   recordRun,
+  applyRetention,
+  getRetention,
   resolvePrompt,
   runEvaluator,
   runPlayground,
+  setRetention,
+  streamPlayground,
   submitBatch,
   submitReviewScore,
 } from "@memoturn/server";
 import { Scalar } from "@scalar/hono-api-reference";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { streamSSE } from "hono/streaming";
 import { type AuthVars, denyIfReadOnly, requireAuth } from "./middleware/auth.js";
 
 /**
@@ -73,6 +78,23 @@ app.use("/v1/audit-logs", requireAuth);
 app.use("/v1/review-queues", requireAuth);
 app.use("/v1/review-queues/*", requireAuth);
 app.use("/v1/exports/*", requireAuth);
+app.use("/v1/retention", requireAuth);
+app.use("/v1/retention/*", requireAuth);
+
+// Streaming playground (SSE) — plain route; emits { delta } events then [DONE].
+app.post("/v1/playground/stream", async (c) => {
+  const input = (await c.req.json()) as Parameters<typeof streamPlayground>[1];
+  return streamSSE(c, async (s) => {
+    try {
+      for await (const delta of streamPlayground(c.get("projectId"), input)) {
+        await s.writeSSE({ data: JSON.stringify({ delta }) });
+      }
+      await s.writeSSE({ data: "[DONE]" });
+    } catch (err) {
+      await s.writeSSE({ data: JSON.stringify({ error: String(err instanceof Error ? err.message : err) }) });
+    }
+  });
+});
 
 // Batch export (NDJSON download) — plain route so we can set a file download header.
 app.get("/v1/exports/traces", async (c) => {
@@ -706,6 +728,59 @@ app.openapi(
     const result = await submitReviewScore(c.get("projectId"), name, itemId, c.req.valid("json"));
     if (!result) return c.json({ error: "queue or item not found" }, 404);
     await recordAudit(c.get("projectId"), c.get("actor"), "review.score", `trace:${result.traceId}`, { score: name });
+    return c.json(result);
+  },
+);
+
+// ── Data retention ───────────────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/retention",
+    summary: "Get the project's retention policy (days; 0 = keep forever)",
+    tags: ["platform"],
+    security,
+    responses: { 200: { description: "Policy", content: { "application/json": { schema: z.any() } } } },
+  }),
+  async (c) => c.json(await getRetention(c.get("projectId"))),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/retention",
+    summary: "Set the project's retention policy (days)",
+    tags: ["platform"],
+    security,
+    request: { body: { content: { "application/json": { schema: z.object({ days: z.number().int().min(0) }) } } } },
+    responses: { 200: { description: "Updated", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" } },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const { days } = c.req.valid("json");
+    const result = await setRetention(c.get("projectId"), days);
+    await recordAudit(c.get("projectId"), c.get("actor"), "retention.set", `days:${days}`);
+    return c.json(result);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/retention/apply",
+    summary: "Apply retention now (delete telemetry older than the policy)",
+    tags: ["platform"],
+    security,
+    responses: { 200: { description: "Result", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" } },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const projectId = c.get("projectId");
+    const { days } = await getRetention(projectId);
+    const result = await applyRetention(projectId, days);
+    await recordAudit(projectId, c.get("actor"), "retention.apply", `deleted:${result.deletedTraces}`);
     return c.json(result);
   },
 );
