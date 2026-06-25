@@ -18,6 +18,10 @@ import {
   listSessions,
   listTraces,
   listUserProjects,
+  addReviewItems,
+  createReviewQueue,
+  listReviewItems,
+  listReviewQueues,
   otlpToEvents,
   recordAudit,
   recordRun,
@@ -25,6 +29,7 @@ import {
   runEvaluator,
   runPlayground,
   submitBatch,
+  submitReviewScore,
 } from "@memoturn/server";
 import { Scalar } from "@scalar/hono-api-reference";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
@@ -64,6 +69,8 @@ app.use("/v1/evaluators", requireAuth);
 app.use("/v1/evaluators/*", requireAuth);
 app.use("/v1/projects", requireAuth);
 app.use("/v1/audit-logs", requireAuth);
+app.use("/v1/review-queues", requireAuth);
+app.use("/v1/review-queues/*", requireAuth);
 
 const security = [{ apiKey: [] }];
 
@@ -580,6 +587,113 @@ app.openapi(
     responses: { 200: { description: "Audit log", content: { "application/json": { schema: z.any() } } } },
   }),
   async (c) => c.json({ data: await listAuditLogs(c.get("projectId"), c.req.valid("query").limit ?? 100) }),
+);
+
+// ── Review queues (human annotation) ─────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/review-queues",
+    summary: "List review queues (with pending/done counts)",
+    tags: ["review"],
+    security,
+    responses: { 200: { description: "Queue list", content: { "application/json": { schema: z.any() } } } },
+  }),
+  async (c) => c.json({ data: await listReviewQueues(c.get("projectId")) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/review-queues",
+    summary: "Create a review queue",
+    tags: ["review"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              name: z.string().min(1),
+              description: z.string().optional(),
+              scoreName: z.string().min(1),
+              dataType: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: { 201: { description: "Created", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" } },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    const result = await createReviewQueue(c.get("projectId"), body);
+    await recordAudit(c.get("projectId"), c.get("actor"), "review-queue.create", `queue:${body.name}`);
+    return c.json(result, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/review-queues/{name}/items",
+    summary: "Enqueue traces for review",
+    tags: ["review"],
+    security,
+    request: {
+      params: z.object({ name: z.string() }),
+      body: { content: { "application/json": { schema: z.object({ traceIds: z.array(z.string()).min(1) }) } } },
+    },
+    responses: { 201: { description: "Added", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" }, 404: { description: "Not found" } },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const result = await addReviewItems(c.get("projectId"), c.req.valid("param").name, c.req.valid("json").traceIds);
+    if (!result) return c.json({ error: "queue not found" }, 404);
+    return c.json(result, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/review-queues/{name}/items",
+    summary: "List items to review (with trace input/output)",
+    tags: ["review"],
+    security,
+    request: { params: z.object({ name: z.string() }), query: z.object({ status: z.enum(["PENDING", "DONE", "SKIPPED"]).optional() }) },
+    responses: { 200: { description: "Items", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+  }),
+  async (c) => {
+    const result = await listReviewItems(c.get("projectId"), c.req.valid("param").name, c.req.valid("query").status ?? "PENDING");
+    if (!result) return c.json({ error: "queue not found" }, 404);
+    return c.json(result);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/review-queues/{name}/items/{itemId}/score",
+    summary: "Submit a human score for a review item (writes an ANNOTATION score)",
+    tags: ["review"],
+    security,
+    request: {
+      params: z.object({ name: z.string(), itemId: z.string() }),
+      body: { content: { "application/json": { schema: z.object({ value: z.number().optional(), stringValue: z.string().optional(), comment: z.string().optional() }) } } },
+    },
+    responses: { 200: { description: "Scored", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+  }),
+  async (c) => {
+    const { name, itemId } = c.req.valid("param");
+    const result = await submitReviewScore(c.get("projectId"), name, itemId, c.req.valid("json"));
+    if (!result) return c.json({ error: "queue or item not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "review.score", `trace:${result.traceId}`, { score: name });
+    return c.json(result);
+  },
 );
 
 // ── OpenAPI document + Scalar API reference ──────────────────────────────────────

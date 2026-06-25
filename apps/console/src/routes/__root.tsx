@@ -59,6 +59,7 @@ function RootComponent() {
           <Link to="/datasets">Datasets</Link>
           <Link to="/playground">Playground</Link>
           <Link to="/evaluators">Evaluators</Link>
+          <Link to="/review">Review</Link>
           <Link to="/audit">Audit</Link>
           <Link to="/settings">Settings</Link>
         </nav>

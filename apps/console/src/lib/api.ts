@@ -171,7 +171,35 @@ export const api = {
   }) => post(`/v1/evaluators`, body),
   listProjects: () => get<{ data: Project[] }>(`/v1/projects`).then((r) => r.data),
   listAuditLogs: () => get<{ data: AuditEntry[] }>(`/v1/audit-logs`).then((r) => r.data),
+  listReviewQueues: () => get<{ data: ReviewQueue[] }>(`/v1/review-queues`).then((r) => r.data),
+  createReviewQueue: (body: { name: string; scoreName: string; dataType?: string; description?: string }) =>
+    post(`/v1/review-queues`, body),
+  addReviewItems: (name: string, traceIds: string[]) =>
+    post(`/v1/review-queues/${encodeURIComponent(name)}/items`, { traceIds }),
+  listReviewItems: (name: string) =>
+    get<ReviewItemsResponse>(`/v1/review-queues/${encodeURIComponent(name)}/items`),
+  submitReviewScore: (name: string, itemId: string, body: { value?: number; stringValue?: string; comment?: string }) =>
+    post(`/v1/review-queues/${encodeURIComponent(name)}/items/${encodeURIComponent(itemId)}/score`, body),
 };
+
+export interface ReviewQueue {
+  name: string;
+  description: string;
+  scoreName: string;
+  dataType: string;
+  pending: number;
+  done: number;
+}
+export interface ReviewItem {
+  id: string;
+  traceId: string;
+  status: string;
+  trace: { id: string; name: string; input: string; output: string };
+}
+export interface ReviewItemsResponse {
+  queue: { name: string; scoreName: string; dataType: string };
+  items: ReviewItem[];
+}
 
 export interface Project {
   id: string;

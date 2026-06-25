@@ -8,5 +8,6 @@ export * from "./datasets.js";
 export * from "./providers.js";
 export * from "./playground.js";
 export * from "./evaluators.js";
+export * from "./review.js";
 export * from "./otel.js";
 export * from "./ingest.js";

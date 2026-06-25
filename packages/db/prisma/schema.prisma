@@ -37,6 +37,7 @@ model Project {
   scoreConfigs ScoreConfig[]
   providers   ProviderConnection[]
   auditLogs   AuditLog[]
+  reviewQueues ReviewQueue[]
 
   @@unique([workspaceId, slug])
 }
@@ -291,4 +292,33 @@ model AuditLog {
   createdAt DateTime @default(now())
 
   @@index([projectId, createdAt])
+}
+
+// Human annotation: a queue of traces to be manually scored. Submitting a review
+// writes an ANNOTATION score (to ClickHouse) and marks the item done.
+model ReviewQueue {
+  id          String       @id @default(cuid())
+  projectId   String
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name        String
+  description String       @default("")
+  scoreName   String // the score this queue assigns, e.g. "human-rating"
+  dataType    String       @default("NUMERIC") // NUMERIC | CATEGORICAL | BOOLEAN
+  createdAt   DateTime     @default(now())
+  items       ReviewItem[]
+
+  @@unique([projectId, name])
+}
+
+model ReviewItem {
+  id          String      @id @default(cuid())
+  queueId     String
+  queue       ReviewQueue @relation(fields: [queueId], references: [id], onDelete: Cascade)
+  traceId     String
+  status      String      @default("PENDING") // PENDING | DONE | SKIPPED
+  createdAt   DateTime    @default(now())
+  completedAt DateTime?
+
+  @@unique([queueId, traceId])
+  @@index([queueId, status])
 }

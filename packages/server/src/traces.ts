@@ -139,6 +139,27 @@ export async function listSessions(projectId: string, limit = 50): Promise<Sessi
   );
 }
 
+export interface TraceIO {
+  id: string;
+  name: string;
+  input: string;
+  output: string;
+}
+
+/** Lightweight fetch of name/input/output for a set of traces (for review queues). */
+export async function getTraceIO(projectId: string, traceIds: string[]): Promise<Map<string, TraceIO>> {
+  if (traceIds.length === 0) return new Map();
+  const rows = await query<TraceIO>(
+    `
+    SELECT id, name, input, output
+    FROM traces FINAL
+    WHERE project_id = {projectId:String} AND id IN {ids:Array(String)}
+    `,
+    { projectId, ids: traceIds },
+  );
+  return new Map(rows.map((r) => [r.id, r]));
+}
+
 export async function getTrace(projectId: string, traceId: string): Promise<TraceDetail | null> {
   const traces = await query<Omit<TraceDetail, "observations" | "observation_count" | "total_cost" | "total_tokens" | "latency_ms">>(
     `
