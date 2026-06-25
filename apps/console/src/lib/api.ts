@@ -197,6 +197,7 @@ export interface PlaygroundResponse {
   model: string;
   content: string;
   usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+  traceId?: string;
 }
 export interface ProviderConnection {
   provider: string;

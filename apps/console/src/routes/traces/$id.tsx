@@ -19,28 +19,84 @@ function pretty(value: string): string {
   }
 }
 
-function ObservationNode({ obs }: { obs: ObservationDetail }) {
+function ms(t: string | null): number | null {
+  if (!t) return null;
+  const v = Date.parse(t);
+  return Number.isNaN(v) ? null : v;
+}
+
+interface Laid extends ObservationDetail {
+  depth: number;
+  offsetPct: number;
+  widthPct: number;
+}
+
+/** Compute waterfall layout: depth from parent chain, bar offset/width from times. */
+function layout(observations: ObservationDetail[]): Laid[] {
+  const byId = new Map(observations.map((o) => [o.id, o]));
+  const depthOf = (o: ObservationDetail): number => {
+    let d = 0;
+    let cur: ObservationDetail | undefined = o;
+    const seen = new Set<string>();
+    while (cur?.parent_observation_id && byId.has(cur.parent_observation_id) && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      cur = byId.get(cur.parent_observation_id);
+      d++;
+    }
+    return d;
+  };
+
+  const starts = observations.map((o) => ms(o.start_time) ?? 0);
+  const ends = observations.map((o, i) => ms(o.end_time) ?? starts[i]! + Number(o.latency_ms));
+  const traceStart = Math.min(...starts);
+  const total = Math.max(1, Math.max(...ends) - traceStart);
+
+  return observations
+    .map((o, i) => ({
+      ...o,
+      depth: depthOf(o),
+      offsetPct: ((starts[i]! - traceStart) / total) * 100,
+      widthPct: Math.max(1.5, (Number(o.latency_ms) / total) * 100),
+    }))
+    .sort((a, b) => (ms(a.start_time) ?? 0) - (ms(b.start_time) ?? 0));
+}
+
+function WaterfallRow({ obs }: { obs: Laid }) {
   return (
-    <li>
-      <div>
+    <div className="wf-row">
+      <div className="wf-label" style={{ paddingLeft: `${obs.depth * 16}px` }}>
         <span className={badgeClass(obs.type)}>{obs.type.toLowerCase()}</span>{" "}
         <span className="obs-name">{obs.name || obs.id.slice(0, 8)}</span>
+        {obs.model && <span className="obs-meta"> · {obs.model}</span>}
       </div>
-      <div className="obs-meta">
-        {obs.model && <>model: {obs.model} · </>}
-        {obs.total_tokens > 0 && <>{obs.total_tokens} tok · </>}
-        {Number(obs.total_cost) > 0 && <>${Number(obs.total_cost).toFixed(6)} · </>}
-        {obs.latency_ms} ms
-        {obs.level !== "DEFAULT" && <> · {obs.level}</>}
+      <div className="wf-track">
+        <div
+          className={`wf-bar ${obs.type === "GENERATION" ? "gen" : obs.type === "SPAN" ? "span" : "event"}`}
+          style={{ left: `${obs.offsetPct}%`, width: `${obs.widthPct}%` }}
+          title={`${obs.latency_ms} ms`}
+        />
+        <span className="wf-dur" style={{ left: `min(${obs.offsetPct}%, 80%)` }}>
+          {obs.latency_ms} ms
+        </span>
       </div>
-      {(obs.input || obs.output) && (
-        <details>
-          <summary className="obs-meta">payload</summary>
-          {obs.input && <pre>{pretty(obs.input)}</pre>}
-          {obs.output && <pre>{pretty(obs.output)}</pre>}
-        </details>
-      )}
-    </li>
+    </div>
+  );
+}
+
+function ObservationDetailRow({ obs }: { obs: ObservationDetail }) {
+  if (!obs.input && !obs.output && obs.level === "DEFAULT") return null;
+  return (
+    <details className="obs-detail">
+      <summary>
+        <span className={badgeClass(obs.type)}>{obs.type.toLowerCase()}</span> {obs.name || obs.id.slice(0, 8)}
+        {obs.total_tokens > 0 && <span className="obs-meta"> · {obs.total_tokens} tok</span>}
+        {Number(obs.total_cost) > 0 && <span className="obs-meta"> · ${Number(obs.total_cost).toFixed(6)}</span>}
+        {obs.level !== "DEFAULT" && <span className="obs-meta"> · {obs.level}</span>}
+      </summary>
+      {obs.input && <pre>{pretty(obs.input)}</pre>}
+      {obs.output && <pre>{pretty(obs.output)}</pre>}
+      {obs.status_message && <pre>{obs.status_message}</pre>}
+    </details>
   );
 }
 
@@ -89,12 +145,19 @@ function TraceDetailPage() {
         <dd>{trace.latency_ms} ms</dd>
       </dl>
 
-      <h2>Observations ({trace.observation_count})</h2>
-      <ul className="tree">
-        {trace.observations.map((obs) => (
-          <ObservationNode key={obs.id} obs={obs} />
+      <h2>Timeline ({trace.observation_count})</h2>
+      <div className="waterfall">
+        {layout(trace.observations).map((obs) => (
+          <WaterfallRow key={obs.id} obs={obs} />
         ))}
-      </ul>
+      </div>
+
+      <h2>Payloads</h2>
+      <div className="tree">
+        {trace.observations.map((obs) => (
+          <ObservationDetailRow key={obs.id} obs={obs} />
+        ))}
+      </div>
     </div>
   );
 }

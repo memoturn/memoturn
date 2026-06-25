@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { api, type PlaygroundResponse } from "../lib/api";
 
@@ -79,6 +79,14 @@ function PlaygroundPage() {
           <div className="obs-meta">
             {result.provider}/{result.model} · {result.usage.totalTokens} tokens (
             {result.usage.promptTokens}+{result.usage.completionTokens})
+            {result.traceId && (
+              <>
+                {" · "}
+                <Link to="/traces/$id" params={{ id: result.traceId }}>
+                  view trace →
+                </Link>
+              </>
+            )}
           </div>
         </>
       )}

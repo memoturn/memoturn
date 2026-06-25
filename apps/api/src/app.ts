@@ -462,6 +462,7 @@ app.openapi(
               messages: z.array(z.object({ role: z.enum(["system", "user", "assistant"]), content: z.string() })),
               temperature: z.number().optional(),
               maxTokens: z.number().int().optional(),
+              trace: z.boolean().optional(),
             }),
           },
         },
@@ -471,7 +472,8 @@ app.openapi(
   }),
   async (c) => {
     try {
-      const result = await runPlayground(c.get("projectId"), c.req.valid("json"));
+      const { trace, ...input } = c.req.valid("json");
+      const result = await runPlayground(c.get("projectId"), input, { trace });
       return c.json(result);
     } catch (err) {
       return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);

@@ -320,3 +320,69 @@ pre {
   outline: none;
   border-color: var(--accent);
 }
+
+/* trace waterfall */
+.waterfall {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.wf-row {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+.wf-row:last-child {
+  border-bottom: none;
+}
+.wf-row:hover {
+  background: var(--panel);
+}
+.wf-label {
+  padding: 8px 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wf-track {
+  position: relative;
+  height: 28px;
+  margin-right: 12px;
+}
+.wf-bar {
+  position: absolute;
+  top: 9px;
+  height: 10px;
+  min-width: 3px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+.wf-bar.gen {
+  background: var(--accent);
+}
+.wf-bar.span {
+  background: var(--green);
+}
+.wf-bar.event {
+  background: var(--amber);
+}
+.wf-dur {
+  position: absolute;
+  top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  transform: translateX(6px);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.obs-detail {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 6px 0;
+  background: var(--panel);
+}
+.obs-detail summary {
+  cursor: pointer;
+}
