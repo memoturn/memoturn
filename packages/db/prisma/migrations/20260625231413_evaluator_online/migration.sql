@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "Evaluator" ADD COLUMN     "filterName" TEXT NOT NULL DEFAULT '',
+ADD COLUMN     "online" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "samplingRate" DOUBLE PRECISION NOT NULL DEFAULT 1.0;

@@ -246,6 +246,11 @@ model Evaluator {
   provider     String   @default("mock")
   model        String
   outputSchema Json     @default("{}")
+  // Online evaluation: when enabled, the worker runs this evaluator on a sampled
+  // fraction of incoming completed traces (optionally filtered by trace name).
+  online       Boolean  @default(false)
+  samplingRate Float    @default(1.0)
+  filterName   String   @default("")
   createdAt    DateTime @default(now())
 
   @@unique([projectId, name])

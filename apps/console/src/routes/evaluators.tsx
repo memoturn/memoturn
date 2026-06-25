@@ -13,9 +13,11 @@ function EvaluatorsPage() {
   const [provider, setProvider] = useState("mock");
   const [model, setModel] = useState("mock-1");
   const [prompt, setPrompt] = useState("Score how well the output answers the input. 1 = perfect, 0 = wrong.");
+  const [online, setOnline] = useState(false);
+  const [samplingRate, setSamplingRate] = useState(1);
 
   const create = useMutation({
-    mutationFn: () => api.createEvaluator({ name, prompt, provider, model }),
+    mutationFn: () => api.createEvaluator({ name, prompt, provider, model, online, samplingRate }),
     onSuccess: () => {
       setName("");
       qc.invalidateQueries({ queryKey: ["evaluators"] });
@@ -36,6 +38,21 @@ function EvaluatorsPage() {
           <option value="openai">openai</option>
         </select>
         <input placeholder="model" value={model} onChange={(e) => setModel(e.target.value)} />
+        <label className="inline-check">
+          <input type="checkbox" checked={online} onChange={(e) => setOnline(e.target.checked)} /> online
+        </label>
+        {online && (
+          <input
+            type="number"
+            step="0.1"
+            min="0"
+            max="1"
+            value={samplingRate}
+            onChange={(e) => setSamplingRate(Number(e.target.value))}
+            title="sampling rate"
+            style={{ width: 80 }}
+          />
+        )}
         <button disabled={!name || create.isPending} onClick={() => create.mutate()}>
           {create.isPending ? "Saving…" : "Create"}
         </button>
@@ -52,6 +69,7 @@ function EvaluatorsPage() {
               <th>Name</th>
               <th>Provider</th>
               <th>Model</th>
+              <th>Online</th>
               <th>Prompt</th>
             </tr>
           </thead>
@@ -63,7 +81,8 @@ function EvaluatorsPage() {
                   <span className="badge gen">{e.provider}</span>
                 </td>
                 <td>{e.model}</td>
-                <td className="obs-meta">{e.prompt.slice(0, 80)}</td>
+                <td>{e.online ? <span className="badge span">{Math.round(e.samplingRate * 100)}%</span> : "—"}</td>
+                <td className="obs-meta">{e.prompt.slice(0, 70)}</td>
               </tr>
             ))}
           </tbody>

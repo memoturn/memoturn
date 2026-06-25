@@ -14,20 +14,45 @@ export interface CreateEvaluatorInput {
   prompt: string;
   provider?: string;
   model: string;
+  online?: boolean;
+  samplingRate?: number;
+  filterName?: string;
 }
 
 export async function createEvaluator(projectId: string, input: CreateEvaluatorInput) {
+  const data = {
+    prompt: input.prompt,
+    provider: input.provider ?? "mock",
+    model: input.model,
+    online: input.online ?? false,
+    samplingRate: input.samplingRate ?? 1.0,
+    filterName: input.filterName ?? "",
+  };
   const ev = await prisma.evaluator.upsert({
     where: { projectId_name: { projectId, name: input.name } },
-    update: { prompt: input.prompt, provider: input.provider ?? "mock", model: input.model },
-    create: { projectId, name: input.name, prompt: input.prompt, provider: input.provider ?? "mock", model: input.model },
+    update: data,
+    create: { projectId, name: input.name, ...data },
   });
-  return { name: ev.name, provider: ev.provider, model: ev.model };
+  return { name: ev.name, provider: ev.provider, model: ev.model, online: ev.online, samplingRate: ev.samplingRate, filterName: ev.filterName };
 }
 
 export async function listEvaluators(projectId: string) {
   const evs = await prisma.evaluator.findMany({ where: { projectId }, orderBy: { name: "asc" } });
-  return evs.map((e) => ({ name: e.name, provider: e.provider, model: e.model, prompt: e.prompt, createdAt: e.createdAt.toISOString() }));
+  return evs.map((e) => ({
+    name: e.name,
+    provider: e.provider,
+    model: e.model,
+    prompt: e.prompt,
+    online: e.online,
+    samplingRate: e.samplingRate,
+    filterName: e.filterName,
+    createdAt: e.createdAt.toISOString(),
+  }));
+}
+
+/** Online evaluators for a project (run automatically on sampled incoming traces). */
+export async function listOnlineEvaluators(projectId: string) {
+  return prisma.evaluator.findMany({ where: { projectId, online: true } });
 }
 
 export interface RunEvaluatorInput {

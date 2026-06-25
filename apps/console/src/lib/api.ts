@@ -160,7 +160,15 @@ export const api = {
   listProviders: () => get<{ data: ProviderConnection[] }>(`/v1/providers`).then((r) => r.data),
   addProvider: (provider: string, apiKey: string) => post(`/v1/providers`, { provider, apiKey }),
   listEvaluators: () => get<{ data: Evaluator[] }>(`/v1/evaluators`).then((r) => r.data),
-  createEvaluator: (body: { name: string; prompt: string; provider: string; model: string }) => post(`/v1/evaluators`, body),
+  createEvaluator: (body: {
+    name: string;
+    prompt: string;
+    provider: string;
+    model: string;
+    online?: boolean;
+    samplingRate?: number;
+    filterName?: string;
+  }) => post(`/v1/evaluators`, body),
   listProjects: () => get<{ data: Project[] }>(`/v1/projects`).then((r) => r.data),
   listAuditLogs: () => get<{ data: AuditEntry[] }>(`/v1/audit-logs`).then((r) => r.data),
 };
@@ -209,6 +217,9 @@ export interface Evaluator {
   provider: string;
   model: string;
   prompt: string;
+  online: boolean;
+  samplingRate: number;
+  filterName: string;
   createdAt: string;
 }
 
