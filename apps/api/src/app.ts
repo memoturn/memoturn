@@ -1,6 +1,7 @@
 import { ingestRequest } from "@memoturn/core";
 import {
   addDatasetItems,
+  auth,
   createDataset,
   createEvaluator,
   createProviderConnection,
@@ -9,30 +10,32 @@ import {
   getMetrics,
   getPromptDetail,
   getTrace,
+  listAuditLogs,
   listDatasets,
   listEvaluators,
   listPrompts,
   listProviderConnections,
   listSessions,
   listTraces,
+  listUserProjects,
   otlpToEvents,
+  recordAudit,
   recordRun,
   resolvePrompt,
   runEvaluator,
   runPlayground,
   submitBatch,
 } from "@memoturn/server";
-import { auth } from "@memoturn/server";
 import { Scalar } from "@scalar/hono-api-reference";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { requireAuth } from "./middleware/auth.js";
+import { type AuthVars, denyIfReadOnly, requireAuth } from "./middleware/auth.js";
 
 /**
  * memoturn public API (Hono + OpenAPI). Runtime-agnostic: the same app is served by
  * the Node and Bun entrypoints. Route handlers are thin — all logic lives in
  * @memoturn/server and @memoturn/core, shared with the dashboard.
  */
-type Env = { Variables: { projectId: string } };
+type Env = { Variables: AuthVars };
 
 export const app = new OpenAPIHono<Env>();
 
@@ -59,6 +62,8 @@ app.use("/v1/providers", requireAuth);
 app.use("/v1/playground/*", requireAuth);
 app.use("/v1/evaluators", requireAuth);
 app.use("/v1/evaluators/*", requireAuth);
+app.use("/v1/projects", requireAuth);
+app.use("/v1/audit-logs", requireAuth);
 
 const security = [{ apiKey: [] }];
 
@@ -245,11 +250,14 @@ app.openapi(
         },
       },
     },
-    responses: { 201: { description: "Created version", content: { "application/json": { schema: z.any() } } } },
+    responses: { 201: { description: "Created version", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" } },
   }),
   async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
     const body = c.req.valid("json");
     const created = await createPromptVersion(c.get("projectId"), { ...body, content: body.content });
+    await recordAudit(c.get("projectId"), c.get("actor"), "prompt.version.create", `prompt:${body.name}`, { version: created.version });
     return c.json(created, 201);
   },
 );
@@ -312,9 +320,16 @@ app.openapi(
     tags: ["datasets"],
     security,
     request: { body: { content: { "application/json": { schema: z.object({ name: z.string().min(1), description: z.string().optional() }) } } } },
-    responses: { 201: { description: "Created", content: { "application/json": { schema: z.any() } } } },
+    responses: { 201: { description: "Created", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" } },
   }),
-  async (c) => c.json(await createDataset(c.get("projectId"), c.req.valid("json")), 201),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    const result = await createDataset(c.get("projectId"), body);
+    await recordAudit(c.get("projectId"), c.get("actor"), "dataset.create", `dataset:${body.name}`);
+    return c.json(result, 201);
+  },
 );
 
 // ── Datasets: detail (items + runs) ──────────────────────────────────────────────
@@ -417,11 +432,15 @@ app.openapi(
     tags: ["providers"],
     security,
     request: { body: { content: { "application/json": { schema: z.object({ provider: z.enum(["anthropic", "openai"]), apiKey: z.string().min(1) }) } } } },
-    responses: { 201: { description: "Saved", content: { "application/json": { schema: z.any() } } } },
+    responses: { 201: { description: "Saved", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" } },
   }),
   async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
     const { provider, apiKey } = c.req.valid("json");
-    return c.json(await createProviderConnection(c.get("projectId"), provider, apiKey), 201);
+    const result = await createProviderConnection(c.get("projectId"), provider, apiKey);
+    await recordAudit(c.get("projectId"), c.get("actor"), "provider.connect", `provider:${provider}`);
+    return c.json(result, 201);
   },
 );
 
@@ -494,9 +513,16 @@ app.openapi(
         },
       },
     },
-    responses: { 201: { description: "Created", content: { "application/json": { schema: z.any() } } } },
+    responses: { 201: { description: "Created", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" } },
   }),
-  async (c) => c.json(await createEvaluator(c.get("projectId"), c.req.valid("json")), 201),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    const result = await createEvaluator(c.get("projectId"), body);
+    await recordAudit(c.get("projectId"), c.get("actor"), "evaluator.create", `evaluator:${body.name}`);
+    return c.json(result, 201);
+  },
 );
 
 app.openapi(
@@ -517,6 +543,38 @@ app.openapi(
     if (!result) return c.json({ error: "evaluator not found" }, 404);
     return c.json(result);
   },
+);
+
+// ── Projects (for the dashboard project switcher) ────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/projects",
+    summary: "List projects the caller can access",
+    tags: ["platform"],
+    security,
+    responses: { 200: { description: "Project list", content: { "application/json": { schema: z.any() } } } },
+  }),
+  async (c) => {
+    const userId = c.get("userId");
+    if (userId) return c.json({ data: await listUserProjects(userId) });
+    // API key: scoped to its single project.
+    return c.json({ data: [{ id: c.get("projectId"), name: "(api-key project)", slug: "", workspace: "", role: c.get("role") }] });
+  },
+);
+
+// ── Audit logs ───────────────────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/audit-logs",
+    summary: "Recent audit log entries for the active project",
+    tags: ["platform"],
+    security,
+    request: { query: z.object({ limit: z.coerce.number().int().min(1).max(500).optional() }) },
+    responses: { 200: { description: "Audit log", content: { "application/json": { schema: z.any() } } } },
+  }),
+  async (c) => c.json({ data: await listAuditLogs(c.get("projectId"), c.req.valid("query").limit ?? 100) }),
 );
 
 // ── OpenAPI document + Scalar API reference ──────────────────────────────────────

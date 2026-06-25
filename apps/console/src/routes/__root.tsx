@@ -1,8 +1,34 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, createRootRoute, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { api, getActiveProject, setActiveProject } from "../lib/api";
 import { signOut, useSession } from "../lib/auth";
 
 export const Route = createRootRoute({ component: RootComponent });
+
+function ProjectSwitcher() {
+  const qc = useQueryClient();
+  const { data: projects } = useQuery({ queryKey: ["projects"], queryFn: () => api.listProjects() });
+  const active = getActiveProject() || projects?.[0]?.id || "";
+  if (!projects || projects.length === 0) return null;
+  return (
+    <select
+      value={active}
+      onChange={(e) => {
+        setActiveProject(e.target.value);
+        qc.invalidateQueries(); // refetch all data for the newly selected project
+      }}
+      title="Active project"
+    >
+      {projects.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.workspace ? `${p.workspace} / ` : ""}
+          {p.name} ({p.role.toLowerCase()})
+        </option>
+      ))}
+    </select>
+  );
+}
 
 function RootComponent() {
   const { data: session, isPending } = useSession();
@@ -33,9 +59,11 @@ function RootComponent() {
           <Link to="/datasets">Datasets</Link>
           <Link to="/playground">Playground</Link>
           <Link to="/evaluators">Evaluators</Link>
+          <Link to="/audit">Audit</Link>
           <Link to="/settings">Settings</Link>
         </nav>
         <div className="spacer" />
+        <ProjectSwitcher />
         <span className="user">{session.user.email}</span>
         <button
           className="link-btn"

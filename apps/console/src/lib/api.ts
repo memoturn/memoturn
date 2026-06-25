@@ -3,9 +3,24 @@
  * `/api` (which injects auth); in production this base is configured to the API host.
  */
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
+const PROJECT_KEY = "memoturn.project";
+
+export function getActiveProject(): string {
+  return (typeof localStorage !== "undefined" && localStorage.getItem(PROJECT_KEY)) || "";
+}
+export function setActiveProject(id: string) {
+  localStorage.setItem(PROJECT_KEY, id);
+}
+
+function headers(extra: Record<string, string> = {}): Record<string, string> {
+  const h: Record<string, string> = { accept: "application/json", ...extra };
+  const project = getActiveProject();
+  if (project) h["x-memoturn-project"] = project; // active project for the switcher
+  return h;
+}
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { headers: { accept: "application/json" } });
+  const res = await fetch(`${API_BASE}${path}`, { headers: headers() });
   if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
   return res.json() as Promise<T>;
 }
@@ -13,7 +28,7 @@ async function get<T>(path: string): Promise<T> {
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
+    headers: headers({ "content-type": "application/json" }),
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
@@ -146,7 +161,24 @@ export const api = {
   addProvider: (provider: string, apiKey: string) => post(`/v1/providers`, { provider, apiKey }),
   listEvaluators: () => get<{ data: Evaluator[] }>(`/v1/evaluators`).then((r) => r.data),
   createEvaluator: (body: { name: string; prompt: string; provider: string; model: string }) => post(`/v1/evaluators`, body),
+  listProjects: () => get<{ data: Project[] }>(`/v1/projects`).then((r) => r.data),
+  listAuditLogs: () => get<{ data: AuditEntry[] }>(`/v1/audit-logs`).then((r) => r.data),
 };
+
+export interface Project {
+  id: string;
+  name: string;
+  slug: string;
+  workspace: string;
+  role: string;
+}
+export interface AuditEntry {
+  actor: string;
+  action: string;
+  target: string;
+  metadata: unknown;
+  createdAt: string;
+}
 
 export type ChatRole = "system" | "user" | "assistant";
 export interface ChatMessage {

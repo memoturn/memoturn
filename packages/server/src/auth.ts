@@ -34,18 +34,60 @@ export async function authenticateKeys(
   return { projectId: apiKey.projectId };
 }
 
+export type WorkspaceRole = "OWNER" | "ADMIN" | "MEMBER" | "VIEWER";
+
+export interface ProjectAccess {
+  projectId: string;
+  role: WorkspaceRole;
+  workspaceId: string;
+}
+
+/** List every project a user can access (across their workspace memberships), with role. */
+export async function listUserProjects(userId: string) {
+  const memberships = await prisma.membership.findMany({
+    where: { userId },
+    include: { workspace: { include: { projects: { orderBy: { createdAt: "asc" } } } } },
+    orderBy: { createdAt: "asc" },
+  });
+  return memberships.flatMap((m) =>
+    m.workspace.projects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      workspace: m.workspace.name,
+      role: m.role as WorkspaceRole,
+    })),
+  );
+}
+
 /**
- * Resolve a logged-in user's default project (first project of their first workspace).
- * Used to scope dashboard (session-based) requests until an explicit project switcher
- * exists. SDK/API-key requests are already project-scoped.
+ * Resolve which project a session request operates on + the user's role there. If a
+ * specific projectId is requested (project switcher), it's honored only when the user
+ * has membership to its workspace; otherwise the default (first) project is used.
  */
-export async function resolveDefaultProjectForUser(userId: string): Promise<string | null> {
+export async function getUserProjectAccess(userId: string, requestedProjectId?: string): Promise<ProjectAccess | null> {
+  if (requestedProjectId) {
+    const project = await prisma.project.findUnique({ where: { id: requestedProjectId } });
+    if (project) {
+      const membership = await prisma.membership.findUnique({
+        where: { userId_workspaceId: { userId, workspaceId: project.workspaceId } },
+      });
+      if (membership) return { projectId: project.id, role: membership.role as WorkspaceRole, workspaceId: project.workspaceId };
+    }
+  }
   const membership = await prisma.membership.findFirst({
     where: { userId },
     orderBy: { createdAt: "asc" },
     include: { workspace: { include: { projects: { orderBy: { createdAt: "asc" }, take: 1 } } } },
   });
-  return membership?.workspace.projects[0]?.id ?? null;
+  const project = membership?.workspace.projects[0];
+  if (!membership || !project) return null;
+  return { projectId: project.id, role: membership.role as WorkspaceRole, workspaceId: membership.workspaceId };
+}
+
+/** @deprecated use getUserProjectAccess */
+export async function resolveDefaultProjectForUser(userId: string): Promise<string | null> {
+  return (await getUserProjectAccess(userId))?.projectId ?? null;
 }
 
 /** Parse a `Basic <base64>` header value into credentials. */
