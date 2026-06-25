@@ -31,6 +31,9 @@ function RootComponent() {
           <Link to="/traces">Traces</Link>
           <Link to="/prompts">Prompts</Link>
           <Link to="/datasets">Datasets</Link>
+          <Link to="/playground">Playground</Link>
+          <Link to="/evaluators">Evaluators</Link>
+          <Link to="/settings">Settings</Link>
         </nav>
         <div className="spacer" />
         <span className="user">{session.user.email}</span>

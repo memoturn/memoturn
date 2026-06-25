@@ -10,6 +10,16 @@ async function get<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  return res.json() as Promise<T>;
+}
+
 export interface TraceSummary {
   id: string;
   name: string;
@@ -131,7 +141,43 @@ export const api = {
   getPrompt: (name: string) => get<PromptDetail>(`/v1/prompts/${encodeURIComponent(name)}/detail`),
   listDatasets: () => get<{ data: DatasetListItem[] }>(`/v1/datasets`).then((r) => r.data),
   getDataset: (name: string) => get<DatasetDetail>(`/v1/datasets/${encodeURIComponent(name)}`),
+  playgroundChat: (body: PlaygroundRequest) => post<PlaygroundResponse>(`/v1/playground/chat`, body),
+  listProviders: () => get<{ data: ProviderConnection[] }>(`/v1/providers`).then((r) => r.data),
+  addProvider: (provider: string, apiKey: string) => post(`/v1/providers`, { provider, apiKey }),
+  listEvaluators: () => get<{ data: Evaluator[] }>(`/v1/evaluators`).then((r) => r.data),
+  createEvaluator: (body: { name: string; prompt: string; provider: string; model: string }) => post(`/v1/evaluators`, body),
 };
+
+export type ChatRole = "system" | "user" | "assistant";
+export interface ChatMessage {
+  role: ChatRole;
+  content: string;
+}
+export interface PlaygroundRequest {
+  provider: string;
+  model: string;
+  messages: ChatMessage[];
+  temperature?: number;
+  maxTokens?: number;
+}
+export interface PlaygroundResponse {
+  provider: string;
+  model: string;
+  content: string;
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+}
+export interface ProviderConnection {
+  provider: string;
+  masked: string;
+  createdAt: string;
+}
+export interface Evaluator {
+  name: string;
+  provider: string;
+  model: string;
+  prompt: string;
+  createdAt: string;
+}
 
 export interface DatasetListItem {
   name: string;

@@ -242,7 +242,8 @@ model Evaluator {
   projectId    String
   project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   name         String
-  prompt       String // judge prompt template
+  prompt       String // judge prompt / instructions
+  provider     String   @default("mock")
   model        String
   outputSchema Json     @default("{}")
   createdAt    DateTime @default(now())

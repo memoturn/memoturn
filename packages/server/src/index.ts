@@ -4,5 +4,8 @@ export * from "./traces.js";
 export * from "./metrics.js";
 export * from "./prompts.js";
 export * from "./datasets.js";
+export * from "./providers.js";
+export * from "./playground.js";
+export * from "./evaluators.js";
 export * from "./otel.js";
 export * from "./ingest.js";

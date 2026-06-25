@@ -297,3 +297,26 @@ pre {
 .filters button:hover {
   color: var(--text);
 }
+.filters select {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+}
+
+.pg-input {
+  width: 100%;
+  background: #0e1117;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 10px;
+  font: inherit;
+  resize: vertical;
+}
+.pg-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}

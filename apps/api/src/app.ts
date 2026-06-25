@@ -2,18 +2,24 @@ import { ingestRequest } from "@memoturn/core";
 import {
   addDatasetItems,
   createDataset,
+  createEvaluator,
+  createProviderConnection,
   createPromptVersion,
   getDatasetDetail,
   getMetrics,
   getPromptDetail,
   getTrace,
   listDatasets,
+  listEvaluators,
   listPrompts,
+  listProviderConnections,
   listSessions,
   listTraces,
   otlpToEvents,
   recordRun,
   resolvePrompt,
+  runEvaluator,
+  runPlayground,
   submitBatch,
 } from "@memoturn/server";
 import { auth } from "@memoturn/server";
@@ -49,6 +55,10 @@ app.use("/v1/prompts", requireAuth);
 app.use("/v1/prompts/*", requireAuth);
 app.use("/v1/datasets", requireAuth);
 app.use("/v1/datasets/*", requireAuth);
+app.use("/v1/providers", requireAuth);
+app.use("/v1/playground/*", requireAuth);
+app.use("/v1/evaluators", requireAuth);
+app.use("/v1/evaluators/*", requireAuth);
 
 const security = [{ apiKey: [] }];
 
@@ -383,6 +393,129 @@ app.openapi(
     const result = await recordRun(c.get("projectId"), c.req.valid("param").name, body.runName, body.links);
     if (!result) return c.json({ error: "dataset not found" }, 404);
     return c.json(result, 201);
+  },
+);
+
+// ── Providers (LLM connections) ──────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/providers",
+    summary: "List configured LLM provider connections (masked)",
+    tags: ["providers"],
+    security,
+    responses: { 200: { description: "Provider list", content: { "application/json": { schema: z.any() } } } },
+  }),
+  async (c) => c.json({ data: await listProviderConnections(c.get("projectId")) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/providers",
+    summary: "Add/update an LLM provider API key (encrypted at rest)",
+    tags: ["providers"],
+    security,
+    request: { body: { content: { "application/json": { schema: z.object({ provider: z.enum(["anthropic", "openai"]), apiKey: z.string().min(1) }) } } } },
+    responses: { 201: { description: "Saved", content: { "application/json": { schema: z.any() } } } },
+  }),
+  async (c) => {
+    const { provider, apiKey } = c.req.valid("json");
+    return c.json(await createProviderConnection(c.get("projectId"), provider, apiKey), 201);
+  },
+);
+
+// ── Playground ───────────────────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/playground/chat",
+    summary: "Run a one-shot chat completion through the provider gateway",
+    tags: ["playground"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              provider: z.enum(["mock", "anthropic", "openai"]),
+              model: z.string(),
+              messages: z.array(z.object({ role: z.enum(["system", "user", "assistant"]), content: z.string() })),
+              temperature: z.number().optional(),
+              maxTokens: z.number().int().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: { 200: { description: "Completion", content: { "application/json": { schema: z.any() } } }, 400: { description: "Error" } },
+  }),
+  async (c) => {
+    try {
+      const result = await runPlayground(c.get("projectId"), c.req.valid("json"));
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+    }
+  },
+);
+
+// ── Evaluators (LLM-as-judge) ────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/evaluators",
+    summary: "List evaluators",
+    tags: ["evaluators"],
+    security,
+    responses: { 200: { description: "Evaluator list", content: { "application/json": { schema: z.any() } } } },
+  }),
+  async (c) => c.json({ data: await listEvaluators(c.get("projectId")) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/evaluators",
+    summary: "Create/update an LLM-as-judge evaluator",
+    tags: ["evaluators"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              name: z.string().min(1),
+              prompt: z.string().min(1),
+              provider: z.enum(["mock", "anthropic", "openai"]).optional(),
+              model: z.string(),
+            }),
+          },
+        },
+      },
+    },
+    responses: { 201: { description: "Created", content: { "application/json": { schema: z.any() } } } },
+  }),
+  async (c) => c.json(await createEvaluator(c.get("projectId"), c.req.valid("json")), 201),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/evaluators/{name}/run",
+    summary: "Run an evaluator over a trace's input/output (writes an EVAL score)",
+    tags: ["evaluators"],
+    security,
+    request: {
+      params: z.object({ name: z.string() }),
+      body: { content: { "application/json": { schema: z.object({ traceId: z.string(), input: z.any(), output: z.any(), expectedOutput: z.any().optional() }) } } },
+    },
+    responses: { 200: { description: "Score", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+  }),
+  async (c) => {
+    const result = await runEvaluator(c.get("projectId"), c.req.valid("param").name, c.req.valid("json"));
+    if (!result) return c.json({ error: "evaluator not found" }, 404);
+    return c.json(result);
   },
 );
 
