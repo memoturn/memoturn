@@ -34,6 +34,20 @@ export async function authenticateKeys(
   return { projectId: apiKey.projectId };
 }
 
+/**
+ * Resolve a logged-in user's default project (first project of their first workspace).
+ * Used to scope dashboard (session-based) requests until an explicit project switcher
+ * exists. SDK/API-key requests are already project-scoped.
+ */
+export async function resolveDefaultProjectForUser(userId: string): Promise<string | null> {
+  const membership = await prisma.membership.findFirst({
+    where: { userId },
+    orderBy: { createdAt: "asc" },
+    include: { workspace: { include: { projects: { orderBy: { createdAt: "asc" }, take: 1 } } } },
+  });
+  return membership?.workspace.projects[0]?.id ?? null;
+}
+
 /** Parse a `Basic <base64>` header value into credentials. */
 export function parseBasicAuth(header: string | null | undefined): { publicKey: string; secretKey: string } | null {
   if (!header?.startsWith("Basic ")) return null;

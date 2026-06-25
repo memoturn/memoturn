@@ -46,6 +46,82 @@ a:hover {
 .topbar nav a {
   color: var(--muted);
 }
+.topbar .spacer {
+  flex: 1;
+}
+.topbar .user {
+  color: var(--muted);
+  font-size: 13px;
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+/* login */
+.login {
+  min-height: 70vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.login-card {
+  width: 320px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.login-card h1 {
+  margin: 0;
+}
+.login-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.login-card input {
+  background: #0e1117;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+}
+.login-card input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.login-card button {
+  margin-top: 4px;
+  background: var(--accent);
+  color: #0b0d12;
+  border: none;
+  border-radius: 8px;
+  padding: 9px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.login-card button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.login-error {
+  color: var(--red);
+  font-size: 13px;
+}
 
 .container {
   max-width: 1100px;

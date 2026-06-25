@@ -16,9 +16,10 @@ import {
   resolvePrompt,
   submitBatch,
 } from "@memoturn/server";
+import { auth } from "@memoturn/server";
 import { Scalar } from "@scalar/hono-api-reference";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { requireApiKey } from "./middleware/auth.js";
+import { requireAuth } from "./middleware/auth.js";
 
 /**
  * memoturn public API (Hono + OpenAPI). Runtime-agnostic: the same app is served by
@@ -29,22 +30,25 @@ type Env = { Variables: { projectId: string } };
 
 export const app = new OpenAPIHono<Env>();
 
+// ── Better Auth: dashboard auth routes (email/password, sessions) ────────────────
+app.on(["GET", "POST"], "/auth/*", (c) => auth.handler(c.req.raw));
+
 // ── Security scheme + auth on everything under /v1 (except health) ──────────────
 app.openAPIRegistry.registerComponent("securitySchemes", "apiKey", {
   type: "http",
   scheme: "basic",
   description: "Basic auth: publicKey as username, secretKey as password.",
 });
-app.use("/v1/ingest", requireApiKey);
-app.use("/v1/otel/*", requireApiKey);
-app.use("/v1/traces", requireApiKey);
-app.use("/v1/traces/*", requireApiKey);
-app.use("/v1/sessions", requireApiKey);
-app.use("/v1/metrics", requireApiKey);
-app.use("/v1/prompts", requireApiKey);
-app.use("/v1/prompts/*", requireApiKey);
-app.use("/v1/datasets", requireApiKey);
-app.use("/v1/datasets/*", requireApiKey);
+app.use("/v1/ingest", requireAuth);
+app.use("/v1/otel/*", requireAuth);
+app.use("/v1/traces", requireAuth);
+app.use("/v1/traces/*", requireAuth);
+app.use("/v1/sessions", requireAuth);
+app.use("/v1/metrics", requireAuth);
+app.use("/v1/prompts", requireAuth);
+app.use("/v1/prompts/*", requireAuth);
+app.use("/v1/datasets", requireAuth);
+app.use("/v1/datasets/*", requireAuth);
 
 const security = [{ apiKey: [] }];
 

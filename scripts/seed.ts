@@ -5,9 +5,12 @@
  * Run with: pnpm seed
  */
 import { prisma, hashSecret } from "@memoturn/db";
+import { auth } from "@memoturn/server";
 
 const DEV_PUBLIC_KEY = "pk-mt-dev";
 const DEV_SECRET_KEY = "sk-mt-dev";
+const DEV_EMAIL = "admin@memoturn.dev";
+const DEV_PASSWORD = "memoturn-dev-123";
 
 async function main() {
   const workspace = await prisma.workspace.upsert({
@@ -65,7 +68,22 @@ async function main() {
     }
   }
 
+  // Dashboard login user (via Better Auth) + membership to the default workspace.
+  let user = await prisma.user.findUnique({ where: { email: DEV_EMAIL } });
+  if (!user) {
+    await auth.api.signUpEmail({ body: { email: DEV_EMAIL, password: DEV_PASSWORD, name: "Admin" } });
+    user = await prisma.user.findUnique({ where: { email: DEV_EMAIL } });
+  }
+  if (user) {
+    await prisma.membership.upsert({
+      where: { userId_workspaceId: { userId: user.id, workspaceId: workspace.id } },
+      update: {},
+      create: { userId: user.id, workspaceId: workspace.id, role: "OWNER" },
+    });
+  }
+
   console.log("Seeded:");
+  console.log(`  login     : ${DEV_EMAIL} / ${DEV_PASSWORD}`);
   console.log(`  workspace : ${workspace.name} (${workspace.id})`);
   console.log(`  project   : ${project.name} (${project.id})`);
   console.log(`  publicKey : ${DEV_PUBLIC_KEY}`);

@@ -18,7 +18,6 @@
     "@memoturn/db": "workspace:*",
     "@memoturn/server": "workspace:*",
     "@scalar/hono-api-reference": "^0.11.5",
-    "better-auth": "^1.6.20",
     "hono": "^4.12.27",
     "zod": "^4.4.3"
   },
