@@ -1,0 +1,52 @@
+{
+  "name": "memoturn",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source AI engineering platform: LLM observability, evals, metrics, prompts, playground, datasets.",
+  "license": "Apache-2.0",
+  "packageManager": "bun@1.3.4",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "sdks/js",
+    "integrations/*"
+  ],
+  "engines": {
+    "bun": ">=1.3"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean",
+    "infra:up": "docker compose -f infra/docker-compose.dev.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.dev.yml down",
+    "infra:logs": "docker compose -f infra/docker-compose.dev.yml logs -f",
+    "db:generate": "bun --filter @memoturn/db generate",
+    "db:migrate": "bun --filter @memoturn/db migrate",
+    "db:clickhouse": "bun --filter @memoturn/db clickhouse:migrate",
+    "seed": "bun --env-file=.env scripts/seed.ts",
+    "quickstart": "bun --env-file=.env examples/quickstart.ts"
+  },
+  "devDependencies": {
+    "@memoturn/db": "workspace:*",
+    "@memoturn/sdk": "workspace:*",
+    "@types/node": "^22.10.0",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  },
+  "trustedDependencies": [
+    "@prisma/client",
+    "@prisma/engines",
+    "prisma",
+    "esbuild",
+    "sharp",
+    "msgpackr-extract",
+    "lightningcss"
+  ],
+  "overrides": {
+    "ioredis": "5.11.1"
+  }
+}

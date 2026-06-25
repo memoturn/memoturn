@@ -1,0 +1,133 @@
+# Full self-host stack — web + worker + all dependencies.
+# Usage: docker compose -f infra/docker-compose.yml up -d --build
+name: memoturn
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: memoturn
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-memoturn}
+      POSTGRES_DB: memoturn
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memoturn -d memoturn"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: memoturn
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-memoturn}
+      CLICKHOUSE_DB: memoturn
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes:
+      - chdata:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user $$CLICKHOUSE_USER --password $$CLICKHOUSE_PASSWORD --query 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--save", "60", "1"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${BLOB_ACCESS_KEY_ID:-memoturn}
+      MINIO_ROOT_PASSWORD: ${BLOB_SECRET_ACCESS_KEY:-memoturn123}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio-setup:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${BLOB_ACCESS_KEY_ID:-memoturn} ${BLOB_SECRET_ACCESS_KEY:-memoturn123} &&
+      mc mb --ignore-existing local/${BLOB_BUCKET:-memoturn};
+      "
+
+  # Public API (Hono on Bun): /v1 ingest + OTel receiver + read API + OpenAPI.
+  api:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      API_PORT: "3001"
+      DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:-memoturn}@postgres:5432/memoturn?schema=public
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: memoturn
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-memoturn}
+      CLICKHOUSE_DB: memoturn
+      REDIS_URL: redis://redis:6379
+      BLOB_ENDPOINT: http://minio:9000
+      BLOB_REGION: us-east-1
+      BLOB_BUCKET: ${BLOB_BUCKET:-memoturn}
+      BLOB_ACCESS_KEY_ID: ${BLOB_ACCESS_KEY_ID:-memoturn}
+      BLOB_SECRET_ACCESS_KEY: ${BLOB_SECRET_ACCESS_KEY:-memoturn123}
+      BLOB_FORCE_PATH_STYLE: "true"
+    ports:
+      - "${API_PORT:-3001}:3001"
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/worker.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      clickhouse: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:-memoturn}@postgres:5432/memoturn?schema=public
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: memoturn
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-memoturn}
+      CLICKHOUSE_DB: memoturn
+      REDIS_URL: redis://redis:6379
+      BLOB_ENDPOINT: http://minio:9000
+      BLOB_REGION: us-east-1
+      BLOB_BUCKET: ${BLOB_BUCKET:-memoturn}
+      BLOB_ACCESS_KEY_ID: ${BLOB_ACCESS_KEY_ID:-memoturn}
+      BLOB_SECRET_ACCESS_KEY: ${BLOB_SECRET_ACCESS_KEY:-memoturn123}
+      BLOB_FORCE_PATH_STYLE: "true"
+
+volumes:
+  pgdata:
+  chdata:
+  redisdata:
+  miniodata:

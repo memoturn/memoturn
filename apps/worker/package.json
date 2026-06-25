@@ -1,0 +1,22 @@
+{
+  "name": "@memoturn/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch --env-file=../../.env src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo 'no lint configured'",
+    "test": "echo 'no tests'",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@memoturn/core": "workspace:*",
+    "@memoturn/db": "workspace:*",
+    "bullmq": "^5.34.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,390 @@
+import { ingestRequest } from "@memoturn/core";
+import {
+  addDatasetItems,
+  createDataset,
+  createPromptVersion,
+  getDatasetDetail,
+  getMetrics,
+  getPromptDetail,
+  getTrace,
+  listDatasets,
+  listPrompts,
+  listSessions,
+  listTraces,
+  otlpToEvents,
+  recordRun,
+  resolvePrompt,
+  submitBatch,
+} from "@memoturn/server";
+import { swaggerUI } from "@hono/swagger-ui";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { requireApiKey } from "./middleware/auth.js";
+
+/**
+ * memoturn public API (Hono + OpenAPI). Runtime-agnostic: the same app is served by
+ * the Node and Bun entrypoints. Route handlers are thin — all logic lives in
+ * @memoturn/server and @memoturn/core, shared with the dashboard.
+ */
+type Env = { Variables: { projectId: string } };
+
+export const app = new OpenAPIHono<Env>();
+
+// ── Security scheme + auth on everything under /v1 (except health) ──────────────
+app.openAPIRegistry.registerComponent("securitySchemes", "apiKey", {
+  type: "http",
+  scheme: "basic",
+  description: "Basic auth: publicKey as username, secretKey as password.",
+});
+app.use("/v1/ingest", requireApiKey);
+app.use("/v1/otel/*", requireApiKey);
+app.use("/v1/traces", requireApiKey);
+app.use("/v1/traces/*", requireApiKey);
+app.use("/v1/sessions", requireApiKey);
+app.use("/v1/metrics", requireApiKey);
+app.use("/v1/prompts", requireApiKey);
+app.use("/v1/prompts/*", requireApiKey);
+app.use("/v1/datasets", requireApiKey);
+app.use("/v1/datasets/*", requireApiKey);
+
+const security = [{ apiKey: [] }];
+
+// ── Health ───────────────────────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/health",
+    summary: "Liveness probe",
+    tags: ["system"],
+    responses: { 200: { description: "ok", content: { "application/json": { schema: z.object({ status: z.string(), service: z.string() }) } } } },
+  }),
+  (c) => c.json({ status: "ok", service: "memoturn-api" }),
+);
+
+// ── Ingest ─────────────────────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/ingest",
+    summary: "Async batched ingestion of traces, observations, and scores",
+    tags: ["ingestion"],
+    security,
+    request: {
+      body: { content: { "application/json": { schema: z.object({ batch: z.array(z.record(z.any())) }) } } },
+    },
+    responses: {
+      207: { description: "Per-event status", content: { "application/json": { schema: z.object({ successes: z.array(z.any()), errors: z.array(z.any()) }) } } },
+      400: { description: "Invalid batch" },
+      401: { description: "Unauthorized" },
+    },
+  }),
+  async (c) => {
+    const json = await c.req.json().catch(() => null);
+    const parsed = ingestRequest.safeParse(json);
+    if (!parsed.success) return c.json({ error: "invalid batch", details: parsed.error.flatten() }, 400);
+
+    await submitBatch(c.get("projectId"), parsed.data);
+    const successes = parsed.data.batch.map((e) => ({ id: e.id, status: 201 }));
+    return c.json({ successes, errors: [] }, 207);
+  },
+);
+
+// ── OTel OTLP/HTTP receiver (JSON) ───────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/otel/v1/traces",
+    summary: "OpenTelemetry OTLP/HTTP traces receiver (GenAI semconv)",
+    tags: ["ingestion"],
+    security,
+    request: { body: { content: { "application/json": { schema: z.record(z.any()) } } } },
+    responses: { 200: { description: "Accepted (OTLP partialSuccess)" }, 401: { description: "Unauthorized" }, 415: { description: "Unsupported content type" } },
+  }),
+  async (c) => {
+    if (!(c.req.header("content-type") ?? "").includes("json")) {
+      return c.json({ error: "only application/json OTLP is supported" }, 415);
+    }
+    const payload = await c.req.json().catch(() => null);
+    const events = otlpToEvents(payload ?? {});
+    if (events.length > 0) {
+      const parsed = ingestRequest.safeParse({ batch: events });
+      if (!parsed.success) return c.json({ error: "mapping failed" }, 400);
+      await submitBatch(c.get("projectId"), parsed.data);
+    }
+    return c.json({ partialSuccess: {} }, 200);
+  },
+);
+
+// ── Read: list + get traces ──────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/traces",
+    summary: "List recent traces",
+    tags: ["traces"],
+    security,
+    request: {
+      query: z.object({
+        limit: z.coerce.number().int().min(1).max(500).optional(),
+        userId: z.string().optional(),
+        sessionId: z.string().optional(),
+        environment: z.string().optional(),
+        search: z.string().optional(),
+      }),
+    },
+    responses: { 200: { description: "Trace list", content: { "application/json": { schema: z.any() } } } },
+  }),
+  async (c) => {
+    const { limit, userId, sessionId, environment, search } = c.req.valid("query");
+    const data = await listTraces(c.get("projectId"), { limit, userId, sessionId, environment, search });
+    return c.json({ data });
+  },
+);
+
+// ── Sessions ─────────────────────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/sessions",
+    summary: "List sessions (traces grouped by session_id)",
+    tags: ["traces"],
+    security,
+    request: { query: z.object({ limit: z.coerce.number().int().min(1).max(500).optional() }) },
+    responses: { 200: { description: "Session list", content: { "application/json": { schema: z.any() } } } },
+  }),
+  async (c) => {
+    const data = await listSessions(c.get("projectId"), c.req.valid("query").limit ?? 50);
+    return c.json({ data });
+  },
+);
+
+// ── Metrics ──────────────────────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/metrics",
+    summary: "Cost / token / latency rollups (by day + by model)",
+    tags: ["metrics"],
+    security,
+    request: { query: z.object({ days: z.coerce.number().int().min(1).max(365).optional() }) },
+    responses: { 200: { description: "Metrics summary", content: { "application/json": { schema: z.any() } } } },
+  }),
+  async (c) => {
+    const data = await getMetrics(c.get("projectId"), c.req.valid("query").days ?? 30);
+    return c.json(data);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/traces/{id}",
+    summary: "Get a single assembled trace with its observations",
+    tags: ["traces"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: { 200: { description: "Trace", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+  }),
+  async (c) => {
+    const trace = await getTrace(c.get("projectId"), c.req.valid("param").id);
+    if (!trace) return c.json({ error: "not found" }, 404);
+    return c.json(trace);
+  },
+);
+
+// ── Prompts: list ────────────────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/prompts",
+    summary: "List prompts (with channels + latest version)",
+    tags: ["prompts"],
+    security,
+    responses: { 200: { description: "Prompt list", content: { "application/json": { schema: z.any() } } } },
+  }),
+  async (c) => {
+    const data = await listPrompts(c.get("projectId"));
+    return c.json({ data });
+  },
+);
+
+// ── Prompts: create a new version (and point channels at it) ──────────────────────
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/prompts",
+    summary: "Create a new prompt version; optionally point channels (labels) at it",
+    tags: ["prompts"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              name: z.string().min(1),
+              type: z.enum(["TEXT", "CHAT"]).optional(),
+              content: z.any(),
+              config: z.record(z.any()).optional(),
+              folder: z.string().optional(),
+              labels: z.array(z.string()).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: { 201: { description: "Created version", content: { "application/json": { schema: z.any() } } } },
+  }),
+  async (c) => {
+    const body = c.req.valid("json");
+    const created = await createPromptVersion(c.get("projectId"), { ...body, content: body.content });
+    return c.json(created, 201);
+  },
+);
+
+// ── Prompts: full detail (all versions + channels) ───────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/prompts/{name}/detail",
+    summary: "Get a prompt with all versions + channels",
+    tags: ["prompts"],
+    security,
+    request: { params: z.object({ name: z.string() }) },
+    responses: { 200: { description: "Prompt detail", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+  }),
+  async (c) => {
+    const detail = await getPromptDetail(c.get("projectId"), c.req.valid("param").name);
+    if (!detail) return c.json({ error: "prompt not found" }, 404);
+    return c.json(detail);
+  },
+);
+
+// ── Prompts: resolve a deployed prompt by channel (used by the SDK) ───────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/prompts/{name}",
+    summary: "Resolve a deployed prompt by name + channel",
+    tags: ["prompts"],
+    security,
+    request: { params: z.object({ name: z.string() }), query: z.object({ channel: z.string().optional() }) },
+    responses: { 200: { description: "Compiled prompt", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+  }),
+  async (c) => {
+    const channel = c.req.valid("query").channel ?? "production";
+    const resolved = await resolvePrompt(c.get("projectId"), c.req.valid("param").name, channel);
+    if (!resolved) return c.json({ error: `prompt or channel '${channel}' not found` }, 404);
+    return c.json(resolved);
+  },
+);
+
+// ── Datasets: list + create ──────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/datasets",
+    summary: "List datasets (with item + run counts)",
+    tags: ["datasets"],
+    security,
+    responses: { 200: { description: "Dataset list", content: { "application/json": { schema: z.any() } } } },
+  }),
+  async (c) => c.json({ data: await listDatasets(c.get("projectId")) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/datasets",
+    summary: "Create (or update) a dataset",
+    tags: ["datasets"],
+    security,
+    request: { body: { content: { "application/json": { schema: z.object({ name: z.string().min(1), description: z.string().optional() }) } } } },
+    responses: { 201: { description: "Created", content: { "application/json": { schema: z.any() } } } },
+  }),
+  async (c) => c.json(await createDataset(c.get("projectId"), c.req.valid("json")), 201),
+);
+
+// ── Datasets: detail (items + runs) ──────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/datasets/{name}",
+    summary: "Get a dataset with items + runs",
+    tags: ["datasets"],
+    security,
+    request: { params: z.object({ name: z.string() }) },
+    responses: { 200: { description: "Dataset", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+  }),
+  async (c) => {
+    const detail = await getDatasetDetail(c.get("projectId"), c.req.valid("param").name);
+    if (!detail) return c.json({ error: "dataset not found" }, 404);
+    return c.json(detail);
+  },
+);
+
+// ── Datasets: add items ──────────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/datasets/{name}/items",
+    summary: "Append items to a dataset",
+    tags: ["datasets"],
+    security,
+    request: {
+      params: z.object({ name: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              items: z.array(z.object({ input: z.any(), expectedOutput: z.any().optional(), metadata: z.record(z.any()).optional() })),
+            }),
+          },
+        },
+      },
+    },
+    responses: { 201: { description: "Added", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+  }),
+  async (c) => {
+    const items = c.req.valid("json").items as Parameters<typeof addDatasetItems>[2];
+    const result = await addDatasetItems(c.get("projectId"), c.req.valid("param").name, items);
+    if (!result) return c.json({ error: "dataset not found" }, 404);
+    return c.json(result, 201);
+  },
+);
+
+// ── Datasets: record an experiment run (link items → traces) ──────────────────────
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/datasets/{name}/runs",
+    summary: "Record an experiment run linking dataset items to traces",
+    tags: ["datasets"],
+    security,
+    request: {
+      params: z.object({ name: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              runName: z.string().min(1),
+              links: z.array(z.object({ datasetItemId: z.string(), traceId: z.string() })),
+            }),
+          },
+        },
+      },
+    },
+    responses: { 201: { description: "Recorded", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+  }),
+  async (c) => {
+    const body = c.req.valid("json");
+    const result = await recordRun(c.get("projectId"), c.req.valid("param").name, body.runName, body.links);
+    if (!result) return c.json({ error: "dataset not found" }, 404);
+    return c.json(result, 201);
+  },
+);
+
+// ── OpenAPI document + Swagger UI ────────────────────────────────────────────────
+app.doc("/openapi.json", {
+  openapi: "3.0.0",
+  info: { title: "memoturn API", version: "0.1.0", description: "Open-source AI engineering platform — public ingestion + read API." },
+});
+app.get("/docs", swaggerUI({ url: "/openapi.json" }));

@@ -1,0 +1,239 @@
+// memoturn relational metadata (OLTP). High-volume telemetry lives in ClickHouse.
+// Phase 1 ships tenancy + auth + API keys + the prompt/dataset/evaluator skeletons
+// that later phases fill in.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Tenancy ───────────────────────────────────────────────────────────────────
+model Workspace {
+  id        String       @id @default(cuid())
+  name      String
+  slug      String       @unique
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  projects  Project[]
+  members   Membership[]
+}
+
+model Project {
+  id          String       @id @default(cuid())
+  workspaceId String
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  slug        String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  apiKeys     ApiKey[]
+  prompts     Prompt[]
+  datasets    Dataset[]
+  evaluators  Evaluator[]
+  scoreConfigs ScoreConfig[]
+  providers   ProviderConnection[]
+  auditLogs   AuditLog[]
+
+  @@unique([workspaceId, slug])
+}
+
+// ── Auth / access ───────────────────────────────────────────────────────────────
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  name         String?
+  passwordHash String?
+  createdAt    DateTime     @default(now())
+  memberships  Membership[]
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+model Membership {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role        Role      @default(MEMBER)
+  createdAt   DateTime  @default(now())
+
+  @@unique([userId, workspaceId])
+}
+
+// API keys are workspace/project scoped. The secret is hashed; the public key and a
+// short hint are stored for display + lookup. Validation result is cached in Redis.
+model ApiKey {
+  id            String   @id @default(cuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  publicKey     String   @unique
+  secretHash    String
+  secretHint    String // last 4 chars, for display
+  name          String?
+  createdAt     DateTime @default(now())
+  lastUsedAt    DateTime?
+
+  @@index([projectId])
+}
+
+// ── Prompt management (Phase 4) ─────────────────────────────────────────────────
+enum PromptType {
+  TEXT
+  CHAT
+}
+
+model Prompt {
+  id        String          @id @default(cuid())
+  projectId String
+  project   Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  folder    String          @default("")
+  createdAt DateTime        @default(now())
+  versions  PromptVersion[]
+  channels  PromptChannel[]
+
+  @@unique([projectId, name])
+}
+
+model PromptVersion {
+  id        String     @id @default(cuid())
+  promptId  String
+  prompt    Prompt     @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  version   Int
+  type      PromptType @default(TEXT)
+  content   Json // string for TEXT, message array for CHAT
+  config    Json       @default("{}") // model + params
+  createdAt DateTime   @default(now())
+
+  @@unique([promptId, version])
+}
+
+// Deployment pointers ("channels") — e.g. production / latest / custom labels.
+model PromptChannel {
+  id        String   @id @default(cuid())
+  promptId  String
+  prompt    Prompt   @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  label     String
+  version   Int
+  updatedAt DateTime @updatedAt
+
+  @@unique([promptId, label])
+}
+
+// ── Datasets & evaluation (Phase 5) ─────────────────────────────────────────────
+model Dataset {
+  id          String        @id @default(cuid())
+  projectId   String
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name        String
+  description String        @default("")
+  createdAt   DateTime      @default(now())
+  items       DatasetItem[]
+  runs        DatasetRun[]
+
+  @@unique([projectId, name])
+}
+
+model DatasetItem {
+  id             String           @id @default(cuid())
+  datasetId      String
+  dataset        Dataset          @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  input          Json
+  expectedOutput Json?
+  metadata       Json             @default("{}")
+  createdAt      DateTime         @default(now())
+  runItems       DatasetRunItem[]
+
+  @@index([datasetId])
+}
+
+// An experiment run over a dataset (e.g. "gpt-4o-baseline"). Each run item links a
+// dataset item to the trace produced by running the task on it; scores against that
+// trace (in ClickHouse) are the experiment's results.
+model DatasetRun {
+  id        String           @id @default(cuid())
+  datasetId String
+  dataset   Dataset          @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  name      String
+  metadata  Json             @default("{}")
+  createdAt DateTime         @default(now())
+  items     DatasetRunItem[]
+
+  @@unique([datasetId, name])
+}
+
+model DatasetRunItem {
+  id            String      @id @default(cuid())
+  runId         String
+  run           DatasetRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  datasetItemId String
+  datasetItem   DatasetItem @relation(fields: [datasetItemId], references: [id], onDelete: Cascade)
+  traceId       String
+  createdAt     DateTime    @default(now())
+
+  @@unique([runId, datasetItemId])
+  @@index([runId])
+}
+
+// Evaluators: managed LLM-as-judge templates or custom. Bindings (online sampling /
+// dataset targets) come in Phase 5.
+model Evaluator {
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name         String
+  prompt       String // judge prompt template
+  model        String
+  outputSchema Json     @default("{}")
+  createdAt    DateTime @default(now())
+
+  @@unique([projectId, name])
+}
+
+model ScoreConfig {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  dataType  String   @default("NUMERIC") // NUMERIC | CATEGORICAL | BOOLEAN
+  config    Json     @default("{}") // ranges / categories
+  createdAt DateTime @default(now())
+
+  @@unique([projectId, name])
+}
+
+// Encrypted provider credentials for playground + LLM-as-judge.
+model ProviderConnection {
+  id            String   @id @default(cuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  provider      String // openai | anthropic | ...
+  encryptedKey  String
+  createdAt     DateTime @default(now())
+
+  @@unique([projectId, provider])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  actor     String
+  action    String
+  target    String
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
+}
