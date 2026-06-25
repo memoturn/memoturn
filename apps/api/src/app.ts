@@ -20,6 +20,7 @@ import {
   listUserProjects,
   addReviewItems,
   createReviewQueue,
+  exportTracesJsonl,
   listReviewItems,
   listReviewQueues,
   otlpToEvents,
@@ -71,6 +72,19 @@ app.use("/v1/projects", requireAuth);
 app.use("/v1/audit-logs", requireAuth);
 app.use("/v1/review-queues", requireAuth);
 app.use("/v1/review-queues/*", requireAuth);
+app.use("/v1/exports/*", requireAuth);
+
+// Batch export (NDJSON download) — plain route so we can set a file download header.
+app.get("/v1/exports/traces", async (c) => {
+  const url = new URL(c.req.url);
+  const limit = Number(url.searchParams.get("limit") ?? 1000);
+  const environment = url.searchParams.get("environment") || undefined;
+  const body = await exportTracesJsonl(c.get("projectId"), { limit, environment });
+  return c.body(body, 200, {
+    "content-type": "application/x-ndjson",
+    "content-disposition": "attachment; filename=memoturn-traces.jsonl",
+  });
+});
 
 const security = [{ apiKey: [] }];
 

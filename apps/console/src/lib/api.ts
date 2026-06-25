@@ -180,6 +180,7 @@ export const api = {
     samplingRate?: number;
     filterName?: string;
   }) => post(`/v1/evaluators`, body),
+  listSessions: () => get<{ data: SessionSummary[] }>(`/v1/sessions`).then((r) => r.data),
   listProjects: () => get<{ data: Project[] }>(`/v1/projects`).then((r) => r.data),
   listAuditLogs: () => get<{ data: AuditEntry[] }>(`/v1/audit-logs`).then((r) => r.data),
   listReviewQueues: () => get<{ data: ReviewQueue[] }>(`/v1/review-queues`).then((r) => r.data),
@@ -210,6 +211,27 @@ export interface ReviewItem {
 export interface ReviewItemsResponse {
   queue: { name: string; scoreName: string; dataType: string };
   items: ReviewItem[];
+}
+
+export interface SessionSummary {
+  session_id: string;
+  trace_count: number;
+  first_seen: string;
+  last_seen: string;
+  total_cost: number;
+}
+
+/** Download the traces export (NDJSON) for the active project via an object URL. */
+export async function downloadTracesExport(): Promise<void> {
+  const res = await fetch(`${API_BASE}/v1/exports/traces`, { headers: headers() });
+  if (!res.ok) throw new Error(`export failed: ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "memoturn-traces.jsonl";
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export interface Project {

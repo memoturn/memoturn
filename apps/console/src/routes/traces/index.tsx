@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { api } from "../../lib/api";
+import { api, downloadTracesExport } from "../../lib/api";
 
 interface TraceSearch {
   search?: string;
@@ -62,6 +62,10 @@ function TracesPage() {
         {(filters.search || filters.environment || filters.userId) && (
           <button onClick={() => navigate({ search: {} })}>Clear</button>
         )}
+        <div style={{ flex: 1 }} />
+        <button onClick={() => void downloadTracesExport()} title="Export traces as NDJSON">
+          Export JSONL
+        </button>
       </div>
 
       {isLoading && <div className="empty">Loading…</div>}
