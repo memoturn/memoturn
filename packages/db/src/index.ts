@@ -1,9 +1,14 @@
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
-/** Shared Prisma client (singleton across hot reloads in dev). */
+/**
+ * Shared Prisma client (singleton across hot reloads in dev). Prisma 7 connects via a
+ * driver adapter; the connection URL lives here + in prisma.config.ts, not the schema.
+ */
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
-export const prisma = globalForPrisma.prisma ?? new PrismaClient();
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
 export * from "@prisma/client";

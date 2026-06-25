@@ -33,9 +33,9 @@
   "devDependencies": {
     "@memoturn/db": "workspace:*",
     "@memoturn/sdk": "workspace:*",
-    "@types/node": "^22.10.0",
-    "turbo": "^2.3.3",
-    "typescript": "^5.7.2"
+    "@types/node": "^26.0.1",
+    "turbo": "^2.10.0",
+    "typescript": "^6.0.3"
   },
   "trustedDependencies": [
     "@prisma/client",

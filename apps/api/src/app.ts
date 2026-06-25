@@ -16,7 +16,7 @@ import {
   resolvePrompt,
   submitBatch,
 } from "@memoturn/server";
-import { swaggerUI } from "@hono/swagger-ui";
+import { Scalar } from "@scalar/hono-api-reference";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { requireApiKey } from "./middleware/auth.js";
 
@@ -69,7 +69,7 @@ app.openapi(
     tags: ["ingestion"],
     security,
     request: {
-      body: { content: { "application/json": { schema: z.object({ batch: z.array(z.record(z.any())) }) } } },
+      body: { content: { "application/json": { schema: z.object({ batch: z.array(z.record(z.string(), z.any())) }) } } },
     },
     responses: {
       207: { description: "Per-event status", content: { "application/json": { schema: z.object({ successes: z.array(z.any()), errors: z.array(z.any()) }) } } },
@@ -80,7 +80,7 @@ app.openapi(
   async (c) => {
     const json = await c.req.json().catch(() => null);
     const parsed = ingestRequest.safeParse(json);
-    if (!parsed.success) return c.json({ error: "invalid batch", details: parsed.error.flatten() }, 400);
+    if (!parsed.success) return c.json({ error: "invalid batch", details: z.flattenError(parsed.error) }, 400);
 
     await submitBatch(c.get("projectId"), parsed.data);
     const successes = parsed.data.batch.map((e) => ({ id: e.id, status: 201 }));
@@ -96,7 +96,7 @@ app.openapi(
     summary: "OpenTelemetry OTLP/HTTP traces receiver (GenAI semconv)",
     tags: ["ingestion"],
     security,
-    request: { body: { content: { "application/json": { schema: z.record(z.any()) } } } },
+    request: { body: { content: { "application/json": { schema: z.record(z.string(), z.any()) } } } },
     responses: { 200: { description: "Accepted (OTLP partialSuccess)" }, 401: { description: "Unauthorized" }, 415: { description: "Unsupported content type" } },
   }),
   async (c) => {
@@ -223,7 +223,7 @@ app.openapi(
               name: z.string().min(1),
               type: z.enum(["TEXT", "CHAT"]).optional(),
               content: z.any(),
-              config: z.record(z.any()).optional(),
+              config: z.record(z.string(), z.any()).optional(),
               folder: z.string().optional(),
               labels: z.array(z.string()).optional(),
             }),
@@ -335,7 +335,7 @@ app.openapi(
         content: {
           "application/json": {
             schema: z.object({
-              items: z.array(z.object({ input: z.any(), expectedOutput: z.any().optional(), metadata: z.record(z.any()).optional() })),
+              items: z.array(z.object({ input: z.any(), expectedOutput: z.any().optional(), metadata: z.record(z.string(), z.any()).optional() })),
             }),
           },
         },
@@ -382,9 +382,9 @@ app.openapi(
   },
 );
 
-// ── OpenAPI document + Swagger UI ────────────────────────────────────────────────
+// ── OpenAPI document + Scalar API reference ──────────────────────────────────────
 app.doc("/openapi.json", {
   openapi: "3.0.0",
   info: { title: "memoturn API", version: "0.1.0", description: "Open-source AI engineering platform — public ingestion + read API." },
 });
-app.get("/docs", swaggerUI({ url: "/openapi.json" }));
+app.get("/docs", Scalar({ url: "/openapi.json", pageTitle: "memoturn API" }));

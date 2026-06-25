@@ -12,7 +12,7 @@ import { z } from "zod";
  * worker. Changing it changes all three.
  */
 
-export const ISO_DATETIME = z.string().datetime({ offset: true });
+export const ISO_DATETIME = z.iso.datetime({ offset: true });
 
 export const ObservationLevel = z.enum(["DEBUG", "DEFAULT", "WARNING", "ERROR"]);
 export type ObservationLevel = z.infer<typeof ObservationLevel>;
@@ -74,7 +74,7 @@ export type SpanBody = z.infer<typeof spanBody>;
 export const generationBody = observationBase.extend({
   model: z.string().optional(),
   provider: z.string().optional(),
-  modelParameters: z.record(z.any()).optional(),
+  modelParameters: z.record(z.string(), z.any()).optional(),
   usage,
   promptId: z.string().optional(),
   promptVersion: z.string().optional(),
