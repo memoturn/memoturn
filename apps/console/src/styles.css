@@ -393,3 +393,32 @@ pre {
   color: var(--muted);
   font-size: 13px;
 }
+
+/* trace scores */
+.scores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.score-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  background: var(--panel);
+}
+.score-name {
+  color: var(--muted);
+}
+.score-val {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.score-comment {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

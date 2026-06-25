@@ -41,6 +41,16 @@ export interface ObservationDetail {
   metadata: string;
 }
 
+export interface ScoreRow {
+  name: string;
+  source: string;
+  data_type: string;
+  value: number | null;
+  string_value: string;
+  comment: string;
+  timestamp: string;
+}
+
 export interface TraceDetail extends TraceSummary {
   release: string;
   version: string;
@@ -49,6 +59,7 @@ export interface TraceDetail extends TraceSummary {
   input: string;
   output: string;
   observations: ObservationDetail[];
+  scores: ScoreRow[];
 }
 
 async function query<T>(sql: string, params: Record<string, unknown>): Promise<T[]> {
@@ -192,6 +203,18 @@ export async function getTrace(projectId: string, traceId: string): Promise<Trac
     { projectId, traceId },
   );
 
+  const scores = await query<ScoreRow>(
+    `
+    SELECT
+      name, source, data_type, value, string_value, comment,
+      formatDateTime(timestamp, '%Y-%m-%dT%H:%i:%SZ') AS timestamp
+    FROM scores FINAL
+    WHERE project_id = {projectId:String} AND trace_id = {traceId:String}
+    ORDER BY timestamp ASC
+    `,
+    { projectId, traceId },
+  );
+
   const t = traces[0]!;
   return {
     ...t,
@@ -200,5 +223,6 @@ export async function getTrace(projectId: string, traceId: string): Promise<Trac
     total_tokens: observations.reduce((s, o) => s + Number(o.total_tokens), 0),
     latency_ms: observations.reduce((m, o) => Math.max(m, Number(o.latency_ms)), 0),
     observations,
+    scores,
   };
 }

@@ -145,6 +145,24 @@ function TraceDetailPage() {
         <dd>{trace.latency_ms} ms</dd>
       </dl>
 
+      {trace.scores.length > 0 && (
+        <>
+          <h2>Scores ({trace.scores.length})</h2>
+          <div className="scores">
+            {trace.scores.map((s, i) => (
+              <div className="score-chip" key={i} title={s.comment}>
+                <span className={`badge ${s.source === "EVAL" ? "gen" : s.source === "ANNOTATION" ? "span" : "event"}`}>
+                  {s.source.toLowerCase()}
+                </span>
+                <span className="score-name">{s.name}</span>
+                <span className="score-val">{s.value != null ? s.value : s.string_value || "—"}</span>
+                {s.comment && <span className="obs-meta score-comment">{s.comment}</span>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       <h2>Timeline ({trace.observation_count})</h2>
       <div className="waterfall">
         {layout(trace.observations).map((obs) => (

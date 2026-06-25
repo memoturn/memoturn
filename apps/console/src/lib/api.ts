@@ -70,6 +70,16 @@ export interface ObservationDetail {
   metadata: string;
 }
 
+export interface ScoreRow {
+  name: string;
+  source: string;
+  data_type: string;
+  value: number | null;
+  string_value: string;
+  comment: string;
+  timestamp: string;
+}
+
 export interface TraceDetail extends TraceSummary {
   release: string;
   version: string;
@@ -78,6 +88,7 @@ export interface TraceDetail extends TraceSummary {
   input: string;
   output: string;
   observations: ObservationDetail[];
+  scores: ScoreRow[];
 }
 
 export interface TraceFilters {
