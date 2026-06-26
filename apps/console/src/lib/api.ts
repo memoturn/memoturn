@@ -100,6 +100,8 @@ export interface PlaygroundRequest {
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
+  tools?: { name: string; description?: string; parameters: Record<string, unknown> }[];
+  responseFormat?: { type: "json_schema"; schema: Record<string, unknown> };
 }
 
 export const api = {

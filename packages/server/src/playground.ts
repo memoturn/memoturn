@@ -1,5 +1,5 @@
 import { isoNow, newId } from "@memoturn/core";
-import { type ChatMessage, generate, generateStream, type Provider } from "@memoturn/llm";
+import { type ChatMessage, generate, generateStream, type Provider, type ToolDef } from "@memoturn/llm";
 import { submitBatch } from "./ingest.js";
 import { resolveProviderKey } from "./providers.js";
 
@@ -14,6 +14,8 @@ export interface PlaygroundInput {
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
+  tools?: ToolDef[];
+  responseFormat?: { type: "json_schema"; schema: Record<string, unknown> };
 }
 
 export async function runPlayground(projectId: string, input: PlaygroundInput, opts: { trace?: boolean } = {}) {

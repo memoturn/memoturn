@@ -695,6 +695,18 @@ app.openapi(
               messages: z.array(z.object({ role: z.enum(["system", "user", "assistant"]), content: z.string() })),
               temperature: z.number().optional(),
               maxTokens: z.number().int().optional(),
+              tools: z
+                .array(
+                  z.object({
+                    name: z.string(),
+                    description: z.string().optional(),
+                    parameters: z.record(z.string(), z.any()),
+                  }),
+                )
+                .optional(),
+              responseFormat: z
+                .object({ type: z.literal("json_schema"), schema: z.record(z.string(), z.any()) })
+                .optional(),
               trace: z.boolean().optional(),
             }),
           },
