@@ -3,6 +3,7 @@ import { createRootRoute, Link, Outlet, useLocation, useNavigate } from "@tansta
 import { LogOut, Search } from "lucide-react";
 import { useEffect } from "react";
 import { CommandPalette } from "../components/CommandPalette";
+import { Logo } from "../components/logo";
 import { ModeToggle } from "../components/mode-toggle";
 import { TimeRangeSelect } from "../components/TimeRangeSelect";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
@@ -92,7 +93,8 @@ function RootComponent() {
     <div className="min-h-svh bg-background text-foreground">
       <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/70">
         <div className="flex h-14 items-center gap-4 px-4">
-          <Link to="/" className="text-sm font-semibold tracking-widest uppercase">
+          <Link to="/" className="flex items-center gap-2 text-sm font-semibold tracking-widest uppercase">
+            <Logo className="size-5" />
             memoturn
           </Link>
           <nav className="flex items-center gap-1 overflow-x-auto">
