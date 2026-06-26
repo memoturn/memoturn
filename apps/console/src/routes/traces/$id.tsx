@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Download, Trash2 } from "lucide-react";
+import { Check, Copy, Download, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "../../components/empty-state";
 import { KindBadge, type KindBadgeTone, toneForKind } from "../../components/kind-badge";
-import { PageHeader } from "../../components/page-header";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../../components/ui/accordion";
+import { Badge } from "../../components/ui/badge";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -16,11 +16,45 @@ import {
   BreadcrumbSeparator,
 } from "../../components/ui/breadcrumb";
 import { Button } from "../../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { Textarea } from "../../components/ui/textarea";
 import { api, type ObservationDetail } from "../../lib/api";
 import { useIsReadOnly } from "../../lib/role";
+
+/** Inline copy-to-clipboard button used next to long ids. */
+function CopyButton({ value, label }: { value: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button
+      variant="ghost"
+      size="icon-xs"
+      className="size-5 text-muted-foreground"
+      aria-label={`Copy ${label ?? "value"}`}
+      onClick={async () => {
+        await navigator.clipboard.writeText(value);
+        setCopied(true);
+        toast.success("Copied");
+        window.setTimeout(() => setCopied(false), 1200);
+      }}
+    >
+      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+    </Button>
+  );
+}
+
+/** Compact metric tile for the trace summary strip. */
+function Stat({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <Card size="sm" className="gap-1">
+      <CardContent>
+        <div className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{label}</div>
+        <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export const Route = createFileRoute("/traces/$id")({ component: TraceDetailPage });
 
@@ -46,7 +80,7 @@ function toneForSource(source: string): KindBadgeTone {
   return "amber";
 }
 
-const PRE_CLASS = "overflow-auto rounded-md border bg-muted/50 p-3 text-xs max-h-80";
+const PRE_CLASS = "overflow-auto border bg-muted/50 p-3 text-xs max-h-80";
 
 // ── Multimodal media: render attachments referenced in input/output ───────────────
 const MEDIA_BASE = import.meta.env.VITE_API_BASE ?? "/api";
@@ -65,7 +99,7 @@ function MediaPreview({ raw }: { raw: string }) {
         const key = m.slice("memoturn-media://".length);
         const url = `${MEDIA_BASE}/v1/media/${key}`;
         return IMG_EXT.test(key) ? (
-          <img key={m} className="h-24 rounded-md border object-cover" src={url} alt="attachment" />
+          <img key={m} className="h-24 border object-cover" src={url} alt="attachment" />
         ) : (
           <Button key={m} asChild variant="outline" size="sm">
             <a href={url} target="_blank" rel="noreferrer">
@@ -75,7 +109,7 @@ function MediaPreview({ raw }: { raw: string }) {
         );
       })}
       {dataImgs.map((d) => (
-        <img key={d.slice(0, 48)} className="h-24 rounded-md border object-cover" src={d} alt="inline attachment" />
+        <img key={d.slice(0, 48)} className="h-24 border object-cover" src={d} alt="inline attachment" />
       ))}
     </div>
   );
@@ -207,7 +241,7 @@ function AgentGraph({ observations }: { observations: ObservationDetail[] }) {
   });
 
   return (
-    <div className="overflow-x-auto rounded-lg border p-4">
+    <div className="overflow-x-auto py-2">
       <svg width={width} height={height} role="img" aria-label="Agent run graph">
         <title>Agent run graph</title>
         {edges.map((e, i) => {
@@ -237,7 +271,7 @@ function AgentGraph({ observations }: { observations: ObservationDetail[] }) {
               className={GRAPH_COLOR[o.type] ?? "text-muted-foreground"}
             >
               <title>{`${o.type} · ${o.name || o.id}${o.model ? ` · ${o.model}` : ""} · ${o.latency_ms} ms`}</title>
-              <rect width={NODE_W} height={NODE_H} rx={7} fill="var(--card)" stroke="currentColor" strokeWidth={1.5} />
+              <rect width={NODE_W} height={NODE_H} rx={0} fill="var(--card)" stroke="currentColor" strokeWidth={1.5} />
               <circle cx={14} cy={NODE_H / 2} r={4} fill="currentColor" />
               <text x={26} y={NODE_H / 2 + 4} fill="var(--foreground)" fontSize={12}>
                 {label.length > 20 ? `${label.slice(0, 19)}…` : label}
@@ -308,99 +342,140 @@ function TraceDetailPage() {
           </BreadcrumbItem>
           <BreadcrumbSeparator />
           <BreadcrumbItem>
-            <BreadcrumbPage>{trace.name || trace.id}</BreadcrumbPage>
+            <BreadcrumbPage className="max-w-[40ch] truncate">{trace.name || trace.id}</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
 
-      <PageHeader title={trace.name || trace.id} />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <h1 className="truncate text-2xl font-semibold tracking-tight">{trace.name || trace.id}</h1>
+          <div className="flex items-center gap-1 text-muted-foreground">
+            <span className="font-mono text-xs">{trace.id}</span>
+            <CopyButton value={trace.id} label="trace id" />
+          </div>
+        </div>
+        <Badge variant="secondary" className="font-medium">
+          {trace.environment}
+        </Badge>
+      </div>
 
-      <dl className="grid grid-cols-[160px_1fr] gap-x-4 gap-y-2 text-sm">
-        <dt className="text-muted-foreground">Trace ID</dt>
-        <dd>{trace.id}</dd>
-        <dt className="text-muted-foreground">Timestamp</dt>
-        <dd>{trace.timestamp}</dd>
-        <dt className="text-muted-foreground">Environment</dt>
-        <dd>{trace.environment}</dd>
-        {trace.user_id && (
-          <>
-            <dt className="text-muted-foreground">User</dt>
-            <dd>{trace.user_id}</dd>
-          </>
-        )}
-        {trace.session_id && (
-          <>
-            <dt className="text-muted-foreground">Session</dt>
-            <dd>{trace.session_id}</dd>
-          </>
-        )}
-        <dt className="text-muted-foreground">Total tokens</dt>
-        <dd>{trace.total_tokens}</dd>
-        <dt className="text-muted-foreground">Total cost</dt>
-        <dd>{Number(trace.total_cost) > 0 ? `$${Number(trace.total_cost).toFixed(6)}` : "—"}</dd>
-        <dt className="text-muted-foreground">Latency</dt>
-        <dd>{trace.latency_ms} ms</dd>
-      </dl>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <Stat label="Observations" value={trace.observation_count} />
+        <Stat label="Tokens" value={trace.total_tokens} />
+        <Stat label="Cost" value={Number(trace.total_cost) > 0 ? `$${Number(trace.total_cost).toFixed(6)}` : "—"} />
+        <Stat label="Latency" value={`${trace.latency_ms} ms`} />
+      </div>
 
-      <MediaPreview raw={trace.input} />
-      <MediaPreview raw={trace.output} />
+      <Card>
+        <CardHeader>
+          <CardTitle>Details</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <dl className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-2.5 text-sm">
+            <dt className="text-muted-foreground">Timestamp</dt>
+            <dd className="tabular-nums">{trace.timestamp}</dd>
+            {trace.user_id && (
+              <>
+                <dt className="text-muted-foreground">User</dt>
+                <dd className="font-mono text-xs">{trace.user_id}</dd>
+              </>
+            )}
+            {trace.session_id && (
+              <>
+                <dt className="text-muted-foreground">Session</dt>
+                <dd className="flex items-center gap-1">
+                  <Link
+                    to="/sessions/$id"
+                    params={{ id: trace.session_id }}
+                    className="truncate font-mono text-xs text-primary hover:underline"
+                  >
+                    {trace.session_id}
+                  </Link>
+                  <CopyButton value={trace.session_id} label="session id" />
+                </dd>
+              </>
+            )}
+          </dl>
+          <MediaPreview raw={trace.input} />
+          <MediaPreview raw={trace.output} />
+        </CardContent>
+      </Card>
 
       {trace.scores.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-lg font-semibold tracking-tight">Scores ({trace.scores.length})</h2>
-          <div className="flex flex-wrap gap-2">
-            {trace.scores.map((s, i) => (
-              <div
-                key={i}
-                title={s.comment}
-                className="inline-flex items-center gap-1.5 border bg-card px-2 py-1 text-sm"
-              >
-                <KindBadge tone={toneForSource(s.source)}>{s.source.toLowerCase()}</KindBadge>
-                <span className="text-muted-foreground">{s.name}</span>
-                <span className="font-medium">{s.value != null ? s.value : s.string_value || "—"}</span>
-                {s.comment && <span className="text-muted-foreground">{s.comment}</span>}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section className="space-y-3">
-        <Tabs value={view} onValueChange={(v) => setView(v as "timeline" | "graph")}>
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <h2 className="text-lg font-semibold tracking-tight">
-              {view === "timeline" ? "Timeline" : "Graph"} ({trace.observation_count})
-            </h2>
-            <TabsList>
-              <TabsTrigger value="timeline">timeline</TabsTrigger>
-              <TabsTrigger value="graph">graph</TabsTrigger>
-            </TabsList>
-          </div>
-          <TabsContent value="timeline">
-            <div className="overflow-hidden rounded-lg border">
-              {layout(trace.observations).map((obs) => (
-                <WaterfallRow key={obs.id} obs={obs} />
+        <Card>
+          <CardHeader>
+            <CardTitle>Scores ({trace.scores.length})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {trace.scores.map((s, i) => (
+                <div
+                  key={i}
+                  title={s.comment}
+                  className="inline-flex items-center gap-1.5 border bg-background px-2 py-1 text-sm"
+                >
+                  <KindBadge tone={toneForSource(s.source)}>{s.source.toLowerCase()}</KindBadge>
+                  <span className="text-muted-foreground">{s.name}</span>
+                  <span className="font-medium">{s.value != null ? s.value : s.string_value || "—"}</span>
+                  {s.comment && <span className="text-muted-foreground">{s.comment}</span>}
+                </div>
               ))}
             </div>
-          </TabsContent>
-          <TabsContent value="graph">
-            <AgentGraph observations={trace.observations} />
-          </TabsContent>
-        </Tabs>
-      </section>
+          </CardContent>
+        </Card>
+      )}
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold tracking-tight">Payloads</h2>
-        {payloadObs.length === 0 ? (
-          <EmptyState title="No payloads to show." />
-        ) : (
-          <Accordion type="multiple" className="rounded-lg border px-4">
-            {payloadObs.map((obs) => (
-              <ObservationDetailItem key={obs.id} obs={obs} />
-            ))}
-          </Accordion>
-        )}
-      </section>
+      <Card>
+        <Tabs value={view} onValueChange={(v) => setView(v as "timeline" | "graph")}>
+          <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
+            <CardTitle>Observations ({trace.observation_count})</CardTitle>
+            <TabsList>
+              <TabsTrigger value="timeline">Timeline</TabsTrigger>
+              <TabsTrigger value="graph">Graph</TabsTrigger>
+            </TabsList>
+          </CardHeader>
+          <CardContent className="px-0">
+            <TabsContent value="timeline" className="mt-0">
+              {trace.observations.length === 0 ? (
+                <div className="px-6">
+                  <EmptyState title="No observations." />
+                </div>
+              ) : (
+                <div className="border-t">
+                  <div className="grid grid-cols-[280px_1fr] border-b bg-muted/30 py-1.5 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+                    <span className="px-3">Observation</span>
+                    <span>Duration</span>
+                  </div>
+                  {layout(trace.observations).map((obs) => (
+                    <WaterfallRow key={obs.id} obs={obs} />
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+            <TabsContent value="graph" className="mt-0 px-6">
+              <AgentGraph observations={trace.observations} />
+            </TabsContent>
+          </CardContent>
+        </Tabs>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Payloads</CardTitle>
+        </CardHeader>
+        <CardContent className={payloadObs.length === 0 ? undefined : "px-0"}>
+          {payloadObs.length === 0 ? (
+            <EmptyState title="No payloads to show." />
+          ) : (
+            <Accordion type="multiple" className="border-t px-6">
+              {payloadObs.map((obs) => (
+                <ObservationDetailItem key={obs.id} obs={obs} />
+              ))}
+            </Accordion>
+          )}
+        </CardContent>
+      </Card>
 
       <Comments traceId={trace.id} />
     </div>
@@ -434,44 +509,50 @@ function Comments({ traceId }: { traceId: string }) {
   });
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-lg font-semibold tracking-tight">Comments ({comments?.length ?? 0})</h2>
-      <ul className="space-y-3">
-        {comments?.map((cm) => (
-          <li key={cm.id} className="rounded-lg border p-3">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>
-                {cm.author} · {cm.createdAt.slice(0, 19).replace("T", " ")}
-              </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-6 text-muted-foreground hover:text-destructive"
-                disabled={readOnly || remove.isPending}
-                onClick={() => remove.mutate(cm.id)}
-                aria-label="Delete comment"
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
-            </div>
-            <div className="mt-1 text-sm">{cm.content}</div>
-          </li>
-        ))}
-      </ul>
-      <div className="space-y-2">
-        <Textarea
-          placeholder="Add a comment…"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && text) add.mutate();
-          }}
-          rows={3}
-        />
-        <Button disabled={readOnly || !text || add.isPending} onClick={() => add.mutate()}>
-          {add.isPending ? "Posting…" : "Comment"}
-        </Button>
-      </div>
-    </section>
+    <Card>
+      <CardHeader>
+        <CardTitle>Comments ({comments?.length ?? 0})</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {comments && comments.length > 0 && (
+          <ul className="space-y-3">
+            {comments.map((cm) => (
+              <li key={cm.id} className="border bg-background p-3">
+                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>
+                    {cm.author} · {cm.createdAt.slice(0, 19).replace("T", " ")}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 text-muted-foreground hover:text-destructive"
+                    disabled={readOnly || remove.isPending}
+                    onClick={() => remove.mutate(cm.id)}
+                    aria-label="Delete comment"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </div>
+                <div className="mt-1 text-sm">{cm.content}</div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="space-y-2">
+          <Textarea
+            placeholder="Add a comment…"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && text) add.mutate();
+            }}
+            rows={3}
+          />
+          <Button disabled={readOnly || !text || add.isPending} onClick={() => add.mutate()}>
+            {add.isPending ? "Posting…" : "Comment"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
