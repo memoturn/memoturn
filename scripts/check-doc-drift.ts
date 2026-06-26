@@ -9,7 +9,7 @@
  * Read-only. Exits non-zero when any check finds drift — safe to wire into
  * lefthook pre-push or CI as-is. Run with: `bun run docs:check`.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
@@ -167,7 +167,38 @@ function checkMcpTools(): CheckResult {
   return { name: "MCP tools (apps/mcp/src/tools.ts → apps/mcp/README.md)", findings };
 }
 
-const checks = [checkScriptNames, checkCredentials, checkPorts, checkCrons, checkMcpTools];
+/** 6. Every agent + skill must be listed in the .claude/README roster. */
+function checkClaudeRoster(): CheckResult {
+  const readme = tryRead(".claude/README.md");
+  const findings: Finding[] = [];
+  if (readme === null) {
+    return { name: "Claude roster (.claude/agents,skills → .claude/README.md)", findings };
+  }
+  const ls = (rel: string): string[] => {
+    try {
+      return readdirSync(join(ROOT, rel));
+    } catch {
+      return [];
+    }
+  };
+  const agents = ls(".claude/agents")
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => f.replace(/\.md$/, ""));
+  const skills = ls(".claude/skills").filter((d) => !d.includes("."));
+  for (const name of agents) {
+    if (!readme.includes(name)) {
+      findings.push({ doc: ".claude/README.md", line: 0, message: `agent \`${name}\` is not in the roster` });
+    }
+  }
+  for (const name of skills) {
+    if (!readme.includes(name)) {
+      findings.push({ doc: ".claude/README.md", line: 0, message: `skill \`${name}\` is not in the roster` });
+    }
+  }
+  return { name: "Claude roster (.claude/agents,skills → .claude/README.md)", findings };
+}
+
+const checks = [checkScriptNames, checkCredentials, checkPorts, checkCrons, checkMcpTools, checkClaudeRoster];
 
 let drift = 0;
 console.log("doc-drift check\n");
