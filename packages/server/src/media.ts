@@ -53,22 +53,32 @@ export async function getMedia(
   return getBlobBytes(key);
 }
 
+/** True for a base64 `data:<mime>;base64,…` URI string. */
+export function isDataUri(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith("data:") && DATA_URI.test(value);
+}
+
 /**
  * Deep-walk a JSON value; any base64 data URI string is offloaded to blob and replaced
- * with a `memoturn-media://<key>` reference. Returns the transformed value.
+ * with a `memoturn-media://<key>` reference. Returns the transformed value. The `store`
+ * is injectable for testing (defaults to the real blob writer).
  */
-export async function offloadMedia(projectId: string, value: unknown): Promise<unknown> {
+export async function offloadMedia(
+  projectId: string,
+  value: unknown,
+  store: (projectId: string, dataUri: string) => Promise<StoredMedia | null> = storeDataUri,
+): Promise<unknown> {
   if (typeof value === "string") {
-    if (value.startsWith("data:") && DATA_URI.test(value)) {
-      const stored = await storeDataUri(projectId, value);
+    if (isDataUri(value)) {
+      const stored = await store(projectId, value);
       return stored ? `${MEDIA_PREFIX}${stored.key}` : value;
     }
     return value;
   }
-  if (Array.isArray(value)) return Promise.all(value.map((v) => offloadMedia(projectId, v)));
+  if (Array.isArray(value)) return Promise.all(value.map((v) => offloadMedia(projectId, v, store)));
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) out[k] = await offloadMedia(projectId, v);
+    for (const [k, v] of Object.entries(value)) out[k] = await offloadMedia(projectId, v, store);
     return out;
   }
   return value;

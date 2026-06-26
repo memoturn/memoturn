@@ -49,11 +49,10 @@ jobs:
       # Doc/code drift — read-only, no infra needed; fails fast before the DB/build steps.
       - name: Docs in sync with code
         run: bun run docs:check
-      # RBAC guards on mutating routes. Advisory until the open findings are triaged
-      # (guard or `// rbac-exempt`); drop continue-on-error to make it a hard gate.
+      # RBAC guards on mutating routes — every mutating /v1 route must denyIfReadOnly
+      # + declare a 403 (or be marked `// rbac-exempt`). Hard gate.
       - name: RBAC guard check
         run: bun run rbac:check
-        continue-on-error: true
       - run: bun --filter @memoturn/db generate
       - run: bun --filter @memoturn/db migrate
       - run: bun run db:clickhouse

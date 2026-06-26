@@ -46,12 +46,29 @@ export interface CreateApiKeyInput {
   rateLimitPerMinute?: number | null;
 }
 
+export type Scope = "read" | "write" | "ingest";
+
+/** The coarse scope a request requires: ingest endpoints, GET reads, everything else writes. */
+export function requiredScope(method: string, path: string): Scope {
+  if (path.startsWith("/v1/ingest") || path.startsWith("/v1/otel")) return "ingest";
+  return method.toUpperCase() === "GET" ? "read" : "write";
+}
+
+/** Normalize create-key options: valid scopes (default all), expiry date, per-key limit. */
+export function resolveKeyControls(input: CreateApiKeyInput, nowMs = Date.now()) {
+  const requested = input.scopes?.length ? input.scopes.filter((s) => ALL_SCOPES.includes(s)) : [];
+  return {
+    scopes: requested.length ? requested : ALL_SCOPES,
+    expiresAt:
+      input.expiresInDays && input.expiresInDays > 0 ? new Date(nowMs + input.expiresInDays * 86_400_000) : null,
+    rateLimitPerMinute: input.rateLimitPerMinute ?? null,
+  };
+}
+
 /** Mint a new key pair. Returns the plaintext secret once — it is never retrievable again. */
 export async function createApiKey(projectId: string, input: CreateApiKeyInput = {}) {
   const pair = generateApiKeyPair();
-  const scopes = (input.scopes?.length ? input.scopes : ALL_SCOPES).filter((s) => ALL_SCOPES.includes(s));
-  const expiresAt =
-    input.expiresInDays && input.expiresInDays > 0 ? new Date(Date.now() + input.expiresInDays * 86_400_000) : null;
+  const { scopes, expiresAt, rateLimitPerMinute } = resolveKeyControls(input);
   const k = await prisma.apiKey.create({
     data: {
       projectId,
@@ -59,9 +76,9 @@ export async function createApiKey(projectId: string, input: CreateApiKeyInput =
       secretHash: pair.secretHash,
       secretHint: pair.secretHint,
       name: input.name || null,
-      scopes: scopes.length ? scopes : ALL_SCOPES,
+      scopes,
       expiresAt,
-      rateLimitPerMinute: input.rateLimitPerMinute ?? null,
+      rateLimitPerMinute,
     },
   });
   return {

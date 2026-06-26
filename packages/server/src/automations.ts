@@ -88,16 +88,26 @@ function slackText(event: string, projectId: string, payload: AutomationEvent): 
   return bits.join(" · ");
 }
 
+/**
+ * Whether an automation should fire for a payload: an optional low-value `threshold`
+ * (fire only when value < threshold) and an optional name-substring `filter`.
+ */
+export function automationMatches(
+  rule: { threshold?: number | null; filter?: string | null },
+  payload: { value?: number | null; name?: string },
+): boolean {
+  if (rule.threshold != null && !(payload.value != null && payload.value < rule.threshold)) return false;
+  if (rule.filter && !(payload.name ?? "").includes(rule.filter)) return false;
+  return true;
+}
+
 /** Fire all enabled automations whose trigger matches the event. Returns count fired. */
 export async function dispatchAutomations(projectId: string, event: string, payload: AutomationEvent): Promise<number> {
   const automations = await prisma.automation.findMany({ where: { projectId, trigger: event, enabled: true } });
   let fired = 0;
   await Promise.all(
     automations.map(async (a) => {
-      // Score threshold: only fire when value is below the threshold.
-      if (a.threshold != null && !(payload.value != null && payload.value < a.threshold)) return;
-      // Name filter: substring match against the entity name.
-      if (a.filter && !(payload.name ?? "").includes(a.filter)) return;
+      if (!automationMatches(a, payload)) return;
 
       const body =
         a.action === "slack"

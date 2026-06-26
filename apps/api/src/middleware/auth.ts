@@ -1,4 +1,11 @@
-import { auth, authenticateKeys, getUserProjectAccess, parseBasicAuth, type WorkspaceRole } from "@memoturn/server";
+import {
+  auth,
+  authenticateKeys,
+  getUserProjectAccess,
+  parseBasicAuth,
+  requiredScope,
+  type WorkspaceRole,
+} from "@memoturn/server";
 import type { Context, Next } from "hono";
 
 export type AuthVars = {
@@ -10,12 +17,6 @@ export type AuthVars = {
   apiKeyId: string; // "" for session auth
   apiKeyRateLimit: number | null; // per-key override, null = none
 };
-
-/** Coarse scope a request requires: ingest endpoints, GET reads, everything else writes. */
-function requiredScope(method: string, path: string): "ingest" | "read" | "write" {
-  if (path.startsWith("/v1/ingest") || path.startsWith("/v1/otel")) return "ingest";
-  return method === "GET" ? "read" : "write";
-}
 
 /**
  * Authenticates two ways and resolves the active project + role:

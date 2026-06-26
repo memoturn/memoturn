@@ -19,6 +19,15 @@ export function rateLimitConfig(): { limit: number; window: number } {
   return { limit: Number(process.env.RATE_LIMIT_PER_MINUTE ?? 0), window: WINDOW_SECONDS };
 }
 
+/** Fixed-window math for a given clock (seconds): the window start + seconds until reset. */
+export function rateLimitWindow(
+  nowSeconds: number,
+  window = WINDOW_SECONDS,
+): { windowStart: number; resetSeconds: number } {
+  const windowStart = nowSeconds - (nowSeconds % window);
+  return { windowStart, resetSeconds: windowStart + window - nowSeconds };
+}
+
 /** Count one request against a project's window. `limit <= 0` disables (always allowed). */
 export async function checkRateLimit(
   projectId: string,
@@ -27,8 +36,7 @@ export async function checkRateLimit(
 ): Promise<RateLimitResult> {
   if (limit <= 0) return { allowed: true, limit: 0, remaining: -1, resetSeconds: 0 };
   const now = Math.floor(Date.now() / 1000);
-  const windowStart = now - (now % window);
-  const resetSeconds = windowStart + window - now;
+  const { windowStart, resetSeconds } = rateLimitWindow(now, window);
   const key = `memoturn:ratelimit:${projectId}:${windowStart}`;
   try {
     const redis = redisConnection();
