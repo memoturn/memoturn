@@ -23,6 +23,7 @@ import type {
   TraceDetail,
   TraceSummary,
   Webhook,
+  Widget,
 } from "@memoturn/contracts";
 
 // Re-export the contract types so route components keep importing from "../lib/api".
@@ -108,6 +109,10 @@ export const api = {
   listWebhooks: () => get<{ data: Webhook[] }>(`/v1/webhooks`).then((r) => r.data),
   createWebhook: (body: { url: string; event?: string; threshold?: number | null }) => post(`/v1/webhooks`, body),
   deleteWebhook: (id: string) => del(`/v1/webhooks/${encodeURIComponent(id)}`),
+  listWidgets: () => get<{ data: Widget[] }>(`/v1/widgets`).then((r) => r.data),
+  createWidget: (body: { title: string; metric?: string; breakdown?: string; days?: number }) =>
+    post(`/v1/widgets`, body),
+  deleteWidget: (id: string) => del(`/v1/widgets/${encodeURIComponent(id)}`),
   listEvaluators: () => get<{ data: Evaluator[] }>(`/v1/evaluators`).then((r) => r.data),
   createEvaluator: (body: {
     name: string;

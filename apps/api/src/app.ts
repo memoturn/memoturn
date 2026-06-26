@@ -12,7 +12,9 @@ import {
   createProviderConnection,
   createReviewQueue,
   createWebhook,
+  createWidget,
   deleteWebhook,
+  deleteWidget,
   exportTracesJsonl,
   getDatasetDetail,
   getMetrics,
@@ -30,6 +32,7 @@ import {
   listTraces,
   listUserProjects,
   listWebhooks,
+  listWidgets,
   otlpToEvents,
   recordAudit,
   recordRun,
@@ -86,6 +89,8 @@ app.use("/v1/retention", requireAuth);
 app.use("/v1/retention/*", requireAuth);
 app.use("/v1/webhooks", requireAuth);
 app.use("/v1/webhooks/*", requireAuth);
+app.use("/v1/widgets", requireAuth);
+app.use("/v1/widgets/*", requireAuth);
 
 // Streaming playground (SSE) — plain route; emits { delta } events then [DONE].
 app.post("/v1/playground/stream", async (c) => {
@@ -1006,6 +1011,74 @@ app.openapi(
     const result = await deleteWebhook(c.get("projectId"), c.req.valid("param").id);
     await recordAudit(c.get("projectId"), c.get("actor"), "webhook.delete", `webhook:${c.req.valid("param").id}`);
     return c.json(result);
+  },
+);
+
+// ── Dashboard widgets ────────────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/widgets",
+    summary: "List dashboard widgets (with computed data series)",
+    tags: ["platform"],
+    security,
+    responses: { 200: { description: "Widget list", content: { "application/json": { schema: C.listOf(C.widget) } } } },
+  }),
+  async (c) => c.json({ data: await listWidgets(c.get("projectId")) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/widgets",
+    summary: "Create a dashboard widget",
+    tags: ["platform"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              title: z.string().min(1),
+              metric: C.widgetMetric.optional(),
+              breakdown: C.widgetBreakdown.optional(),
+              days: z.number().int().min(1).max(365).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: C.widget } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const result = await createWidget(c.get("projectId"), c.req.valid("json"));
+    await recordAudit(c.get("projectId"), c.get("actor"), "widget.create", `widget:${result.id}`);
+    return c.json(result, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/widgets/{id}",
+    summary: "Delete a dashboard widget",
+    tags: ["platform"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Deleted", content: { "application/json": { schema: z.object({ deleted: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    return c.json(await deleteWidget(c.get("projectId"), c.req.valid("param").id));
   },
 );
 

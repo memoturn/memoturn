@@ -14,3 +14,4 @@ export * from "./retention.js";
 export * from "./review.js";
 export * from "./traces.js";
 export * from "./webhooks.js";
+export * from "./widgets.js";

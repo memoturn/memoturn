@@ -225,6 +225,24 @@ export const webhook = z.object({
 });
 export type Webhook = z.infer<typeof webhook>;
 
+export const widgetMetric = z.enum(["cost", "tokens", "generations", "latency_p95"]);
+export const widgetBreakdown = z.enum(["by_day", "by_model"]);
+export type WidgetMetric = z.infer<typeof widgetMetric>;
+export type WidgetBreakdown = z.infer<typeof widgetBreakdown>;
+
+export const widgetPoint = z.object({ label: z.string(), value: z.number() });
+export type WidgetPoint = z.infer<typeof widgetPoint>;
+
+export const widget = z.object({
+  id: z.string(),
+  title: z.string(),
+  metric: widgetMetric,
+  breakdown: widgetBreakdown,
+  days: z.number(),
+  data: z.array(widgetPoint),
+});
+export type Widget = z.infer<typeof widget>;
+
 // ── Review queues ────────────────────────────────────────────────────────────────
 export const reviewQueue = z.object({
   name: z.string(),

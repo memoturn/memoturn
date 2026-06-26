@@ -399,6 +399,32 @@ pre {
   font-size: 13px;
 }
 
+/* custom widgets */
+.widget-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+.widget {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 14px;
+}
+.widget-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.widget-label {
+  width: 90px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* trace scores */
 .scores {
   display: flex;

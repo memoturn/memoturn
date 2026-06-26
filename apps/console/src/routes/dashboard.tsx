@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { api, type DailyMetric } from "../lib/api";
+import { useState } from "react";
+import { api, type DailyMetric, type Widget } from "../lib/api";
 
 export const Route = createFileRoute("/dashboard")({ component: DashboardPage });
 
@@ -94,6 +95,89 @@ function DashboardPage() {
             ))}
           </tbody>
         </table>
+      )}
+
+      <CustomWidgets />
+    </div>
+  );
+}
+
+function CustomWidgets() {
+  const qc = useQueryClient();
+  const { data: widgets } = useQuery({ queryKey: ["widgets"], queryFn: () => api.listWidgets() });
+  const [title, setTitle] = useState("");
+  const [metric, setMetric] = useState("cost");
+  const [breakdown, setBreakdown] = useState("by_day");
+
+  const add = useMutation({
+    mutationFn: () => api.createWidget({ title, metric, breakdown, days: 30 }),
+    onSuccess: () => {
+      setTitle("");
+      qc.invalidateQueries({ queryKey: ["widgets"] });
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deleteWidget(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["widgets"] }),
+  });
+
+  return (
+    <>
+      <h2>Custom widgets</h2>
+      <div className="filters">
+        <input placeholder="title" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <select value={metric} onChange={(e) => setMetric(e.target.value)}>
+          <option value="cost">cost</option>
+          <option value="tokens">tokens</option>
+          <option value="generations">generations</option>
+          <option value="latency_p95">p95 latency</option>
+        </select>
+        <select value={breakdown} onChange={(e) => setBreakdown(e.target.value)}>
+          <option value="by_day">by day</option>
+          <option value="by_model">by model</option>
+        </select>
+        <button disabled={!title || add.isPending} onClick={() => add.mutate()}>
+          {add.isPending ? "Adding…" : "Add widget"}
+        </button>
+      </div>
+
+      {!widgets || widgets.length === 0 ? (
+        <div className="empty">No custom widgets yet.</div>
+      ) : (
+        <div className="widget-grid">
+          {widgets.map((w) => (
+            <WidgetCard key={w.id} widget={w} onDelete={() => remove.mutate(w.id)} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function WidgetCard({ widget, onDelete }: { widget: Widget; onDelete: () => void }) {
+  const max = Math.max(0, ...widget.data.map((p) => p.value));
+  const fmt = (v: number) => (widget.metric === "cost" ? `$${v.toFixed(4)}` : v.toLocaleString());
+  return (
+    <div className="widget">
+      <div className="widget-head">
+        <span className="obs-name">{widget.title}</span>
+        <button className="link-btn" onClick={onDelete}>
+          ✕
+        </button>
+      </div>
+      <div className="obs-meta">
+        {widget.metric} · {widget.breakdown.replace("_", " ")} · {widget.days}d
+      </div>
+      {widget.data.length === 0 ? (
+        <div className="obs-meta">no data</div>
+      ) : (
+        widget.data.slice(-12).map((p) => (
+          <div className="barrow" key={p.label}>
+            <span className="widget-label">{p.label}</span>
+            <Bar value={p.value} max={max} />
+            <span>{fmt(p.value)}</span>
+          </div>
+        ))
       )}
     </div>
   );
