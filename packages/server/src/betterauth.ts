@@ -3,6 +3,7 @@ import { prisma } from "@memoturn/db";
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { createAccessControl } from "better-auth/plugins/access";
+import { haveIBeenPwned } from "better-auth/plugins/haveibeenpwned";
 import { organization } from "better-auth/plugins/organization";
 import { adminAc, defaultStatements, memberAc, ownerAc } from "better-auth/plugins/organization/access";
 
@@ -33,6 +34,8 @@ export const auth = betterAuth({
   trustedOrigins: (process.env.AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000").split(","),
   advanced: { cookiePrefix: "memoturn" },
   plugins: [
+    // Reject passwords found in known breaches at signup/change (k-anonymity HIBP check).
+    haveIBeenPwned(),
     // Let customers sign into memoturn with their own IdP (OIDC/SAML), mapped by email domain.
     sso(),
     organization({
