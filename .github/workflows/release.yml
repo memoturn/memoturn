@@ -1,11 +1,21 @@
 name: Release
 
 # Publishes the SDKs (npm + PyPI) and container images (GHCR) on a version tag.
-# Requires repo secrets: NPM_TOKEN (npm automation token), PYPI_TOKEN (PyPI API token).
+# Auth: npm uses the NPM_TOKEN repo secret (+ OIDC provenance); PyPI uses Trusted
+# Publishing (OIDC, no secret) — register a pending publisher on PyPI for this repo
+# + workflow first. GHCR uses the built-in GITHUB_TOKEN.
+#
+# Run via the Actions tab with "Dry run" checked to validate the whole pipeline
+# without publishing anything (npm whoami + pack, uv build, images built but not pushed).
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Validate without publishing (no npm/PyPI upload, images not pushed)"
+        type: boolean
+        default: false
 
 jobs:
   npm:
@@ -39,13 +49,22 @@ jobs:
           '
       - name: Publish
         working-directory: sdks/js
-        run: npm publish --provenance --access public
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "Dry run — validating token + tarball, not publishing."
+            npm whoami
+            npm publish --dry-run
+          else
+            npm publish --provenance --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   pypi:
     name: Publish memoturn to PyPI
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write # PyPI Trusted Publishing (OIDC) — no token needed
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
@@ -53,10 +72,9 @@ jobs:
         working-directory: sdks/python
         run: uv build
       - name: Publish
+        if: ${{ !inputs.dry_run }}
         working-directory: sdks/python
-        run: uv publish
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: uv publish --trusted-publishing always
 
   images:
     name: Build + push ${{ matrix.service }} image
@@ -71,6 +89,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR
+        if: ${{ !inputs.dry_run }}
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -85,12 +104,12 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
-      - name: Build + push
+      - name: Build${{ inputs.dry_run && ' (no push)' || ' + push' }}
         uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/${{ matrix.service }}.Dockerfile
-          push: true
+          push: ${{ !inputs.dry_run }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
