@@ -294,6 +294,7 @@ app.openapi(
         environment: z.string().optional(),
         search: z.string().optional(),
         tag: z.string().optional(),
+        days: z.coerce.number().int().min(1).max(365).optional(),
       }),
     },
     responses: {
@@ -301,8 +302,8 @@ app.openapi(
     },
   }),
   async (c) => {
-    const { limit, userId, sessionId, environment, search, tag } = c.req.valid("query");
-    const data = await listTraces(c.get("projectId"), { limit, userId, sessionId, environment, search, tag });
+    const { limit, userId, sessionId, environment, search, tag, days } = c.req.valid("query");
+    const data = await listTraces(c.get("projectId"), { limit, userId, sessionId, environment, search, tag, days });
     return c.json({ data });
   },
 );

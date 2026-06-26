@@ -1,6 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createRootRoute, Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { CommandPalette } from "../components/CommandPalette";
+import { TimeRangeSelect } from "../components/TimeRangeSelect";
 import { api, getActiveProject, setActiveProject } from "../lib/api";
 import { signOut, useSession } from "../lib/auth";
 
@@ -66,6 +68,15 @@ function RootComponent() {
           <Link to="/settings">Settings</Link>
         </nav>
         <div className="spacer" />
+        <button
+          type="button"
+          className="kbd"
+          title="Command palette (⌘K)"
+          onClick={() => window.dispatchEvent(new Event("memoturn:cmdk"))}
+        >
+          ⌘K
+        </button>
+        <TimeRangeSelect />
         <ProjectSwitcher />
         <span className="user">{session.user.email}</span>
         <button
@@ -81,6 +92,7 @@ function RootComponent() {
       <main className="container">
         <Outlet />
       </main>
+      <CommandPalette />
     </>
   );
 }

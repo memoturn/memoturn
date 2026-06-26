@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { api, type DailyMetric, type Widget } from "../lib/api";
+import { useRangeDays } from "../lib/timeRange";
 
 export const Route = createFileRoute("/dashboard")({ component: DashboardPage });
 
@@ -15,9 +16,10 @@ function Bar({ value, max }: { value: number; max: number }) {
 }
 
 function DashboardPage() {
+  const days = useRangeDays();
   const { data, isLoading, error } = useQuery({
-    queryKey: ["metrics"],
-    queryFn: () => api.getMetrics(30),
+    queryKey: ["metrics", days],
+    queryFn: () => api.getMetrics(days),
     refetchInterval: 10_000,
   });
 
@@ -38,7 +40,7 @@ function DashboardPage() {
         <Stat label="Cost" value={money(data.total_cost)} />
       </div>
 
-      <h2>Cost by day (30d)</h2>
+      <h2>Cost by day ({days}d)</h2>
       {data.byDay.length === 0 ? (
         <div className="empty">No generation data yet.</div>
       ) : (

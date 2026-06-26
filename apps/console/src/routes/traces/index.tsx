@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { api, downloadTracesExport } from "../../lib/api";
+import { useRangeDays } from "../../lib/timeRange";
 
 interface TraceSearch {
   search?: string;
@@ -30,14 +31,15 @@ function fmtCost(n: number): string {
 function TracesPage() {
   const filters = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
+  const days = useRangeDays();
 
   const {
     data: traces,
     isLoading,
     error,
   } = useQuery({
-    queryKey: ["traces", filters],
-    queryFn: () => api.listTraces(filters),
+    queryKey: ["traces", filters, days],
+    queryFn: () => api.listTraces({ ...filters, days }),
     refetchInterval: 5_000,
   });
 

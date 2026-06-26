@@ -91,6 +91,7 @@ export interface TraceFilters {
   environment?: string;
   search?: string;
   tag?: string;
+  days?: number;
 }
 export interface PlaygroundRequest {
   provider: string;

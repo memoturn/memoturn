@@ -75,10 +75,11 @@ export interface TraceFilters {
   environment?: string;
   search?: string; // matches trace name (case-insensitive substring)
   tag?: string; // trace must carry this tag
+  days?: number; // only traces from the last N days
 }
 
 export async function listTraces(projectId: string, filters: TraceFilters = {}): Promise<TraceSummary[]> {
-  const { limit = 50, userId, sessionId, environment, search, tag } = filters;
+  const { limit = 50, userId, sessionId, environment, search, tag, days } = filters;
 
   // Build optional filters as parameterized predicates on the trace row.
   const conds: string[] = ["t.project_id = {projectId:String}"];
@@ -102,6 +103,10 @@ export async function listTraces(projectId: string, filters: TraceFilters = {}):
   if (tag) {
     conds.push("has(t.tags, {tag:String})");
     params.tag = tag;
+  }
+  if (days && days > 0) {
+    conds.push("t.timestamp >= now() - toIntervalDay({days:UInt32})");
+    params.days = Math.floor(days);
   }
 
   return query<TraceSummary>(
