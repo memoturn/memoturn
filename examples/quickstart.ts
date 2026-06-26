@@ -9,7 +9,7 @@ import { Memoturn } from "@memoturn/sdk";
 
 async function main() {
   const memoturn = new Memoturn({
-    baseUrl: process.env.MEMOTURN_BASE_URL ?? "http://localhost:3000",
+    baseUrl: process.env.MEMOTURN_BASE_URL ?? "http://localhost:3001",
     publicKey: process.env.MEMOTURN_PUBLIC_KEY ?? "pk-mt-dev",
     secretKey: process.env.MEMOTURN_SECRET_KEY ?? "sk-mt-dev",
   });

@@ -1,0 +1,37 @@
+{
+  "$comment": "Source-of-truth manifest for the doc-drift-reminder PostToolUse hook. Each entry maps code paths (repo-relative globs) to the docs/files that hand-restate their facts, plus next-step notes. Keep in sync with scripts/check-doc-drift.ts and the sync-docs skill.",
+  "couplings": [
+    {
+      "match": ["package.json"],
+      "note": "Root scripts are restated by name in CLAUDE.md, README.md, CONTRIBUTING.md and docs/getting-started.md. If you renamed/removed a script, update those docs. Verify with `bun run docs:check`."
+    },
+    {
+      "match": ["scripts/seed.ts"],
+      "note": "Dev credentials (pk-mt-dev / sk-mt-dev, admin@memoturn.dev / memoturn-dev-123) are quoted in README.md, CLAUDE.md, CONTRIBUTING.md, docs/getting-started.md and docs/sdk-*.md. If you changed them here, update those docs and .env.example. Verify with `bun run docs:check`."
+    },
+    {
+      "match": ["infra/docker-compose.dev.yml", ".env.example"],
+      "note": "Host ports (PG 5433, Redis 6380, ClickHouse 8123, API 3001, worker 3002, console 3000) are restated in docs/configuration.md, docs/getting-started.md and CLAUDE.md. Update those if a port changed. Verify with `bun run docs:check`."
+    },
+    {
+      "match": ["apps/api/src/app.ts"],
+      "note": "The endpoint tables in docs/api.md are hand-maintained (no OpenAPI export to disk). If you added/removed/renamed a /v1 route, update docs/api.md to match."
+    },
+    {
+      "match": ["apps/mcp/src/tools.ts"],
+      "note": "The MCP tool list in apps/mcp/README.md is hand-maintained. If you added/renamed a tool, update that README. Verify with `bun run docs:check`."
+    },
+    {
+      "match": ["apps/worker/src/index.ts"],
+      "note": "Worker cron schedules are documented in CLAUDE.md. If you changed a `repeat: { pattern }`, update CLAUDE.md. Verify with `bun run docs:check`."
+    },
+    {
+      "match": ["packages/core/src/events.ts"],
+      "note": "events.ts is the shared ingest wire contract (SDK + API + worker). A shape change usually also needs apps/worker/src/mappers.ts, an infra/clickhouse/*.sql migration, and the events.test.ts / mappers.test.ts tests. See the ingest-event-change skill or delegate to the ingest-syncer agent."
+    },
+    {
+      "match": ["packages/db/prisma/schema.prisma"],
+      "note": "Add the reverse relation on `Project` for any new project-scoped model, then run `cd packages/db && set -a; . ../../.env; set +a; bunx prisma migrate dev --name <change>` and `bun run typecheck`. See the change-prisma-schema skill or delegate to the prisma-migrator agent."
+    }
+  ]
+}
