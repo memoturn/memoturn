@@ -21,6 +21,7 @@
       "dependencies": {
         "@hono/node-server": "^2.0.6",
         "@hono/zod-openapi": "^1.4.0",
+        "@memoturn/contracts": "workspace:*",
         "@memoturn/core": "workspace:*",
         "@memoturn/db": "workspace:*",
         "@memoturn/server": "workspace:*",
@@ -37,6 +38,7 @@
       "name": "@memoturn/console",
       "version": "0.1.0",
       "dependencies": {
+        "@memoturn/contracts": "workspace:*",
         "@tanstack/react-query": "^5.101.1",
         "@tanstack/react-router": "^1.170.16",
         "better-auth": "^1.6.20",
@@ -62,6 +64,17 @@
         "@memoturn/db": "workspace:*",
         "@memoturn/server": "workspace:*",
         "bullmq": "^5.79.1",
+      },
+      "devDependencies": {
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.9",
+      },
+    },
+    "packages/contracts": {
+      "name": "@memoturn/contracts",
+      "version": "0.1.0",
+      "dependencies": {
+        "zod": "^4.4.3",
       },
       "devDependencies": {
         "typescript": "^6.0.3",
@@ -115,6 +128,7 @@
       "name": "@memoturn/server",
       "version": "0.1.0",
       "dependencies": {
+        "@memoturn/contracts": "workspace:*",
         "@memoturn/core": "workspace:*",
         "@memoturn/db": "workspace:*",
         "@memoturn/llm": "workspace:*",
@@ -370,6 +384,8 @@
     "@memoturn/api": ["@memoturn/api@workspace:apps/api"],
 
     "@memoturn/console": ["@memoturn/console@workspace:apps/console"],
+
+    "@memoturn/contracts": ["@memoturn/contracts@workspace:packages/contracts"],
 
     "@memoturn/core": ["@memoturn/core@workspace:packages/core"],
 

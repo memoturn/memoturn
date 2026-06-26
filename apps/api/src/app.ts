@@ -1,4 +1,5 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
+import * as C from "@memoturn/contracts";
 import { ingestRequest } from "@memoturn/core";
 import {
   addDatasetItems,
@@ -209,7 +210,9 @@ app.openapi(
         search: z.string().optional(),
       }),
     },
-    responses: { 200: { description: "Trace list", content: { "application/json": { schema: z.any() } } } },
+    responses: {
+      200: { description: "Trace list", content: { "application/json": { schema: C.listOf(C.traceSummary) } } },
+    },
   }),
   async (c) => {
     const { limit, userId, sessionId, environment, search } = c.req.valid("query");
@@ -227,7 +230,9 @@ app.openapi(
     tags: ["traces"],
     security,
     request: { query: z.object({ limit: z.coerce.number().int().min(1).max(500).optional() }) },
-    responses: { 200: { description: "Session list", content: { "application/json": { schema: z.any() } } } },
+    responses: {
+      200: { description: "Session list", content: { "application/json": { schema: C.listOf(C.sessionSummary) } } },
+    },
   }),
   async (c) => {
     const data = await listSessions(c.get("projectId"), c.req.valid("query").limit ?? 50);
@@ -244,7 +249,9 @@ app.openapi(
     tags: ["metrics"],
     security,
     request: { query: z.object({ days: z.coerce.number().int().min(1).max(365).optional() }) },
-    responses: { 200: { description: "Metrics summary", content: { "application/json": { schema: z.any() } } } },
+    responses: {
+      200: { description: "Metrics summary", content: { "application/json": { schema: C.metricsSummary } } },
+    },
   }),
   async (c) => {
     const data = await getMetrics(c.get("projectId"), c.req.valid("query").days ?? 30);
@@ -261,7 +268,7 @@ app.openapi(
     security,
     request: { params: z.object({ id: z.string() }) },
     responses: {
-      200: { description: "Trace", content: { "application/json": { schema: z.any() } } },
+      200: { description: "Trace", content: { "application/json": { schema: C.traceDetail } } },
       404: { description: "Not found" },
     },
   }),
@@ -280,7 +287,9 @@ app.openapi(
     summary: "List prompts (with channels + latest version)",
     tags: ["prompts"],
     security,
-    responses: { 200: { description: "Prompt list", content: { "application/json": { schema: z.any() } } } },
+    responses: {
+      200: { description: "Prompt list", content: { "application/json": { schema: C.listOf(C.promptListItem) } } },
+    },
   }),
   async (c) => {
     const data = await listPrompts(c.get("projectId"));
@@ -339,7 +348,7 @@ app.openapi(
     security,
     request: { params: z.object({ name: z.string() }) },
     responses: {
-      200: { description: "Prompt detail", content: { "application/json": { schema: z.any() } } },
+      200: { description: "Prompt detail", content: { "application/json": { schema: C.promptDetail } } },
       404: { description: "Not found" },
     },
   }),
@@ -380,7 +389,9 @@ app.openapi(
     summary: "List datasets (with item + run counts)",
     tags: ["datasets"],
     security,
-    responses: { 200: { description: "Dataset list", content: { "application/json": { schema: z.any() } } } },
+    responses: {
+      200: { description: "Dataset list", content: { "application/json": { schema: C.listOf(C.datasetListItem) } } },
+    },
   }),
   async (c) => c.json({ data: await listDatasets(c.get("projectId")) }),
 );
@@ -424,7 +435,7 @@ app.openapi(
     security,
     request: { params: z.object({ name: z.string() }) },
     responses: {
-      200: { description: "Dataset", content: { "application/json": { schema: z.any() } } },
+      200: { description: "Dataset", content: { "application/json": { schema: C.datasetDetail } } },
       404: { description: "Not found" },
     },
   }),
@@ -516,7 +527,12 @@ app.openapi(
     summary: "List configured LLM provider connections (masked)",
     tags: ["providers"],
     security,
-    responses: { 200: { description: "Provider list", content: { "application/json": { schema: z.any() } } } },
+    responses: {
+      200: {
+        description: "Provider list",
+        content: { "application/json": { schema: C.listOf(C.providerConnection) } },
+      },
+    },
   }),
   async (c) => c.json({ data: await listProviderConnections(c.get("projectId")) }),
 );
@@ -600,7 +616,9 @@ app.openapi(
     summary: "List evaluators",
     tags: ["evaluators"],
     security,
-    responses: { 200: { description: "Evaluator list", content: { "application/json": { schema: z.any() } } } },
+    responses: {
+      200: { description: "Evaluator list", content: { "application/json": { schema: C.listOf(C.evaluator) } } },
+    },
   }),
   async (c) => c.json({ data: await listEvaluators(c.get("projectId")) }),
 );
@@ -686,7 +704,9 @@ app.openapi(
     summary: "List projects the caller can access",
     tags: ["platform"],
     security,
-    responses: { 200: { description: "Project list", content: { "application/json": { schema: z.any() } } } },
+    responses: {
+      200: { description: "Project list", content: { "application/json": { schema: C.listOf(C.project) } } },
+    },
   }),
   async (c) => {
     const userId = c.get("userId");
@@ -707,7 +727,9 @@ app.openapi(
     tags: ["platform"],
     security,
     request: { query: z.object({ limit: z.coerce.number().int().min(1).max(500).optional() }) },
-    responses: { 200: { description: "Audit log", content: { "application/json": { schema: z.any() } } } },
+    responses: {
+      200: { description: "Audit log", content: { "application/json": { schema: C.listOf(C.auditEntry) } } },
+    },
   }),
   async (c) => c.json({ data: await listAuditLogs(c.get("projectId"), c.req.valid("query").limit ?? 100) }),
 );
@@ -720,7 +742,9 @@ app.openapi(
     summary: "List review queues (with pending/done counts)",
     tags: ["review"],
     security,
-    responses: { 200: { description: "Queue list", content: { "application/json": { schema: z.any() } } } },
+    responses: {
+      200: { description: "Queue list", content: { "application/json": { schema: C.listOf(C.reviewQueue) } } },
+    },
   }),
   async (c) => c.json({ data: await listReviewQueues(c.get("projectId")) }),
 );
@@ -799,7 +823,7 @@ app.openapi(
       query: z.object({ status: z.enum(["PENDING", "DONE", "SKIPPED"]).optional() }),
     },
     responses: {
-      200: { description: "Items", content: { "application/json": { schema: z.any() } } },
+      200: { description: "Items", content: { "application/json": { schema: C.reviewItemsResponse } } },
       404: { description: "Not found" },
     },
   }),

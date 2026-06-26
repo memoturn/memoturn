@@ -31,7 +31,8 @@ Then `bun run quickstart` emits a trace; open http://localhost:3000.
 apps/api       Hono (Bun) — public /v1 REST, OTel receiver, Better Auth, OpenAPI/Scalar
 apps/console   Vite + TanStack Router SPA + TanStack Query
 apps/worker    Bun + BullMQ — ingest -> ClickHouse, online evaluators
-packages/core  Zod event contracts, model/cost registry
+packages/core      Zod ingest event contracts, model/cost registry
+packages/contracts Zod API response schemas + inferred types (shared by API + console)
 packages/db    Prisma (Postgres) + ClickHouse/blob/queue clients
 packages/server shared server logic (auth, traces, metrics, prompts, datasets, evals, review, export)
 packages/llm   provider gateway (mock/Anthropic/OpenAI) + key encryption

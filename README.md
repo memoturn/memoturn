@@ -77,7 +77,7 @@ def rag(q): ...           # nested @observe calls become child spans
 ## Monorepo
 
 ```
-apps/{api,console,worker}   packages/{core,db,server,llm}   sdks/{js,python}   infra/   docker/
+apps/{api,console,worker}   packages/{core,contracts,db,server,llm}   sdks/{js,python}   infra/   docker/
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev workflow.

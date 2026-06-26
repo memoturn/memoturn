@@ -1,7 +1,32 @@
 /**
  * Thin client for the memoturn API. In dev, requests go through the Vite proxy at
- * `/api` (which injects auth); in production this base is configured to the API host.
+ * `/api` (which forwards the session cookie); the active project is sent as a header.
+ *
+ * Response types come from @memoturn/contracts (the same zod schemas the API serves in
+ * its OpenAPI doc) — single source of truth, no hand-maintained duplicates.
  */
+import type {
+  AuditEntry,
+  ChatMessage,
+  DatasetDetail,
+  DatasetListItem,
+  Evaluator,
+  MetricsSummary,
+  PlaygroundResponse,
+  Project,
+  PromptDetail,
+  PromptListItem,
+  ProviderConnection,
+  ReviewItemsResponse,
+  ReviewQueue,
+  SessionSummary,
+  TraceDetail,
+  TraceSummary,
+} from "@memoturn/contracts";
+
+// Re-export the contract types so route components keep importing from "../lib/api".
+export type * from "@memoturn/contracts";
+
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 const PROJECT_KEY = "memoturn.project";
 
@@ -35,94 +60,6 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export interface TraceSummary {
-  id: string;
-  name: string;
-  timestamp: string;
-  user_id: string;
-  session_id: string;
-  environment: string;
-  observation_count: number;
-  total_cost: number;
-  total_tokens: number;
-  latency_ms: number;
-}
-
-export interface ObservationDetail {
-  id: string;
-  trace_id: string;
-  type: string;
-  parent_observation_id: string;
-  name: string;
-  start_time: string;
-  end_time: string | null;
-  level: string;
-  status_message: string;
-  model: string;
-  provider: string;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  total_cost: number;
-  latency_ms: number;
-  input: string;
-  output: string;
-  metadata: string;
-}
-
-export interface ScoreRow {
-  name: string;
-  source: string;
-  data_type: string;
-  value: number | null;
-  string_value: string;
-  comment: string;
-  timestamp: string;
-}
-
-export interface TraceDetail extends TraceSummary {
-  release: string;
-  version: string;
-  tags: string[];
-  metadata: string;
-  input: string;
-  output: string;
-  observations: ObservationDetail[];
-  scores: ScoreRow[];
-}
-
-export interface TraceFilters {
-  userId?: string;
-  sessionId?: string;
-  environment?: string;
-  search?: string;
-}
-
-export interface DailyMetric {
-  date: string;
-  generations: number;
-  total_tokens: number;
-  total_cost: number;
-  p50_latency_ms: number;
-  p95_latency_ms: number;
-}
-
-export interface ModelMetric {
-  model: string;
-  generations: number;
-  total_tokens: number;
-  total_cost: number;
-}
-
-export interface MetricsSummary {
-  total_traces: number;
-  total_generations: number;
-  total_tokens: number;
-  total_cost: number;
-  byDay: DailyMetric[];
-  byModel: ModelMetric[];
-}
-
 function qs(params: Record<string, unknown>): string {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -132,30 +69,19 @@ function qs(params: Record<string, unknown>): string {
   return s ? `?${s}` : "";
 }
 
-export interface PromptChannel {
-  label: string;
-  version: number;
+// ── Client-only (request) types ──────────────────────────────────────────────────
+export interface TraceFilters {
+  userId?: string;
+  sessionId?: string;
+  environment?: string;
+  search?: string;
 }
-
-export interface PromptListItem {
-  name: string;
-  folder: string;
-  versions: number;
-  latestVersion: number;
-  channels: PromptChannel[];
-  updatedAt: string;
-}
-
-export interface PromptVersionDetail {
-  version: number;
-  type: "TEXT" | "CHAT";
-  content: unknown;
-  config: unknown;
-  createdAt: string;
-}
-
-export interface PromptDetail extends PromptListItem {
-  allVersions: PromptVersionDetail[];
+export interface PlaygroundRequest {
+  provider: string;
+  model: string;
+  messages: ChatMessage[];
+  temperature?: number;
+  maxTokens?: number;
 }
 
 export const api = {
@@ -194,33 +120,6 @@ export const api = {
   submitReviewScore: (name: string, itemId: string, body: { value?: number; stringValue?: string; comment?: string }) =>
     post(`/v1/review-queues/${encodeURIComponent(name)}/items/${encodeURIComponent(itemId)}/score`, body),
 };
-
-export interface ReviewQueue {
-  name: string;
-  description: string;
-  scoreName: string;
-  dataType: string;
-  pending: number;
-  done: number;
-}
-export interface ReviewItem {
-  id: string;
-  traceId: string;
-  status: string;
-  trace: { id: string; name: string; input: string; output: string };
-}
-export interface ReviewItemsResponse {
-  queue: { name: string; scoreName: string; dataType: string };
-  items: ReviewItem[];
-}
-
-export interface SessionSummary {
-  session_id: string;
-  trace_count: number;
-  first_seen: string;
-  last_seen: string;
-  total_cost: number;
-}
 
 /** Stream a playground completion (SSE), invoking onDelta for each text chunk. */
 export async function streamPlayground(body: PlaygroundRequest, onDelta: (delta: string) => void): Promise<void> {
@@ -266,82 +165,4 @@ export async function downloadTracesExport(): Promise<void> {
   a.download = "memoturn-traces.jsonl";
   a.click();
   URL.revokeObjectURL(url);
-}
-
-export interface Project {
-  id: string;
-  name: string;
-  slug: string;
-  workspace: string;
-  role: string;
-}
-export interface AuditEntry {
-  actor: string;
-  action: string;
-  target: string;
-  metadata: unknown;
-  createdAt: string;
-}
-
-export type ChatRole = "system" | "user" | "assistant";
-export interface ChatMessage {
-  role: ChatRole;
-  content: string;
-}
-export interface PlaygroundRequest {
-  provider: string;
-  model: string;
-  messages: ChatMessage[];
-  temperature?: number;
-  maxTokens?: number;
-}
-export interface PlaygroundResponse {
-  provider: string;
-  model: string;
-  content: string;
-  usage: { promptTokens: number; completionTokens: number; totalTokens: number };
-  traceId?: string;
-}
-export interface ProviderConnection {
-  provider: string;
-  masked: string;
-  createdAt: string;
-}
-export interface Evaluator {
-  name: string;
-  provider: string;
-  model: string;
-  prompt: string;
-  online: boolean;
-  samplingRate: number;
-  filterName: string;
-  createdAt: string;
-}
-
-export interface DatasetListItem {
-  name: string;
-  description: string;
-  items: number;
-  runs: number;
-  createdAt: string;
-}
-
-export interface DatasetItemRow {
-  id: string;
-  input: unknown;
-  expectedOutput: unknown;
-  metadata: unknown;
-}
-
-export interface DatasetRunRow {
-  name: string;
-  itemCount: number;
-  createdAt: string;
-}
-
-export interface DatasetDetail {
-  name: string;
-  description: string;
-  items: DatasetItemRow[];
-  runs: DatasetRunRow[];
 }

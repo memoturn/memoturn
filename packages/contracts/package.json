@@ -1,5 +1,5 @@
 {
-  "name": "@memoturn/server",
+  "name": "@memoturn/contracts",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,11 +15,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@memoturn/core": "workspace:*",
-    "@memoturn/db": "workspace:*",
-    "@memoturn/llm": "workspace:*",
-    "better-auth": "^1.6.20",
-    "@memoturn/contracts": "workspace:*"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "typescript": "^6.0.3"

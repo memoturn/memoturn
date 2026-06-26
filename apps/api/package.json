@@ -19,7 +19,8 @@
     "@memoturn/server": "workspace:*",
     "@scalar/hono-api-reference": "^0.11.5",
     "hono": "^4.12.27",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "@memoturn/contracts": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.0.1",
