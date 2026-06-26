@@ -1,8 +1,8 @@
-import { type IngestEvent, ingestRequest } from "@memoturn/core";
+import { compileModelPrices, type IngestEvent, ingestRequest } from "@memoturn/core";
 import { getRawBatch } from "@memoturn/db/blob";
 import { clickhouse } from "@memoturn/db/clickhouse";
 import type { IngestJob } from "@memoturn/db/queue";
-import { dispatchWebhooks, listOnlineEvaluators, runEvaluator } from "@memoturn/server";
+import { dispatchWebhooks, listOnlineEvaluators, loadProjectPriceOverrides, runEvaluator } from "@memoturn/server";
 import type { Job } from "bullmq";
 import { mapEvents } from "../mappers.js";
 
@@ -62,7 +62,8 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
   if (!raw) throw new Error(`raw batch not found at ${blobKey}`);
 
   const parsed = ingestRequest.parse(JSON.parse(raw));
-  const { traces, observations, scores } = mapEvents(projectId, parsed.batch);
+  const priceOverrides = compileModelPrices(await loadProjectPriceOverrides(projectId));
+  const { traces, observations, scores } = mapEvents(projectId, parsed.batch, priceOverrides);
 
   const ch = clickhouse();
   await Promise.all([

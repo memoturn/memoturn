@@ -30,17 +30,56 @@ export interface CostBreakdown {
   totalCost: number;
 }
 
-export function computeCost(model: string | undefined, promptTokens = 0, completionTokens = 0): CostBreakdown {
+/**
+ * Serializable price override (pattern is a regex source string) — what a project
+ * stores in Postgres. Compile to `ModelPrice[]` with `compileModelPrices` before use.
+ */
+export interface ModelPriceOverride {
+  pattern: string;
+  provider?: string;
+  inputPerMTok: number;
+  outputPerMTok: number;
+}
+
+/** Compile stored overrides into matchable `ModelPrice` entries (bad patterns are dropped). */
+export function compileModelPrices(overrides: ModelPriceOverride[]): ModelPrice[] {
+  const compiled: ModelPrice[] = [];
+  for (const o of overrides) {
+    try {
+      compiled.push({
+        match: new RegExp(o.pattern, "i"),
+        provider: o.provider ?? "",
+        inputPerMTok: o.inputPerMTok,
+        outputPerMTok: o.outputPerMTok,
+      });
+    } catch {
+      // skip invalid regex patterns
+    }
+  }
+  return compiled;
+}
+
+// Project overrides take precedence over the built-in registry (first match wins).
+function priceTable(overrides?: ModelPrice[]): ModelPrice[] {
+  return overrides?.length ? [...overrides, ...MODEL_PRICES] : MODEL_PRICES;
+}
+
+export function computeCost(
+  model: string | undefined,
+  promptTokens = 0,
+  completionTokens = 0,
+  overrides?: ModelPrice[],
+): CostBreakdown {
   const zero = { inputCost: 0, outputCost: 0, totalCost: 0 };
   if (!model) return zero;
-  const price = MODEL_PRICES.find((p) => p.match.test(model));
+  const price = priceTable(overrides).find((p) => p.match.test(model));
   if (!price) return zero;
   const inputCost = (promptTokens / 1_000_000) * price.inputPerMTok;
   const outputCost = (completionTokens / 1_000_000) * price.outputPerMTok;
   return { inputCost, outputCost, totalCost: inputCost + outputCost };
 }
 
-export function providerForModel(model: string | undefined): string {
+export function providerForModel(model: string | undefined, overrides?: ModelPrice[]): string {
   if (!model) return "";
-  return MODEL_PRICES.find((p) => p.match.test(model))?.provider ?? "";
+  return priceTable(overrides).find((p) => p.match.test(model))?.provider ?? "";
 }

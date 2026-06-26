@@ -52,6 +52,28 @@ export const savedView = z.object({
 });
 export type SavedView = z.infer<typeof savedView>;
 
+export const modelPrice = z.object({
+  id: z.string(),
+  pattern: z.string(),
+  provider: z.string(),
+  inputPerMTok: z.number(),
+  outputPerMTok: z.number(),
+  createdAt: z.string(),
+});
+export type ModelPrice = z.infer<typeof modelPrice>;
+
+export const modelPriceBuiltin = z.object({
+  pattern: z.string(),
+  provider: z.string(),
+  inputPerMTok: z.number(),
+  outputPerMTok: z.number(),
+});
+export const modelPriceList = z.object({
+  data: z.array(modelPrice),
+  builtins: z.array(modelPriceBuiltin),
+});
+export type ModelPriceList = z.infer<typeof modelPriceList>;
+
 export const observationDetail = z.object({
   id: z.string(),
   trace_id: z.string(),

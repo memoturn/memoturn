@@ -34,7 +34,7 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 
 | Feature | Effort | Notes |
 | --- | --- | --- |
-| **Custom model definitions** | M | Per-project model pricing overrides (the cost registry is currently static in `packages/core`). |
+| ~~**Custom model definitions**~~ | Done | Per-project model price overrides (`/v1/model-prices`); the worker applies them over the built-in registry at ingest. |
 | ~~**Batch actions**~~ | Done | Multi-select on the trace table → bulk delete / add-to-dataset / enqueue-for-review (`POST /v1/traces/batch`). |
 | **Scheduled blob exports** | M | Recurring exports to a project's own S3/GCS bucket (we have on-demand NDJSON); a worker cron + destination config. |
 | ~~**Saved table views**~~ | Done | Persist named filter sets per table (`/v1/saved-views`), applied from the trace explorer. |

@@ -73,6 +73,32 @@ function SettingsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["score-configs"] }),
   });
 
+  const { data: modelPrices } = useQuery({ queryKey: ["model-prices"], queryFn: () => api.listModelPrices() });
+  const [mpPattern, setMpPattern] = useState("");
+  const [mpProvider, setMpProvider] = useState("");
+  const [mpInput, setMpInput] = useState("");
+  const [mpOutput, setMpOutput] = useState("");
+  const addModelPrice = useMutation({
+    mutationFn: () =>
+      api.createModelPrice({
+        pattern: mpPattern,
+        provider: mpProvider || undefined,
+        inputPerMTok: Number(mpInput),
+        outputPerMTok: Number(mpOutput),
+      }),
+    onSuccess: () => {
+      setMpPattern("");
+      setMpProvider("");
+      setMpInput("");
+      setMpOutput("");
+      qc.invalidateQueries({ queryKey: ["model-prices"] });
+    },
+  });
+  const removeModelPrice = useMutation({
+    mutationFn: (id: string) => api.deleteModelPrice(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["model-prices"] }),
+  });
+
   return (
     <div>
       <h1>Settings</h1>
@@ -238,6 +264,102 @@ function SettingsPage() {
             ))}
           </tbody>
         </table>
+      )}
+
+      <h2>Model pricing</h2>
+      <p className="obs-meta">
+        Override token prices (USD per 1M tokens) for models matched by a name pattern (a case-insensitive regex, e.g.{" "}
+        <code>^my-model</code>). Overrides take precedence over the built-in defaults and apply to newly ingested
+        generations.
+      </p>
+      <div className="filters">
+        <input
+          placeholder="pattern (e.g. ^my-model)"
+          value={mpPattern}
+          onChange={(e) => setMpPattern(e.target.value)}
+        />
+        <input placeholder="provider (optional)" value={mpProvider} onChange={(e) => setMpProvider(e.target.value)} />
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          placeholder="input / 1M"
+          value={mpInput}
+          onChange={(e) => setMpInput(e.target.value)}
+          style={{ width: 110 }}
+        />
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          placeholder="output / 1M"
+          value={mpOutput}
+          onChange={(e) => setMpOutput(e.target.value)}
+          style={{ width: 110 }}
+        />
+        <button
+          disabled={!mpPattern || mpInput === "" || mpOutput === "" || addModelPrice.isPending}
+          onClick={() => addModelPrice.mutate()}
+        >
+          {addModelPrice.isPending ? "Saving…" : "Add price"}
+        </button>
+      </div>
+      {modelPrices && modelPrices.data.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>Pattern</th>
+              <th>Provider</th>
+              <th>Input / 1M</th>
+              <th>Output / 1M</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {modelPrices.data.map((p) => (
+              <tr key={p.id}>
+                <td>
+                  <code>{p.pattern}</code>
+                </td>
+                <td>{p.provider || "—"}</td>
+                <td>${p.inputPerMTok}</td>
+                <td>${p.outputPerMTok}</td>
+                <td>
+                  <button className="link-btn" onClick={() => removeModelPrice.mutate(p.id)}>
+                    delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {modelPrices && modelPrices.builtins.length > 0 && (
+        <details>
+          <summary className="obs-meta">Built-in defaults ({modelPrices.builtins.length})</summary>
+          <table>
+            <thead>
+              <tr>
+                <th>Pattern</th>
+                <th>Provider</th>
+                <th>Input / 1M</th>
+                <th>Output / 1M</th>
+              </tr>
+            </thead>
+            <tbody>
+              {modelPrices.builtins.map((p) => (
+                <tr key={p.pattern}>
+                  <td>
+                    <code>{p.pattern}</code>
+                  </td>
+                  <td>{p.provider}</td>
+                  <td>${p.inputPerMTok}</td>
+                  <td>${p.outputPerMTok}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
       )}
     </div>
   );

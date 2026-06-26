@@ -43,6 +43,7 @@ model Project {
   widgets     Widget[]
   comments    Comment[]
   savedViews  SavedView[]
+  modelPrices ModelPrice[]
 
   @@unique([workspaceId, slug])
 }
@@ -393,4 +394,19 @@ model SavedView {
   createdAt DateTime @default(now())
 
   @@index([projectId, table])
+}
+
+// Per-project model price override. `pattern` is a case-insensitive regex matched
+// against the model name; it takes precedence over the built-in registry in @memoturn/core.
+model ModelPrice {
+  id            String   @id @default(cuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  pattern       String // model-name regex source, e.g. ^my-model
+  provider      String   @default("")
+  inputPerMTok  Float
+  outputPerMTok Float
+  createdAt     DateTime @default(now())
+
+  @@unique([projectId, pattern])
 }

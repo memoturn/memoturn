@@ -8,6 +8,7 @@ export * from "./evaluators.js";
 export * from "./export.js";
 export * from "./ingest.js";
 export * from "./metrics.js";
+export * from "./modelpricing.js";
 export * from "./otel.js";
 export * from "./playground.js";
 export * from "./prompts.js";

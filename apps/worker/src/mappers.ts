@@ -1,4 +1,4 @@
-import { computeCost, type IngestEvent, providerForModel } from "@memoturn/core";
+import { computeCost, type IngestEvent, type ModelPrice, providerForModel } from "@memoturn/core";
 
 /**
  * Maps validated ingest events into ClickHouse row shapes. Multiple events for the
@@ -94,7 +94,7 @@ function assign<T extends object>(acc: Partial<T>, patch: Record<string, unknown
   }
 }
 
-export function mapEvents(projectId: string, events: IngestEvent[]): MappedRows {
+export function mapEvents(projectId: string, events: IngestEvent[], priceOverrides: ModelPrice[] = []): MappedRows {
   // Sort by event timestamp so later updates override earlier creates.
   const ordered = [...events].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
@@ -165,7 +165,7 @@ export function mapEvents(projectId: string, events: IngestEvent[]): MappedRows 
     const promptTokens = b.usage?.promptTokens ?? 0;
     const completionTokens = b.usage?.completionTokens ?? 0;
     const totalTokens = b.usage?.totalTokens ?? promptTokens + completionTokens;
-    const cost = computeCost(b.model, promptTokens, completionTokens);
+    const cost = computeCost(b.model, promptTokens, completionTokens, priceOverrides);
     return {
       id: b.id,
       trace_id: b.traceId,
@@ -179,7 +179,7 @@ export function mapEvents(projectId: string, events: IngestEvent[]): MappedRows 
       level: b.level ?? "DEFAULT",
       status_message: b.statusMessage ?? "",
       model: b.model ?? "",
-      provider: b.provider ?? providerForModel(b.model),
+      provider: b.provider ?? providerForModel(b.model, priceOverrides),
       model_parameters: meta(b.modelParameters),
       prompt_tokens: promptTokens,
       completion_tokens: completionTokens,

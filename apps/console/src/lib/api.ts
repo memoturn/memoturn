@@ -13,6 +13,7 @@ import type {
   DatasetListItem,
   Evaluator,
   MetricsSummary,
+  ModelPriceList,
   PlaygroundResponse,
   Project,
   PromptDetail,
@@ -116,6 +117,10 @@ export const api = {
   createWebhook: (body: { url: string; event?: string; threshold?: number | null }) => post(`/v1/webhooks`, body),
   deleteWebhook: (id: string) => del(`/v1/webhooks/${encodeURIComponent(id)}`),
   listScoreConfigs: () => get<{ data: ScoreConfig[] }>(`/v1/score-configs`).then((r) => r.data),
+  listModelPrices: () => get<ModelPriceList>(`/v1/model-prices`),
+  createModelPrice: (body: { pattern: string; provider?: string; inputPerMTok: number; outputPerMTok: number }) =>
+    post(`/v1/model-prices`, body),
+  deleteModelPrice: (id: string) => del(`/v1/model-prices/${encodeURIComponent(id)}`),
   createScoreConfig: (body: {
     name: string;
     dataType?: string;

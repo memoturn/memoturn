@@ -6,9 +6,11 @@ import {
   addReviewItems,
   applyRetention,
   auth,
+  builtinModelPrices,
   createComment,
   createDataset,
   createEvaluator,
+  createModelPrice,
   createPromptVersion,
   createProviderConnection,
   createReviewQueue,
@@ -17,6 +19,7 @@ import {
   createWebhook,
   createWidget,
   deleteComment,
+  deleteModelPrice,
   deleteSavedView,
   deleteScoreConfig,
   deleteWebhook,
@@ -31,6 +34,7 @@ import {
   listComments,
   listDatasets,
   listEvaluators,
+  listModelPrices,
   listPrompts,
   listProviderConnections,
   listReviewItems,
@@ -107,6 +111,8 @@ app.use("/v1/score-configs", requireAuth);
 app.use("/v1/score-configs/*", requireAuth);
 app.use("/v1/saved-views", requireAuth);
 app.use("/v1/saved-views/*", requireAuth);
+app.use("/v1/model-prices", requireAuth);
+app.use("/v1/model-prices/*", requireAuth);
 
 // Streaming playground (SSE) — plain route; emits { delta } events then [DONE].
 app.post("/v1/playground/stream", async (c) => {
@@ -1344,6 +1350,76 @@ app.openapi(
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
     return c.json(await deleteSavedView(c.get("projectId"), c.req.valid("param").id));
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/model-prices",
+    summary: "List custom model price overrides (plus the built-in defaults for reference)",
+    tags: ["platform"],
+    security,
+    responses: {
+      200: { description: "Model prices", content: { "application/json": { schema: C.modelPriceList } } },
+    },
+  }),
+  async (c) => c.json({ data: await listModelPrices(c.get("projectId")), builtins: builtinModelPrices() }),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/model-prices",
+    summary: "Create or update a model price override (matched by name pattern, overrides built-ins)",
+    tags: ["platform"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              pattern: z.string().min(1),
+              provider: z.string().optional(),
+              inputPerMTok: z.number().nonnegative(),
+              outputPerMTok: z.number().nonnegative(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: C.modelPrice } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    const price = await createModelPrice(c.get("projectId"), body);
+    await recordAudit(c.get("projectId"), c.get("actor"), "model-price.set", `pattern:${body.pattern}`);
+    return c.json(price, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/model-prices/{id}",
+    summary: "Delete a model price override",
+    tags: ["platform"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Deleted", content: { "application/json": { schema: z.object({ deleted: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    return c.json(await deleteModelPrice(c.get("projectId"), c.req.valid("param").id));
   },
 );
 
