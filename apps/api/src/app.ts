@@ -20,6 +20,7 @@ import {
   createScoreConfig,
   createWebhook,
   createWidget,
+  decodeOtlpTraces,
   deleteAutomation,
   deleteComment,
   deleteModelPrice,
@@ -238,35 +239,40 @@ app.openapi(
   },
 );
 
-// ── OTel OTLP/HTTP receiver (JSON) ───────────────────────────────────────────────
-app.openapi(
-  createRoute({
-    method: "post",
-    path: "/v1/otel/v1/traces",
-    summary: "OpenTelemetry OTLP/HTTP traces receiver (GenAI semconv)",
-    tags: ["ingestion"],
-    security,
-    request: { body: { content: { "application/json": { schema: z.record(z.string(), z.any()) } } } },
-    responses: {
-      200: { description: "Accepted (OTLP partialSuccess)" },
-      401: { description: "Unauthorized" },
-      415: { description: "Unsupported content type" },
-    },
-  }),
-  async (c) => {
-    if (!(c.req.header("content-type") ?? "").includes("json")) {
-      return c.json({ error: "only application/json OTLP is supported" }, 415);
+// ── OTel OTLP/HTTP receiver (JSON + protobuf, GenAI semconv) ─────────────────────
+// Plain route (not OpenAPI) so we can switch parsing on content-type: application/json
+// or application/x-protobuf (the default OTLP/HTTP encoding). Auth/rate-limit are applied
+// by the /v1/otel/* + /v1/* middleware above.
+app.post("/v1/otel/v1/traces", async (c) => {
+  const contentType = c.req.header("content-type") ?? "";
+  let payload: ReturnType<typeof decodeOtlpTraces> | null = null;
+
+  if (contentType.includes("json")) {
+    payload = (await c.req.json().catch(() => null)) as typeof payload;
+  } else if (contentType.includes("protobuf")) {
+    try {
+      payload = decodeOtlpTraces(new Uint8Array(await c.req.arrayBuffer()));
+    } catch {
+      return c.json({ error: "could not decode OTLP protobuf" }, 400);
     }
-    const payload = await c.req.json().catch(() => null);
-    const events = otlpToEvents(payload ?? {});
-    if (events.length > 0) {
-      const parsed = ingestRequest.safeParse({ batch: events });
-      if (!parsed.success) return c.json({ error: "mapping failed" }, 400);
-      await submitBatch(c.get("projectId"), parsed.data);
-    }
-    return c.json({ partialSuccess: {} }, 200);
-  },
-);
+  } else {
+    return c.json({ error: "content-type must be application/json or application/x-protobuf" }, 415);
+  }
+
+  const events = otlpToEvents(payload ?? {});
+  if (events.length > 0) {
+    const parsed = ingestRequest.safeParse({ batch: events });
+    if (!parsed.success) return c.json({ error: "mapping failed" }, 400);
+    await submitBatch(c.get("projectId"), parsed.data);
+  }
+
+  // OTLP success: an empty ExportTraceServiceResponse. For protobuf, an empty body is a
+  // valid "all accepted" response; for JSON we return the partialSuccess envelope.
+  if (contentType.includes("protobuf")) {
+    return c.body(new Uint8Array(0).buffer, 200, { "content-type": "application/x-protobuf" });
+  }
+  return c.json({ partialSuccess: {} }, 200);
+});
 
 // ── Batch actions on traces ──────────────────────────────────────────────────────
 app.openapi(
