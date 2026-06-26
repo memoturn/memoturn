@@ -44,7 +44,7 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 
 | Feature | Effort | Notes |
 | --- | --- | --- |
-| **Organizations** | L | An org layer above workspace with org-level membership/roles (tenancy change touching auth + schema). |
+| ~~**Organizations**~~ | Done | Tenancy via the Better Auth organization plugin (org/member/invitation); projects scoped to an org, role-mapped to our RBAC, console org management. |
 | **SSO / social login** | M | Add OAuth/SAML providers to the auth layer (the auth library supports them; mostly config + UI). |
 | ~~**API rate limiting**~~ | Done | Per-project Redis fixed-window limiter on `/v1` (`RATE_LIMIT_PER_MINUTE`), 429 + `X-RateLimit-*`/`Retry-After`. |
 | **Worker health/metrics endpoint** | S | A small HTTP health/metrics surface on the worker for liveness + queue depth. |

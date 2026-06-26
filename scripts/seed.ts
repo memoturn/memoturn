@@ -1,5 +1,5 @@
 /**
- * Seeds a default workspace, project, and a deterministic dev API key
+ * Seeds a default organization, project, and a deterministic dev API key
  * (pk-mt-dev / sk-mt-dev) so the SDK + examples work out of the box. Idempotent.
  *
  * Run with: pnpm seed
@@ -13,16 +13,16 @@ const DEV_EMAIL = "admin@memoturn.dev";
 const DEV_PASSWORD = "memoturn-dev-123";
 
 async function main() {
-  const workspace = await prisma.workspace.upsert({
+  const org = await prisma.organization.upsert({
     where: { slug: "default" },
     update: {},
-    create: { name: "Default Workspace", slug: "default" },
+    create: { name: "Default Org", slug: "default" },
   });
 
   const project = await prisma.project.upsert({
-    where: { workspaceId_slug: { workspaceId: workspace.id, slug: "default" } },
+    where: { organizationId_slug: { organizationId: org.id, slug: "default" } },
     update: {},
-    create: { name: "Default Project", slug: "default", workspaceId: workspace.id },
+    create: { name: "Default Project", slug: "default", organizationId: org.id },
   });
 
   await prisma.apiKey.upsert({
@@ -68,23 +68,23 @@ async function main() {
     }
   }
 
-  // Dashboard login user (via Better Auth) + membership to the default workspace.
+  // Dashboard login user (via Better Auth) + owner membership of the default org.
   let user = await prisma.user.findUnique({ where: { email: DEV_EMAIL } });
   if (!user) {
     await auth.api.signUpEmail({ body: { email: DEV_EMAIL, password: DEV_PASSWORD, name: "Admin" } });
     user = await prisma.user.findUnique({ where: { email: DEV_EMAIL } });
   }
   if (user) {
-    await prisma.membership.upsert({
-      where: { userId_workspaceId: { userId: user.id, workspaceId: workspace.id } },
+    await prisma.member.upsert({
+      where: { organizationId_userId: { userId: user.id, organizationId: org.id } },
       update: {},
-      create: { userId: user.id, workspaceId: workspace.id, role: "OWNER" },
+      create: { userId: user.id, organizationId: org.id, role: "owner" },
     });
   }
 
   console.log("Seeded:");
   console.log(`  login     : ${DEV_EMAIL} / ${DEV_PASSWORD}`);
-  console.log(`  workspace : ${workspace.name} (${workspace.id})`);
+  console.log(`  org       : ${org.name} (${org.id})`);
   console.log(`  project   : ${project.name} (${project.id})`);
   console.log(`  publicKey : ${DEV_PUBLIC_KEY}`);
   console.log(`  secretKey : ${DEV_SECRET_KEY}`);

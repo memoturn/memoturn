@@ -19,7 +19,7 @@ bun run build        # turbo build (respects ^build dependency order)
 bun run infra:up / infra:down / infra:logs   # docker compose for PG/ClickHouse/Redis/MinIO
 bun run db:migrate   # prisma migrate deploy
 bun run db:clickhouse # apply ClickHouse migrations (infra/clickhouse)
-bun run seed         # seed workspace/project/dev API key
+bun run seed         # seed organization/project/dev API key
 ```
 
 Per-package: `bun --filter @memoturn/<name> <script>` (e.g. `bun --filter @memoturn/worker test`).
@@ -64,9 +64,11 @@ Key consequence: the API **never writes telemetry synchronously**. It persists t
 
 `requireAuth` in `apps/api/src/middleware/auth.ts` accepts either:
 1. **API key** (Basic auth, SDK/programmatic) → full access as role `OWNER`.
-2. **Better Auth session cookie** (console) → honors the `x-memoturn-project` header (project switcher) and the user's real workspace role.
+2. **Better Auth session cookie** (console) → honors the `x-memoturn-project` header (project switcher) and the user's organization role, resolved against the session's active organization.
 
-Both set `projectId` + `role` on the context. Mutating handlers must call `denyIfReadOnly(c)` — `VIEWER` is read-only (returns 403). RBAC roles: OWNER/ADMIN/MEMBER (write) vs VIEWER.
+Both set `projectId` + `role` (+ `organizationId`) on the context. Mutating handlers must call `denyIfReadOnly(c)` — `VIEWER` is read-only (returns 403). RBAC roles: OWNER/ADMIN/MEMBER (write) vs VIEWER.
+
+Tenancy is the **Better Auth organization plugin** (`organization`/`member`/`invitation` tables; config + roles in `packages/server/src/betterauth.ts`). Projects belong to an `Organization`; `member.role` is a lowercase string mapped to our `WorkspaceRole` via `toWorkspaceRole`. Org management (create/switch/invite) uses `authClient.organization.*` directly — note org mutations require an `Origin` header (browsers send it; scripts must set a trusted one). New orgs auto-provision a default project via the plugin's `afterCreateOrganization` hook.
 
 ## Recipes
 

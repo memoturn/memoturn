@@ -799,7 +799,7 @@ app.openapi(
     if (userId) return c.json({ data: await listUserProjects(userId) });
     // API key: scoped to its single project.
     return c.json({
-      data: [{ id: c.get("projectId"), name: "(api-key project)", slug: "", workspace: "", role: c.get("role") }],
+      data: [{ id: c.get("projectId"), name: "(api-key project)", slug: "", organization: "", role: c.get("role") }],
     });
   },
 );

@@ -1,7 +1,13 @@
 import { auth, authenticateKeys, getUserProjectAccess, parseBasicAuth, type WorkspaceRole } from "@memoturn/server";
 import type { Context, Next } from "hono";
 
-export type AuthVars = { projectId: string; role: WorkspaceRole; actor: string; userId: string };
+export type AuthVars = {
+  projectId: string;
+  role: WorkspaceRole;
+  actor: string;
+  userId: string;
+  organizationId: string;
+};
 
 /**
  * Authenticates two ways and resolves the active project + role:
@@ -18,6 +24,7 @@ export async function requireAuth(c: Context<{ Variables: AuthVars }>, next: Nex
     c.set("role", "OWNER");
     c.set("actor", `apikey:${creds.publicKey}`);
     c.set("userId", "");
+    c.set("organizationId", "");
     return next();
   }
 
@@ -25,13 +32,14 @@ export async function requireAuth(c: Context<{ Variables: AuthVars }>, next: Nex
   if (!session) return c.json({ error: "unauthorized" }, 401);
 
   const requested = c.req.header("x-memoturn-project") || undefined;
-  const access = await getUserProjectAccess(session.user.id, requested);
+  const access = await getUserProjectAccess(session.user.id, requested, session.session.activeOrganizationId);
   if (!access) return c.json({ error: "no accessible project" }, 403);
 
   c.set("projectId", access.projectId);
   c.set("role", access.role);
   c.set("actor", session.user.email);
   c.set("userId", session.user.id);
+  c.set("organizationId", access.organizationId);
   return next();
 }
 

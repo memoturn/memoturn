@@ -33,54 +33,85 @@ export async function authenticateKeys(publicKey: string, secretKey: string): Pr
 
 export type WorkspaceRole = "OWNER" | "ADMIN" | "MEMBER" | "VIEWER";
 
+/** Map a Better Auth org member role (lowercase string) to our WorkspaceRole. */
+export function toWorkspaceRole(role: string | null | undefined): WorkspaceRole {
+  switch ((role ?? "").toLowerCase()) {
+    case "owner":
+      return "OWNER";
+    case "admin":
+      return "ADMIN";
+    case "viewer":
+      return "VIEWER";
+    default:
+      return "MEMBER";
+  }
+}
+
 export interface ProjectAccess {
   projectId: string;
   role: WorkspaceRole;
-  workspaceId: string;
+  organizationId: string;
 }
 
-/** List every project a user can access (across their workspace memberships), with role. */
+/** List every project a user can access (across their org memberships), with role. */
 export async function listUserProjects(userId: string) {
-  const memberships = await prisma.membership.findMany({
+  const members = await prisma.member.findMany({
     where: { userId },
-    include: { workspace: { include: { projects: { orderBy: { createdAt: "asc" } } } } },
+    include: { organization: { include: { projects: { orderBy: { createdAt: "asc" } } } } },
     orderBy: { createdAt: "asc" },
   });
-  return memberships.flatMap((m) =>
-    m.workspace.projects.map((p) => ({
+  return members.flatMap((m) =>
+    m.organization.projects.map((p) => ({
       id: p.id,
       name: p.name,
       slug: p.slug,
-      workspace: m.workspace.name,
-      role: m.role as WorkspaceRole,
+      organization: m.organization.name,
+      role: toWorkspaceRole(m.role),
     })),
   );
 }
 
 /**
- * Resolve which project a session request operates on + the user's role there. If a
- * specific projectId is requested (project switcher), it's honored only when the user
- * has membership to its workspace; otherwise the default (first) project is used.
+ * Resolve which project a session request operates on + the user's role there. A
+ * requested projectId (project switcher) wins when the user is a member of its org;
+ * otherwise the active organization's first project, else the user's first project.
  */
-export async function getUserProjectAccess(userId: string, requestedProjectId?: string): Promise<ProjectAccess | null> {
+export async function getUserProjectAccess(
+  userId: string,
+  requestedProjectId?: string,
+  activeOrganizationId?: string | null,
+): Promise<ProjectAccess | null> {
   if (requestedProjectId) {
     const project = await prisma.project.findUnique({ where: { id: requestedProjectId } });
     if (project) {
-      const membership = await prisma.membership.findUnique({
-        where: { userId_workspaceId: { userId, workspaceId: project.workspaceId } },
+      const member = await prisma.member.findUnique({
+        where: { organizationId_userId: { userId, organizationId: project.organizationId } },
       });
-      if (membership)
-        return { projectId: project.id, role: membership.role as WorkspaceRole, workspaceId: project.workspaceId };
+      if (member)
+        return { projectId: project.id, role: toWorkspaceRole(member.role), organizationId: project.organizationId };
     }
   }
-  const membership = await prisma.membership.findFirst({
+
+  if (activeOrganizationId) {
+    const member = await prisma.member.findUnique({
+      where: { organizationId_userId: { userId, organizationId: activeOrganizationId } },
+    });
+    const project = await prisma.project.findFirst({
+      where: { organizationId: activeOrganizationId },
+      orderBy: { createdAt: "asc" },
+    });
+    if (member && project)
+      return { projectId: project.id, role: toWorkspaceRole(member.role), organizationId: activeOrganizationId };
+  }
+
+  const member = await prisma.member.findFirst({
     where: { userId },
     orderBy: { createdAt: "asc" },
-    include: { workspace: { include: { projects: { orderBy: { createdAt: "asc" }, take: 1 } } } },
+    include: { organization: { include: { projects: { orderBy: { createdAt: "asc" }, take: 1 } } } },
   });
-  const project = membership?.workspace.projects[0];
-  if (!membership || !project) return null;
-  return { projectId: project.id, role: membership.role as WorkspaceRole, workspaceId: membership.workspaceId };
+  const project = member?.organization.projects[0];
+  if (!member || !project) return null;
+  return { projectId: project.id, role: toWorkspaceRole(member.role), organizationId: member.organizationId };
 }
 
 /** @deprecated use getUserProjectAccess */

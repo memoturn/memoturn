@@ -22,7 +22,7 @@ function ProjectSwitcher() {
     >
       {projects.map((p) => (
         <option key={p.id} value={p.id}>
-          {p.workspace ? `${p.workspace} / ` : ""}
+          {p.organization ? `${p.organization} / ` : ""}
           {p.name} ({p.role.toLowerCase()})
         </option>
       ))}
@@ -62,6 +62,7 @@ function RootComponent() {
           <Link to="/evaluators">Evaluators</Link>
           <Link to="/review">Review</Link>
           <Link to="/audit">Audit</Link>
+          <Link to="/organizations">Orgs</Link>
           <Link to="/settings">Settings</Link>
         </nav>
         <div className="spacer" />

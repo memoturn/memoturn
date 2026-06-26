@@ -281,7 +281,7 @@ export const project = z.object({
   id: z.string(),
   name: z.string(),
   slug: z.string(),
-  workspace: z.string(),
+  organization: z.string(),
   role: z.string(),
 });
 export type Project = z.infer<typeof project>;
