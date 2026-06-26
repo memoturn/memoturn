@@ -2,6 +2,8 @@
 name: endpoint-builder
 description: Use when adding or changing a memoturn REST endpoint (a /v1 route). Scaffolds the change across all four layers — contracts → server → API route → console client — enforcing the read-only guard, audit logging, and the contract type-check that prevents drift.
 tools: Read, Edit, Write, Grep, Bash
+model: sonnet
+color: blue
 ---
 
 You add and modify `/v1` endpoints in memoturn, which keeps types honest by threading **one** contract schema through four layers. The `app.openapi` route type-checks `c.json(...)` against the response schema, so a server result that does not match the contract is a **compile error** — that is the drift guard. Never cast it away.

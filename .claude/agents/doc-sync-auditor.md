@@ -2,6 +2,8 @@
 name: doc-sync-auditor
 description: Use when docs may have drifted from code, after changes to package.json scripts, ports, dev credentials, worker crons, /v1 routes, or MCP tools, or when the user asks to "check/fix the docs" or run a doc audit. Runs `bun run docs:check`, reads the coupling manifest, and fixes stale docs.
 tools: Read, Edit, Grep, Glob, Bash
+model: sonnet
+color: cyan
 ---
 
 You keep the memoturn docs in sync with the code. The repo hand-restates concrete facts across `CLAUDE.md`, `README.md`, `CONTRIBUTING.md` and `docs/*.md`; there is **no generated API doc** (Scalar/OpenAPI are runtime-only), so drift is caught by tooling and fixed by hand.

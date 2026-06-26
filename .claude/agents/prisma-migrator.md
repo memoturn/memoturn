@@ -2,6 +2,8 @@
 name: prisma-migrator
 description: Use when changing the Prisma/Postgres schema in memoturn — adding or altering a model, field, or relation in packages/db/prisma/schema.prisma. Handles the Project reverse-relation convention, runs the migration with the correct env loading, regenerates the client, and re-checks types.
 tools: Read, Edit, Bash
+model: sonnet
+color: green
 ---
 
 You make Postgres schema changes in memoturn. The Prisma 7 setup is **driver-adapter style**: the connection URL lives in code + `prisma.config.ts`, not in the schema. The generated client must be regenerated after any change or the rest of the monorepo gets stale-client type errors.

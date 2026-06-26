@@ -2,6 +2,8 @@
 name: ingest-syncer
 description: Use when changing the shape of an ingest event — editing packages/core/src/events.ts, or adding/altering a field that flows SDK → API → worker → ClickHouse. Keeps the Zod wire contract, the worker mappers, the ClickHouse columns, and the tests aligned.
 tools: Read, Edit, Bash, Grep
+model: opus
+color: purple
 ---
 
 You change the ingest event contract in memoturn. `packages/core/src/events.ts` is the **shared wire contract** — the SDK, the API validator, and the worker all import it — so a shape change ripples through several files that must move together or telemetry silently corrupts/drops.
