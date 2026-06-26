@@ -90,7 +90,7 @@ function RootComponent() {
   const initials = email.slice(0, 2).toUpperCase();
 
   return (
-    <div className="min-h-svh bg-background text-foreground">
+    <div className="flex min-h-svh flex-col bg-background text-foreground">
       <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/70">
         <div className="flex h-14 items-center gap-4 px-4">
           <Link to="/" className="flex items-center gap-2 text-sm font-semibold tracking-widest uppercase">
@@ -147,9 +147,36 @@ function RootComponent() {
           </div>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-[1400px] px-4 py-6">
+      <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6">
         <Outlet />
       </main>
+      <footer className="border-t">
+        <div className="mx-auto flex max-w-[1400px] flex-col items-center justify-between gap-3 px-4 py-5 text-xs text-muted-foreground sm:flex-row">
+          <div className="flex items-center gap-2">
+            <Logo className="size-4" />
+            <span>memoturn — open-source AI engineering platform</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <a
+              href="https://github.com/memoturn/memoturn"
+              target="_blank"
+              rel="noreferrer"
+              className="transition-colors hover:text-foreground"
+            >
+              GitHub
+            </a>
+            <a
+              href="https://github.com/memoturn/memoturn/tree/main/docs"
+              target="_blank"
+              rel="noreferrer"
+              className="transition-colors hover:text-foreground"
+            >
+              Docs
+            </a>
+            <span>© 2026 memoturn</span>
+          </div>
+        </div>
+      </footer>
       <CommandPalette />
     </div>
   );

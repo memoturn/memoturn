@@ -376,28 +376,52 @@ function CustomWidgets() {
 
 function WidgetCard({ widget, onDelete, disabled }: { widget: Widget; onDelete: () => void; disabled: boolean }) {
   const series = widget.data.map((p) => ({ label: p.label, value: Number(p.value) }));
+  const isPeak = widget.metric === "latency_p95";
+  const total = series.reduce((a, p) => a + p.value, 0);
+  const peak = Math.max(0, ...series.map((p) => p.value));
+  const headline =
+    series.length === 0
+      ? "—"
+      : widget.metric === "cost"
+        ? money(total)
+        : isPeak
+          ? `${peak} ms`
+          : Math.round(total).toLocaleString();
   const config = { value: { label: widget.metric, color: "var(--chart-1)" } } satisfies ChartConfig;
   return (
-    <Card size="sm">
+    <Card size="sm" className="gap-3">
       <CardHeader>
         <div className="flex items-start justify-between gap-2">
-          <div className="space-y-1">
-            <CardTitle>{widget.title}</CardTitle>
-            <CardDescription>
+          <div className="min-w-0 space-y-0.5">
+            <CardTitle className="truncate">{widget.title}</CardTitle>
+            <CardDescription className="text-[0.6875rem]">
               {widget.metric} · {widget.breakdown.replace("_", " ")} · {widget.days}d
             </CardDescription>
           </div>
-          <Button variant="ghost" size="icon" onClick={onDelete} disabled={disabled} aria-label="Delete widget">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="-mt-1 -mr-1 text-muted-foreground hover:text-destructive"
+            onClick={onDelete}
+            disabled={disabled}
+            aria-label="Delete widget"
+          >
             <Trash2 className="size-4" />
           </Button>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
+        <div className="space-y-0.5">
+          <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+            {isPeak ? "Peak" : "Total"}
+          </div>
+          <div className="text-2xl font-semibold tabular-nums">{headline}</div>
+        </div>
         {series.length === 0 ? (
           <p className="text-sm text-muted-foreground">no data</p>
         ) : (
-          <ChartContainer config={config} className="aspect-auto h-[120px] w-full">
-            <BarChart data={series} margin={{ top: 4, left: 0, right: 0 }}>
+          <ChartContainer config={config} className="aspect-auto h-[72px] w-full">
+            <BarChart data={series} margin={{ top: 2, left: 0, right: 0 }}>
               <XAxis dataKey="label" hide />
               <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
               <Bar dataKey="value" fill="var(--color-value)" radius={0} />
