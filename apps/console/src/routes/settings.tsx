@@ -28,6 +28,23 @@ function SettingsPage() {
   });
   const daysValue = days ?? retention?.days ?? 0;
 
+  const { data: webhooks } = useQuery({ queryKey: ["webhooks"], queryFn: () => api.listWebhooks() });
+  const [url, setUrl] = useState("");
+  const [threshold, setThreshold] = useState("");
+  const addWebhook = useMutation({
+    mutationFn: () =>
+      api.createWebhook({ url, event: "score.created", threshold: threshold === "" ? null : Number(threshold) }),
+    onSuccess: () => {
+      setUrl("");
+      setThreshold("");
+      qc.invalidateQueries({ queryKey: ["webhooks"] });
+    },
+  });
+  const removeWebhook = useMutation({
+    mutationFn: (id: string) => api.deleteWebhook(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["webhooks"] }),
+  });
+
   return (
     <div>
       <h1>Settings</h1>
@@ -95,6 +112,53 @@ function SettingsPage() {
           {saveRetention.isPending ? "Saving…" : "Save retention"}
         </button>
       </div>
+
+      <h2>Webhooks</h2>
+      <p className="obs-meta">
+        POST to a URL when a score is created. Set a threshold to only fire on low scores (value &lt; threshold).
+      </p>
+      <div className="filters">
+        <input placeholder="https://…" value={url} onChange={(e) => setUrl(e.target.value)} style={{ width: 320 }} />
+        <input
+          type="number"
+          step="0.1"
+          placeholder="threshold (optional)"
+          value={threshold}
+          onChange={(e) => setThreshold(e.target.value)}
+          style={{ width: 160 }}
+        />
+        <button disabled={!url || addWebhook.isPending} onClick={() => addWebhook.mutate()}>
+          {addWebhook.isPending ? "Saving…" : "Add webhook"}
+        </button>
+      </div>
+      {webhooks && webhooks.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>URL</th>
+              <th>Event</th>
+              <th>Threshold</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {webhooks.map((w) => (
+              <tr key={w.id}>
+                <td>{w.url}</td>
+                <td>
+                  <span className="badge gen">{w.event}</span>
+                </td>
+                <td>{w.threshold ?? "—"}</td>
+                <td>
+                  <button className="link-btn" onClick={() => removeWebhook.mutate(w.id)}>
+                    delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

@@ -11,6 +11,8 @@ import {
   createPromptVersion,
   createProviderConnection,
   createReviewQueue,
+  createWebhook,
+  deleteWebhook,
   exportTracesJsonl,
   getDatasetDetail,
   getMetrics,
@@ -27,6 +29,7 @@ import {
   listSessions,
   listTraces,
   listUserProjects,
+  listWebhooks,
   otlpToEvents,
   recordAudit,
   recordRun,
@@ -81,6 +84,8 @@ app.use("/v1/review-queues/*", requireAuth);
 app.use("/v1/exports/*", requireAuth);
 app.use("/v1/retention", requireAuth);
 app.use("/v1/retention/*", requireAuth);
+app.use("/v1/webhooks", requireAuth);
+app.use("/v1/webhooks/*", requireAuth);
 
 // Streaming playground (SSE) — plain route; emits { delta } events then [DONE].
 app.post("/v1/playground/stream", async (c) => {
@@ -928,6 +933,78 @@ app.openapi(
     const { days } = await getRetention(projectId);
     const result = await applyRetention(projectId, days);
     await recordAudit(projectId, c.get("actor"), "retention.apply", `deleted:${result.deletedTraces}`);
+    return c.json(result);
+  },
+);
+
+// ── Webhooks / automations ───────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/webhooks",
+    summary: "List webhooks",
+    tags: ["platform"],
+    security,
+    responses: {
+      200: { description: "Webhook list", content: { "application/json": { schema: C.listOf(C.webhook) } } },
+    },
+  }),
+  async (c) => c.json({ data: await listWebhooks(c.get("projectId")) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/webhooks",
+    summary: "Create a webhook (POSTs on an event; score.created supports a low-score threshold)",
+    tags: ["platform"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              url: z.string().url(),
+              event: z.enum(["score.created"]).optional(),
+              threshold: z.number().nullable().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: C.webhook.partial() } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    const result = await createWebhook(c.get("projectId"), body);
+    await recordAudit(c.get("projectId"), c.get("actor"), "webhook.create", `webhook:${result.id}`, { url: body.url });
+    return c.json(result, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/webhooks/{id}",
+    summary: "Delete a webhook",
+    tags: ["platform"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Deleted", content: { "application/json": { schema: z.object({ deleted: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const result = await deleteWebhook(c.get("projectId"), c.req.valid("param").id);
+    await recordAudit(c.get("projectId"), c.get("actor"), "webhook.delete", `webhook:${c.req.valid("param").id}`);
     return c.json(result);
   },
 );

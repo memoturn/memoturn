@@ -215,6 +215,16 @@ export type AuditEntry = z.infer<typeof auditEntry>;
 export const retentionPolicy = z.object({ days: z.number() });
 export type RetentionPolicy = z.infer<typeof retentionPolicy>;
 
+export const webhook = z.object({
+  id: z.string(),
+  url: z.string(),
+  event: z.string(),
+  threshold: z.number().nullable(),
+  enabled: z.boolean(),
+  createdAt: z.string(),
+});
+export type Webhook = z.infer<typeof webhook>;
+
 // ── Review queues ────────────────────────────────────────────────────────────────
 export const reviewQueue = z.object({
   name: z.string(),

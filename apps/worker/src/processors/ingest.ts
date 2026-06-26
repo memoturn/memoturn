@@ -2,7 +2,7 @@ import { type IngestEvent, ingestRequest } from "@memoturn/core";
 import { getRawBatch } from "@memoturn/db/blob";
 import { clickhouse } from "@memoturn/db/clickhouse";
 import type { IngestJob } from "@memoturn/db/queue";
-import { listOnlineEvaluators, runEvaluator } from "@memoturn/server";
+import { dispatchWebhooks, listOnlineEvaluators, runEvaluator } from "@memoturn/server";
 import type { Job } from "bullmq";
 import { mapEvents } from "../mappers.js";
 
@@ -76,6 +76,16 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
   console.log(
     `[ingest] project=${projectId} traces=${traces.length} observations=${observations.length} scores=${scores.length}`,
   );
+
+  // Fire score.created webhooks for any scores in this batch (threshold-filtered).
+  for (const s of scores) {
+    await dispatchWebhooks(projectId, "score.created", {
+      traceId: s.trace_id,
+      name: s.name,
+      value: s.value,
+      source: s.source,
+    });
+  }
 
   await runOnlineEvals(projectId, parsed.batch);
 }

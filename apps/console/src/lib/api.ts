@@ -22,6 +22,7 @@ import type {
   SessionSummary,
   TraceDetail,
   TraceSummary,
+  Webhook,
 } from "@memoturn/contracts";
 
 // Re-export the contract types so route components keep importing from "../lib/api".
@@ -56,6 +57,12 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     headers: headers({ "content-type": "application/json" }),
     body: JSON.stringify(body),
   });
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  return res.json() as Promise<T>;
+}
+
+async function del<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { method: "DELETE", headers: headers() });
   if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
   return res.json() as Promise<T>;
 }
@@ -98,6 +105,9 @@ export const api = {
   addProvider: (provider: string, apiKey: string) => post(`/v1/providers`, { provider, apiKey }),
   getRetention: () => get<{ days: number }>(`/v1/retention`),
   setRetention: (days: number) => post<{ days: number }>(`/v1/retention`, { days }),
+  listWebhooks: () => get<{ data: Webhook[] }>(`/v1/webhooks`).then((r) => r.data),
+  createWebhook: (body: { url: string; event?: string; threshold?: number | null }) => post(`/v1/webhooks`, body),
+  deleteWebhook: (id: string) => del(`/v1/webhooks/${encodeURIComponent(id)}`),
   listEvaluators: () => get<{ data: Evaluator[] }>(`/v1/evaluators`).then((r) => r.data),
   createEvaluator: (body: {
     name: string;

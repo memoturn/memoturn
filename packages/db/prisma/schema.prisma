@@ -39,6 +39,7 @@ model Project {
   auditLogs   AuditLog[]
   reviewQueues ReviewQueue[]
   retention   RetentionPolicy?
+  webhooks    Webhook[]
 
   @@unique([workspaceId, slug])
 }
@@ -319,6 +320,21 @@ model RetentionPolicy {
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   days      Int      @default(0)
   updatedAt DateTime @updatedAt
+}
+
+// Outbound webhook / automation: POSTs to `url` when `event` fires. For score.created,
+// an optional `threshold` only fires when score.value < threshold (low-score alerts).
+model Webhook {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  url       String
+  event     String   @default("score.created")
+  threshold Float?
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([projectId, event])
 }
 
 model ReviewItem {
