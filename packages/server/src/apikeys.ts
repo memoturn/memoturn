@@ -11,9 +11,14 @@ interface ApiKeyRow {
   publicKey: string;
   secretHint: string;
   name: string | null;
+  scopes: string[];
+  expiresAt: Date | null;
+  rateLimitPerMinute: number | null;
   createdAt: Date;
   lastUsedAt: Date | null;
 }
+
+const ALL_SCOPES = ["read", "write", "ingest"];
 
 function shape(k: ApiKeyRow) {
   return {
@@ -21,6 +26,9 @@ function shape(k: ApiKeyRow) {
     publicKey: k.publicKey,
     secretHint: k.secretHint,
     name: k.name ?? "",
+    scopes: k.scopes,
+    expiresAt: k.expiresAt ? k.expiresAt.toISOString() : null,
+    rateLimitPerMinute: k.rateLimitPerMinute,
     createdAt: k.createdAt.toISOString(),
     lastUsedAt: k.lastUsedAt ? k.lastUsedAt.toISOString() : null,
   };
@@ -31,16 +39,29 @@ export async function listApiKeys(projectId: string) {
   return keys.map(shape);
 }
 
+export interface CreateApiKeyInput {
+  name?: string;
+  scopes?: string[];
+  expiresInDays?: number | null;
+  rateLimitPerMinute?: number | null;
+}
+
 /** Mint a new key pair. Returns the plaintext secret once — it is never retrievable again. */
-export async function createApiKey(projectId: string, name?: string) {
+export async function createApiKey(projectId: string, input: CreateApiKeyInput = {}) {
   const pair = generateApiKeyPair();
+  const scopes = (input.scopes?.length ? input.scopes : ALL_SCOPES).filter((s) => ALL_SCOPES.includes(s));
+  const expiresAt =
+    input.expiresInDays && input.expiresInDays > 0 ? new Date(Date.now() + input.expiresInDays * 86_400_000) : null;
   const k = await prisma.apiKey.create({
     data: {
       projectId,
       publicKey: pair.publicKey,
       secretHash: pair.secretHash,
       secretHint: pair.secretHint,
-      name: name || null,
+      name: input.name || null,
+      scopes: scopes.length ? scopes : ALL_SCOPES,
+      expiresAt,
+      rateLimitPerMinute: input.rateLimitPerMinute ?? null,
     },
   });
   return {
@@ -49,6 +70,9 @@ export async function createApiKey(projectId: string, name?: string) {
     secretKey: pair.secretKey,
     secretHint: pair.secretHint,
     name: k.name ?? "",
+    scopes: k.scopes,
+    expiresAt: k.expiresAt ? k.expiresAt.toISOString() : null,
+    rateLimitPerMinute: k.rateLimitPerMinute,
     createdAt: k.createdAt.toISOString(),
   };
 }

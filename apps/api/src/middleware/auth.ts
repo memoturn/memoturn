@@ -7,11 +7,20 @@ export type AuthVars = {
   actor: string;
   userId: string;
   organizationId: string;
+  apiKeyId: string; // "" for session auth
+  apiKeyRateLimit: number | null; // per-key override, null = none
 };
+
+/** Coarse scope a request requires: ingest endpoints, GET reads, everything else writes. */
+function requiredScope(method: string, path: string): "ingest" | "read" | "write" {
+  if (path.startsWith("/v1/ingest") || path.startsWith("/v1/otel")) return "ingest";
+  return method === "GET" ? "read" : "write";
+}
 
 /**
  * Authenticates two ways and resolves the active project + role:
- *  1. API key (Basic auth) — SDK/programmatic; full access to its project (role OWNER).
+ *  1. API key (Basic auth) — SDK/programmatic; full access to its project (role OWNER),
+ *     subject to the key's scopes + expiry + per-key rate limit.
  *  2. Better Auth session — dashboard; honors the `x-memoturn-project` header (project
  *     switcher) when the user has access, else their default project, with their role.
  */
@@ -20,11 +29,17 @@ export async function requireAuth(c: Context<{ Variables: AuthVars }>, next: Nex
   if (creds) {
     const ctx = await authenticateKeys(creds.publicKey, creds.secretKey);
     if (!ctx) return c.json({ error: "unauthorized" }, 401);
+    const need = requiredScope(c.req.method, c.req.path);
+    if (!ctx.scopes.includes(need)) {
+      return c.json({ error: `forbidden: API key lacks the '${need}' scope` }, 403);
+    }
     c.set("projectId", ctx.projectId);
     c.set("role", "OWNER");
     c.set("actor", `apikey:${creds.publicKey}`);
     c.set("userId", "");
     c.set("organizationId", "");
+    c.set("apiKeyId", ctx.keyId);
+    c.set("apiKeyRateLimit", ctx.rateLimitPerMinute);
     return next();
   }
 
@@ -40,6 +55,8 @@ export async function requireAuth(c: Context<{ Variables: AuthVars }>, next: Nex
   c.set("actor", session.user.email);
   c.set("userId", session.user.id);
   c.set("organizationId", access.organizationId);
+  c.set("apiKeyId", "");
+  c.set("apiKeyRateLimit", null);
   return next();
 }
 

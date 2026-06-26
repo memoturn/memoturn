@@ -1824,7 +1824,18 @@ app.openapi(
     tags: ["platform"],
     security,
     request: {
-      body: { content: { "application/json": { schema: z.object({ name: z.string().optional() }) } } },
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              name: z.string().optional(),
+              scopes: z.array(z.enum(["read", "write", "ingest"])).optional(),
+              expiresInDays: z.number().int().positive().nullable().optional(),
+              rateLimitPerMinute: z.number().int().positive().nullable().optional(),
+            }),
+          },
+        },
+      },
     },
     responses: {
       201: { description: "Created", content: { "application/json": { schema: C.apiKeyCreated } } },
@@ -1834,8 +1845,8 @@ app.openapi(
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
-    const key = await createApiKey(c.get("projectId"), c.req.valid("json").name);
-    await recordAudit(c.get("projectId"), c.get("actor"), "api-key.create", key.publicKey);
+    const key = await createApiKey(c.get("projectId"), c.req.valid("json"));
+    await recordAudit(c.get("projectId"), c.get("actor"), "api-key.create", key.publicKey, { scopes: key.scopes });
     return c.json(key, 201);
   },
 );

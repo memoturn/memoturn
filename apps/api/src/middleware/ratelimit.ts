@@ -3,17 +3,32 @@ import type { Context, Next } from "hono";
 import type { AuthVars } from "./auth.js";
 
 /**
- * Per-project rate limiting. Runs after requireAuth (so projectId is set); disabled
- * unless RATE_LIMIT_PER_MINUTE > 0. Sets X-RateLimit-* headers and returns 429 +
- * Retry-After when a project exceeds its window.
+ * Rate limiting. Runs after requireAuth. A per-key limit (apiKeyRateLimit) takes
+ * precedence and applies even when the global RATE_LIMIT_PER_MINUTE is disabled,
+ * counted per key; otherwise the global per-project limit applies when configured.
+ * Sets X-RateLimit-* headers and returns 429 + Retry-After when the window is exceeded.
  */
 export async function rateLimit(c: Context<{ Variables: AuthVars }>, next: Next) {
-  const { limit, window } = rateLimitConfig();
-  if (limit <= 0) return next();
   const projectId = c.get("projectId");
   if (!projectId) return next(); // unauthenticated routes (e.g. health) aren't limited
 
-  const result = await checkRateLimit(projectId, limit, window);
+  const { limit: globalLimit, window } = rateLimitConfig();
+  const apiKeyId = c.get("apiKeyId");
+  const keyLimit = c.get("apiKeyRateLimit");
+
+  let id: string;
+  let limit: number;
+  if (apiKeyId && keyLimit && keyLimit > 0) {
+    id = `key:${apiKeyId}`;
+    limit = keyLimit;
+  } else if (globalLimit > 0) {
+    id = projectId;
+    limit = globalLimit;
+  } else {
+    return next(); // no limiting configured
+  }
+
+  const result = await checkRateLimit(id, limit, window);
   c.header("X-RateLimit-Limit", String(result.limit));
   if (result.remaining >= 0) c.header("X-RateLimit-Remaining", String(result.remaining));
   c.header("X-RateLimit-Reset", String(result.resetSeconds));

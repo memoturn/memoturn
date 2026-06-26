@@ -22,11 +22,24 @@ function SettingsPage() {
 
   const { data: apiKeys } = useQuery({ queryKey: ["api-keys"], queryFn: () => api.listApiKeys() });
   const [keyName, setKeyName] = useState("");
+  const [keyScopes, setKeyScopes] = useState<string[]>(["read", "write", "ingest"]);
+  const [keyExpiry, setKeyExpiry] = useState("");
+  const [keyRate, setKeyRate] = useState("");
   const [newSecret, setNewSecret] = useState<{ publicKey: string; secretKey: string } | null>(null);
+  const toggleScope = (s: string) =>
+    setKeyScopes((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
   const createKey = useMutation({
-    mutationFn: () => api.createApiKey(keyName || undefined),
+    mutationFn: () =>
+      api.createApiKey({
+        name: keyName || undefined,
+        scopes: keyScopes,
+        expiresInDays: keyExpiry ? Number(keyExpiry) : null,
+        rateLimitPerMinute: keyRate ? Number(keyRate) : null,
+      }),
     onSuccess: (k) => {
       setKeyName("");
+      setKeyExpiry("");
+      setKeyRate("");
       setNewSecret({ publicKey: k.publicKey, secretKey: k.secretKey });
       qc.invalidateQueries({ queryKey: ["api-keys"] });
     },
@@ -190,7 +203,28 @@ function SettingsPage() {
       </p>
       <div className="filters">
         <input placeholder="key name (optional)" value={keyName} onChange={(e) => setKeyName(e.target.value)} />
-        <button disabled={createKey.isPending} onClick={() => createKey.mutate()}>
+        {["read", "write", "ingest"].map((s) => (
+          <label key={s} className="inline-check">
+            <input type="checkbox" checked={keyScopes.includes(s)} onChange={() => toggleScope(s)} /> {s}
+          </label>
+        ))}
+        <input
+          type="number"
+          min="1"
+          placeholder="expires (days)"
+          value={keyExpiry}
+          onChange={(e) => setKeyExpiry(e.target.value)}
+          style={{ width: 120 }}
+        />
+        <input
+          type="number"
+          min="1"
+          placeholder="rate / min"
+          value={keyRate}
+          onChange={(e) => setKeyRate(e.target.value)}
+          style={{ width: 100 }}
+        />
+        <button disabled={keyScopes.length === 0 || createKey.isPending} onClick={() => createKey.mutate()}>
           {createKey.isPending ? "Creating…" : "Create key"}
         </button>
       </div>
@@ -210,6 +244,9 @@ function SettingsPage() {
               <th>Name</th>
               <th>Public key</th>
               <th>Secret</th>
+              <th>Scopes</th>
+              <th>Expires</th>
+              <th>Rate/min</th>
               <th>Last used</th>
               <th />
             </tr>
@@ -222,6 +259,9 @@ function SettingsPage() {
                   <code>{k.publicKey}</code>
                 </td>
                 <td className="obs-meta">sk-…{k.secretHint}</td>
+                <td className="obs-meta">{k.scopes.join(", ")}</td>
+                <td className="obs-meta">{k.expiresAt ? k.expiresAt.slice(0, 10) : "never"}</td>
+                <td className="obs-meta">{k.rateLimitPerMinute ?? "—"}</td>
                 <td className="obs-meta">{k.lastUsedAt ? k.lastUsedAt.slice(0, 19).replace("T", " ") : "never"}</td>
                 <td>
                   <button className="link-btn" onClick={() => revokeKey.mutate(k.id)}>

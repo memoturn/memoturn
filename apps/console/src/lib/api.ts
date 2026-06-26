@@ -126,7 +126,12 @@ export const api = {
   getRetention: () => get<{ days: number }>(`/v1/retention`),
   setRetention: (days: number) => post<{ days: number }>(`/v1/retention`, { days }),
   listApiKeys: () => get<{ data: ApiKey[] }>(`/v1/api-keys`).then((r) => r.data),
-  createApiKey: (name?: string) => post<ApiKeyCreated>(`/v1/api-keys`, { name }),
+  createApiKey: (body: {
+    name?: string;
+    scopes?: string[];
+    expiresInDays?: number | null;
+    rateLimitPerMinute?: number | null;
+  }) => post<ApiKeyCreated>(`/v1/api-keys`, body),
   revokeApiKey: (id: string) => del(`/v1/api-keys/${encodeURIComponent(id)}`),
   getAnalyticsSink: () => get<AnalyticsSink>(`/v1/analytics-sink`),
   setAnalyticsSink: (body: { enabled?: boolean; host?: string; apiKey?: string }) =>

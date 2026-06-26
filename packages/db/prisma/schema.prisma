@@ -177,6 +177,9 @@ model ApiKey {
   secretHash    String
   secretHint    String // last 4 chars, for display
   name          String?
+  expiresAt          DateTime? // null = never expires
+  rateLimitPerMinute Int? // per-key override; null = project/global default
+  scopes             String[] @default(["read", "write", "ingest"]) // coarse access scopes
   createdAt     DateTime @default(now())
   lastUsedAt    DateTime?
 

@@ -11,6 +11,9 @@ const CACHE_TTL_SECONDS = 60;
 
 export interface AuthContext {
   projectId: string;
+  keyId: string;
+  scopes: string[];
+  rateLimitPerMinute: number | null;
 }
 
 export async function authenticateKeys(publicKey: string, secretKey: string): Promise<AuthContext | null> {
@@ -18,17 +21,37 @@ export async function authenticateKeys(publicKey: string, secretKey: string): Pr
 
   const cached = await readCache(publicKey);
   if (cached) {
-    return verifySecret(secretKey, cached.secretHash) ? { projectId: cached.projectId } : null;
+    if (!verifySecret(secretKey, cached.secretHash)) return null;
+    if (cached.expiresAt && Date.parse(cached.expiresAt) < Date.now()) return null;
+    return {
+      projectId: cached.projectId,
+      keyId: cached.keyId,
+      scopes: cached.scopes,
+      rateLimitPerMinute: cached.rateLimitPerMinute,
+    };
   }
 
   const apiKey = await prisma.apiKey.findUnique({ where: { publicKey } });
   if (!apiKey) return null;
   if (!verifySecret(secretKey, apiKey.secretHash)) return null;
+  if (apiKey.expiresAt && apiKey.expiresAt.getTime() < Date.now()) return null;
 
-  await writeCache(publicKey, { projectId: apiKey.projectId, secretHash: apiKey.secretHash });
+  await writeCache(publicKey, {
+    projectId: apiKey.projectId,
+    secretHash: apiKey.secretHash,
+    keyId: apiKey.id,
+    scopes: apiKey.scopes,
+    rateLimitPerMinute: apiKey.rateLimitPerMinute,
+    expiresAt: apiKey.expiresAt ? apiKey.expiresAt.toISOString() : null,
+  });
   void prisma.apiKey.update({ where: { id: apiKey.id }, data: { lastUsedAt: new Date() } }).catch(() => {});
 
-  return { projectId: apiKey.projectId };
+  return {
+    projectId: apiKey.projectId,
+    keyId: apiKey.id,
+    scopes: apiKey.scopes,
+    rateLimitPerMinute: apiKey.rateLimitPerMinute,
+  };
 }
 
 export type WorkspaceRole = "OWNER" | "ADMIN" | "MEMBER" | "VIEWER";
@@ -135,6 +158,10 @@ export function parseBasicAuth(header: string | null | undefined): { publicKey: 
 interface CachedKey {
   projectId: string;
   secretHash: string;
+  keyId: string;
+  scopes: string[];
+  rateLimitPerMinute: number | null;
+  expiresAt: string | null;
 }
 
 async function readCache(publicKey: string): Promise<CachedKey | null> {

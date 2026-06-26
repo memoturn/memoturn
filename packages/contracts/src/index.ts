@@ -308,6 +308,9 @@ export const apiKey = z.object({
   publicKey: z.string(),
   secretHint: z.string(),
   name: z.string(),
+  scopes: z.array(z.string()),
+  expiresAt: z.string().nullable(),
+  rateLimitPerMinute: z.number().nullable(),
   createdAt: z.string(),
   lastUsedAt: z.string().nullable(),
 });
@@ -319,6 +322,9 @@ export const apiKeyCreated = z.object({
   secretKey: z.string(), // shown once at creation
   secretHint: z.string(),
   name: z.string(),
+  scopes: z.array(z.string()),
+  expiresAt: z.string().nullable(),
+  rateLimitPerMinute: z.number().nullable(),
   createdAt: z.string(),
 });
 export type ApiKeyCreated = z.infer<typeof apiKeyCreated>;
