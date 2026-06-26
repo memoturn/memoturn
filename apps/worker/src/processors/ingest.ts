@@ -3,10 +3,13 @@ import { getRawBatch } from "@memoturn/db/blob";
 import { clickhouse } from "@memoturn/db/clickhouse";
 import type { IngestJob } from "@memoturn/db/queue";
 import {
+  applyMasking,
+  compileMaskers,
   dispatchAutomations,
   dispatchWebhooks,
   forwardEvent,
   listOnlineEvaluators,
+  loadMaskingPolicy,
   loadProjectPriceOverrides,
   offloadMedia,
   runEvaluator,
@@ -77,6 +80,18 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     const body = e.body as { input?: unknown; output?: unknown };
     if (body.input !== undefined) body.input = await offloadMedia(projectId, body.input);
     if (body.output !== undefined) body.output = await offloadMedia(projectId, body.output);
+  }
+
+  // Redact PII from input/output/metadata per the project's masking policy (before CH).
+  const maskingPolicy = await loadMaskingPolicy(projectId);
+  if (maskingPolicy.enabled) {
+    const maskers = compileMaskers(maskingPolicy);
+    for (const e of parsed.batch) {
+      const body = e.body as { input?: unknown; output?: unknown; metadata?: unknown };
+      if (body.input !== undefined) body.input = applyMasking(body.input, maskers);
+      if (body.output !== undefined) body.output = applyMasking(body.output, maskers);
+      if (body.metadata !== undefined) body.metadata = applyMasking(body.metadata, maskers);
+    }
   }
 
   const priceOverrides = compileModelPrices(await loadProjectPriceOverrides(projectId));

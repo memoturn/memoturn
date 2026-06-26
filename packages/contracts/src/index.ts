@@ -92,6 +92,15 @@ export const scheduledExportResult = z.object({
 });
 export type ScheduledExportResult = z.infer<typeof scheduledExportResult>;
 
+export const maskingPolicy = z.object({
+  enabled: z.boolean(),
+  builtins: z.array(z.string()),
+  customPatterns: z.array(z.string()),
+  redactWith: z.string(),
+  available: z.array(z.string()),
+});
+export type MaskingPolicy = z.infer<typeof maskingPolicy>;
+
 export const analyticsSink = z.object({
   enabled: z.boolean(),
   type: z.string(),

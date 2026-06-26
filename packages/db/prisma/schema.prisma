@@ -83,6 +83,7 @@ model Project {
   scheduledExport ScheduledExport?
   automations Automation[]
   analyticsSink AnalyticsSink?
+  maskingPolicy MaskingPolicy?
 
   @@unique([organizationId, slug])
 }
@@ -458,6 +459,21 @@ model SavedView {
   createdAt DateTime @default(now())
 
   @@index([projectId, table])
+}
+
+// PII masking policy: redact sensitive data from trace/observation input/output at
+// ingest (worker), before ClickHouse. `builtins` are named patterns (email/…),
+// `customPatterns` are user-supplied regex sources.
+model MaskingPolicy {
+  id             String   @id @default(cuid())
+  projectId      String   @unique
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  enabled        Boolean  @default(false)
+  builtins       String[] @default([])
+  customPatterns String[] @default([])
+  redactWith     String   @default("[REDACTED]")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
 // Product-analytics sink: forward trace/score events to PostHog for funnels.

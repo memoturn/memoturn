@@ -10,6 +10,7 @@ export * from "./datasets.js";
 export * from "./evaluators.js";
 export * from "./export.js";
 export * from "./ingest.js";
+export * from "./masking.js";
 export * from "./media.js";
 export * from "./metrics.js";
 export * from "./modelpricing.js";

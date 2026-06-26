@@ -17,6 +17,7 @@ import type {
   DatasetListItem,
   Evaluator,
   ExperimentComparison,
+  MaskingPolicy,
   MetricsSummary,
   ModelPriceList,
   PlaygroundResponse,
@@ -133,6 +134,13 @@ export const api = {
     rateLimitPerMinute?: number | null;
   }) => post<ApiKeyCreated>(`/v1/api-keys`, body),
   revokeApiKey: (id: string) => del(`/v1/api-keys/${encodeURIComponent(id)}`),
+  getMaskingPolicy: () => get<MaskingPolicy>(`/v1/masking`),
+  setMaskingPolicy: (body: {
+    enabled?: boolean;
+    builtins?: string[];
+    customPatterns?: string[];
+    redactWith?: string;
+  }) => post<MaskingPolicy>(`/v1/masking`, body),
   getAnalyticsSink: () => get<AnalyticsSink>(`/v1/analytics-sink`),
   setAnalyticsSink: (body: { enabled?: boolean; host?: string; apiKey?: string }) =>
     post<AnalyticsSink>(`/v1/analytics-sink`, body),

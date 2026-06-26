@@ -33,6 +33,7 @@ import {
   getAnalyticsSink,
   getDatasetComparison,
   getDatasetDetail,
+  getMaskingPolicy,
   getMedia,
   getMetrics,
   getPromptDetail,
@@ -67,6 +68,7 @@ import {
   runPlayground,
   runScheduledExport,
   setAnalyticsSink,
+  setMaskingPolicy,
   setRetention,
   setScheduledExport,
   storeDataUri,
@@ -139,6 +141,7 @@ app.use("/v1/media/*", requireAuth);
 app.use("/v1/analytics-sink", requireAuth);
 app.use("/v1/api-keys", requireAuth);
 app.use("/v1/api-keys/*", requireAuth);
+app.use("/v1/masking", requireAuth);
 
 // Per-project rate limiting runs after auth (projectId is set) on every /v1 route.
 app.use("/v1/*", rateLimit);
@@ -1797,6 +1800,54 @@ app.openapi(
     const body = c.req.valid("json");
     const result = await setAnalyticsSink(c.get("projectId"), body);
     await recordAudit(c.get("projectId"), c.get("actor"), "analytics-sink.set", `enabled:${result.enabled}`);
+    return c.json(result);
+  },
+);
+
+// ── PII masking policy ───────────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/masking",
+    summary: "Get the project's PII masking policy (+ the available built-in patterns)",
+    tags: ["platform"],
+    security,
+    responses: { 200: { description: "Policy", content: { "application/json": { schema: C.maskingPolicy } } } },
+  }),
+  async (c) => c.json(await getMaskingPolicy(c.get("projectId"))),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/masking",
+    summary: "Configure PII redaction applied to trace input/output at ingest",
+    tags: ["platform"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              enabled: z.boolean().optional(),
+              builtins: z.array(z.string()).optional(),
+              customPatterns: z.array(z.string()).optional(),
+              redactWith: z.string().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Updated", content: { "application/json": { schema: C.maskingPolicy } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const result = await setMaskingPolicy(c.get("projectId"), c.req.valid("json"));
+    await recordAudit(c.get("projectId"), c.get("actor"), "masking.set", `enabled:${result.enabled}`);
     return c.json(result);
   },
 );

@@ -49,6 +49,31 @@ function SettingsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }),
   });
 
+  const { data: masking } = useQuery({ queryKey: ["masking"], queryFn: () => api.getMaskingPolicy() });
+  const [maskEnabled, setMaskEnabled] = useState<boolean | null>(null);
+  const [maskBuiltins, setMaskBuiltins] = useState<string[] | null>(null);
+  const [maskCustom, setMaskCustom] = useState<string | null>(null);
+  const [maskRedact, setMaskRedact] = useState<string | null>(null);
+  const maskEnabledVal = maskEnabled ?? masking?.enabled ?? false;
+  const maskBuiltinsVal = maskBuiltins ?? masking?.builtins ?? [];
+  const maskCustomVal = maskCustom ?? (masking?.customPatterns ?? []).join("\n");
+  const maskRedactVal = maskRedact ?? masking?.redactWith ?? "[REDACTED]";
+  const toggleBuiltin = (b: string) =>
+    setMaskBuiltins(maskBuiltinsVal.includes(b) ? maskBuiltinsVal.filter((x) => x !== b) : [...maskBuiltinsVal, b]);
+  const saveMasking = useMutation({
+    mutationFn: () =>
+      api.setMaskingPolicy({
+        enabled: maskEnabledVal,
+        builtins: maskBuiltinsVal,
+        customPatterns: maskCustomVal
+          .split("\n")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        redactWith: maskRedactVal,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["masking"] }),
+  });
+
   const { data: retention } = useQuery({ queryKey: ["retention"], queryFn: () => api.getRetention() });
   const [days, setDays] = useState<number | null>(null);
   const saveRetention = useMutation({
@@ -405,6 +430,38 @@ function SettingsPage() {
           {saveAnalytics.isPending ? "Saving…" : "Save"}
         </button>
       </div>
+
+      <h2>PII masking</h2>
+      <p className="obs-meta">
+        When enabled, the worker redacts matches from trace/observation input/output (and metadata) at ingest, before
+        they're stored. Built-in patterns plus your own regexes (one per line).
+      </p>
+      <div className="filters" style={{ flexWrap: "wrap", alignItems: "center" }}>
+        <label className="inline-check">
+          <input type="checkbox" checked={maskEnabledVal} onChange={(e) => setMaskEnabled(e.target.checked)} /> enabled
+        </label>
+        {(masking?.available ?? []).map((b) => (
+          <label key={b} className="inline-check">
+            <input type="checkbox" checked={maskBuiltinsVal.includes(b)} onChange={() => toggleBuiltin(b)} /> {b}
+          </label>
+        ))}
+        <input
+          placeholder="redact with"
+          value={maskRedactVal}
+          onChange={(e) => setMaskRedact(e.target.value)}
+          style={{ width: 130 }}
+        />
+        <button disabled={saveMasking.isPending} onClick={() => saveMasking.mutate()}>
+          {saveMasking.isPending ? "Saving…" : "Save masking"}
+        </button>
+      </div>
+      <textarea
+        className="pg-input"
+        placeholder="custom regex patterns, one per line (e.g. sk-[a-z0-9]+)"
+        value={maskCustomVal}
+        onChange={(e) => setMaskCustom(e.target.value)}
+        rows={3}
+      />
 
       <h2>Webhooks</h2>
       <p className="obs-meta">
