@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { api, type ReviewItem } from "../lib/api";
+import { api, type ReviewItem, type ScoreConfig } from "../lib/api";
 
 export const Route = createFileRoute("/review")({ component: ReviewPage });
 
@@ -14,11 +14,24 @@ function pretty(v: string): string {
   }
 }
 
-function ReviewCard({ queue, item, onDone }: { queue: string; item: ReviewItem; onDone: () => void }) {
+function ReviewCard({
+  queue,
+  item,
+  config,
+  onDone,
+}: {
+  queue: string;
+  item: ReviewItem;
+  config?: ScoreConfig;
+  onDone: () => void;
+}) {
+  const categorical = config?.dataType === "CATEGORICAL" && config.categories.length > 0;
   const [value, setValue] = useState(1);
+  const [stringValue, setStringValue] = useState(config?.categories[0] ?? "");
   const [comment, setComment] = useState("");
   const submit = useMutation({
-    mutationFn: () => api.submitReviewScore(queue, item.id, { value, comment }),
+    mutationFn: () =>
+      api.submitReviewScore(queue, item.id, categorical ? { stringValue, comment } : { value, comment }),
     onSuccess: onDone,
   });
   return (
@@ -31,14 +44,24 @@ function ReviewCard({ queue, item, onDone }: { queue: string; item: ReviewItem; 
       {item.trace.input && <pre>{pretty(item.trace.input)}</pre>}
       {item.trace.output && <pre>{pretty(item.trace.output)}</pre>}
       <div className="filters">
-        <input
-          type="number"
-          step="0.1"
-          value={value}
-          onChange={(e) => setValue(Number(e.target.value))}
-          title="score value"
-          style={{ width: 90 }}
-        />
+        {categorical ? (
+          <select value={stringValue} onChange={(e) => setStringValue(e.target.value)}>
+            {config!.categories.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type="number"
+            step="0.1"
+            value={value}
+            onChange={(e) => setValue(Number(e.target.value))}
+            title="score value"
+            style={{ width: 90 }}
+          />
+        )}
         <input
           placeholder="comment"
           value={comment}
@@ -74,6 +97,8 @@ function ReviewPage() {
     enabled: !!selected,
     refetchInterval: 5_000,
   });
+  const { data: scoreConfigs } = useQuery({ queryKey: ["score-configs"], queryFn: () => api.listScoreConfigs() });
+  const queueConfig = scoreConfigs?.find((s) => s.name === items?.queue.scoreName);
 
   return (
     <div>
@@ -135,6 +160,7 @@ function ReviewPage() {
                   key={item.id}
                   queue={selected}
                   item={item}
+                  config={queueConfig}
                   onDone={() => {
                     qc.invalidateQueries({ queryKey: ["review-items", selected] });
                     qc.invalidateQueries({ queryKey: ["review-queues"] });

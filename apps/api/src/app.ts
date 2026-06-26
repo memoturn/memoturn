@@ -12,9 +12,11 @@ import {
   createPromptVersion,
   createProviderConnection,
   createReviewQueue,
+  createScoreConfig,
   createWebhook,
   createWidget,
   deleteComment,
+  deleteScoreConfig,
   deleteWebhook,
   deleteWidget,
   exportTracesJsonl,
@@ -31,6 +33,7 @@ import {
   listProviderConnections,
   listReviewItems,
   listReviewQueues,
+  listScoreConfigs,
   listSessions,
   listTraces,
   listUserProjects,
@@ -96,6 +99,8 @@ app.use("/v1/widgets", requireAuth);
 app.use("/v1/widgets/*", requireAuth);
 app.use("/v1/comments", requireAuth);
 app.use("/v1/comments/*", requireAuth);
+app.use("/v1/score-configs", requireAuth);
+app.use("/v1/score-configs/*", requireAuth);
 
 // Streaming playground (SSE) — plain route; emits { delta } events then [DONE].
 app.post("/v1/playground/stream", async (c) => {
@@ -1085,6 +1090,77 @@ app.openapi(
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
     return c.json(await deleteWidget(c.get("projectId"), c.req.valid("param").id));
+  },
+);
+
+// ── Score configs ────────────────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/score-configs",
+    summary: "List score configs",
+    tags: ["evaluators"],
+    security,
+    responses: {
+      200: { description: "Score configs", content: { "application/json": { schema: C.listOf(C.scoreConfig) } } },
+    },
+  }),
+  async (c) => c.json({ data: await listScoreConfigs(c.get("projectId")) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/score-configs",
+    summary: "Create/update a score config",
+    tags: ["evaluators"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              name: z.string().min(1),
+              dataType: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]).optional(),
+              categories: z.array(z.string()).optional(),
+              min: z.number().nullable().optional(),
+              max: z.number().nullable().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: C.scoreConfig } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const result = await createScoreConfig(c.get("projectId"), c.req.valid("json"));
+    await recordAudit(c.get("projectId"), c.get("actor"), "score-config.create", `score:${result.name}`);
+    return c.json(result, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/score-configs/{id}",
+    summary: "Delete a score config",
+    tags: ["evaluators"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Deleted", content: { "application/json": { schema: z.object({ deleted: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    return c.json(await deleteScoreConfig(c.get("projectId"), c.req.valid("param").id));
   },
 );
 

@@ -23,6 +23,16 @@ export const traceSummary = z.object({
 });
 export type TraceSummary = z.infer<typeof traceSummary>;
 
+export const scoreConfig = z.object({
+  id: z.string(),
+  name: z.string(),
+  dataType: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]),
+  categories: z.array(z.string()),
+  min: z.number().nullable(),
+  max: z.number().nullable(),
+});
+export type ScoreConfig = z.infer<typeof scoreConfig>;
+
 export const comment = z.object({
   id: z.string(),
   objectType: z.string(),

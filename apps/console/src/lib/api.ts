@@ -20,6 +20,7 @@ import type {
   ProviderConnection,
   ReviewItemsResponse,
   ReviewQueue,
+  ScoreConfig,
   SessionSummary,
   TraceDetail,
   TraceSummary,
@@ -111,6 +112,15 @@ export const api = {
   listWebhooks: () => get<{ data: Webhook[] }>(`/v1/webhooks`).then((r) => r.data),
   createWebhook: (body: { url: string; event?: string; threshold?: number | null }) => post(`/v1/webhooks`, body),
   deleteWebhook: (id: string) => del(`/v1/webhooks/${encodeURIComponent(id)}`),
+  listScoreConfigs: () => get<{ data: ScoreConfig[] }>(`/v1/score-configs`).then((r) => r.data),
+  createScoreConfig: (body: {
+    name: string;
+    dataType?: string;
+    categories?: string[];
+    min?: number | null;
+    max?: number | null;
+  }) => post(`/v1/score-configs`, body),
+  deleteScoreConfig: (id: string) => del(`/v1/score-configs/${encodeURIComponent(id)}`),
   listComments: (objectType: string, objectId: string) =>
     get<{ data: Comment[] }>(`/v1/comments${qs({ objectType, objectId })}`).then((r) => r.data),
   createComment: (objectType: string, objectId: string, content: string) =>

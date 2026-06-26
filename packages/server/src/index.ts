@@ -13,6 +13,7 @@ export * from "./prompts.js";
 export * from "./providers.js";
 export * from "./retention.js";
 export * from "./review.js";
+export * from "./scoreconfigs.js";
 export * from "./traces.js";
 export * from "./webhooks.js";
 export * from "./widgets.js";

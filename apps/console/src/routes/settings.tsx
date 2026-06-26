@@ -45,6 +45,34 @@ function SettingsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["webhooks"] }),
   });
 
+  const { data: scoreConfigs } = useQuery({ queryKey: ["score-configs"], queryFn: () => api.listScoreConfigs() });
+  const [scName, setScName] = useState("");
+  const [scType, setScType] = useState("NUMERIC");
+  const [scCategories, setScCategories] = useState("");
+  const addScoreConfig = useMutation({
+    mutationFn: () =>
+      api.createScoreConfig({
+        name: scName,
+        dataType: scType,
+        categories:
+          scType === "CATEGORICAL"
+            ? scCategories
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean)
+            : [],
+      }),
+    onSuccess: () => {
+      setScName("");
+      setScCategories("");
+      qc.invalidateQueries({ queryKey: ["score-configs"] });
+    },
+  });
+  const removeScoreConfig = useMutation({
+    mutationFn: (id: string) => api.deleteScoreConfig(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["score-configs"] }),
+  });
+
   return (
     <div>
       <h1>Settings</h1>
@@ -151,6 +179,58 @@ function SettingsPage() {
                 <td>{w.threshold ?? "—"}</td>
                 <td>
                   <button className="link-btn" onClick={() => removeWebhook.mutate(w.id)}>
+                    delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <h2>Score configs</h2>
+      <p className="obs-meta">
+        Define the scores used for this project. Categorical configs drive the review form (dropdown of categories).
+      </p>
+      <div className="filters">
+        <input placeholder="score name" value={scName} onChange={(e) => setScName(e.target.value)} />
+        <select value={scType} onChange={(e) => setScType(e.target.value)}>
+          <option value="NUMERIC">numeric</option>
+          <option value="CATEGORICAL">categorical</option>
+          <option value="BOOLEAN">boolean</option>
+        </select>
+        {scType === "CATEGORICAL" && (
+          <input
+            placeholder="categories (comma-separated)"
+            value={scCategories}
+            onChange={(e) => setScCategories(e.target.value)}
+            style={{ width: 240 }}
+          />
+        )}
+        <button disabled={!scName || addScoreConfig.isPending} onClick={() => addScoreConfig.mutate()}>
+          {addScoreConfig.isPending ? "Saving…" : "Add score"}
+        </button>
+      </div>
+      {scoreConfigs && scoreConfigs.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Categories</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {scoreConfigs.map((s) => (
+              <tr key={s.id}>
+                <td>{s.name}</td>
+                <td>
+                  <span className="badge">{s.dataType.toLowerCase()}</span>
+                </td>
+                <td className="obs-meta">{s.categories.join(", ") || "—"}</td>
+                <td>
+                  <button className="link-btn" onClick={() => removeScoreConfig.mutate(s.id)}>
                     delete
                   </button>
                 </td>
