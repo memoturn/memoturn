@@ -84,6 +84,98 @@ function WaterfallRow({ obs }: { obs: Laid }) {
   );
 }
 
+// ── Agent graph: nodes = observations, edges = parent links, layered by depth ─────
+const GRAPH_COLOR: Record<string, string> = { GENERATION: "#6d8bff", SPAN: "#4ade80", EVENT: "#fbbf24" };
+const NODE_W = 172;
+const NODE_H = 34;
+const HGAP = 48;
+const VGAP = 14;
+
+function AgentGraph({ observations }: { observations: ObservationDetail[] }) {
+  if (observations.length === 0) return <div className="empty">No observations to graph.</div>;
+
+  const byId = new Map(observations.map((o) => [o.id, o]));
+  const depthOf = (o: ObservationDetail): number => {
+    let d = 0;
+    let cur: ObservationDetail | undefined = o;
+    const seen = new Set<string>();
+    while (cur?.parent_observation_id && byId.has(cur.parent_observation_id) && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      cur = byId.get(cur.parent_observation_id);
+      d++;
+    }
+    return d;
+  };
+
+  const ordered = [...observations].sort((a, b) => (ms(a.start_time) ?? 0) - (ms(b.start_time) ?? 0));
+  const layers = new Map<number, ObservationDetail[]>();
+  for (const o of ordered) {
+    const d = depthOf(o);
+    const arr = layers.get(d) ?? [];
+    arr.push(o);
+    layers.set(d, arr);
+  }
+
+  const pos = new Map<string, { x: number; y: number }>();
+  for (const [depth, arr] of layers) {
+    arr.forEach((o, row) => {
+      pos.set(o.id, { x: depth * (NODE_W + HGAP), y: row * (NODE_H + VGAP) });
+    });
+  }
+
+  const maxDepth = Math.max(0, ...[...layers.keys()]);
+  const maxRows = Math.max(1, ...[...layers.values()].map((a) => a.length));
+  const width = (maxDepth + 1) * NODE_W + maxDepth * HGAP;
+  const height = maxRows * (NODE_H + VGAP);
+
+  const edges = observations.flatMap((o) => {
+    if (!o.parent_observation_id) return [];
+    const from = pos.get(o.parent_observation_id);
+    const to = pos.get(o.id);
+    return from && to ? [{ from, to }] : [];
+  });
+
+  return (
+    <div className="agraph">
+      <svg width={width} height={height} role="img" aria-label="Agent run graph">
+        <title>Agent run graph</title>
+        {edges.map((e, i) => {
+          const x1 = e.from.x + NODE_W;
+          const y1 = e.from.y + NODE_H / 2;
+          const x2 = e.to.x;
+          const y2 = e.to.y + NODE_H / 2;
+          const mx = (x1 + x2) / 2;
+          return (
+            <path
+              key={i}
+              d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`}
+              fill="none"
+              stroke="#232a36"
+              strokeWidth={1.5}
+            />
+          );
+        })}
+        {observations.map((o) => {
+          const p = pos.get(o.id);
+          if (!p) return null;
+          const color = GRAPH_COLOR[o.type] ?? "#8b94a7";
+          const label = o.name || o.id.slice(0, 8);
+          return (
+            <g key={o.id} transform={`translate(${p.x}, ${p.y})`}>
+              <title>{`${o.type} · ${o.name || o.id}${o.model ? ` · ${o.model}` : ""} · ${o.latency_ms} ms`}</title>
+              <rect width={NODE_W} height={NODE_H} rx={7} fill="#141821" stroke={color} strokeWidth={1.5} />
+              <circle cx={14} cy={NODE_H / 2} r={4} fill={color} />
+              <text x={26} y={NODE_H / 2 + 4} fill="#e6e9ef" fontSize={12}>
+                {label.length > 20 ? `${label.slice(0, 19)}…` : label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 function ObservationDetailRow({ obs }: { obs: ObservationDetail }) {
   if (!obs.input && !obs.output && obs.level === "DEFAULT") return null;
   return (
@@ -103,6 +195,7 @@ function ObservationDetailRow({ obs }: { obs: ObservationDetail }) {
 
 function TraceDetailPage() {
   const { id } = Route.useParams();
+  const [view, setView] = useState<"timeline" | "graph">("timeline");
   const {
     data: trace,
     isLoading,
@@ -168,12 +261,28 @@ function TraceDetailPage() {
         </>
       )}
 
-      <h2>Timeline ({trace.observation_count})</h2>
-      <div className="waterfall">
-        {layout(trace.observations).map((obs) => (
-          <WaterfallRow key={obs.id} obs={obs} />
-        ))}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+        <h2>
+          {view === "timeline" ? "Timeline" : "Graph"} ({trace.observation_count})
+        </h2>
+        <div className="seg">
+          <button type="button" className={view === "timeline" ? "active" : ""} onClick={() => setView("timeline")}>
+            timeline
+          </button>
+          <button type="button" className={view === "graph" ? "active" : ""} onClick={() => setView("graph")}>
+            graph
+          </button>
+        </div>
       </div>
+      {view === "timeline" ? (
+        <div className="waterfall">
+          {layout(trace.observations).map((obs) => (
+            <WaterfallRow key={obs.id} obs={obs} />
+          ))}
+        </div>
+      ) : (
+        <AgentGraph observations={trace.observations} />
+      )}
 
       <h2>Payloads</h2>
       <div className="tree">
