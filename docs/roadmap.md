@@ -53,7 +53,7 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 
 | Feature | Effort | Notes |
 | --- | --- | --- |
-| **MCP server** | M | Expose prompts / datasets / review queues as MCP tools for agent IDEs. |
+| ~~**MCP server**~~ | Done | Stdio MCP server (`apps/mcp`) exposing prompts / datasets / review queues as tools for agent IDEs. |
 | **More OTel coverage** | M | OTLP/protobuf (currently JSON only); richer GenAI semconv mapping. |
 | **Product-analytics export** | M | Forward events to an analytics sink (e.g. PostHog) for funnels. |
 
@@ -70,6 +70,6 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 1. ~~**Comments** + **Tags/facets**~~ — done.
 2. ~~**Score configs**~~ — done.
 3. ~~**Batch actions** + **saved table views**~~ — done.
-4. **MCP server** — high-leverage integration surface.
+4. ~~**MCP server**~~ — done.
 
 Larger bets (organizations, multimodal media) are scoped separately when prioritized.

@@ -1,0 +1,25 @@
+{
+  "name": "@memoturn/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "memoturn-mcp": "src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun --watch --env-file=../../.env src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "biome check .",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@memoturn/core": "workspace:*",
+    "@memoturn/db": "workspace:*",
+    "@memoturn/server": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}
