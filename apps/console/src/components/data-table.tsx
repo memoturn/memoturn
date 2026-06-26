@@ -91,12 +91,12 @@ export function DataTable<TData, TValue>({
                   const canSort = header.column.getCanSort();
                   const sorted = header.column.getIsSorted();
                   return (
-                    <TableHead key={header.id} className={canSort ? "p-0" : undefined}>
+                    <TableHead key={header.id}>
                       {header.isPlaceholder ? null : canSort ? (
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="-ml-2 h-8 gap-1 data-[state=open]:bg-accent"
+                          className="-ml-2 h-8 gap-1 px-2 data-[state=open]:bg-accent"
                           onClick={header.column.getToggleSortingHandler()}
                         >
                           {flexRender(header.column.columnDef.header, header.getContext())}
