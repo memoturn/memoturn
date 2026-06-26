@@ -30,6 +30,15 @@ jobs:
       redis:
         image: valkey/valkey:8-alpine
         ports: ["6379:6379"]
+      # bitnami/minio runs the server by default (no command override, which GitHub
+      # service containers can't set) and auto-creates MINIO_DEFAULT_BUCKETS.
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: memoturn
+          MINIO_ROOT_PASSWORD: memoturn123
+          MINIO_DEFAULT_BUCKETS: memoturn
+        ports: ["9000:9000"]
 
     env:
       DATABASE_URL: postgresql://memoturn:memoturn@localhost:5432/memoturn?schema=public
@@ -38,6 +47,12 @@ jobs:
       CLICKHOUSE_PASSWORD: memoturn
       CLICKHOUSE_DB: memoturn
       REDIS_URL: redis://localhost:6379
+      BLOB_ENDPOINT: http://localhost:9000
+      BLOB_REGION: us-east-1
+      BLOB_BUCKET: memoturn
+      BLOB_ACCESS_KEY_ID: memoturn
+      BLOB_SECRET_ACCESS_KEY: memoturn123
+      BLOB_FORCE_PATH_STYLE: "true"
 
     steps:
       - uses: actions/checkout@v4
@@ -56,6 +71,15 @@ jobs:
       - run: bun --filter @memoturn/db generate
       - run: bun --filter @memoturn/db migrate
       - run: bun run db:clickhouse
+      # Wait for MinIO before the integration test writes a blob (services start
+      # concurrently and bitnami/minio doesn't expose a health-cmd we can wire here).
+      - name: Wait for MinIO
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live; then echo "minio ready"; exit 0; fi
+            sleep 2
+          done
+          echo "minio did not become ready" >&2; exit 1
       - run: bun run test
       - run: bun run typecheck
       - run: bun run build
