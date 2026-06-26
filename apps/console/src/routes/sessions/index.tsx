@@ -6,10 +6,13 @@ import { MessageSquare } from "lucide-react";
 import { DataTable } from "../../components/data-table";
 import { EmptyState } from "../../components/empty-state";
 import { PageHeader } from "../../components/page-header";
+import { StatTile } from "../../components/stat-tile";
 import { Skeleton } from "../../components/ui/skeleton";
 import { api } from "../../lib/api";
 
 export const Route = createFileRoute("/sessions/")({ component: SessionsPage });
+
+const money = (n: number) => (n > 0 ? `$${n.toFixed(4)}` : "—");
 
 const columns: ColumnDef<SessionSummary>[] = [
   {
@@ -65,13 +68,20 @@ function SessionsPage() {
           description="Sessions appear when traces share a session id."
         />
       ) : (
-        <DataTable
-          columns={columns}
-          data={sessions}
-          filterColumn="session_id"
-          filterPlaceholder="Filter sessions…"
-          onRowClick={(s) => navigate({ to: "/sessions/$id", params: { id: s.session_id } })}
-        />
+        <div className="space-y-6">
+          <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
+            <StatTile label="Sessions" value={sessions.length} />
+            <StatTile label="Traces" value={sessions.reduce((a, s) => a + Number(s.trace_count), 0)} />
+            <StatTile label="Cost" value={money(sessions.reduce((a, s) => a + Number(s.total_cost), 0))} />
+          </div>
+          <DataTable
+            columns={columns}
+            data={sessions}
+            filterColumn="session_id"
+            filterPlaceholder="Filter sessions…"
+            onRowClick={(s) => navigate({ to: "/sessions/$id", params: { id: s.session_id } })}
+          />
+        </div>
       )}
     </div>
   );

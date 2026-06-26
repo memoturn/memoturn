@@ -7,6 +7,7 @@ import { DataTable } from "../../components/data-table";
 import { EmptyState } from "../../components/empty-state";
 import { KindBadge } from "../../components/kind-badge";
 import { PageHeader } from "../../components/page-header";
+import { StatTile } from "../../components/stat-tile";
 import { Skeleton } from "../../components/ui/skeleton";
 import { api } from "../../lib/api";
 
@@ -75,7 +76,14 @@ function PromptsPage() {
       ) : !prompts || prompts.length === 0 ? (
         <EmptyState icon={FileText} title="No prompts yet" description="Create one with POST /v1/prompts or the SDK." />
       ) : (
-        <DataTable columns={columns} data={prompts} filterColumn="name" filterPlaceholder="Filter prompts…" />
+        <div className="space-y-6">
+          <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
+            <StatTile label="Prompts" value={prompts.length} />
+            <StatTile label="Versions" value={prompts.reduce((a, p) => a + Number(p.versions), 0)} />
+            <StatTile label="Channels" value={prompts.reduce((a, p) => a + p.channels.length, 0)} />
+          </div>
+          <DataTable columns={columns} data={prompts} filterColumn="name" filterPlaceholder="Filter prompts…" />
+        </div>
       )}
     </div>
   );

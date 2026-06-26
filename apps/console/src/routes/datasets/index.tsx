@@ -6,6 +6,7 @@ import { Database } from "lucide-react";
 import { DataTable } from "../../components/data-table";
 import { EmptyState } from "../../components/empty-state";
 import { PageHeader } from "../../components/page-header";
+import { StatTile } from "../../components/stat-tile";
 import { Skeleton } from "../../components/ui/skeleton";
 import { api } from "../../lib/api";
 
@@ -60,7 +61,14 @@ function DatasetsPage() {
           description="Create one with POST /v1/datasets or the SDK."
         />
       ) : (
-        <DataTable columns={columns} data={datasets} filterColumn="name" filterPlaceholder="Filter datasets…" />
+        <div className="space-y-6">
+          <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
+            <StatTile label="Datasets" value={datasets.length} />
+            <StatTile label="Items" value={datasets.reduce((a, d) => a + Number(d.items), 0)} />
+            <StatTile label="Runs" value={datasets.reduce((a, d) => a + Number(d.runs), 0)} />
+          </div>
+          <DataTable columns={columns} data={datasets} filterColumn="name" filterPlaceholder="Filter datasets…" />
+        </div>
       )}
     </div>
   );

@@ -7,6 +7,7 @@ import { DataTable } from "../components/data-table";
 import { EmptyState } from "../components/empty-state";
 import { KindBadge } from "../components/kind-badge";
 import { PageHeader } from "../components/page-header";
+import { StatTile } from "../components/stat-tile";
 import { Skeleton } from "../components/ui/skeleton";
 import { api } from "../lib/api";
 
@@ -48,7 +49,13 @@ function AuditPage() {
       ) : !logs || logs.length === 0 ? (
         <EmptyState icon={ScrollText} title="No audit entries yet" description="Mutating actions will appear here." />
       ) : (
-        <DataTable columns={columns} data={logs} filterColumn="actor" filterPlaceholder="Filter by actor…" />
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 gap-4 sm:max-w-md">
+            <StatTile label="Entries" value={logs.length} />
+            <StatTile label="Actors" value={new Set(logs.map((l) => l.actor)).size} />
+          </div>
+          <DataTable columns={columns} data={logs} filterColumn="actor" filterPlaceholder="Filter by actor…" />
+        </div>
       )}
     </div>
   );

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { EmptyState } from "../../components/empty-state";
 import { KindBadge } from "../../components/kind-badge";
 import { PageHeader } from "../../components/page-header";
+import { StatTile } from "../../components/stat-tile";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
@@ -134,6 +135,14 @@ function TracesPage() {
           </>
         }
       />
+
+      {traces && traces.length > 0 && (
+        <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
+          <StatTile label="Traces" value={traces.length} />
+          <StatTile label="Tokens" value={traces.reduce((a, t) => a + Number(t.total_tokens), 0)} />
+          <StatTile label="Cost" value={fmtCost(traces.reduce((a, t) => a + Number(t.total_cost), 0))} />
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <Input
