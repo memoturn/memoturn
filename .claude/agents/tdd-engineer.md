@@ -1,5 +1,5 @@
 ---
-name: tdd
+name: tdd-engineer
 description: Use to build or change logic in memoturn test-first (red → green → refactor) — a failing test before implementation, then the minimal code to pass. Best for packages/core, packages/server, and apps/worker (the workspaces wired with vitest). Use when the user asks for TDD, a test-first workflow, or "write tests for X".
 tools: Read, Edit, Write, Grep, Bash
 model: sonnet

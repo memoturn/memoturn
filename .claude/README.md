@@ -13,7 +13,7 @@ Delegated subagents for multi-file work that benefits from its own context. Invo
 | `prisma-migrator` | sonnet · green | Change `schema.prisma`: the `Project` reverse-relation rule, migrate with env loading, regenerate, typecheck. |
 | `ingest-syncer` | opus · purple | Change an ingest event shape, keeping `events.ts` ↔ `mappers.ts` ↔ ClickHouse SQL ↔ tests aligned. |
 | `rbac-auditor` | sonnet · red | Run `rbac:check` and fix confirmed gaps (mutating routes missing `denyIfReadOnly` + `403`). |
-| `tdd` | sonnet · yellow | Build/change logic test-first (red → green → refactor) in core/server/worker. |
+| `tdd-engineer` | sonnet · yellow | Build/change logic test-first (red → green → refactor) in core/server/worker. |
 
 ## Skills (`skills/`)
 
