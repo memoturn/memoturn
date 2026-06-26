@@ -24,6 +24,20 @@ console is a static SPA — build it (`bun --filter @memoturn/console build`) an
 output behind any static host / CDN, with a reverse proxy routing `/api/*` to the API and
 SPA-fallback (rewrite unknown paths to `index.html`) for deep links.
 
+## Kubernetes (Helm)
+
+For production, the chart at `infra/helm/memoturn` deploys the stateless API (behind an
+HPA), the worker, and the console; Postgres / ClickHouse / Redis / blob are expected to be
+external (managed services or operators). A pre-install/upgrade hook Job runs the Prisma +
+ClickHouse migrations before pods roll. Published images come from `ghcr.io/memoturn/*`.
+
+```bash
+helm install memoturn ./infra/helm/memoturn -f my-values.yaml
+```
+
+See `infra/helm/memoturn/README.md` for required values (datastore URLs, `betterAuthSecret`,
+`encryptionKey`) and the ingress / autoscaling options.
+
 ## Migrations
 
 ```bash

@@ -1,0 +1,117 @@
+# Default values for the memoturn chart.
+# The API + worker share one image registry/repo; image names are <repository>/<component>.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  registry: ghcr.io
+  repository: memoturn # images resolve to <registry>/<repository>/{api,worker,console}
+  tag: "" # defaults to .Chart.appVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ── Datastores + secrets ─────────────────────────────────────────────────────────
+# memoturn does NOT ship Postgres/ClickHouse/Redis/blob — point these at managed
+# services or in-cluster operators. Provide values here (a Secret + ConfigMap are
+# rendered) or set existingSecret to a Secret you manage holding the same keys.
+config:
+  existingSecret: ""
+
+  # Sensitive — rendered into the chart Secret unless existingSecret is set.
+  databaseUrl: "" # postgresql://user:pass@host:5432/memoturn?schema=public
+  redisUrl: "" # redis://host:6379
+  betterAuthSecret: "" # REQUIRED: signing secret for Better Auth sessions
+  encryptionKey: "" # REQUIRED: 32-byte key for encrypting stored provider keys
+  clickhouse:
+    url: "" # http://host:8123
+    user: memoturn
+    password: ""
+    db: memoturn
+  blob:
+    endpoint: "" # https://s3.amazonaws.com or http://minio:9000
+    accessKeyId: ""
+    secretAccessKey: ""
+
+  # Non-sensitive — rendered into the chart ConfigMap.
+  blobRegion: us-east-1
+  blobBucket: memoturn
+  blobForcePathStyle: "true" # "true" for MinIO/R2 path-style; "false" for AWS S3
+  authBaseUrl: "" # public URL of the API, e.g. https://memoturn.example.com
+  authTrustedOrigins: "" # comma-separated console origins allowed to call auth
+
+# Extra env injected into api + worker (e.g. RATE_LIMIT_PER_MINUTE, WORKER_CONCURRENCY).
+extraEnv: []
+# - name: RATE_LIMIT_PER_MINUTE
+#   value: "600"
+extraEnvFrom: []
+
+# Run `db:migrate` (Prisma) + `db:clickhouse` as a pre-install/upgrade Job.
+migrations:
+  enabled: true
+  backoffLimit: 3
+
+api:
+  replicaCount: 2
+  port: 3001
+  service:
+    type: ClusterIP
+    port: 3001
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+worker:
+  replicaCount: 1
+  port: 3002 # /health + /metrics
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+console:
+  enabled: true
+  replicaCount: 2
+  port: 3000
+  service:
+    type: ClusterIP
+    port: 3000
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Single ingress fronting both services: /v1, /auth, /docs, /openapi.json -> api; / -> console.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: memoturn.local
+  tls: []
+  # - secretName: memoturn-tls
+  #   hosts: [memoturn.example.com]

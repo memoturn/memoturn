@@ -1,0 +1,38 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "memoturn.fullname" . }}-migrate
+  labels:
+    {{- include "memoturn.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    # Run before the app rolls out, on install and every upgrade.
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "memoturn.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "memoturn.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ include "memoturn.image" (list . "api") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Apply Prisma (Postgres) migrations, then ClickHouse DDL.
+          command: ["/bin/sh", "-c"]
+          args:
+            - bun run db:migrate && bun run db:clickhouse
+          envFrom:
+            {{- include "memoturn.envFrom" . | nindent 12 }}
+{{- end }}

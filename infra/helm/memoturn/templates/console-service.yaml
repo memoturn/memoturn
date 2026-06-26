@@ -1,0 +1,18 @@
+{{- if .Values.console.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "memoturn.fullname" . }}-console
+  labels:
+    {{- include "memoturn.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+spec:
+  type: {{ .Values.console.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.console.service.port }}
+      targetPort: http
+  selector:
+    {{- include "memoturn.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+{{- end }}

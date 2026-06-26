@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "memoturn.fullname" . }}-config
+  labels:
+    {{- include "memoturn.labels" . | nindent 4 }}
+data:
+  NODE_ENV: production
+  CLICKHOUSE_USER: {{ .Values.config.clickhouse.user | quote }}
+  CLICKHOUSE_DB: {{ .Values.config.clickhouse.db | quote }}
+  BLOB_REGION: {{ .Values.config.blobRegion | quote }}
+  BLOB_BUCKET: {{ .Values.config.blobBucket | quote }}
+  BLOB_FORCE_PATH_STYLE: {{ .Values.config.blobForcePathStyle | quote }}
+  {{- with .Values.config.authBaseUrl }}
+  AUTH_BASE_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.authTrustedOrigins }}
+  AUTH_TRUSTED_ORIGINS: {{ . | quote }}
+  {{- end }}

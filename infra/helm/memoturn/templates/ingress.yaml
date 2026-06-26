@@ -1,0 +1,45 @@
+{{- if .Values.ingress.enabled }}
+{{- $fullName := include "memoturn.fullname" . -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "memoturn.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          # API + auth + OpenAPI surface.
+          {{- range $path := list "/v1" "/auth" "/docs" "/openapi.json" }}
+          - path: {{ $path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullName }}-api
+                port:
+                  number: {{ $.Values.api.service.port }}
+          {{- end }}
+          {{- if $.Values.console.enabled }}
+          # Everything else -> console SPA.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullName }}-console
+                port:
+                  number: {{ $.Values.console.service.port }}
+          {{- end }}
+{{- end }}

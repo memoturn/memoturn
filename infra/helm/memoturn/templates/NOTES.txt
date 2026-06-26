@@ -1,0 +1,25 @@
+memoturn {{ .Chart.AppVersion }} is deploying.
+
+Components:
+  - API     : {{ include "memoturn.fullname" . }}-api (:{{ .Values.api.service.port }})
+  - Worker  : {{ include "memoturn.fullname" . }}-worker (health :{{ .Values.worker.port }})
+{{- if .Values.console.enabled }}
+  - Console : {{ include "memoturn.fullname" . }}-console (:{{ .Values.console.service.port }})
+{{- end }}
+{{- if .Values.migrations.enabled }}
+  - Migrations ran as a pre-install/upgrade Job (Prisma + ClickHouse DDL).
+{{- end }}
+
+{{- if .Values.ingress.enabled }}
+
+Reach it at: http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}
+  API docs : http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}/docs
+{{- else }}
+
+No ingress is enabled. Port-forward to try it locally:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "memoturn.fullname" . }}-api {{ .Values.api.service.port }}:{{ .Values.api.service.port }}
+  curl http://localhost:{{ .Values.api.service.port }}/v1/health
+{{- end }}
+
+Check rollout:
+  kubectl --namespace {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
