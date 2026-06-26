@@ -7,29 +7,30 @@ triggered by pushing a `v*` tag (or run manually via *workflow_dispatch*).
 
 ## One-time setup
 
-**npm** — add one repository secret (Settings → Secrets and variables → Actions):
+Both SDK registries use **Trusted Publishing** (OIDC) — **no secrets to manage**. Register
+the trusted publisher once on each, pointing at this repo + `release.yml`:
 
-| Secret | Used by | How to get it |
-| --- | --- | --- |
-| `NPM_TOKEN` | npm publish | npm → Access Tokens → **Granular** token, read+write, scoped to `@memoturn` |
+- **npm** — npmjs.com → `@memoturn/sdk` → **Settings → Trusted Publisher** → GitHub Actions,
+  owner `memoturn`, repo `memoturn`, workflow `release.yml`.
+- **PyPI** — PyPI → your account → **Publishing → Add a pending publisher**: project `memoturn`,
+  owner `memoturn`, repository `memoturn`, workflow `release.yml`, environment *(blank)*.
+- **GHCR** — `GITHUB_TOKEN` is provided automatically (the `images` job requests `packages: write`).
 
-**PyPI** — uses **Trusted Publishing** (OIDC), so there is *no* secret to manage. Register a
-pending publisher once at PyPI → your account → **Publishing → Add a pending publisher**:
+The `npm` and `pypi` jobs request `id-token: write`; npm additionally attaches **provenance**.
 
-- PyPI Project Name: `memoturn` · Owner: `memoturn` · Repository: `memoturn`
-- Workflow name: `release.yml` · Environment: *(blank)*
-
-**GHCR** — `GITHUB_TOKEN` is provided automatically (the `images` job requests `packages: write`).
-
-The `npm` and `pypi` jobs request `id-token: write` — for npm **provenance** and PyPI Trusted
-Publishing respectively (both via GitHub's OIDC).
+> **First publish of a new package** is the exception: a trusted publisher can only be
+> configured on a package/project that already exists (npm) — and an npm account/org that
+> enforces 2FA-on-publish will reject any token from CI with `EOTP`. So bootstrap a brand-new
+> npm package once from a maintainer's machine (`npm publish --access public --otp=<code>`),
+> then add the trusted publisher; every release after that is tokenless via CI. PyPI supports
+> pre-registering a pending publisher, so it needs no bootstrap.
 
 ## Validate first (dry run)
 
 Before tagging, run the workflow from the **Actions → Release → Run workflow** menu with
-**Dry run** checked. It exercises the whole pipeline without publishing: `npm whoami` +
-`npm publish --dry-run` (confirms the token + tarball), `uv build`, and all three images built
-but **not** pushed. A green dry run means the real tag is safe.
+**Dry run** checked. It exercises the pipeline without publishing: `npm publish --dry-run`,
+`uv build`, and all three images built but **not** pushed. (Trusted Publishing itself can only
+be exercised by a real publish, so a green dry run confirms the builds, not the OIDC handshake.)
 
 ## Cut a release
 
