@@ -1,10 +1,12 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import type { DailyMetric, ModelMetric, Widget } from "@memoturn/contracts";
+import type { ModelMetric, Widget } from "@memoturn/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
 import { LayoutDashboard, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 import { z } from "zod";
 import { DataTable } from "../components/data-table";
@@ -12,6 +14,7 @@ import { EmptyState } from "../components/empty-state";
 import { PageHeader } from "../components/page-header";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "../components/ui/chart";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "../components/ui/form";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -24,15 +27,6 @@ export const Route = createFileRoute("/dashboard")({ component: DashboardPage })
 
 function money(n: number): string {
   return `$${Number(n).toFixed(4)}`;
-}
-
-function Bar({ value, max }: { value: number; max: number }) {
-  const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
-  return (
-    <div className="h-2 flex-1 overflow-hidden rounded bg-muted">
-      <div className="h-full rounded bg-primary" style={{ width: `${pct}%` }} />
-    </div>
-  );
 }
 
 const modelColumns: ColumnDef<ModelMetric>[] = [
@@ -50,6 +44,120 @@ const modelColumns: ColumnDef<ModelMetric>[] = [
   { accessorKey: "total_cost", header: "Cost", cell: ({ row }) => money(row.original.total_cost) },
 ];
 
+// ── Interactive usage-over-time area chart ────────────────────────────────────────
+type MetricKey = "cost" | "tokens" | "gens" | "latency";
+const usageConfig = {
+  cost: { label: "Cost", color: "var(--chart-1)" },
+  tokens: { label: "Tokens", color: "var(--chart-2)" },
+  gens: { label: "Generations", color: "var(--chart-3)" },
+  latency: { label: "p95 latency", color: "var(--chart-4)" },
+} satisfies ChartConfig;
+
+function UsageChart({
+  series,
+  totals,
+  days,
+}: {
+  series: { date: string; cost: number; tokens: number; gens: number; latency: number }[];
+  totals: Record<MetricKey, string>;
+  days: number;
+}) {
+  const [active, setActive] = useState<MetricKey>("cost");
+  const metrics: MetricKey[] = ["cost", "tokens", "gens", "latency"];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Usage over time</CardTitle>
+        <CardDescription>
+          Daily {usageConfig[active].label.toLowerCase()} over the last {days} days
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap gap-2">
+          {metrics.map((m) => (
+            <button
+              type="button"
+              key={m}
+              data-active={active === m}
+              onClick={() => setActive(m)}
+              className="flex flex-col gap-0.5 border px-3 py-2 text-left transition-colors hover:bg-muted/60 data-[active=true]:border-foreground/30 data-[active=true]:bg-muted"
+            >
+              <span className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+                {usageConfig[m].label}
+              </span>
+              <span className="text-base font-semibold tabular-nums">{totals[m]}</span>
+            </button>
+          ))}
+        </div>
+        <ChartContainer config={usageConfig} className="aspect-auto h-[260px] w-full">
+          <AreaChart data={series} margin={{ left: 12, right: 12, top: 8 }}>
+            <defs>
+              <linearGradient id={`fill-${active}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={`var(--color-${active})`} stopOpacity={0.7} />
+                <stop offset="95%" stopColor={`var(--color-${active})`} stopOpacity={0.05} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid vertical={false} />
+            <XAxis
+              dataKey="date"
+              tickLine={false}
+              axisLine={false}
+              tickMargin={8}
+              minTickGap={24}
+              tickFormatter={(v: string) => v.slice(5)}
+            />
+            <ChartTooltip cursor={false} content={<ChartTooltipContent labelFormatter={(v) => String(v)} />} />
+            <Area
+              dataKey={active}
+              type="natural"
+              stroke={`var(--color-${active})`}
+              strokeWidth={2}
+              fill={`url(#fill-${active})`}
+            />
+          </AreaChart>
+        </ChartContainer>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Per-model bar chart ───────────────────────────────────────────────────────────
+function ModelBarChart({
+  title,
+  description,
+  data,
+  metric,
+  color,
+}: {
+  title: string;
+  description: string;
+  data: { model: string; value: number }[];
+  metric: string;
+  color: string;
+}) {
+  const config = { value: { label: metric, color } } satisfies ChartConfig;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ChartContainer config={config} className="aspect-auto h-[240px] w-full">
+          <BarChart data={data} layout="vertical" margin={{ left: 8, right: 16 }}>
+            <CartesianGrid horizontal={false} />
+            <XAxis type="number" hide />
+            <YAxis dataKey="model" type="category" tickLine={false} axisLine={false} width={110} tickMargin={6} />
+            <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
+            <Bar dataKey="value" fill="var(--color-value)" radius={0} />
+          </BarChart>
+        </ChartContainer>
+      </CardContent>
+    </Card>
+  );
+}
+
 function DashboardPage() {
   const days = useRangeDays();
   const { data, isLoading, error } = useQuery({
@@ -62,36 +170,22 @@ function DashboardPage() {
   if (error) return <EmptyState title="Failed to load dashboard" description={String(error)} />;
   if (!data) return null;
 
-  const maxCost = Math.max(0, ...data.byDay.map((d) => Number(d.total_cost)));
-
-  const dayColumns: ColumnDef<DailyMetric>[] = [
-    {
-      accessorKey: "date",
-      header: "Date",
-      cell: ({ row }) => <span className="font-medium">{row.original.date}</span>,
-    },
-    {
-      accessorKey: "generations",
-      header: "Gens",
-      cell: ({ row }) => Number(row.original.generations).toLocaleString(),
-    },
-    {
-      accessorKey: "total_tokens",
-      header: "Tokens",
-      cell: ({ row }) => Number(row.original.total_tokens).toLocaleString(),
-    },
-    { accessorKey: "p95_latency_ms", header: "p95 latency", cell: ({ row }) => `${row.original.p95_latency_ms} ms` },
-    {
-      accessorKey: "total_cost",
-      header: "Cost",
-      cell: ({ row }) => (
-        <div className="flex min-w-40 items-center gap-2">
-          <Bar value={Number(row.original.total_cost)} max={maxCost} />
-          <span className="tabular-nums">{money(row.original.total_cost)}</span>
-        </div>
-      ),
-    },
-  ];
+  const series = data.byDay.map((d) => ({
+    date: d.date,
+    cost: Number(d.total_cost),
+    tokens: Number(d.total_tokens),
+    gens: Number(d.generations),
+    latency: Number(d.p95_latency_ms),
+  }));
+  const maxLatency = Math.max(0, ...series.map((s) => s.latency));
+  const totals: Record<MetricKey, string> = {
+    cost: money(data.total_cost),
+    tokens: Number(data.total_tokens).toLocaleString(),
+    gens: Number(data.total_generations).toLocaleString(),
+    latency: `${maxLatency} ms`,
+  };
+  const costByModel = data.byModel.map((m) => ({ model: m.model, value: Number(m.total_cost) }));
+  const tokensByModel = data.byModel.map((m) => ({ model: m.model, value: Number(m.total_tokens) }));
 
   return (
     <div className="space-y-6">
@@ -104,26 +198,45 @@ function DashboardPage() {
         <Stat label="Cost" value={money(data.total_cost)} />
       </div>
 
-      <div className="space-y-3">
-        <h2 className="text-lg font-semibold tracking-tight">Cost by day ({days}d)</h2>
-        {data.byDay.length === 0 ? (
-          <EmptyState title="No generation data yet" description="Cost trends appear once traces are ingested." />
-        ) : (
-          <DataTable columns={dayColumns} data={data.byDay} />
-        )}
-      </div>
+      {data.byDay.length === 0 ? (
+        <EmptyState title="No generation data yet" description="Charts appear once traces are ingested." />
+      ) : (
+        <UsageChart series={series} totals={totals} days={days} />
+      )}
 
-      <div className="space-y-3">
-        <h2 className="text-lg font-semibold tracking-tight">By model</h2>
-        {data.byModel.length === 0 ? (
-          <EmptyState
-            title="No model data yet"
-            description="Per-model breakdown appears once generations are recorded."
+      {data.byModel.length > 0 && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <ModelBarChart
+            title="Cost by model"
+            description="Total spend per model"
+            data={costByModel}
+            metric="Cost"
+            color="var(--chart-1)"
           />
-        ) : (
-          <DataTable columns={modelColumns} data={data.byModel} />
-        )}
-      </div>
+          <ModelBarChart
+            title="Tokens by model"
+            description="Total tokens per model"
+            data={tokensByModel}
+            metric="Tokens"
+            color="var(--chart-2)"
+          />
+        </div>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>By model ({data.byModel.length})</CardTitle>
+        </CardHeader>
+        <CardContent className={data.byModel.length === 0 ? undefined : "px-0"}>
+          {data.byModel.length === 0 ? (
+            <EmptyState title="No model data yet" description="Per-model breakdown appears once generations record." />
+          ) : (
+            <div className="border-t">
+              <DataTable columns={modelColumns} data={data.byModel} />
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <CustomWidgets />
     </div>
@@ -262,8 +375,8 @@ function CustomWidgets() {
 }
 
 function WidgetCard({ widget, onDelete, disabled }: { widget: Widget; onDelete: () => void; disabled: boolean }) {
-  const max = Math.max(0, ...widget.data.map((p) => Number(p.value)));
-  const fmt = (v: number) => (widget.metric === "cost" ? `$${Number(v).toFixed(4)}` : Number(v).toLocaleString());
+  const series = widget.data.map((p) => ({ label: p.label, value: Number(p.value) }));
+  const config = { value: { label: widget.metric, color: "var(--chart-1)" } } satisfies ChartConfig;
   return (
     <Card size="sm">
       <CardHeader>
@@ -280,18 +393,16 @@ function WidgetCard({ widget, onDelete, disabled }: { widget: Widget; onDelete: 
         </div>
       </CardHeader>
       <CardContent>
-        {widget.data.length === 0 ? (
+        {series.length === 0 ? (
           <p className="text-sm text-muted-foreground">no data</p>
         ) : (
-          <div className="space-y-2">
-            {widget.data.slice(-12).map((p) => (
-              <div className="flex items-center gap-2 text-sm" key={p.label}>
-                <span className="w-24 shrink-0 truncate text-muted-foreground">{p.label}</span>
-                <Bar value={Number(p.value)} max={max} />
-                <span className="shrink-0 tabular-nums">{fmt(p.value)}</span>
-              </div>
-            ))}
-          </div>
+          <ChartContainer config={config} className="aspect-auto h-[120px] w-full">
+            <BarChart data={series} margin={{ top: 4, left: 0, right: 0 }}>
+              <XAxis dataKey="label" hide />
+              <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
+              <Bar dataKey="value" fill="var(--color-value)" radius={0} />
+            </BarChart>
+          </ChartContainer>
         )}
       </CardContent>
     </Card>
