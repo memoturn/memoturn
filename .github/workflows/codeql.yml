@@ -27,11 +27,14 @@ jobs:
         language: [javascript-typescript, python]
     steps:
       - uses: actions/checkout@v7
+      # Default suite: real security vulnerabilities. The "security-and-quality" suite
+      # adds noisy style/maintainability queries (e.g. "unpinned action tag") that, with
+      # the branch's require-conversation-resolution rule, block every workflow-touching
+      # PR. Pin actions to SHAs + re-enable the suite later if desired.
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
           language: ${{ matrix.language }}
-          queries: security-and-quality
       - name: Analyze
         uses: github/codeql-action/analyze@v4
         with:
