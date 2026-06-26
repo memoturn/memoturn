@@ -127,7 +127,7 @@ function ReviewPage() {
             Reviewing: {selected} ({items?.items.length ?? 0} pending)
           </h2>
           {items && items.items.length === 0 ? (
-            <div className="empty">Nothing to review. 🎉</div>
+            <div className="empty">Nothing to review.</div>
           ) : (
             <ul className="tree">
               {items?.items.map((item) => (

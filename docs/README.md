@@ -17,6 +17,7 @@ Bun-native.
 - [Prompt management](./prompts.md)
 - [Evaluation](./evaluation.md) — offline, online, and human review
 - [Deployment](./deployment.md) — Docker, scaling, retention
+- [Roadmap](./roadmap.md) — shipped + prioritized backlog
 
 ## Screenshots
 

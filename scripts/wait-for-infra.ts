@@ -44,7 +44,7 @@ while (pending.size > 0) {
       .map(async (c) => {
         if (await c.check()) {
           pending.delete(c.name);
-          console.log(`  ✓ ${c.name}`);
+          console.log(`  ${c.name}`);
         }
       }),
   );

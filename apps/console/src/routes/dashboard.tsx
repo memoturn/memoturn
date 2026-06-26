@@ -162,7 +162,7 @@ function WidgetCard({ widget, onDelete }: { widget: Widget; onDelete: () => void
       <div className="widget-head">
         <span className="obs-name">{widget.title}</span>
         <button className="link-btn" onClick={onDelete}>
-          ✕
+          delete
         </button>
       </div>
       <div className="obs-meta">

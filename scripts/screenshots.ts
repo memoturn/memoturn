@@ -40,7 +40,7 @@ for (const p of PAGES) {
   if (p.waitFor) await page.waitForSelector(p.waitFor, { timeout: 8_000 }).catch(() => {});
   await page.waitForTimeout(600); // let queries settle
   await page.screenshot({ path: `${OUT}/${p.name}.png`, fullPage: true });
-  console.log(`  ✓ ${p.name}`);
+  console.log(`  ${p.name}`);
 }
 
 // Trace detail (waterfall) — open the first trace from the list.
@@ -51,7 +51,7 @@ if (await firstTrace.count()) {
   await page.waitForSelector("text=Timeline", { timeout: 8_000 }).catch(() => {});
   await page.waitForTimeout(600);
   await page.screenshot({ path: `${OUT}/trace-detail.png`, fullPage: true });
-  console.log("  ✓ trace-detail");
+  console.log("  trace-detail");
 }
 
 await browser.close();

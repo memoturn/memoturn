@@ -40,5 +40,5 @@ if __name__ == "__main__":
     result = rag("What is memoturn?")
     get_client().shutdown()  # flush
     print("answer:", result)
-    print("✓ emitted a nested trace (rag-pipeline → retrieve, answer)")
+    print("emitted a nested trace (rag-pipeline → retrieve, answer)")
     print("  open the console Traces view to see the waterfall")

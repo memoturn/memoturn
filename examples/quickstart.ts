@@ -45,7 +45,7 @@ async function main() {
   trace.score({ name: "user-feedback", value: 1, comment: "helpful" });
 
   await memoturn.shutdown();
-  console.log(`✓ emitted trace ${trace.id}`);
+  console.log(`emitted trace ${trace.id}`);
   console.log(`  open http://localhost:3000/traces/${trace.id}`);
 }
 

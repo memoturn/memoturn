@@ -61,13 +61,13 @@ The dev shell is **zsh**, which does **not** word-split unquoted variables. So t
 
 ```sh
 A='-u pk-mt-dev:sk-mt-dev'
-curl $A http://localhost:3001/v1/metrics      # ✗ 401
+curl $A http://localhost:3001/v1/metrics      # FAILS -> 401 (one bogus arg)
 ```
 
 Use literal flags instead:
 
 ```sh
-curl -u pk-mt-dev:sk-mt-dev http://localhost:3001/v1/metrics   # ✓
+curl -u pk-mt-dev:sk-mt-dev http://localhost:3001/v1/metrics   # works
 ```
 
 Also: run services with `bun --filter @memoturn/api start` (stable) rather than `dev` (`--watch`) when scripting verification, and give the first authed request a few seconds after boot (cold Redis/Postgres connections).
