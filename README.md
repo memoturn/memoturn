@@ -1,5 +1,10 @@
 # memoturn
 
+[![CI](https://github.com/memoturn/memoturn/actions/workflows/ci.yml/badge.svg)](https://github.com/memoturn/memoturn/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
+[![npm](https://img.shields.io/npm/v/@memoturn/sdk?label=%40memoturn%2Fsdk)](https://www.npmjs.com/package/@memoturn/sdk)
+[![PyPI](https://img.shields.io/pypi/v/memoturn?label=memoturn)](https://pypi.org/project/memoturn/)
+
 Open-source **AI engineering platform** — LLM observability, evals, metrics, prompt
 management, playground, and datasets. Self-hostable, OpenTelemetry-native, Bun-native.
 
@@ -83,8 +88,9 @@ def rag(q): ...           # nested @observe calls become child spans
 apps/{api,console,worker}   packages/{core,contracts,db,server,llm}   sdks/{js,python}   infra/   docker/
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev workflow.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev workflow, [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+for community standards, and [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## License
 
-Apache-2.0
+[Apache-2.0](./LICENSE)

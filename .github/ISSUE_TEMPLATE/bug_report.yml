@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a defect in memoturn
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please search existing issues first.
+        For security vulnerabilities, do **not** use this form — see [SECURITY.md](../security/policy).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+      placeholder: When I ..., memoturn ... but I expected ...
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps (and a code snippet / curl, if relevant) to reproduce.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of memoturn is affected?
+      options:
+        - API (apps/api)
+        - Worker (apps/worker)
+        - Console (apps/console)
+        - JS SDK (@memoturn/sdk)
+        - Python SDK (memoturn)
+        - Deployment (Docker / Helm)
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: memoturn version, image tag, or git commit SHA.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Bun version, how you run memoturn (local dev, Docker Compose, Helm), datastore versions.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste any relevant log output. This will be rendered as code.
+      render: shell
+    validations:
+      required: false
