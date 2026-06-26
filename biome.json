@@ -3,7 +3,7 @@
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!**/routeTree.gen.ts", "!**/dist", "!**/.next", "!packages/db/prisma/migrations"]
+    "includes": ["**", "!**/routeTree.gen.ts", "!**/dist", "!**/.next", "!packages/db/prisma/migrations", "!.claude"]
   },
   "formatter": {
     "enabled": true,
