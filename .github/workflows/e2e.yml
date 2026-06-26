@@ -36,7 +36,8 @@ jobs:
         image: valkey/valkey:8-alpine
         ports: ["6379:6379"]
       minio:
-        image: bitnami/minio:latest
+        # bitnami/minio was removed from Docker Hub; pinned via the bitnamilegacy archive.
+        image: bitnamilegacy/minio:2025.7.23-debian-12-r5
         env:
           MINIO_ROOT_USER: memoturn
           MINIO_ROOT_PASSWORD: memoturn123

@@ -30,10 +30,12 @@ jobs:
       redis:
         image: valkey/valkey:8-alpine
         ports: ["6379:6379"]
-      # bitnami/minio runs the server by default (no command override, which GitHub
-      # service containers can't set) and auto-creates MINIO_DEFAULT_BUCKETS.
+      # Bitnami's MinIO runs the server by default (no command override, which GitHub
+      # service containers can't set) and auto-creates MINIO_DEFAULT_BUCKETS. Bitnami
+      # removed bitnami/minio from Docker Hub; the images live on (pinned) under the
+      # bitnamilegacy archive namespace.
       minio:
-        image: bitnami/minio:latest
+        image: bitnamilegacy/minio:2025.7.23-debian-12-r5
         env:
           MINIO_ROOT_USER: memoturn
           MINIO_ROOT_PASSWORD: memoturn123
