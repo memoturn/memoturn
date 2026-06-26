@@ -92,7 +92,7 @@ Same as above, plus: call `denyIfReadOnly(c)` first and `recordAudit(projectId, 
 
 - **Dev infra uses non-default host ports** to avoid clashes: Postgres **5433**, Redis **6380** (ClickHouse 8123, MinIO standard). The `.env` reflects this — don't "fix" them to 5432/6379.
 - **Biome** is the only formatter/linter: 2-space indent, double quotes, semicolons, line width 120. Run `bun run format` before committing. Generated files (`routeTree.gen.ts`) and Prisma migrations are excluded.
-- **Git hooks (lefthook)**: pre-commit runs Biome on staged files; pre-push runs `typecheck`. Keep `typecheck` + `build` green.
+- **Git hooks (lefthook)**: pre-commit runs Biome on staged files; pre-push runs `typecheck` + `rbac:check` (every mutating `/v1` route must `denyIfReadOnly` + declare a `403`) + `docs:check` (doc/code coupling). Keep `typecheck` + `build` green.
 - **Online eval failures never fail ingestion** — they're wrapped best-effort in the worker. Sampling is deterministic (FNV hash of `traceId:evaluatorName`), not random.
 - **Local curl testing under zsh**: zsh does not word-split unquoted vars, so `A='-u pk:sk'; curl $A ...` silently 401s. Use literal flags: `curl -u pk-mt-dev:sk-mt-dev http://localhost:3001/v1/metrics`. For scripted verification prefer `bun --filter @memoturn/api start` (stable) over `dev` (`--watch`), and allow a few seconds after boot for cold connections.
 - **ClickHouse counts** (`count()`, `sum()`) come back as **strings** in JSONEachRow — coerce with `Number(...)` (contract types declare them as `number`; the console already coerces).

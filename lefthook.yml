@@ -7,6 +7,11 @@ pre-commit:
       run: bunx @biomejs/biome check --no-errors-on-unmatched --staged
 
 pre-push:
+  parallel: true
   commands:
     typecheck:
       run: bun run typecheck
+    rbac:
+      run: bun run rbac:check
+    docs:
+      run: bun run docs:check
