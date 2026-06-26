@@ -1,0 +1,25 @@
+version: 2
+
+# Application dependencies are managed with Bun (bun.lock), which Dependabot's npm
+# ecosystem does not update in lockstep — so npm version bumps are handled manually
+# (or via Renovate, which supports Bun). Dependabot here keeps the parts it updates
+# reliably current: GitHub Actions and Docker base images. PR-time dependency
+# vulnerability checks are covered by dependency-review.yml + CodeQL.
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: docker
+    directories:
+      - "/docker"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "build"
