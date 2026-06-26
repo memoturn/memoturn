@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Download, Trash2 } from "lucide-react";
+import { Coins, DollarSign, Download, Layers, Timer, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { CopyButton } from "../../components/copy-button";
@@ -330,10 +330,14 @@ function TraceDetailPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <StatTile label="Observations" value={trace.observation_count} />
-        <StatTile label="Tokens" value={trace.total_tokens} />
-        <StatTile label="Cost" value={Number(trace.total_cost) > 0 ? `$${Number(trace.total_cost).toFixed(6)}` : "—"} />
-        <StatTile label="Latency" value={`${trace.latency_ms} ms`} />
+        <StatTile label="Observations" value={trace.observation_count} icon={Layers} />
+        <StatTile label="Tokens" value={trace.total_tokens} icon={Coins} />
+        <StatTile
+          label="Cost"
+          value={Number(trace.total_cost) > 0 ? `$${Number(trace.total_cost).toFixed(6)}` : "—"}
+          icon={DollarSign}
+        />
+        <StatTile label="Latency" value={`${trace.latency_ms} ms`} icon={Timer} />
       </div>
 
       <Card>

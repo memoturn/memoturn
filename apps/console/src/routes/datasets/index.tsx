@@ -2,7 +2,7 @@ import type { DatasetListItem } from "@memoturn/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Database } from "lucide-react";
+import { Database, FlaskConical, Rows3 } from "lucide-react";
 import { DataTable } from "../../components/data-table";
 import { EmptyState } from "../../components/empty-state";
 import { PageHeader } from "../../components/page-header";
@@ -63,9 +63,9 @@ function DatasetsPage() {
       ) : (
         <div className="space-y-6">
           <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
-            <StatTile label="Datasets" value={datasets.length} />
-            <StatTile label="Items" value={datasets.reduce((a, d) => a + Number(d.items), 0)} />
-            <StatTile label="Runs" value={datasets.reduce((a, d) => a + Number(d.runs), 0)} />
+            <StatTile label="Datasets" value={datasets.length} icon={Database} />
+            <StatTile label="Items" value={datasets.reduce((a, d) => a + Number(d.items), 0)} icon={Rows3} />
+            <StatTile label="Runs" value={datasets.reduce((a, d) => a + Number(d.runs), 0)} icon={FlaskConical} />
           </div>
           <DataTable columns={columns} data={datasets} filterColumn="name" filterPlaceholder="Filter datasets…" />
         </div>

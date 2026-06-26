@@ -2,7 +2,7 @@ import type { PromptListItem } from "@memoturn/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
-import { FileText } from "lucide-react";
+import { FileText, GitBranch, Radio } from "lucide-react";
 import { DataTable } from "../../components/data-table";
 import { EmptyState } from "../../components/empty-state";
 import { KindBadge } from "../../components/kind-badge";
@@ -78,9 +78,9 @@ function PromptsPage() {
       ) : (
         <div className="space-y-6">
           <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
-            <StatTile label="Prompts" value={prompts.length} />
-            <StatTile label="Versions" value={prompts.reduce((a, p) => a + Number(p.versions), 0)} />
-            <StatTile label="Channels" value={prompts.reduce((a, p) => a + p.channels.length, 0)} />
+            <StatTile label="Prompts" value={prompts.length} icon={FileText} />
+            <StatTile label="Versions" value={prompts.reduce((a, p) => a + Number(p.versions), 0)} icon={GitBranch} />
+            <StatTile label="Channels" value={prompts.reduce((a, p) => a + p.channels.length, 0)} icon={Radio} />
           </div>
           <DataTable columns={columns} data={prompts} filterColumn="name" filterPlaceholder="Filter prompts…" />
         </div>

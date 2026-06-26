@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { Database, FlaskConical } from "lucide-react";
 import { EmptyState } from "../../components/empty-state";
 import { KindBadge } from "../../components/kind-badge";
 import { StatTile } from "../../components/stat-tile";
@@ -60,8 +61,8 @@ function DatasetDetailPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:max-w-md">
-        <StatTile label="Runs" value={data.runs.length} />
-        <StatTile label="Items" value={data.items.length} />
+        <StatTile label="Runs" value={data.runs.length} icon={FlaskConical} />
+        <StatTile label="Items" value={data.items.length} icon={Database} />
       </div>
 
       <Card>
