@@ -1,12 +1,13 @@
 name: Release
 
 # Publishes the SDKs (npm + PyPI) and container images (GHCR) on a version tag.
-# Auth: npm uses the NPM_TOKEN repo secret (+ OIDC provenance); PyPI uses Trusted
-# Publishing (OIDC, no secret) — register a pending publisher on PyPI for this repo
-# + workflow first. GHCR uses the built-in GITHUB_TOKEN.
+# Auth: npm and PyPI both use Trusted Publishing (OIDC) — no secrets. Register the
+# trusted publisher once on each registry (npm: @memoturn/sdk → Settings → Trusted
+# Publisher; PyPI: a pending publisher) for this repo + release.yml. GHCR uses the
+# built-in GITHUB_TOKEN.
 #
 # Run via the Actions tab with "Dry run" checked to validate the whole pipeline
-# without publishing anything (npm whoami + pack, uv build, images built but not pushed).
+# without publishing anything (npm pack, uv build, images built but not pushed).
 on:
   push:
     tags: ["v*"]
@@ -23,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # npm provenance
+      id-token: write # npm Trusted Publishing (OIDC) + provenance
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -33,6 +34,8 @@ jobs:
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
+      # Trusted Publishing needs npm >= 11.5.1; node 22 ships npm 10.x.
+      - run: npm install -g npm@latest
       - run: bun install --frozen-lockfile
       - run: bun --filter @memoturn/sdk build
       # Point the published manifest at dist. The repo keeps main/types on src for
@@ -49,16 +52,15 @@ jobs:
           '
       - name: Publish
         working-directory: sdks/js
+        # Trusted Publishing: npm authenticates via the OIDC id-token (no NODE_AUTH_TOKEN),
+        # and provenance is attached automatically.
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            echo "Dry run — validating token + tarball, not publishing."
-            npm whoami
+            echo "Dry run — packing, not publishing."
             npm publish --dry-run
           else
             npm publish --provenance --access public
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   pypi:
     name: Publish memoturn to PyPI
