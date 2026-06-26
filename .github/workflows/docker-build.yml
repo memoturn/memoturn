@@ -1,0 +1,38 @@
+name: Docker build
+
+# Validates that the api/worker/console images actually build (no push, no secrets).
+# Runs on demand and when the Dockerfiles or dependency manifests change, so a broken
+# image is caught before a release tag triggers the real publish in release.yml.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "docker/**"
+      - "**/package.json"
+      - "bun.lock"
+      - ".github/workflows/docker-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.service }} image
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, worker, console]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/${{ matrix.service }}.Dockerfile
+          push: false
+          load: false
+          tags: memoturn-${{ matrix.service }}:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
