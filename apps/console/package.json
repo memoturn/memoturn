@@ -9,7 +9,7 @@
     "build": "tsr generate && vite build",
     "preview": "vite preview --port 3000",
     "typecheck": "tsr generate && tsc --noEmit",
-    "lint": "echo 'no lint configured'",
+    "lint": "biome check .",
     "test": "echo 'no tests'",
     "clean": "rm -rf dist .turbo src/routeTree.gen.ts"
   },

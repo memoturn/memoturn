@@ -1,6 +1,6 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { api, streamPlayground, type PlaygroundResponse } from "../lib/api";
+import { api, type PlaygroundResponse, streamPlayground } from "../lib/api";
 
 export const Route = createFileRoute("/playground")({ component: PlaygroundPage });
 
@@ -78,7 +78,11 @@ function PlaygroundPage() {
       <h2>User</h2>
       <textarea className="pg-input" value={userMsg} onChange={(e) => setUserMsg(e.target.value)} rows={4} />
 
-      {error && <div className="empty" style={{ marginTop: 16 }}>{error}</div>}
+      {error && (
+        <div className="empty" style={{ marginTop: 16 }}>
+          {error}
+        </div>
+      )}
       {streamed && (
         <>
           <h2>Response (streaming)</h2>
@@ -90,8 +94,8 @@ function PlaygroundPage() {
           <h2>Response</h2>
           <pre>{result.content}</pre>
           <div className="obs-meta">
-            {result.provider}/{result.model} · {result.usage.totalTokens} tokens (
-            {result.usage.promptTokens}+{result.usage.completionTokens})
+            {result.provider}/{result.model} · {result.usage.totalTokens} tokens ({result.usage.promptTokens}+
+            {result.usage.completionTokens})
             {result.traceId && (
               <>
                 {" · "}

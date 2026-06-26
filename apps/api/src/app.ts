@@ -1,33 +1,34 @@
+import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { ingestRequest } from "@memoturn/core";
 import {
   addDatasetItems,
+  addReviewItems,
+  applyRetention,
   auth,
   createDataset,
   createEvaluator,
-  createProviderConnection,
   createPromptVersion,
+  createProviderConnection,
+  createReviewQueue,
+  exportTracesJsonl,
   getDatasetDetail,
   getMetrics,
   getPromptDetail,
+  getRetention,
   getTrace,
   listAuditLogs,
   listDatasets,
   listEvaluators,
   listPrompts,
   listProviderConnections,
+  listReviewItems,
+  listReviewQueues,
   listSessions,
   listTraces,
   listUserProjects,
-  addReviewItems,
-  createReviewQueue,
-  exportTracesJsonl,
-  listReviewItems,
-  listReviewQueues,
   otlpToEvents,
   recordAudit,
   recordRun,
-  applyRetention,
-  getRetention,
   resolvePrompt,
   runEvaluator,
   runPlayground,
@@ -37,7 +38,6 @@ import {
   submitReviewScore,
 } from "@memoturn/server";
 import { Scalar } from "@scalar/hono-api-reference";
-import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { streamSSE } from "hono/streaming";
 import { type AuthVars, denyIfReadOnly, requireAuth } from "./middleware/auth.js";
 
@@ -117,7 +117,12 @@ app.openapi(
     path: "/v1/health",
     summary: "Liveness probe",
     tags: ["system"],
-    responses: { 200: { description: "ok", content: { "application/json": { schema: z.object({ status: z.string(), service: z.string() }) } } } },
+    responses: {
+      200: {
+        description: "ok",
+        content: { "application/json": { schema: z.object({ status: z.string(), service: z.string() }) } },
+      },
+    },
   }),
   (c) => c.json({ status: "ok", service: "memoturn-api" }),
 );
@@ -131,10 +136,17 @@ app.openapi(
     tags: ["ingestion"],
     security,
     request: {
-      body: { content: { "application/json": { schema: z.object({ batch: z.array(z.record(z.string(), z.any())) }) } } },
+      body: {
+        content: { "application/json": { schema: z.object({ batch: z.array(z.record(z.string(), z.any())) }) } },
+      },
     },
     responses: {
-      207: { description: "Per-event status", content: { "application/json": { schema: z.object({ successes: z.array(z.any()), errors: z.array(z.any()) }) } } },
+      207: {
+        description: "Per-event status",
+        content: {
+          "application/json": { schema: z.object({ successes: z.array(z.any()), errors: z.array(z.any()) }) },
+        },
+      },
       400: { description: "Invalid batch" },
       401: { description: "Unauthorized" },
     },
@@ -159,7 +171,11 @@ app.openapi(
     tags: ["ingestion"],
     security,
     request: { body: { content: { "application/json": { schema: z.record(z.string(), z.any()) } } } },
-    responses: { 200: { description: "Accepted (OTLP partialSuccess)" }, 401: { description: "Unauthorized" }, 415: { description: "Unsupported content type" } },
+    responses: {
+      200: { description: "Accepted (OTLP partialSuccess)" },
+      401: { description: "Unauthorized" },
+      415: { description: "Unsupported content type" },
+    },
   }),
   async (c) => {
     if (!(c.req.header("content-type") ?? "").includes("json")) {
@@ -244,7 +260,10 @@ app.openapi(
     tags: ["traces"],
     security,
     request: { params: z.object({ id: z.string() }) },
-    responses: { 200: { description: "Trace", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+    responses: {
+      200: { description: "Trace", content: { "application/json": { schema: z.any() } } },
+      404: { description: "Not found" },
+    },
   }),
   async (c) => {
     const trace = await getTrace(c.get("projectId"), c.req.valid("param").id);
@@ -293,14 +312,19 @@ app.openapi(
         },
       },
     },
-    responses: { 201: { description: "Created version", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" } },
+    responses: {
+      201: { description: "Created version", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
+    },
   }),
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
     const body = c.req.valid("json");
     const created = await createPromptVersion(c.get("projectId"), { ...body, content: body.content });
-    await recordAudit(c.get("projectId"), c.get("actor"), "prompt.version.create", `prompt:${body.name}`, { version: created.version });
+    await recordAudit(c.get("projectId"), c.get("actor"), "prompt.version.create", `prompt:${body.name}`, {
+      version: created.version,
+    });
     return c.json(created, 201);
   },
 );
@@ -314,7 +338,10 @@ app.openapi(
     tags: ["prompts"],
     security,
     request: { params: z.object({ name: z.string() }) },
-    responses: { 200: { description: "Prompt detail", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+    responses: {
+      200: { description: "Prompt detail", content: { "application/json": { schema: z.any() } } },
+      404: { description: "Not found" },
+    },
   }),
   async (c) => {
     const detail = await getPromptDetail(c.get("projectId"), c.req.valid("param").name);
@@ -332,7 +359,10 @@ app.openapi(
     tags: ["prompts"],
     security,
     request: { params: z.object({ name: z.string() }), query: z.object({ channel: z.string().optional() }) },
-    responses: { 200: { description: "Compiled prompt", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+    responses: {
+      200: { description: "Compiled prompt", content: { "application/json": { schema: z.any() } } },
+      404: { description: "Not found" },
+    },
   }),
   async (c) => {
     const channel = c.req.valid("query").channel ?? "production";
@@ -362,8 +392,17 @@ app.openapi(
     summary: "Create (or update) a dataset",
     tags: ["datasets"],
     security,
-    request: { body: { content: { "application/json": { schema: z.object({ name: z.string().min(1), description: z.string().optional() }) } } } },
-    responses: { 201: { description: "Created", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" } },
+    request: {
+      body: {
+        content: {
+          "application/json": { schema: z.object({ name: z.string().min(1), description: z.string().optional() }) },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
+    },
   }),
   async (c) => {
     const denied = denyIfReadOnly(c);
@@ -384,7 +423,10 @@ app.openapi(
     tags: ["datasets"],
     security,
     request: { params: z.object({ name: z.string() }) },
-    responses: { 200: { description: "Dataset", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+    responses: {
+      200: { description: "Dataset", content: { "application/json": { schema: z.any() } } },
+      404: { description: "Not found" },
+    },
   }),
   async (c) => {
     const detail = await getDatasetDetail(c.get("projectId"), c.req.valid("param").name);
@@ -407,13 +449,22 @@ app.openapi(
         content: {
           "application/json": {
             schema: z.object({
-              items: z.array(z.object({ input: z.any(), expectedOutput: z.any().optional(), metadata: z.record(z.string(), z.any()).optional() })),
+              items: z.array(
+                z.object({
+                  input: z.any(),
+                  expectedOutput: z.any().optional(),
+                  metadata: z.record(z.string(), z.any()).optional(),
+                }),
+              ),
             }),
           },
         },
       },
     },
-    responses: { 201: { description: "Added", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+    responses: {
+      201: { description: "Added", content: { "application/json": { schema: z.any() } } },
+      404: { description: "Not found" },
+    },
   }),
   async (c) => {
     const items = c.req.valid("json").items as Parameters<typeof addDatasetItems>[2];
@@ -444,7 +495,10 @@ app.openapi(
         },
       },
     },
-    responses: { 201: { description: "Recorded", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+    responses: {
+      201: { description: "Recorded", content: { "application/json": { schema: z.any() } } },
+      404: { description: "Not found" },
+    },
   }),
   async (c) => {
     const body = c.req.valid("json");
@@ -474,8 +528,19 @@ app.openapi(
     summary: "Add/update an LLM provider API key (encrypted at rest)",
     tags: ["providers"],
     security,
-    request: { body: { content: { "application/json": { schema: z.object({ provider: z.enum(["anthropic", "openai"]), apiKey: z.string().min(1) }) } } } },
-    responses: { 201: { description: "Saved", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" } },
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({ provider: z.enum(["anthropic", "openai"]), apiKey: z.string().min(1) }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Saved", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
+    },
   }),
   async (c) => {
     const denied = denyIfReadOnly(c);
@@ -511,7 +576,10 @@ app.openapi(
         },
       },
     },
-    responses: { 200: { description: "Completion", content: { "application/json": { schema: z.any() } } }, 400: { description: "Error" } },
+    responses: {
+      200: { description: "Completion", content: { "application/json": { schema: z.any() } } },
+      400: { description: "Error" },
+    },
   }),
   async (c) => {
     try {
@@ -561,7 +629,10 @@ app.openapi(
         },
       },
     },
-    responses: { 201: { description: "Created", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" } },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
+    },
   }),
   async (c) => {
     const denied = denyIfReadOnly(c);
@@ -582,9 +653,23 @@ app.openapi(
     security,
     request: {
       params: z.object({ name: z.string() }),
-      body: { content: { "application/json": { schema: z.object({ traceId: z.string(), input: z.any(), output: z.any(), expectedOutput: z.any().optional() }) } } },
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              traceId: z.string(),
+              input: z.any(),
+              output: z.any(),
+              expectedOutput: z.any().optional(),
+            }),
+          },
+        },
+      },
     },
-    responses: { 200: { description: "Score", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+    responses: {
+      200: { description: "Score", content: { "application/json": { schema: z.any() } } },
+      404: { description: "Not found" },
+    },
   }),
   async (c) => {
     const result = await runEvaluator(c.get("projectId"), c.req.valid("param").name, c.req.valid("json"));
@@ -607,7 +692,9 @@ app.openapi(
     const userId = c.get("userId");
     if (userId) return c.json({ data: await listUserProjects(userId) });
     // API key: scoped to its single project.
-    return c.json({ data: [{ id: c.get("projectId"), name: "(api-key project)", slug: "", workspace: "", role: c.get("role") }] });
+    return c.json({
+      data: [{ id: c.get("projectId"), name: "(api-key project)", slug: "", workspace: "", role: c.get("role") }],
+    });
   },
 );
 
@@ -659,7 +746,10 @@ app.openapi(
         },
       },
     },
-    responses: { 201: { description: "Created", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" } },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
+    },
   }),
   async (c) => {
     const denied = denyIfReadOnly(c);
@@ -682,7 +772,11 @@ app.openapi(
       params: z.object({ name: z.string() }),
       body: { content: { "application/json": { schema: z.object({ traceIds: z.array(z.string()).min(1) }) } } },
     },
-    responses: { 201: { description: "Added", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" }, 404: { description: "Not found" } },
+    responses: {
+      201: { description: "Added", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
+      404: { description: "Not found" },
+    },
   }),
   async (c) => {
     const denied = denyIfReadOnly(c);
@@ -700,11 +794,21 @@ app.openapi(
     summary: "List items to review (with trace input/output)",
     tags: ["review"],
     security,
-    request: { params: z.object({ name: z.string() }), query: z.object({ status: z.enum(["PENDING", "DONE", "SKIPPED"]).optional() }) },
-    responses: { 200: { description: "Items", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+    request: {
+      params: z.object({ name: z.string() }),
+      query: z.object({ status: z.enum(["PENDING", "DONE", "SKIPPED"]).optional() }),
+    },
+    responses: {
+      200: { description: "Items", content: { "application/json": { schema: z.any() } } },
+      404: { description: "Not found" },
+    },
   }),
   async (c) => {
-    const result = await listReviewItems(c.get("projectId"), c.req.valid("param").name, c.req.valid("query").status ?? "PENDING");
+    const result = await listReviewItems(
+      c.get("projectId"),
+      c.req.valid("param").name,
+      c.req.valid("query").status ?? "PENDING",
+    );
     if (!result) return c.json({ error: "queue not found" }, 404);
     return c.json(result);
   },
@@ -719,9 +823,22 @@ app.openapi(
     security,
     request: {
       params: z.object({ name: z.string(), itemId: z.string() }),
-      body: { content: { "application/json": { schema: z.object({ value: z.number().optional(), stringValue: z.string().optional(), comment: z.string().optional() }) } } },
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              value: z.number().optional(),
+              stringValue: z.string().optional(),
+              comment: z.string().optional(),
+            }),
+          },
+        },
+      },
     },
-    responses: { 200: { description: "Scored", content: { "application/json": { schema: z.any() } } }, 404: { description: "Not found" } },
+    responses: {
+      200: { description: "Scored", content: { "application/json": { schema: z.any() } } },
+      404: { description: "Not found" },
+    },
   }),
   async (c) => {
     const { name, itemId } = c.req.valid("param");
@@ -753,7 +870,10 @@ app.openapi(
     tags: ["platform"],
     security,
     request: { body: { content: { "application/json": { schema: z.object({ days: z.number().int().min(0) }) } } } },
-    responses: { 200: { description: "Updated", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" } },
+    responses: {
+      200: { description: "Updated", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
+    },
   }),
   async (c) => {
     const denied = denyIfReadOnly(c);
@@ -772,7 +892,10 @@ app.openapi(
     summary: "Apply retention now (delete telemetry older than the policy)",
     tags: ["platform"],
     security,
-    responses: { 200: { description: "Result", content: { "application/json": { schema: z.any() } } }, 403: { description: "Forbidden" } },
+    responses: {
+      200: { description: "Result", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
+    },
   }),
   async (c) => {
     const denied = denyIfReadOnly(c);
@@ -788,6 +911,10 @@ app.openapi(
 // ── OpenAPI document + Scalar API reference ──────────────────────────────────────
 app.doc("/openapi.json", {
   openapi: "3.0.0",
-  info: { title: "memoturn API", version: "0.1.0", description: "Open-source AI engineering platform — public ingestion + read API." },
+  info: {
+    title: "memoturn API",
+    version: "0.1.0",
+    description: "Open-source AI engineering platform — public ingestion + read API.",
+  },
 });
 app.get("/docs", Scalar({ url: "/openapi.json", pageTitle: "memoturn API" }));

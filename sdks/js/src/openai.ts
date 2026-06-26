@@ -34,7 +34,11 @@ function wrapChat(chat: any, memoturn: Memoturn, options: { trace?: MemoturnTrac
   });
 }
 
-function wrapCompletions(completions: any, memoturn: Memoturn, options: { trace?: MemoturnTrace; traceName?: string }): any {
+function wrapCompletions(
+  completions: any,
+  memoturn: Memoturn,
+  options: { trace?: MemoturnTrace; traceName?: string },
+): any {
   return new Proxy(completions, {
     get(target, prop, receiver) {
       const original = Reflect.get(target, prop, receiver);

@@ -1,0 +1,12 @@
+# Git hooks (installed via `bun run prepare` / postinstall).
+pre-commit:
+  parallel: true
+  commands:
+    biome:
+      glob: "*.{js,ts,jsx,tsx,json,css}"
+      run: bunx @biomejs/biome check --no-errors-on-unmatched --staged
+
+pre-push:
+  commands:
+    typecheck:
+      run: bun run typecheck

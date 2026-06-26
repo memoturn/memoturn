@@ -172,7 +172,9 @@ export async function getTraceIO(projectId: string, traceIds: string[]): Promise
 }
 
 export async function getTrace(projectId: string, traceId: string): Promise<TraceDetail | null> {
-  const traces = await query<Omit<TraceDetail, "observations" | "observation_count" | "total_cost" | "total_tokens" | "latency_ms">>(
+  const traces = await query<
+    Omit<TraceDetail, "observations" | "observation_count" | "total_cost" | "total_tokens" | "latency_ms">
+  >(
     `
     SELECT
       id,

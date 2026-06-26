@@ -33,7 +33,14 @@ export async function createEvaluator(projectId: string, input: CreateEvaluatorI
     update: data,
     create: { projectId, name: input.name, ...data },
   });
-  return { name: ev.name, provider: ev.provider, model: ev.model, online: ev.online, samplingRate: ev.samplingRate, filterName: ev.filterName };
+  return {
+    name: ev.name,
+    provider: ev.provider,
+    model: ev.model,
+    online: ev.online,
+    samplingRate: ev.samplingRate,
+    filterName: ev.filterName,
+  };
 }
 
 export async function listEvaluators(projectId: string) {

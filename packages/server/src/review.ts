@@ -18,7 +18,11 @@ export interface CreateQueueInput {
 export async function createReviewQueue(projectId: string, input: CreateQueueInput) {
   const q = await prisma.reviewQueue.upsert({
     where: { projectId_name: { projectId, name: input.name } },
-    update: { description: input.description ?? undefined, scoreName: input.scoreName, dataType: input.dataType ?? "NUMERIC" },
+    update: {
+      description: input.description ?? undefined,
+      scoreName: input.scoreName,
+      dataType: input.dataType ?? "NUMERIC",
+    },
     create: {
       projectId,
       name: input.name,
@@ -72,7 +76,10 @@ export async function listReviewItems(projectId: string, name: string, status = 
     orderBy: { createdAt: "asc" },
     take: 100,
   });
-  const io = await getTraceIO(projectId, items.map((i) => i.traceId));
+  const io = await getTraceIO(
+    projectId,
+    items.map((i) => i.traceId),
+  );
   return {
     queue: { name: queue.name, scoreName: queue.scoreName, dataType: queue.dataType },
     items: items.map((i) => ({

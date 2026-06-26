@@ -4,7 +4,7 @@
  *
  * Run with: pnpm seed
  */
-import { prisma, hashSecret } from "@memoturn/db";
+import { hashSecret, prisma } from "@memoturn/db";
 import { auth } from "@memoturn/server";
 
 const DEV_PUBLIC_KEY = "pk-mt-dev";

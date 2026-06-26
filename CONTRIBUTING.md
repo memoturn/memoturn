@@ -11,14 +11,13 @@ Thanks for helping build memoturn! This is a Bun-native monorepo.
 ## Setup
 
 ```bash
-bun install
 cp .env.example .env
-bun run infra:up        # start Postgres, ClickHouse, Redis, MinIO
-bun run db:migrate      # Prisma migrations
-bun run db:clickhouse   # ClickHouse DDL
-bun run seed            # default workspace/project, dev API key, login user
-bun run dev             # api (:3001) + worker + console (:3000)
+bun run setup   # install + infra up + wait-for-healthy + migrate + clickhouse + seed
+bun run dev     # api (:3001) + worker + console (:3000)
 ```
+
+`bun install` also runs `postinstall` (regenerates the Prisma client — no more stale-client
+type errors after a schema change) and `prepare` (installs git hooks via lefthook).
 
 Then `bun run quickstart` emits a trace; open http://localhost:3000.
 
@@ -42,8 +41,11 @@ sdks/js        @memoturn/sdk      sdks/python  memoturn
 ## Checks (CI parity)
 
 ```bash
+bun run lint        # Biome (format + lint + import order); `bun run format` to auto-fix
 bun run typecheck && bun run test && bun run build
 ```
+
+Git hooks (lefthook): pre-commit runs Biome on staged files; pre-push runs typecheck.
 
 ## Conventions
 

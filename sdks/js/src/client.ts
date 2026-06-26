@@ -1,11 +1,4 @@
-import type {
-  GenerationInput,
-  IngestEnvelope,
-  MemoturnOptions,
-  ScoreInput,
-  SpanInput,
-  TraceInput,
-} from "./types.js";
+import type { GenerationInput, IngestEnvelope, MemoturnOptions, ScoreInput, SpanInput, TraceInput } from "./types.js";
 
 function uuid(): string {
   // Works in Node 18+ and browsers.
@@ -169,7 +162,14 @@ export class MemoturnSpan {
       id: uuid(),
       type: "span-create",
       timestamp: nowIso(),
-      body: { ...input, id, traceId: this.traceId, parentObservationId: this.id, environment: this.environment, startTime: nowIso() },
+      body: {
+        ...input,
+        id,
+        traceId: this.traceId,
+        parentObservationId: this.id,
+        environment: this.environment,
+        startTime: nowIso(),
+      },
     });
     return new MemoturnSpan(this.client, this.traceId, id, this.environment, "span");
   }

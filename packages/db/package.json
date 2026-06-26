@@ -18,7 +18,7 @@
     "clickhouse:migrate": "bun --env-file=../../.env src/migrate-clickhouse.ts",
     "studio": "prisma studio",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "echo 'no lint configured'",
+    "lint": "biome check .",
     "test": "echo 'no tests'",
     "clean": "rm -rf dist .turbo"
   },

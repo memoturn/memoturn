@@ -53,7 +53,14 @@ export async function runPlayground(projectId: string, input: PlaygroundInput, o
         id: newId(),
         type: "generation-update",
         timestamp: isoNow(),
-        body: { id: obsId, traceId, environment: "playground", endTime: isoNow(), output: result.content, usage: result.usage },
+        body: {
+          id: obsId,
+          traceId,
+          environment: "playground",
+          endTime: isoNow(),
+          output: result.content,
+          usage: result.usage,
+        },
       },
     ],
   });

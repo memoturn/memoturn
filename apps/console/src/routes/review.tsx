@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { api, type ReviewItem } from "../lib/api";
 
@@ -39,7 +39,12 @@ function ReviewCard({ queue, item, onDone }: { queue: string; item: ReviewItem; 
           title="score value"
           style={{ width: 90 }}
         />
-        <input placeholder="comment" value={comment} onChange={(e) => setComment(e.target.value)} style={{ width: 260 }} />
+        <input
+          placeholder="comment"
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          style={{ width: 260 }}
+        />
         <button disabled={submit.isPending} onClick={() => submit.mutate()}>
           {submit.isPending ? "Saving…" : "Submit score"}
         </button>
@@ -73,7 +78,9 @@ function ReviewPage() {
   return (
     <div>
       <h1>Review queues</h1>
-      <p className="obs-meta">Human-in-the-loop annotation. Submitting a review writes an ANNOTATION score on the trace.</p>
+      <p className="obs-meta">
+        Human-in-the-loop annotation. Submitting a review writes an ANNOTATION score on the trace.
+      </p>
 
       <h2>New queue</h2>
       <div className="filters">

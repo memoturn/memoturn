@@ -5,7 +5,11 @@ import { api } from "../lib/api";
 export const Route = createFileRoute("/audit")({ component: AuditPage });
 
 function AuditPage() {
-  const { data: logs, isLoading, error } = useQuery({
+  const {
+    data: logs,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ["audit"],
     queryFn: () => api.listAuditLogs(),
     refetchInterval: 10_000,

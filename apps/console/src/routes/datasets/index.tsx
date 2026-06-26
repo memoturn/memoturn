@@ -1,11 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { api } from "../../lib/api";
 
 export const Route = createFileRoute("/datasets/")({ component: DatasetsPage });
 
 function DatasetsPage() {
-  const { data: datasets, isLoading, error } = useQuery({
+  const {
+    data: datasets,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ["datasets"],
     queryFn: () => api.listDatasets(),
     refetchInterval: 10_000,

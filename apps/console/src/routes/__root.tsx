@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, Outlet, createRootRoute, useLocation, useNavigate } from "@tanstack/react-router";
+import { createRootRoute, Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { api, getActiveProject, setActiveProject } from "../lib/api";
 import { signOut, useSession } from "../lib/auth";

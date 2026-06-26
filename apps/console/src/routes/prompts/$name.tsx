@@ -1,21 +1,23 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { api, type PromptVersionDetail } from "../../lib/api";
 
 export const Route = createFileRoute("/prompts/$name")({ component: PromptDetailPage });
 
 function renderContent(v: PromptVersionDetail): string {
   if (v.type === "CHAT" && Array.isArray(v.content)) {
-    return (v.content as { role: string; content: string }[])
-      .map((m) => `[${m.role}] ${m.content}`)
-      .join("\n");
+    return (v.content as { role: string; content: string }[]).map((m) => `[${m.role}] ${m.content}`).join("\n");
   }
   return String(v.content ?? "");
 }
 
 function PromptDetailPage() {
   const { name } = Route.useParams();
-  const { data: prompt, isLoading, error } = useQuery({
+  const {
+    data: prompt,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ["prompt", name],
     queryFn: () => api.getPrompt(name),
   });

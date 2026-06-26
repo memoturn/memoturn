@@ -17,24 +17,31 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "lint": "turbo run lint",
+    "lint": "biome check .",
+    "format": "biome check --write .",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "clean": "turbo run clean",
+    "setup": "bun install && bun run infra:up && bun run infra:wait && bun run db:migrate && bun run db:clickhouse && bun run seed",
     "infra:up": "docker compose -f infra/docker-compose.dev.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.dev.yml down",
+    "infra:wait": "bun scripts/wait-for-infra.ts",
     "infra:logs": "docker compose -f infra/docker-compose.dev.yml logs -f",
     "db:generate": "bun --filter @memoturn/db generate",
     "db:migrate": "bun --filter @memoturn/db migrate",
     "db:clickhouse": "bun --filter @memoturn/db clickhouse:migrate",
     "seed": "bun --env-file=.env scripts/seed.ts",
-    "quickstart": "bun --env-file=.env examples/quickstart.ts"
+    "quickstart": "bun --env-file=.env examples/quickstart.ts",
+    "postinstall": "bun --filter @memoturn/db generate || true",
+    "prepare": "lefthook install || true"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.1",
     "@memoturn/db": "workspace:*",
     "@memoturn/sdk": "workspace:*",
     "@memoturn/server": "workspace:*",
     "@types/node": "^26.0.1",
+    "lefthook": "^2.1.9",
     "turbo": "^2.10.0",
     "typescript": "^6.0.3"
   },

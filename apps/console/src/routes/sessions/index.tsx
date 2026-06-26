@@ -1,11 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { api } from "../../lib/api";
 
 export const Route = createFileRoute("/sessions/")({ component: SessionsPage });
 
 function SessionsPage() {
-  const { data: sessions, isLoading, error } = useQuery({
+  const {
+    data: sessions,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ["sessions"],
     queryFn: () => api.listSessions(),
     refetchInterval: 5_000,

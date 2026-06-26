@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { api, type ObservationDetail } from "../../lib/api";
 
 export const Route = createFileRoute("/traces/$id")({ component: TraceDetailPage });
@@ -102,7 +102,11 @@ function ObservationDetailRow({ obs }: { obs: ObservationDetail }) {
 
 function TraceDetailPage() {
   const { id } = Route.useParams();
-  const { data: trace, isLoading, error } = useQuery({
+  const {
+    data: trace,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ["trace", id],
     queryFn: () => api.getTrace(id),
   });

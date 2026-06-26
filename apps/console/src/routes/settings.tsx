@@ -33,13 +33,21 @@ function SettingsPage() {
       <h1>Settings</h1>
 
       <h2>LLM provider connections</h2>
-      <p className="obs-meta">API keys are encrypted at rest and used by the playground + evaluators. The "mock" provider needs no key.</p>
+      <p className="obs-meta">
+        API keys are encrypted at rest and used by the playground + evaluators. The "mock" provider needs no key.
+      </p>
       <div className="filters">
         <select value={provider} onChange={(e) => setProvider(e.target.value)}>
           <option value="anthropic">anthropic</option>
           <option value="openai">openai</option>
         </select>
-        <input type="password" placeholder="API key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={{ width: 260 }} />
+        <input
+          type="password"
+          placeholder="API key"
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          style={{ width: 260 }}
+        />
         <button disabled={!apiKey || save.isPending} onClick={() => save.mutate()}>
           {save.isPending ? "Saving…" : "Save key"}
         </button>
@@ -69,7 +77,9 @@ function SettingsPage() {
       )}
 
       <h2>Data retention</h2>
-      <p className="obs-meta">Delete traces/observations/scores older than N days (0 = keep forever). A daily worker job enforces this.</p>
+      <p className="obs-meta">
+        Delete traces/observations/scores older than N days (0 = keep forever). A daily worker job enforces this.
+      </p>
       <div className="filters">
         <input
           type="number"
@@ -78,7 +88,9 @@ function SettingsPage() {
           onChange={(e) => setDays(Number(e.target.value))}
           style={{ width: 100 }}
         />
-        <span className="obs-meta" style={{ alignSelf: "center" }}>days</span>
+        <span className="obs-meta" style={{ alignSelf: "center" }}>
+          days
+        </span>
         <button disabled={saveRetention.isPending} onClick={() => saveRetention.mutate()}>
           {saveRetention.isPending ? "Saving…" : "Save retention"}
         </button>

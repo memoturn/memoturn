@@ -45,6 +45,7 @@ jobs:
         with:
           bun-version: "1.3.4"
       - run: bun install --frozen-lockfile
+      - run: bun run lint
       - run: bun --filter @memoturn/db generate
       - run: bun --filter @memoturn/db migrate
       - run: bun run db:clickhouse

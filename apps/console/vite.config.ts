@@ -12,10 +12,7 @@ import { defineConfig } from "vite";
 const API_TARGET = process.env.MEMOTURN_API_URL ?? "http://localhost:3001";
 
 export default defineConfig({
-  plugins: [
-    tanstackRouter({ target: "react", autoCodeSplitting: true }),
-    viteReact(),
-  ],
+  plugins: [tanstackRouter({ target: "react", autoCodeSplitting: true }), viteReact()],
   server: {
     port: 3000,
     proxy: {

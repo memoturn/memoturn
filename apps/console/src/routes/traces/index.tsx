@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { api, downloadTracesExport } from "../../lib/api";
 
 interface TraceSearch {
@@ -26,7 +26,11 @@ function TracesPage() {
   const filters = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
 
-  const { data: traces, isLoading, error } = useQuery({
+  const {
+    data: traces,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ["traces", filters],
     queryFn: () => api.listTraces(filters),
     refetchInterval: 5_000,

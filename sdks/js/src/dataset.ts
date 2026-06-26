@@ -8,7 +8,7 @@ function resolve(creds: Creds) {
   const baseUrl = (creds.baseUrl ?? process.env.MEMOTURN_BASE_URL ?? "http://localhost:3001").replace(/\/$/, "");
   const publicKey = creds.publicKey ?? process.env.MEMOTURN_PUBLIC_KEY ?? "";
   const secretKey = creds.secretKey ?? process.env.MEMOTURN_SECRET_KEY ?? "";
-  const auth = "Basic " + Buffer.from(`${publicKey}:${secretKey}`).toString("base64");
+  const auth = `Basic ${Buffer.from(`${publicKey}:${secretKey}`).toString("base64")}`;
   return { baseUrl, auth };
 }
 
@@ -35,7 +35,10 @@ export interface DatasetHandle {
   description: string;
   items: DatasetItem[];
   /** Record an experiment run linking items to the traces produced for them. */
-  recordRun(runName: string, links: { datasetItemId: string; traceId: string }[]): Promise<{ run: string; linked: number }>;
+  recordRun(
+    runName: string,
+    links: { datasetItemId: string; traceId: string }[],
+  ): Promise<{ run: string; linked: number }>;
 }
 
 export async function createDataset(creds: Creds, name: string, description?: string): Promise<void> {

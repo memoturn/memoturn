@@ -30,11 +30,7 @@ export interface CostBreakdown {
   totalCost: number;
 }
 
-export function computeCost(
-  model: string | undefined,
-  promptTokens = 0,
-  completionTokens = 0,
-): CostBreakdown {
+export function computeCost(model: string | undefined, promptTokens = 0, completionTokens = 0): CostBreakdown {
   const zero = { inputCost: 0, outputCost: 0, totalCost: 0 };
   if (!model) return zero;
   const price = MODEL_PRICES.find((p) => p.match.test(model));

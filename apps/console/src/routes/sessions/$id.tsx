@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { api } from "../../lib/api";
 
 export const Route = createFileRoute("/sessions/$id")({ component: SessionDetailPage });
@@ -10,7 +10,11 @@ function fmtCost(n: number): string {
 
 function SessionDetailPage() {
   const { id } = Route.useParams();
-  const { data: traces, isLoading, error } = useQuery({
+  const {
+    data: traces,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ["session-traces", id],
     queryFn: () => api.listTraces({ sessionId: id }),
   });

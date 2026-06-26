@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { computeCost } from "./models.js";
 import { ingestRequest } from "./events.js";
+import { computeCost } from "./models.js";
 
 describe("ingestRequest", () => {
   it("accepts a valid trace + generation batch", () => {

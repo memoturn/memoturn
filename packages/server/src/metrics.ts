@@ -37,7 +37,13 @@ async function query<T>(sql: string, params: Record<string, unknown>): Promise<T
 }
 
 export async function getMetrics(projectId: string, days = 30): Promise<MetricsSummary> {
-  const byDay = await query<{ day: string; generations: number; total_tokens: number; total_cost: number; latency: number[] }>(
+  const byDay = await query<{
+    day: string;
+    generations: number;
+    total_tokens: number;
+    total_cost: number;
+    latency: number[];
+  }>(
     `
     SELECT
       toString(date) AS day,

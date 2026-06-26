@@ -1,4 +1,4 @@
-import { createClient, type ClickHouseClient } from "@clickhouse/client";
+import { type ClickHouseClient, createClient } from "@clickhouse/client";
 
 /**
  * Shared ClickHouse client. memoturn writes telemetry through the worker and reads

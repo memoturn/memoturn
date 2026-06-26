@@ -1,6 +1,6 @@
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 /**
  * Shared Prisma client (singleton across hot reloads in dev). Prisma 7 connects via a

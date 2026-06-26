@@ -190,8 +190,7 @@ export const api = {
     post(`/v1/review-queues`, body),
   addReviewItems: (name: string, traceIds: string[]) =>
     post(`/v1/review-queues/${encodeURIComponent(name)}/items`, { traceIds }),
-  listReviewItems: (name: string) =>
-    get<ReviewItemsResponse>(`/v1/review-queues/${encodeURIComponent(name)}/items`),
+  listReviewItems: (name: string) => get<ReviewItemsResponse>(`/v1/review-queues/${encodeURIComponent(name)}/items`),
   submitReviewScore: (name: string, itemId: string, body: { value?: number; stringValue?: string; comment?: string }) =>
     post(`/v1/review-queues/${encodeURIComponent(name)}/items/${encodeURIComponent(itemId)}/score`, body),
 };
@@ -224,10 +223,7 @@ export interface SessionSummary {
 }
 
 /** Stream a playground completion (SSE), invoking onDelta for each text chunk. */
-export async function streamPlayground(
-  body: PlaygroundRequest,
-  onDelta: (delta: string) => void,
-): Promise<void> {
+export async function streamPlayground(body: PlaygroundRequest, onDelta: (delta: string) => void): Promise<void> {
   const res = await fetch(`${API_BASE}/v1/playground/stream`, {
     method: "POST",
     headers: headers({ "content-type": "application/json" }),

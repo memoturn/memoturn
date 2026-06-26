@@ -1,5 +1,5 @@
 import { QUEUE_NAMES, QUEUE_PREFIX } from "@memoturn/core";
-import { Queue, type ConnectionOptions } from "bullmq";
+import { type ConnectionOptions, Queue } from "bullmq";
 import { Redis } from "ioredis";
 
 /**
@@ -46,5 +46,5 @@ export function getIngestQueue(): Queue<IngestJob> {
   return ingestQueue;
 }
 
-export { QUEUE_NAMES, QUEUE_PREFIX };
 export type { ConnectionOptions };
+export { QUEUE_NAMES, QUEUE_PREFIX };

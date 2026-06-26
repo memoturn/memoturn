@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "echo 'no lint configured'",
+    "lint": "biome check .",
     "test": "echo 'no tests'",
     "clean": "rm -rf dist .turbo"
   },
@@ -22,7 +22,9 @@
     "openai": ">=4"
   },
   "peerDependenciesMeta": {
-    "openai": { "optional": true }
+    "openai": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^26.0.1",

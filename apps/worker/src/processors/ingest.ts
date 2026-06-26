@@ -1,6 +1,6 @@
 import { type IngestEvent, ingestRequest } from "@memoturn/core";
-import { clickhouse } from "@memoturn/db/clickhouse";
 import { getRawBatch } from "@memoturn/db/blob";
+import { clickhouse } from "@memoturn/db/clickhouse";
 import type { IngestJob } from "@memoturn/db/queue";
 import { listOnlineEvaluators, runEvaluator } from "@memoturn/server";
 import type { Job } from "bullmq";
@@ -66,15 +66,11 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
 
   const ch = clickhouse();
   await Promise.all([
-    traces.length
-      ? ch.insert({ table: "traces", values: traces, format: "JSONEachRow" })
-      : Promise.resolve(),
+    traces.length ? ch.insert({ table: "traces", values: traces, format: "JSONEachRow" }) : Promise.resolve(),
     observations.length
       ? ch.insert({ table: "observations", values: observations, format: "JSONEachRow" })
       : Promise.resolve(),
-    scores.length
-      ? ch.insert({ table: "scores", values: scores, format: "JSONEachRow" })
-      : Promise.resolve(),
+    scores.length ? ch.insert({ table: "scores", values: scores, format: "JSONEachRow" }) : Promise.resolve(),
   ]);
 
   console.log(

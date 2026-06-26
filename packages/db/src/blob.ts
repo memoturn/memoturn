@@ -24,11 +24,7 @@ export function blob(): S3Client {
 export const BLOB_BUCKET = process.env.BLOB_BUCKET ?? "memoturn";
 
 /** Store a raw ingest batch. Key: events/<projectId>/<YYYY-MM-DD>/<batchId>.json */
-export async function putRawBatch(
-  projectId: string,
-  batchId: string,
-  payload: unknown,
-): Promise<string> {
+export async function putRawBatch(projectId: string, batchId: string, payload: unknown): Promise<string> {
   const date = new Date().toISOString().slice(0, 10);
   const key = `events/${projectId}/${date}/${batchId}.json`;
   await blob().send(

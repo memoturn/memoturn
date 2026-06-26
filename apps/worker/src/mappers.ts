@@ -1,4 +1,4 @@
-import { computeCost, providerForModel, type IngestEvent } from "@memoturn/core";
+import { computeCost, type IngestEvent, providerForModel } from "@memoturn/core";
 
 /**
  * Maps validated ingest events into ClickHouse row shapes. Multiple events for the
@@ -99,7 +99,10 @@ export function mapEvents(projectId: string, events: IngestEvent[]): MappedRows 
   const ordered = [...events].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
   const traceAcc = new Map<string, { body: Record<string, unknown>; event_ts: string }>();
-  const obsAcc = new Map<string, { body: Record<string, unknown>; type: "SPAN" | "GENERATION" | "EVENT"; event_ts: string }>();
+  const obsAcc = new Map<
+    string,
+    { body: Record<string, unknown>; type: "SPAN" | "GENERATION" | "EVENT"; event_ts: string }
+  >();
   const scoreRows: ScoreRow[] = [];
 
   for (const event of ordered) {

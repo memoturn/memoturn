@@ -1,4 +1,4 @@
-import { prisma, type PromptType } from "@memoturn/db";
+import { type PromptType, prisma } from "@memoturn/db";
 
 /**
  * Prompt management. Each save creates a new immutable version; "channels" are
@@ -124,7 +124,11 @@ export async function getPromptDetail(projectId: string, name: string): Promise<
 }
 
 /** Resolve a deployed prompt by name + channel (default "production"). */
-export async function resolvePrompt(projectId: string, name: string, channel = "production"): Promise<CompiledPrompt | null> {
+export async function resolvePrompt(
+  projectId: string,
+  name: string,
+  channel = "production",
+): Promise<CompiledPrompt | null> {
   const prompt = await prisma.prompt.findUnique({
     where: { projectId_name: { projectId, name } },
     include: { channels: true },

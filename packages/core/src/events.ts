@@ -110,9 +110,15 @@ const envelope = z.object({
 export const ingestEvent = z.discriminatedUnion("type", [
   envelope.extend({ type: z.literal("trace-create"), body: traceBody }),
   envelope.extend({ type: z.literal("span-create"), body: spanBody }),
-  envelope.extend({ type: z.literal("span-update"), body: spanBody.partial({ name: true }).required({ id: true, traceId: true }) }),
+  envelope.extend({
+    type: z.literal("span-update"),
+    body: spanBody.partial({ name: true }).required({ id: true, traceId: true }),
+  }),
   envelope.extend({ type: z.literal("generation-create"), body: generationBody }),
-  envelope.extend({ type: z.literal("generation-update"), body: generationBody.partial({ name: true }).required({ id: true, traceId: true }) }),
+  envelope.extend({
+    type: z.literal("generation-update"),
+    body: generationBody.partial({ name: true }).required({ id: true, traceId: true }),
+  }),
   envelope.extend({ type: z.literal("event-create"), body: eventBody }),
   envelope.extend({ type: z.literal("score-create"), body: scoreBody }),
 ]);

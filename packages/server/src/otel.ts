@@ -77,7 +77,9 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
 
         if (isGen) {
           const promptTokens = Number(attrs["gen_ai.usage.input_tokens"] ?? attrs["gen_ai.usage.prompt_tokens"] ?? 0);
-          const completionTokens = Number(attrs["gen_ai.usage.output_tokens"] ?? attrs["gen_ai.usage.completion_tokens"] ?? 0);
+          const completionTokens = Number(
+            attrs["gen_ai.usage.output_tokens"] ?? attrs["gen_ai.usage.completion_tokens"] ?? 0,
+          );
           events.push({
             id: newId(),
             type: "generation-create",

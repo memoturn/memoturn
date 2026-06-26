@@ -43,12 +43,8 @@ SDKs / OTel / LangChain / OpenAI
 ## Quickstart
 
 ```bash
-bun install
 cp .env.example .env
-bun run infra:up        # Postgres, ClickHouse, Redis, MinIO
-bun run db:migrate
-bun run db:clickhouse
-bun run seed            # workspace/project, dev API key, login user, sample prompt
+bun run setup           # install + infra up + wait + migrate + clickhouse + seed
 bun run dev             # api (:3001) + worker + console (:3000)
 bun run quickstart      # emit a trace → open http://localhost:3000
 ```

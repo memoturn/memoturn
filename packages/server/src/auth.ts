@@ -13,10 +13,7 @@ export interface AuthContext {
   projectId: string;
 }
 
-export async function authenticateKeys(
-  publicKey: string,
-  secretKey: string,
-): Promise<AuthContext | null> {
+export async function authenticateKeys(publicKey: string, secretKey: string): Promise<AuthContext | null> {
   if (!publicKey || !secretKey) return null;
 
   const cached = await readCache(publicKey);
@@ -72,7 +69,8 @@ export async function getUserProjectAccess(userId: string, requestedProjectId?: 
       const membership = await prisma.membership.findUnique({
         where: { userId_workspaceId: { userId, workspaceId: project.workspaceId } },
       });
-      if (membership) return { projectId: project.id, role: membership.role as WorkspaceRole, workspaceId: project.workspaceId };
+      if (membership)
+        return { projectId: project.id, role: membership.role as WorkspaceRole, workspaceId: project.workspaceId };
     }
   }
   const membership = await prisma.membership.findFirst({

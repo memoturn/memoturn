@@ -1,11 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { api } from "../../lib/api";
 
 export const Route = createFileRoute("/prompts/")({ component: PromptsPage });
 
 function PromptsPage() {
-  const { data: prompts, isLoading, error } = useQuery({
+  const {
+    data: prompts,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ["prompts"],
     queryFn: () => api.listPrompts(),
     refetchInterval: 10_000,

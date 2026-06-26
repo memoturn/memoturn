@@ -43,15 +43,17 @@ export async function generate(input: GenerateInput): Promise<GenerateResult> {
     const content = `[mock:${model}] ${lastUser.slice(0, 400)}`;
     const promptTokens = messages.reduce((n, m) => n + approxTokens(m.content), 0);
     const completionTokens = approxTokens(content);
-    return { provider, model, content, usage: { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens } };
+    return {
+      provider,
+      model,
+      content,
+      usage: { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens },
+    };
   }
 
   if (!apiKey) throw new Error(`no API key configured for provider '${provider}'`);
 
-  const languageModel =
-    provider === "anthropic"
-      ? createAnthropic({ apiKey })(model)
-      : createOpenAI({ apiKey })(model);
+  const languageModel = provider === "anthropic" ? createAnthropic({ apiKey })(model) : createOpenAI({ apiKey })(model);
 
   const result = await generateText({
     model: languageModel,
@@ -79,7 +81,7 @@ export async function* generateStream(input: GenerateInput): AsyncGenerator<stri
     const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
     const content = `[mock:${model}] ${lastUser.slice(0, 400)}`;
     for (const word of content.split(" ")) {
-      yield word + " ";
+      yield `${word} `;
       await sleep(15);
     }
     return;

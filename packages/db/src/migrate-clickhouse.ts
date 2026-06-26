@@ -4,7 +4,7 @@
  *
  * Run with: pnpm db:clickhouse
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { clickhouse } from "./clickhouse.js";
