@@ -2,7 +2,8 @@
 
 Open-source **AI engineering platform** — LLM observability, evals, metrics, prompt
 management, playground, and datasets. Self-hostable, OpenTelemetry-native, Bun-native.
-A Langfuse-class platform built as its own product.
+
+📚 **[Documentation](./docs/README.md)** — getting started, architecture, API, SDKs, integrations, evaluation, deployment.
 
 ## Features
 
