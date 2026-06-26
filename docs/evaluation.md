@@ -3,6 +3,23 @@
 memoturn supports three evaluation modes; all write **scores** into ClickHouse, surfaced
 on the trace alongside `API` feedback scores.
 
+```mermaid
+flowchart TD
+  subgraph offline[Offline]
+    ds[Dataset + items] --> run[Experiment run] --> ev1[Evaluator]
+  end
+  subgraph online[Online]
+    ing[Incoming trace] --> sample{sampled?} -->|yes| ev2[Evaluator]
+  end
+  subgraph human[Human]
+    q[Review queue] --> rev[Reviewer scores]
+  end
+  ev1 --> score[(scores in ClickHouse)]
+  ev2 --> score
+  rev --> score
+  score --> trace[Shown on the trace]
+```
+
 | Mode | Source | How |
 | --- | --- | --- |
 | Offline | `EVAL` | Run an evaluator over a dataset/experiment |

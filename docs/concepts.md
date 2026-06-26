@@ -1,5 +1,31 @@
 # Concepts
 
+## Data model
+
+```mermaid
+erDiagram
+  Workspace ||--o{ Project : has
+  Workspace ||--o{ Membership : has
+  User ||--o{ Membership : has
+  Project ||--o{ ApiKey : has
+  Project ||--o{ Prompt : has
+  Project ||--o{ Dataset : has
+  Project ||--o{ Evaluator : has
+  Project ||--o{ ReviewQueue : has
+  Prompt ||--o{ PromptVersion : versions
+  Prompt ||--o{ PromptChannel : channels
+  Dataset ||--o{ DatasetItem : items
+  Dataset ||--o{ DatasetRun : runs
+  DatasetRun ||--o{ DatasetRunItem : links
+  ReviewQueue ||--o{ ReviewItem : items
+  Trace ||--o{ Observation : contains
+  Trace ||--o{ Score : has
+```
+
+Relational metadata (workspaces, projects, prompts, datasets, …) lives in **Postgres**;
+high-volume **Trace / Observation / Score** telemetry lives in **ClickHouse** and is
+linked by `trace_id` / `project_id`.
+
 ## Tenancy
 
 - **Workspace** → **Project**. All telemetry and config is scoped to a project.

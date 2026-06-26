@@ -3,6 +3,31 @@
 memoturn is an async, decoupled, Bun-native system. Ingestion is fire-and-forget: the
 API persists raw events and acks immediately; a worker does the heavy writes.
 
+```mermaid
+flowchart LR
+  subgraph clients[Clients]
+    sdk[SDKs / OTel / LangChain / OpenAI]
+    ui[Console SPA]
+  end
+  api[apps/api · Hono/Bun]
+  worker[apps/worker · BullMQ]
+  pg[(Postgres)]
+  ch[(ClickHouse)]
+  redis[(Redis / BullMQ)]
+  blob[(S3 / MinIO)]
+
+  sdk -- POST /v1/ingest --> api
+  ui -- TanStack Query --> api
+  api -- raw batch --> blob
+  api -- enqueue --> redis
+  api -- metadata --> pg
+  redis --> worker
+  worker -- fetch raw --> blob
+  worker -- merge + insert --> ch
+  api -- read --> ch
+  api -- read --> pg
+```
+
 ## Services
 
 | Service | Tech | Responsibility |
@@ -22,16 +47,24 @@ API persists raw events and acks immediately; a worker does the heavy writes.
 
 ## Ingestion pipeline
 
-```
-SDKs / OTel / LangChain / OpenAI / LiteLLM
-      │  POST /v1/ingest   (batched, Basic auth = publicKey:secretKey)
-      ▼
-  apps/api ─► validate (zod) ─► write raw batch to blob ─► enqueue (BullMQ) ─► 207 ack
-      ▼
-  apps/worker ─► merge trace/observation/score events ─► INSERT ClickHouse
-                └─► run sampled online evaluators on completed traces
-      ▼
-  apps/console ──TanStack Query──► apps/api  (reads from ClickHouse + Postgres)
+```mermaid
+sequenceDiagram
+  participant SDK
+  participant API as apps/api
+  participant Blob as S3/MinIO
+  participant Q as Redis/BullMQ
+  participant W as apps/worker
+  participant CH as ClickHouse
+
+  SDK->>API: POST /v1/ingest (batch, Basic auth)
+  API->>API: validate (zod)
+  API->>Blob: write raw batch (source of truth)
+  API->>Q: enqueue ingest job
+  API-->>SDK: 207 (per-event status)
+  Q->>W: deliver job
+  W->>Blob: fetch raw batch
+  W->>CH: merge + insert traces/observations/scores
+  W->>W: run sampled online evaluators on completed traces
 ```
 
 - The API acks fast; the blob event log is the source of truth, so ClickHouse is
