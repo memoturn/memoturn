@@ -3,6 +3,23 @@
   "version": "0.1.0",
   "description": "memoturn JS/TS SDK — tracing, OpenAI wrapper, LangChain callback, prompt fetch.",
   "license": "Apache-2.0",
+  "keywords": [
+    "memoturn",
+    "llm",
+    "observability",
+    "tracing",
+    "openai",
+    "langchain",
+    "evals",
+    "opentelemetry"
+  ],
+  "homepage": "https://github.com/memoturn/memoturn/tree/main/sdks/js#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/memoturn/memoturn.git",
+    "directory": "sdks/js"
+  },
+  "bugs": "https://github.com/memoturn/memoturn/issues",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -11,11 +28,35 @@
     "./openai": "./src/openai.ts",
     "./langchain": "./src/langchain.ts"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./openai": {
+        "types": "./dist/openai.d.ts",
+        "default": "./dist/openai.js"
+      },
+      "./langchain": {
+        "types": "./dist/langchain.d.ts",
+        "default": "./dist/langchain.js"
+      }
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "biome check .",
     "test": "vitest run",
+    "prepublishOnly": "bun run build",
     "clean": "rm -rf dist .turbo"
   },
   "peerDependencies": {
