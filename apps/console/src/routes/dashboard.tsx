@@ -227,13 +227,11 @@ function DashboardPage() {
         <CardHeader>
           <CardTitle>By model ({data.byModel.length})</CardTitle>
         </CardHeader>
-        <CardContent className={data.byModel.length === 0 ? undefined : "px-0"}>
+        <CardContent>
           {data.byModel.length === 0 ? (
             <EmptyState title="No model data yet" description="Per-model breakdown appears once generations record." />
           ) : (
-            <div className="border-t">
-              <DataTable columns={modelColumns} data={data.byModel} />
-            </div>
+            <DataTable columns={modelColumns} data={data.byModel} />
           )}
         </CardContent>
       </Card>
