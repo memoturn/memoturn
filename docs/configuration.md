@@ -24,6 +24,7 @@ defaults match `infra/docker-compose.dev.yml`.
 | --- | --- | --- |
 | `REDIS_URL` | `redis://localhost:6380` | Host port **6380** in dev |
 | `WORKER_CONCURRENCY` | `10` | Ingest worker concurrency |
+| `WORKER_PORT` | `3002` | Worker `/health` + `/metrics` HTTP endpoint |
 
 ## Blob storage (S3-compatible)
 
@@ -43,6 +44,7 @@ defaults match `infra/docker-compose.dev.yml`.
 | `API_PORT` | `3001` | Hono API |
 | `CONSOLE_PORT` | `3000` | Vite SPA |
 | `MEMOTURN_API_URL` | `http://localhost:3001` | API target for the console dev proxy |
+| `RATE_LIMIT_PER_MINUTE` | `0` | Per-project global request rate limit; `0` disables it (per-key limits still apply) |
 
 ## Auth
 

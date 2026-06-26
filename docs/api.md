@@ -77,6 +77,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET / POST | `/v1/review-queues` | List / create. |
 | POST | `/v1/review-queues/{name}/items` | Enqueue traces. |
 | GET | `/v1/review-queues/{name}/items` | Pending items with trace input/output. |
+| POST | `/v1/review-queues/{name}/items/{itemId}/assign` | Assign an item to a user (empty `assigneeId` unassigns; defaults to self). |
 | POST | `/v1/review-queues/{name}/items/{itemId}/score` | Submit a human `ANNOTATION` score. |
 
 ### Providers
@@ -128,6 +129,9 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | DELETE | `/v1/model-prices/{id}` | Delete a model price override. |
 | GET / POST | `/v1/scheduled-exports` | Get / configure the recurring daily NDJSON export of traces to blob storage. |
 | POST | `/v1/scheduled-exports/run` | Run the export now and write the NDJSON to blob storage. |
-| GET | `/v1/exports/traces` | NDJSON export (download). |
+| GET / POST | `/v1/masking` | Get / configure the PII redaction policy (built-in + custom patterns) applied to trace input/output at ingest. |
+| GET / POST | `/v1/analytics-sink` | Get / configure forwarding of trace/score events to PostHog. |
+| GET / POST | `/v1/api-keys` | List project API keys (public key + hint) / mint a new pair (secret returned once). |
+| DELETE | `/v1/api-keys/{id}` | Revoke an API key. |
 | GET | `/v1/health` | Liveness (no auth). |
 | `*` | `/auth/*` | Better Auth (sign-in/out, session). |
