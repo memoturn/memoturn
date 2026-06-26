@@ -54,7 +54,7 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 | Feature | Effort | Notes |
 | --- | --- | --- |
 | ~~**MCP server**~~ | Done | Stdio MCP server (`apps/mcp`) exposing prompts / datasets / review queues as tools for agent IDEs. |
-| **More OTel coverage** | M | OTLP/protobuf (currently JSON only); richer GenAI semconv mapping. |
+| **More OTel coverage** | M | Richer GenAI semconv mapping done (model params, log level, session/user, deployment env, newer `gen_ai.*.messages`). OTLP/protobuf decode still pending (JSON only). |
 | **Product-analytics export** | M | Forward events to an analytics sink (e.g. PostHog) for funnels. |
 
 ## UX
