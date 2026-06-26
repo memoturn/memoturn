@@ -1,7 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { Download, Save, X } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
+import { EmptyState } from "../../components/empty-state";
+import { KindBadge } from "../../components/kind-badge";
+import { PageHeader } from "../../components/page-header";
+import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
+import { Checkbox } from "../../components/ui/checkbox";
+import { Input } from "../../components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
+import { Skeleton } from "../../components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { api, downloadTracesExport } from "../../lib/api";
+import { useIsReadOnly } from "../../lib/role";
 import { useRangeDays } from "../../lib/timeRange";
 
 interface TraceSearch {
@@ -32,6 +45,8 @@ function TracesPage() {
   const filters = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const days = useRangeDays();
+  const readOnly = useIsReadOnly();
+  const qc = useQueryClient();
 
   const {
     data: traces,
@@ -46,8 +61,7 @@ function TracesPage() {
   const setFilter = (key: keyof TraceSearch, value: string) => {
     navigate({ search: (prev) => ({ ...prev, [key]: value || undefined }) });
   };
-
-  const qc = useQueryClient();
+  const hasFilters = Boolean(filters.search || filters.environment || filters.userId || filters.tag);
 
   const { data: savedViews } = useQuery({
     queryKey: ["saved-views", "traces"],
@@ -55,11 +69,16 @@ function TracesPage() {
   });
   const saveView = useMutation({
     mutationFn: (name: string) => api.createSavedView({ name, table: "traces", filters }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["saved-views", "traces"] }),
+    onSuccess: () => {
+      toast.success("View saved");
+      qc.invalidateQueries({ queryKey: ["saved-views", "traces"] });
+    },
+    onError: (e) => toast.error(`Failed to save view: ${String(e)}`),
   });
   const removeView = useMutation({
     mutationFn: (id: string) => api.deleteSavedView(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["saved-views", "traces"] }),
+    onError: (e) => toast.error(`Failed to delete view: ${String(e)}`),
   });
   const applyView = (f: Record<string, unknown>) => navigate({ search: f as TraceSearch });
   const promptSaveView = () => {
@@ -89,59 +108,81 @@ function TracesPage() {
         queueName: action === "review" ? target : undefined,
       }),
     onSuccess: () => {
+      toast.success("Batch applied");
       setSelected(new Set());
       setTarget("");
       qc.invalidateQueries({ queryKey: ["traces"] });
     },
+    onError: (e) => toast.error(`Batch failed: ${String(e)}`),
   });
   const needsTarget = action === "add-to-dataset" || action === "review";
 
   return (
-    <div>
-      <h1>Traces</h1>
+    <div className="space-y-4">
+      <PageHeader
+        title="Traces"
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={promptSaveView} disabled={readOnly} className="gap-2">
+              <Save />
+              Save view
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => void downloadTracesExport()} className="gap-2">
+              <Download />
+              Export JSONL
+            </Button>
+          </>
+        }
+      />
 
-      <div className="filters">
-        <input
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
           type="search"
           placeholder="Search name…"
           defaultValue={filters.search ?? ""}
           onChange={(e) => setFilter("search", e.target.value)}
+          className="h-9 max-w-xs"
         />
-        <input
-          type="text"
+        <Input
           placeholder="Environment"
           defaultValue={filters.environment ?? ""}
           onChange={(e) => setFilter("environment", e.target.value)}
+          className="h-9 w-40"
         />
-        <input
-          type="text"
+        <Input
           placeholder="User ID"
           defaultValue={filters.userId ?? ""}
           onChange={(e) => setFilter("userId", e.target.value)}
+          className="h-9 w-40"
         />
-        {filters.tag && <span className="badge gen">tag: {filters.tag}</span>}
-        {(filters.search || filters.environment || filters.userId || filters.tag) && (
-          <button onClick={() => navigate({ search: {} })}>Clear</button>
+        {filters.tag && <KindBadge tone="blue">tag: {filters.tag}</KindBadge>}
+        {hasFilters && (
+          <Button variant="ghost" size="sm" onClick={() => navigate({ search: {} })}>
+            Clear
+          </Button>
         )}
-        <div style={{ flex: 1 }} />
-        <button onClick={promptSaveView} title="Save the current filters as a view">
-          Save view
-        </button>
-        <button onClick={() => void downloadTracesExport()} title="Export traces as NDJSON">
-          Export JSONL
-        </button>
       </div>
 
       {savedViews && savedViews.length > 0 && (
-        <div className="filters" style={{ alignItems: "center" }}>
-          <span className="obs-meta">Saved views:</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-muted-foreground">Saved views:</span>
           {savedViews.map((v) => (
-            <span key={v.id} className="badge gen" style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-              <button className="link-btn" onClick={() => applyView(v.filters)} title="Apply this view">
+            <span key={v.id} className="inline-flex items-center gap-1 rounded-md border bg-muted px-1.5 py-0.5">
+              <button
+                type="button"
+                className="text-xs font-medium hover:underline"
+                onClick={() => applyView(v.filters)}
+                title="Apply this view"
+              >
                 {v.name}
               </button>
-              <button className="link-btn" onClick={() => removeView.mutate(v.id)} title="Delete view">
-                ×
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() => removeView.mutate(v.id)}
+                title="Delete view"
+              >
+                <X className="size-3" />
               </button>
             </span>
           ))}
@@ -149,90 +190,113 @@ function TracesPage() {
       )}
 
       {selected.size > 0 && (
-        <div className="filters" style={{ alignItems: "center" }}>
-          <strong>{selected.size} selected</strong>
-          <select value={action} onChange={(e) => setAction(e.target.value)}>
-            <option value="add-to-dataset">Add to dataset</option>
-            <option value="review">Add to review queue</option>
-            <option value="delete">Delete</option>
-          </select>
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 p-2">
+          <strong className="text-sm">{selected.size} selected</strong>
+          <Select value={action} onValueChange={setAction}>
+            <SelectTrigger size="sm" className="w-[200px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="add-to-dataset">Add to dataset</SelectItem>
+              <SelectItem value="review">Add to review queue</SelectItem>
+              <SelectItem value="delete">Delete</SelectItem>
+            </SelectContent>
+          </Select>
           {needsTarget && (
-            <input
+            <Input
               placeholder={action === "add-to-dataset" ? "dataset name" : "review queue name"}
               value={target}
               onChange={(e) => setTarget(e.target.value)}
-              style={{ width: 200 }}
+              className="h-9 w-52"
             />
           )}
-          <button disabled={runBatch.isPending || (needsTarget && !target)} onClick={() => runBatch.mutate()}>
+          <Button
+            size="sm"
+            disabled={readOnly || runBatch.isPending || (needsTarget && !target)}
+            onClick={() => runBatch.mutate()}
+          >
             {runBatch.isPending ? "Applying…" : "Apply"}
-          </button>
-          <button className="link-btn" onClick={() => setSelected(new Set())}>
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
             Clear selection
-          </button>
-          {runBatch.isError && <span className="obs-meta">Failed: {String(runBatch.error)}</span>}
+          </Button>
         </div>
       )}
 
-      {isLoading && <div className="empty">Loading…</div>}
-      {error && <div className="empty">Failed to load: {String(error)}</div>}
-      {traces && traces.length === 0 && (
-        <div className="empty">
-          No traces match. Run <code>bun run quickstart</code> to emit one.
+      {isLoading ? (
+        <Skeleton className="h-64 w-full" />
+      ) : error ? (
+        <EmptyState title="Failed to load traces" description={String(error)} />
+      ) : !traces || traces.length === 0 ? (
+        <EmptyState
+          title="No traces match"
+          description="Run `bun run quickstart` to emit one, or adjust your filters."
+        />
+      ) : (
+        <div className="rounded-lg border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={allSelected}
+                    onCheckedChange={(c) => setSelected(c ? new Set(allShown) : new Set())}
+                    aria-label="Select all shown"
+                  />
+                </TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Timestamp</TableHead>
+                <TableHead>Obs</TableHead>
+                <TableHead>Tokens</TableHead>
+                <TableHead>Cost</TableHead>
+                <TableHead>Latency</TableHead>
+                <TableHead>Env</TableHead>
+                <TableHead>Tags</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {traces.map((t) => (
+                <TableRow key={t.id} data-state={selected.has(t.id) ? "selected" : undefined}>
+                  <TableCell>
+                    <Checkbox
+                      checked={selected.has(t.id)}
+                      onCheckedChange={() => toggle(t.id)}
+                      aria-label={`Select ${t.name || t.id}`}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Link to="/traces/$id" params={{ id: t.id }} className="font-medium text-primary hover:underline">
+                      {t.name || t.id.slice(0, 8)}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{t.timestamp}</TableCell>
+                  <TableCell>{t.observation_count}</TableCell>
+                  <TableCell>{t.total_tokens}</TableCell>
+                  <TableCell>{fmtCost(Number(t.total_cost))}</TableCell>
+                  <TableCell>{t.latency_ms} ms</TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{t.environment}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {t.tags.map((tag) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          className="rounded-md border bg-muted px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+                          onClick={() => setFilter("tag", tag)}
+                          title="Filter by tag"
+                        >
+                          {tag}
+                        </button>
+                      ))}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
-      )}
-      {traces && traces.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th style={{ width: 24 }}>
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  onChange={(e) => setSelected(e.target.checked ? new Set(allShown) : new Set())}
-                  title="Select all shown"
-                />
-              </th>
-              <th>Name</th>
-              <th>Timestamp</th>
-              <th>Obs</th>
-              <th>Tokens</th>
-              <th>Cost</th>
-              <th>Latency</th>
-              <th>Env</th>
-              <th>Tags</th>
-            </tr>
-          </thead>
-          <tbody>
-            {traces.map((t) => (
-              <tr key={t.id}>
-                <td>
-                  <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggle(t.id)} />
-                </td>
-                <td>
-                  <Link to="/traces/$id" params={{ id: t.id }}>
-                    {t.name || t.id.slice(0, 8)}
-                  </Link>
-                </td>
-                <td>{t.timestamp}</td>
-                <td>{t.observation_count}</td>
-                <td>{t.total_tokens}</td>
-                <td>{fmtCost(Number(t.total_cost))}</td>
-                <td>{t.latency_ms} ms</td>
-                <td>
-                  <span className="badge">{t.environment}</span>
-                </td>
-                <td>
-                  {t.tags.map((tag) => (
-                    <button key={tag} className="tag-chip" onClick={() => setFilter("tag", tag)} title="Filter by tag">
-                      {tag}
-                    </button>
-                  ))}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       )}
     </div>
   );

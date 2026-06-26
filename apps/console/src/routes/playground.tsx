@@ -1,8 +1,20 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { ArrowRight, Play } from "lucide-react";
 import { useState } from "react";
+import { PageHeader } from "../components/page-header";
+import { Button } from "../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Switch } from "../components/ui/switch";
+import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Textarea } from "../components/ui/textarea";
 import { api, type PlaygroundResponse, streamPlayground } from "../lib/api";
 
 export const Route = createFileRoute("/playground")({ component: PlaygroundPage });
+
+type Mode = "chat" | "structured" | "tools";
 
 function PlaygroundPage() {
   const [provider, setProvider] = useState("mock");
@@ -10,7 +22,7 @@ function PlaygroundPage() {
   const [system, setSystem] = useState("You are a helpful assistant.");
   const [userMsg, setUserMsg] = useState("Explain what memoturn is in one sentence.");
   const [temperature, setTemperature] = useState(0.2);
-  const [mode, setMode] = useState<"chat" | "structured" | "tools">("chat");
+  const [mode, setMode] = useState<Mode>("chat");
   const [schemaText, setSchemaText] = useState(
     JSON.stringify({ type: "object", properties: { answer: { type: "string" } }, required: ["answer"] }, null, 2),
   );
@@ -68,89 +80,149 @@ function PlaygroundPage() {
   }
 
   return (
-    <div>
-      <h1>Playground</h1>
-      <div className="filters">
-        <select value={provider} onChange={(e) => onProvider(e.target.value)}>
-          <option value="mock">mock</option>
-          <option value="anthropic">anthropic</option>
-          <option value="openai">openai</option>
-        </select>
-        <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="model" />
-        <input
-          type="number"
-          step="0.1"
-          min="0"
-          max="2"
-          value={temperature}
-          onChange={(e) => setTemperature(Number(e.target.value))}
-          style={{ width: 90 }}
-        />
-        <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)} title="Output mode">
-          <option value="chat">chat</option>
-          <option value="structured">structured output</option>
-          <option value="tools">tools</option>
-        </select>
-        <label className="inline-check">
-          <input
-            type="checkbox"
-            checked={streaming}
-            disabled={mode !== "chat"}
-            onChange={(e) => setStreaming(e.target.checked)}
-          />{" "}
-          stream
-        </label>
-        <button onClick={run} disabled={busy}>
-          {busy ? "Running…" : "Run"}
-        </button>
-      </div>
+    <div className="space-y-6">
+      <PageHeader title="Playground" description="Try a prompt against a provider and inspect the response." />
 
-      <h2>System</h2>
-      <textarea className="pg-input" value={system} onChange={(e) => setSystem(e.target.value)} rows={2} />
-      <h2>User</h2>
-      <textarea className="pg-input" value={userMsg} onChange={(e) => setUserMsg(e.target.value)} rows={4} />
+      <Card>
+        <CardHeader>
+          <CardTitle>Request</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="space-y-2">
+              <Label>Provider</Label>
+              <Select value={provider} onValueChange={onProvider}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="mock">mock</SelectItem>
+                  <SelectItem value="anthropic">anthropic</SelectItem>
+                  <SelectItem value="openai">openai</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pg-model">Model</Label>
+              <Input id="pg-model" value={model} onChange={(e) => setModel(e.target.value)} placeholder="model" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pg-temp">Temperature</Label>
+              <Input
+                id="pg-temp"
+                type="number"
+                step="0.1"
+                min="0"
+                max="2"
+                value={temperature}
+                onChange={(e) => setTemperature(Number(e.target.value))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Mode</Label>
+              <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)}>
+                <TabsList className="w-full">
+                  <TabsTrigger value="chat">chat</TabsTrigger>
+                  <TabsTrigger value="structured">structured</TabsTrigger>
+                  <TabsTrigger value="tools">tools</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+          </div>
 
-      {mode === "structured" && (
-        <>
-          <h2>JSON schema</h2>
-          <textarea className="pg-input" value={schemaText} onChange={(e) => setSchemaText(e.target.value)} rows={8} />
-        </>
-      )}
-      {mode === "tools" && (
-        <>
-          <h2>Tools (JSON)</h2>
-          <textarea className="pg-input" value={toolsText} onChange={(e) => setToolsText(e.target.value)} rows={10} />
-        </>
-      )}
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Switch id="pg-stream" checked={streaming} disabled={mode !== "chat"} onCheckedChange={setStreaming} />
+              <Label htmlFor="pg-stream" className="text-muted-foreground">
+                Stream {mode !== "chat" && "(chat only)"}
+              </Label>
+            </div>
+            <Button onClick={run} disabled={busy} className="ml-auto">
+              <Play className="size-4" />
+              {busy ? "Running…" : "Run"}
+            </Button>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="pg-system">System</Label>
+            <Textarea id="pg-system" value={system} onChange={(e) => setSystem(e.target.value)} rows={2} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pg-user">User</Label>
+            <Textarea id="pg-user" value={userMsg} onChange={(e) => setUserMsg(e.target.value)} rows={4} />
+          </div>
+
+          {mode === "structured" && (
+            <div className="space-y-2">
+              <Label htmlFor="pg-schema">JSON schema</Label>
+              <Textarea
+                id="pg-schema"
+                className="font-mono text-xs"
+                value={schemaText}
+                onChange={(e) => setSchemaText(e.target.value)}
+                rows={8}
+              />
+            </div>
+          )}
+          {mode === "tools" && (
+            <div className="space-y-2">
+              <Label htmlFor="pg-tools">Tools (JSON)</Label>
+              <Textarea
+                id="pg-tools"
+                className="font-mono text-xs"
+                value={toolsText}
+                onChange={(e) => setToolsText(e.target.value)}
+                rows={10}
+              />
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {error && (
-        <div className="empty" style={{ marginTop: 16 }}>
-          {error}
-        </div>
+        <Card className="border-destructive/50">
+          <CardContent className="text-sm text-destructive">{error}</CardContent>
+        </Card>
       )}
+
       {streamed && (
-        <>
-          <h2>Response (streaming)</h2>
-          <pre>{streamed}</pre>
-        </>
+        <Card>
+          <CardHeader>
+            <CardTitle>Response (streaming)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <pre className="overflow-auto rounded-md border bg-muted/50 p-3 text-xs whitespace-pre-wrap">
+              {streamed}
+            </pre>
+          </CardContent>
+        </Card>
       )}
+
       {result && (
-        <>
-          <h2>Response</h2>
-          <pre>{result.content}</pre>
-          <div className="obs-meta">
-            {result.provider}/{result.model} · {result.usage.totalTokens} tokens ({result.usage.promptTokens}+
-            {result.usage.completionTokens})
-            {result.traceId && (
-              <>
-                {" · "}
-                <Link to="/traces/$id" params={{ id: result.traceId }}>
-                  view trace →
-                </Link>
-              </>
-            )}
-          </div>
-        </>
+        <Card>
+          <CardHeader>
+            <CardTitle>Response</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <pre className="overflow-auto rounded-md border bg-muted/50 p-3 text-xs whitespace-pre-wrap">
+              {result.content}
+            </pre>
+            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <span>
+                {result.provider}/{result.model} · {result.usage.totalTokens} tokens ({result.usage.promptTokens}+
+                {result.usage.completionTokens})
+              </span>
+              {result.traceId && (
+                <Button asChild variant="link" size="sm" className="h-auto p-0">
+                  <Link to="/traces/$id" params={{ id: result.traceId }}>
+                    view trace
+                    <ArrowRight className="size-3.5" />
+                  </Link>
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

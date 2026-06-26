@@ -1,54 +1,239 @@
+import { zodResolver } from "@hookform/resolvers/zod";
+import type { ApiKey, Automation, ModelPrice, ModelPriceList, ScoreConfig, Webhook } from "@memoturn/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import type { ColumnDef } from "@tanstack/react-table";
+import { Copy, DollarSign, KeyRound, ListChecks, Plug, Webhook as WebhookIcon, Zap } from "lucide-react";
 import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
+import { z } from "zod";
+import { DataTable } from "../components/data-table";
+import { EmptyState } from "../components/empty-state";
+import { KindBadge } from "../components/kind-badge";
+import { PageHeader } from "../components/page-header";
+import { Button } from "../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Checkbox } from "../components/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "../components/ui/form";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Textarea } from "../components/ui/textarea";
 import { api } from "../lib/api";
+import { useIsReadOnly } from "../lib/role";
 
 export const Route = createFileRoute("/settings")({ component: SettingsPage });
 
+type ModelPriceBuiltin = ModelPriceList["builtins"][number];
+
+const apiKeySchema = z.object({
+  name: z.string(),
+  scopes: z.array(z.string()).min(1, "Select at least one scope"),
+  expiresInDays: z.string(),
+  rateLimitPerMinute: z.string(),
+});
+type ApiKeyForm = z.infer<typeof apiKeySchema>;
+
+const providerSchema = z.object({
+  provider: z.enum(["anthropic", "openai"]),
+  apiKey: z.string().min(1, "API key is required"),
+});
+type ProviderForm = z.infer<typeof providerSchema>;
+
+const webhookSchema = z.object({ url: z.string().min(1, "URL is required"), threshold: z.string() });
+type WebhookForm = z.infer<typeof webhookSchema>;
+
+const automationSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  trigger: z.string(),
+  action: z.string(),
+  target: z.string().min(1, "Target URL is required"),
+  threshold: z.string(),
+  filter: z.string(),
+});
+type AutomationForm = z.infer<typeof automationSchema>;
+
+const scoreSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  dataType: z.string(),
+  categories: z.string(),
+});
+type ScoreForm = z.infer<typeof scoreSchema>;
+
+const pricingSchema = z.object({
+  pattern: z.string().min(1, "Pattern is required"),
+  provider: z.string(),
+  inputPerMTok: z.string().min(1, "Required"),
+  outputPerMTok: z.string().min(1, "Required"),
+});
+type PricingForm = z.infer<typeof pricingSchema>;
+
 function SettingsPage() {
   const qc = useQueryClient();
-  const { data: providers } = useQuery({ queryKey: ["providers"], queryFn: () => api.listProviders() });
+  const readOnly = useIsReadOnly();
 
-  const [provider, setProvider] = useState("anthropic");
-  const [apiKey, setApiKey] = useState("");
-
-  const save = useMutation({
-    mutationFn: () => api.addProvider(provider, apiKey),
-    onSuccess: () => {
-      setApiKey("");
-      qc.invalidateQueries({ queryKey: ["providers"] });
-    },
-  });
-
+  // ── API keys ──────────────────────────────────────────────────────────────
   const { data: apiKeys } = useQuery({ queryKey: ["api-keys"], queryFn: () => api.listApiKeys() });
-  const [keyName, setKeyName] = useState("");
-  const [keyScopes, setKeyScopes] = useState<string[]>(["read", "write", "ingest"]);
-  const [keyExpiry, setKeyExpiry] = useState("");
-  const [keyRate, setKeyRate] = useState("");
   const [newSecret, setNewSecret] = useState<{ publicKey: string; secretKey: string } | null>(null);
-  const toggleScope = (s: string) =>
-    setKeyScopes((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
+  const apiKeyForm = useForm<ApiKeyForm>({
+    resolver: zodResolver(apiKeySchema),
+    defaultValues: { name: "", scopes: ["read", "write", "ingest"], expiresInDays: "", rateLimitPerMinute: "" },
+  });
   const createKey = useMutation({
-    mutationFn: () =>
-      api.createApiKey({
-        name: keyName || undefined,
-        scopes: keyScopes,
-        expiresInDays: keyExpiry ? Number(keyExpiry) : null,
-        rateLimitPerMinute: keyRate ? Number(keyRate) : null,
-      }),
+    mutationFn: (body: {
+      name?: string;
+      scopes?: string[];
+      expiresInDays?: number | null;
+      rateLimitPerMinute?: number | null;
+    }) => api.createApiKey(body),
     onSuccess: (k) => {
-      setKeyName("");
-      setKeyExpiry("");
-      setKeyRate("");
       setNewSecret({ publicKey: k.publicKey, secretKey: k.secretKey });
+      toast.success("API key created — copy the secret now");
+      apiKeyForm.reset();
       qc.invalidateQueries({ queryKey: ["api-keys"] });
     },
+    onError: (e) => toast.error(`Failed to create key: ${String(e)}`),
   });
   const revokeKey = useMutation({
     mutationFn: (id: string) => api.revokeApiKey(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }),
+    onSuccess: () => {
+      toast.success("API key revoked");
+      qc.invalidateQueries({ queryKey: ["api-keys"] });
+    },
+    onError: (e) => toast.error(`Failed to revoke key: ${String(e)}`),
+  });
+  const apiKeyColumns: ColumnDef<ApiKey>[] = [
+    { accessorKey: "name", header: "Name", cell: ({ row }) => row.original.name || "—" },
+    {
+      accessorKey: "publicKey",
+      header: "Public key",
+      cell: ({ row }) => <code className="text-xs">{row.original.publicKey}</code>,
+    },
+    {
+      accessorKey: "secretHint",
+      header: "Secret",
+      cell: ({ row }) => <span className="text-muted-foreground">sk-…{row.original.secretHint}</span>,
+    },
+    {
+      accessorKey: "scopes",
+      header: "Scopes",
+      cell: ({ row }) => <span className="text-muted-foreground">{row.original.scopes.join(", ")}</span>,
+    },
+    {
+      accessorKey: "expiresAt",
+      header: "Expires",
+      cell: ({ row }) => (
+        <span className="text-muted-foreground">
+          {row.original.expiresAt ? row.original.expiresAt.slice(0, 10) : "never"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "rateLimitPerMinute",
+      header: "Rate/min",
+      cell: ({ row }) => <span className="text-muted-foreground">{row.original.rateLimitPerMinute ?? "—"}</span>,
+    },
+    {
+      accessorKey: "lastUsedAt",
+      header: "Last used",
+      cell: ({ row }) => (
+        <span className="text-muted-foreground">
+          {row.original.lastUsedAt ? row.original.lastUsedAt.slice(0, 19).replace("T", " ") : "never"}
+        </span>
+      ),
+    },
+    {
+      id: "actions",
+      header: "",
+      cell: ({ row }) => (
+        <Button
+          variant="destructive"
+          size="sm"
+          disabled={readOnly || revokeKey.isPending}
+          onClick={() => revokeKey.mutate(row.original.id)}
+        >
+          Revoke
+        </Button>
+      ),
+    },
+  ];
+
+  // ── Providers ─────────────────────────────────────────────────────────────
+  const { data: providers } = useQuery({ queryKey: ["providers"], queryFn: () => api.listProviders() });
+  const providerForm = useForm<ProviderForm>({
+    resolver: zodResolver(providerSchema),
+    defaultValues: { provider: "anthropic", apiKey: "" },
+  });
+  const saveProvider = useMutation({
+    mutationFn: (v: ProviderForm) => api.addProvider(v.provider, v.apiKey),
+    onSuccess: () => {
+      toast.success("Provider key saved");
+      providerForm.reset();
+      qc.invalidateQueries({ queryKey: ["providers"] });
+    },
+    onError: (e) => toast.error(`Failed to save provider: ${String(e)}`),
   });
 
+  // ── Retention ─────────────────────────────────────────────────────────────
+  const { data: retention } = useQuery({ queryKey: ["retention"], queryFn: () => api.getRetention() });
+  const [days, setDays] = useState<number | null>(null);
+  const daysValue = days ?? retention?.days ?? 0;
+  const saveRetention = useMutation({
+    mutationFn: () => api.setRetention(daysValue),
+    onSuccess: () => {
+      toast.success("Retention saved");
+      qc.invalidateQueries({ queryKey: ["retention"] });
+    },
+    onError: (e) => toast.error(`Failed to save retention: ${String(e)}`),
+  });
+
+  // ── Scheduled exports ─────────────────────────────────────────────────────
+  const { data: schedExport } = useQuery({ queryKey: ["scheduled-export"], queryFn: () => api.getScheduledExport() });
+  const [seEnabled, setSeEnabled] = useState<boolean | null>(null);
+  const [seEnv, setSeEnv] = useState<string | null>(null);
+  const [seLimit, setSeLimit] = useState<number | null>(null);
+  const seEnabledValue = seEnabled ?? schedExport?.enabled ?? false;
+  const seEnvValue = seEnv ?? schedExport?.environment ?? "";
+  const seLimitValue = seLimit ?? schedExport?.limit ?? 1000;
+  const saveSchedExport = useMutation({
+    mutationFn: () => api.setScheduledExport({ enabled: seEnabledValue, environment: seEnvValue, limit: seLimitValue }),
+    onSuccess: () => {
+      toast.success("Scheduled export saved");
+      qc.invalidateQueries({ queryKey: ["scheduled-export"] });
+    },
+    onError: (e) => toast.error(`Failed to save: ${String(e)}`),
+  });
+  const runSchedExport = useMutation({
+    mutationFn: () => api.runScheduledExport(),
+    onSuccess: () => {
+      toast.success("Export started");
+      qc.invalidateQueries({ queryKey: ["scheduled-export"] });
+    },
+    onError: (e) => toast.error(`Failed to export: ${String(e)}`),
+  });
+
+  // ── Analytics sink ────────────────────────────────────────────────────────
+  const { data: analytics } = useQuery({ queryKey: ["analytics-sink"], queryFn: () => api.getAnalyticsSink() });
+  const [anEnabled, setAnEnabled] = useState<boolean | null>(null);
+  const [anHost, setAnHost] = useState<string | null>(null);
+  const [anKey, setAnKey] = useState("");
+  const anEnabledValue = anEnabled ?? analytics?.enabled ?? false;
+  const anHostValue = anHost ?? analytics?.host ?? "https://us.i.posthog.com";
+  const saveAnalytics = useMutation({
+    mutationFn: () =>
+      api.setAnalyticsSink({ enabled: anEnabledValue, host: anHostValue, apiKey: anKey || analytics?.apiKey }),
+    onSuccess: () => {
+      setAnKey("");
+      toast.success("Analytics sink saved");
+      qc.invalidateQueries({ queryKey: ["analytics-sink"] });
+    },
+    onError: (e) => toast.error(`Failed to save: ${String(e)}`),
+  });
+
+  // ── Masking ───────────────────────────────────────────────────────────────
   const { data: masking } = useQuery({ queryKey: ["masking"], queryFn: () => api.getMaskingPolicy() });
   const [maskEnabled, setMaskEnabled] = useState<boolean | null>(null);
   const [maskBuiltins, setMaskBuiltins] = useState<string[] | null>(null);
@@ -71,670 +256,1094 @@ function SettingsPage() {
           .filter(Boolean),
         redactWith: maskRedactVal,
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["masking"] }),
-  });
-
-  const { data: retention } = useQuery({ queryKey: ["retention"], queryFn: () => api.getRetention() });
-  const [days, setDays] = useState<number | null>(null);
-  const saveRetention = useMutation({
-    mutationFn: () => api.setRetention(days ?? 0),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["retention"] }),
-  });
-  const daysValue = days ?? retention?.days ?? 0;
-
-  const { data: schedExport } = useQuery({
-    queryKey: ["scheduled-export"],
-    queryFn: () => api.getScheduledExport(),
-  });
-  const [seEnabled, setSeEnabled] = useState<boolean | null>(null);
-  const [seEnv, setSeEnv] = useState<string | null>(null);
-  const [seLimit, setSeLimit] = useState<number | null>(null);
-  const seEnabledValue = seEnabled ?? schedExport?.enabled ?? false;
-  const seEnvValue = seEnv ?? schedExport?.environment ?? "";
-  const seLimitValue = seLimit ?? schedExport?.limit ?? 1000;
-  const saveSchedExport = useMutation({
-    mutationFn: () => api.setScheduledExport({ enabled: seEnabledValue, environment: seEnvValue, limit: seLimitValue }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["scheduled-export"] }),
-  });
-  const runSchedExport = useMutation({
-    mutationFn: () => api.runScheduledExport(),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["scheduled-export"] }),
-  });
-
-  const { data: analytics } = useQuery({ queryKey: ["analytics-sink"], queryFn: () => api.getAnalyticsSink() });
-  const [anEnabled, setAnEnabled] = useState<boolean | null>(null);
-  const [anHost, setAnHost] = useState<string | null>(null);
-  const [anKey, setAnKey] = useState("");
-  const anEnabledValue = anEnabled ?? analytics?.enabled ?? false;
-  const anHostValue = anHost ?? analytics?.host ?? "https://us.i.posthog.com";
-  const saveAnalytics = useMutation({
-    mutationFn: () =>
-      api.setAnalyticsSink({ enabled: anEnabledValue, host: anHostValue, apiKey: anKey || analytics?.apiKey }),
     onSuccess: () => {
-      setAnKey("");
-      qc.invalidateQueries({ queryKey: ["analytics-sink"] });
+      toast.success("Masking policy saved");
+      qc.invalidateQueries({ queryKey: ["masking"] });
     },
+    onError: (e) => toast.error(`Failed to save masking: ${String(e)}`),
   });
 
+  // ── Webhooks ──────────────────────────────────────────────────────────────
   const { data: webhooks } = useQuery({ queryKey: ["webhooks"], queryFn: () => api.listWebhooks() });
-  const [url, setUrl] = useState("");
-  const [threshold, setThreshold] = useState("");
+  const webhookForm = useForm<WebhookForm>({
+    resolver: zodResolver(webhookSchema),
+    defaultValues: { url: "", threshold: "" },
+  });
   const addWebhook = useMutation({
-    mutationFn: () =>
-      api.createWebhook({ url, event: "score.created", threshold: threshold === "" ? null : Number(threshold) }),
+    mutationFn: (v: WebhookForm) =>
+      api.createWebhook({
+        url: v.url,
+        event: "score.created",
+        threshold: v.threshold === "" ? null : Number(v.threshold),
+      }),
     onSuccess: () => {
-      setUrl("");
-      setThreshold("");
+      toast.success("Webhook added");
+      webhookForm.reset();
       qc.invalidateQueries({ queryKey: ["webhooks"] });
     },
+    onError: (e) => toast.error(`Failed to add webhook: ${String(e)}`),
   });
   const removeWebhook = useMutation({
     mutationFn: (id: string) => api.deleteWebhook(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["webhooks"] }),
+    onSuccess: () => {
+      toast.success("Webhook deleted");
+      qc.invalidateQueries({ queryKey: ["webhooks"] });
+    },
+    onError: (e) => toast.error(`Failed to delete webhook: ${String(e)}`),
   });
+  const webhookColumns: ColumnDef<Webhook>[] = [
+    { accessorKey: "url", header: "URL", cell: ({ row }) => <span className="font-medium">{row.original.url}</span> },
+    {
+      accessorKey: "event",
+      header: "Event",
+      cell: ({ row }) => <KindBadge tone="blue">{row.original.event}</KindBadge>,
+    },
+    { accessorKey: "threshold", header: "Threshold", cell: ({ row }) => row.original.threshold ?? "—" },
+    {
+      id: "actions",
+      header: "",
+      cell: ({ row }) => (
+        <Button
+          variant="destructive"
+          size="sm"
+          disabled={readOnly || removeWebhook.isPending}
+          onClick={() => removeWebhook.mutate(row.original.id)}
+        >
+          Delete
+        </Button>
+      ),
+    },
+  ];
 
+  // ── Automations ───────────────────────────────────────────────────────────
   const { data: automations } = useQuery({ queryKey: ["automations"], queryFn: () => api.listAutomations() });
-  const [auName, setAuName] = useState("");
-  const [auTrigger, setAuTrigger] = useState("score.created");
-  const [auAction, setAuAction] = useState("webhook");
-  const [auTarget, setAuTarget] = useState("");
-  const [auThreshold, setAuThreshold] = useState("");
-  const [auFilter, setAuFilter] = useState("");
+  const automationForm = useForm<AutomationForm>({
+    resolver: zodResolver(automationSchema),
+    defaultValues: { name: "", trigger: "score.created", action: "webhook", target: "", threshold: "", filter: "" },
+  });
   const addAutomation = useMutation({
-    mutationFn: () =>
+    mutationFn: (v: AutomationForm) =>
       api.createAutomation({
-        name: auName,
-        trigger: auTrigger,
-        action: auAction,
-        target: auTarget,
-        threshold: auThreshold === "" ? null : Number(auThreshold),
-        filter: auFilter || undefined,
+        name: v.name,
+        trigger: v.trigger,
+        action: v.action,
+        target: v.target,
+        threshold: v.threshold === "" ? null : Number(v.threshold),
+        filter: v.filter || undefined,
       }),
     onSuccess: () => {
-      setAuName("");
-      setAuTarget("");
-      setAuThreshold("");
-      setAuFilter("");
+      toast.success("Automation added");
+      automationForm.reset();
       qc.invalidateQueries({ queryKey: ["automations"] });
     },
+    onError: (e) => toast.error(`Failed to add automation: ${String(e)}`),
   });
   const removeAutomation = useMutation({
     mutationFn: (id: string) => api.deleteAutomation(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["automations"] }),
+    onSuccess: () => {
+      toast.success("Automation deleted");
+      qc.invalidateQueries({ queryKey: ["automations"] });
+    },
+    onError: (e) => toast.error(`Failed to delete automation: ${String(e)}`),
   });
+  const automationColumns: ColumnDef<Automation>[] = [
+    {
+      accessorKey: "name",
+      header: "Name",
+      cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+    },
+    {
+      accessorKey: "trigger",
+      header: "Trigger",
+      cell: ({ row }) => <KindBadge tone="blue">{row.original.trigger}</KindBadge>,
+    },
+    {
+      accessorKey: "action",
+      header: "Action",
+      cell: ({ row }) => <KindBadge tone="neutral">{row.original.action}</KindBadge>,
+    },
+    {
+      accessorKey: "target",
+      header: "Target",
+      cell: ({ row }) => <span className="text-muted-foreground">{row.original.target}</span>,
+    },
+    { accessorKey: "threshold", header: "Threshold", cell: ({ row }) => row.original.threshold ?? "—" },
+    {
+      accessorKey: "filter",
+      header: "Filter",
+      cell: ({ row }) => <span className="text-muted-foreground">{row.original.filter || "—"}</span>,
+    },
+    {
+      id: "actions",
+      header: "",
+      cell: ({ row }) => (
+        <Button
+          variant="destructive"
+          size="sm"
+          disabled={readOnly || removeAutomation.isPending}
+          onClick={() => removeAutomation.mutate(row.original.id)}
+        >
+          Delete
+        </Button>
+      ),
+    },
+  ];
 
+  // ── Score configs ─────────────────────────────────────────────────────────
   const { data: scoreConfigs } = useQuery({ queryKey: ["score-configs"], queryFn: () => api.listScoreConfigs() });
-  const [scName, setScName] = useState("");
-  const [scType, setScType] = useState("NUMERIC");
-  const [scCategories, setScCategories] = useState("");
+  const scoreForm = useForm<ScoreForm>({
+    resolver: zodResolver(scoreSchema),
+    defaultValues: { name: "", dataType: "NUMERIC", categories: "" },
+  });
+  const scoreType = scoreForm.watch("dataType");
   const addScoreConfig = useMutation({
-    mutationFn: () =>
+    mutationFn: (v: ScoreForm) =>
       api.createScoreConfig({
-        name: scName,
-        dataType: scType,
+        name: v.name,
+        dataType: v.dataType,
         categories:
-          scType === "CATEGORICAL"
-            ? scCategories
+          v.dataType === "CATEGORICAL"
+            ? v.categories
                 .split(",")
                 .map((s) => s.trim())
                 .filter(Boolean)
             : [],
       }),
     onSuccess: () => {
-      setScName("");
-      setScCategories("");
+      toast.success("Score config added");
+      scoreForm.reset();
       qc.invalidateQueries({ queryKey: ["score-configs"] });
     },
+    onError: (e) => toast.error(`Failed to add score: ${String(e)}`),
   });
   const removeScoreConfig = useMutation({
     mutationFn: (id: string) => api.deleteScoreConfig(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["score-configs"] }),
+    onSuccess: () => {
+      toast.success("Score config deleted");
+      qc.invalidateQueries({ queryKey: ["score-configs"] });
+    },
+    onError: (e) => toast.error(`Failed to delete score: ${String(e)}`),
   });
+  const scoreColumns: ColumnDef<ScoreConfig>[] = [
+    {
+      accessorKey: "name",
+      header: "Name",
+      cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+    },
+    {
+      accessorKey: "dataType",
+      header: "Type",
+      cell: ({ row }) => <KindBadge tone="neutral">{row.original.dataType.toLowerCase()}</KindBadge>,
+    },
+    {
+      accessorKey: "categories",
+      header: "Categories",
+      cell: ({ row }) => <span className="text-muted-foreground">{row.original.categories.join(", ") || "—"}</span>,
+    },
+    {
+      id: "actions",
+      header: "",
+      cell: ({ row }) => (
+        <Button
+          variant="destructive"
+          size="sm"
+          disabled={readOnly || removeScoreConfig.isPending}
+          onClick={() => removeScoreConfig.mutate(row.original.id)}
+        >
+          Delete
+        </Button>
+      ),
+    },
+  ];
 
+  // ── Model pricing ─────────────────────────────────────────────────────────
   const { data: modelPrices } = useQuery({ queryKey: ["model-prices"], queryFn: () => api.listModelPrices() });
-  const [mpPattern, setMpPattern] = useState("");
-  const [mpProvider, setMpProvider] = useState("");
-  const [mpInput, setMpInput] = useState("");
-  const [mpOutput, setMpOutput] = useState("");
+  const pricingForm = useForm<PricingForm>({
+    resolver: zodResolver(pricingSchema),
+    defaultValues: { pattern: "", provider: "", inputPerMTok: "", outputPerMTok: "" },
+  });
   const addModelPrice = useMutation({
-    mutationFn: () =>
+    mutationFn: (v: PricingForm) =>
       api.createModelPrice({
-        pattern: mpPattern,
-        provider: mpProvider || undefined,
-        inputPerMTok: Number(mpInput),
-        outputPerMTok: Number(mpOutput),
+        pattern: v.pattern,
+        provider: v.provider || undefined,
+        inputPerMTok: Number(v.inputPerMTok),
+        outputPerMTok: Number(v.outputPerMTok),
       }),
     onSuccess: () => {
-      setMpPattern("");
-      setMpProvider("");
-      setMpInput("");
-      setMpOutput("");
+      toast.success("Model price added");
+      pricingForm.reset();
       qc.invalidateQueries({ queryKey: ["model-prices"] });
     },
+    onError: (e) => toast.error(`Failed to add price: ${String(e)}`),
   });
   const removeModelPrice = useMutation({
     mutationFn: (id: string) => api.deleteModelPrice(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["model-prices"] }),
+    onSuccess: () => {
+      toast.success("Model price deleted");
+      qc.invalidateQueries({ queryKey: ["model-prices"] });
+    },
+    onError: (e) => toast.error(`Failed to delete price: ${String(e)}`),
   });
+  const modelPriceColumns: ColumnDef<ModelPrice>[] = [
+    {
+      accessorKey: "pattern",
+      header: "Pattern",
+      cell: ({ row }) => <code className="text-xs">{row.original.pattern}</code>,
+    },
+    { accessorKey: "provider", header: "Provider", cell: ({ row }) => row.original.provider || "—" },
+    { accessorKey: "inputPerMTok", header: "Input / 1M", cell: ({ row }) => `$${row.original.inputPerMTok}` },
+    { accessorKey: "outputPerMTok", header: "Output / 1M", cell: ({ row }) => `$${row.original.outputPerMTok}` },
+    {
+      id: "actions",
+      header: "",
+      cell: ({ row }) => (
+        <Button
+          variant="destructive"
+          size="sm"
+          disabled={readOnly || removeModelPrice.isPending}
+          onClick={() => removeModelPrice.mutate(row.original.id)}
+        >
+          Delete
+        </Button>
+      ),
+    },
+  ];
+  const builtinColumns: ColumnDef<ModelPriceBuiltin>[] = [
+    {
+      accessorKey: "pattern",
+      header: "Pattern",
+      cell: ({ row }) => <code className="text-xs">{row.original.pattern}</code>,
+    },
+    { accessorKey: "provider", header: "Provider", cell: ({ row }) => row.original.provider || "—" },
+    { accessorKey: "inputPerMTok", header: "Input / 1M", cell: ({ row }) => `$${row.original.inputPerMTok}` },
+    { accessorKey: "outputPerMTok", header: "Output / 1M", cell: ({ row }) => `$${row.original.outputPerMTok}` },
+  ];
 
   return (
-    <div>
-      <h1>Settings</h1>
-
-      <h2>API keys</h2>
-      <p className="obs-meta">
-        Project-scoped keys for the SDK / ingestion API (Basic auth: <code>publicKey:secretKey</code>). The secret is
-        shown once at creation — store it now; it can't be retrieved later.
-      </p>
-      <div className="filters">
-        <input placeholder="key name (optional)" value={keyName} onChange={(e) => setKeyName(e.target.value)} />
-        {["read", "write", "ingest"].map((s) => (
-          <label key={s} className="inline-check">
-            <input type="checkbox" checked={keyScopes.includes(s)} onChange={() => toggleScope(s)} /> {s}
-          </label>
-        ))}
-        <input
-          type="number"
-          min="1"
-          placeholder="expires (days)"
-          value={keyExpiry}
-          onChange={(e) => setKeyExpiry(e.target.value)}
-          style={{ width: 120 }}
-        />
-        <input
-          type="number"
-          min="1"
-          placeholder="rate / min"
-          value={keyRate}
-          onChange={(e) => setKeyRate(e.target.value)}
-          style={{ width: 100 }}
-        />
-        <button disabled={keyScopes.length === 0 || createKey.isPending} onClick={() => createKey.mutate()}>
-          {createKey.isPending ? "Creating…" : "Create key"}
-        </button>
-      </div>
-      {newSecret && (
-        <div className="empty" style={{ textAlign: "left" }}>
-          <div className="obs-meta">New key — copy the secret now, it won't be shown again:</div>
-          <pre>{`publicKey: ${newSecret.publicKey}\nsecretKey: ${newSecret.secretKey}`}</pre>
-          <button className="link-btn" onClick={() => setNewSecret(null)}>
-            dismiss
-          </button>
-        </div>
-      )}
-      {apiKeys && apiKeys.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Public key</th>
-              <th>Secret</th>
-              <th>Scopes</th>
-              <th>Expires</th>
-              <th>Rate/min</th>
-              <th>Last used</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {apiKeys.map((k) => (
-              <tr key={k.id}>
-                <td>{k.name || "—"}</td>
-                <td>
-                  <code>{k.publicKey}</code>
-                </td>
-                <td className="obs-meta">sk-…{k.secretHint}</td>
-                <td className="obs-meta">{k.scopes.join(", ")}</td>
-                <td className="obs-meta">{k.expiresAt ? k.expiresAt.slice(0, 10) : "never"}</td>
-                <td className="obs-meta">{k.rateLimitPerMinute ?? "—"}</td>
-                <td className="obs-meta">{k.lastUsedAt ? k.lastUsedAt.slice(0, 19).replace("T", " ") : "never"}</td>
-                <td>
-                  <button className="link-btn" onClick={() => revokeKey.mutate(k.id)}>
-                    revoke
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <h2>LLM provider connections</h2>
-      <p className="obs-meta">
-        API keys are encrypted at rest and used by the playground + evaluators. The "mock" provider needs no key.
-      </p>
-      <div className="filters">
-        <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-          <option value="anthropic">anthropic</option>
-          <option value="openai">openai</option>
-        </select>
-        <input
-          type="password"
-          placeholder="API key"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          style={{ width: 260 }}
-        />
-        <button disabled={!apiKey || save.isPending} onClick={() => save.mutate()}>
-          {save.isPending ? "Saving…" : "Save key"}
-        </button>
-      </div>
-
-      {!providers || providers.length === 0 ? (
-        <div className="empty">No provider keys configured.</div>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Provider</th>
-              <th>Key</th>
-              <th>Added</th>
-            </tr>
-          </thead>
-          <tbody>
-            {providers.map((p) => (
-              <tr key={p.provider}>
-                <td>{p.provider}</td>
-                <td>{p.masked}</td>
-                <td>{p.createdAt.slice(0, 19).replace("T", " ")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <h2>Data retention</h2>
-      <p className="obs-meta">
-        Delete traces/observations/scores older than N days (0 = keep forever). A daily worker job enforces this.
-      </p>
-      <div className="filters">
-        <input
-          type="number"
-          min="0"
-          value={daysValue}
-          onChange={(e) => setDays(Number(e.target.value))}
-          style={{ width: 100 }}
-        />
-        <span className="obs-meta" style={{ alignSelf: "center" }}>
-          days
-        </span>
-        <button disabled={saveRetention.isPending} onClick={() => saveRetention.mutate()}>
-          {saveRetention.isPending ? "Saving…" : "Save retention"}
-        </button>
-      </div>
-
-      <h2>Scheduled exports</h2>
-      <p className="obs-meta">
-        When enabled, a daily worker job writes the project's traces (NDJSON) to blob storage under{" "}
-        <code>exports/&lt;projectId&gt;/&lt;date&gt;/</code>. Use "Run now" to export immediately.
-      </p>
-      <div className="filters">
-        <label style={{ alignSelf: "center", display: "flex", gap: 6, alignItems: "center" }}>
-          <input type="checkbox" checked={seEnabledValue} onChange={(e) => setSeEnabled(e.target.checked)} />
-          enabled
-        </label>
-        <input
-          placeholder="environment (optional)"
-          value={seEnvValue}
-          onChange={(e) => setSeEnv(e.target.value)}
-          style={{ width: 180 }}
-        />
-        <input
-          type="number"
-          min="1"
-          value={seLimitValue}
-          onChange={(e) => setSeLimit(Number(e.target.value))}
-          style={{ width: 110 }}
-        />
-        <span className="obs-meta" style={{ alignSelf: "center" }}>
-          max traces
-        </span>
-        <button disabled={saveSchedExport.isPending} onClick={() => saveSchedExport.mutate()}>
-          {saveSchedExport.isPending ? "Saving…" : "Save"}
-        </button>
-        <button disabled={runSchedExport.isPending} onClick={() => runSchedExport.mutate()}>
-          {runSchedExport.isPending ? "Exporting…" : "Run now"}
-        </button>
-      </div>
-      {schedExport?.lastRunAt && (
-        <p className="obs-meta">
-          Last run {schedExport.lastRunAt.slice(0, 19).replace("T", " ")} — {schedExport.lastCount} traces →{" "}
-          <code>{schedExport.lastKey}</code>
-        </p>
-      )}
-
-      <h2>Product analytics (PostHog)</h2>
-      <p className="obs-meta">
-        When enabled, the worker forwards <code>trace.created</code> and <code>score.created</code> events to PostHog's
-        capture API so you can build funnels/retention over LLM usage.
-      </p>
-      <div className="filters">
-        <label style={{ alignSelf: "center", display: "flex", gap: 6, alignItems: "center" }}>
-          <input type="checkbox" checked={anEnabledValue} onChange={(e) => setAnEnabled(e.target.checked)} />
-          enabled
-        </label>
-        <input
-          placeholder="host"
-          value={anHostValue}
-          onChange={(e) => setAnHost(e.target.value)}
-          style={{ width: 240 }}
-        />
-        <input
-          type="password"
-          placeholder={analytics?.apiKey ? "API key (set — leave blank to keep)" : "PostHog project API key"}
-          value={anKey}
-          onChange={(e) => setAnKey(e.target.value)}
-          style={{ width: 240 }}
-        />
-        <button disabled={saveAnalytics.isPending} onClick={() => saveAnalytics.mutate()}>
-          {saveAnalytics.isPending ? "Saving…" : "Save"}
-        </button>
-      </div>
-
-      <h2>PII masking</h2>
-      <p className="obs-meta">
-        When enabled, the worker redacts matches from trace/observation input/output (and metadata) at ingest, before
-        they're stored. Built-in patterns plus your own regexes (one per line).
-      </p>
-      <div className="filters" style={{ flexWrap: "wrap", alignItems: "center" }}>
-        <label className="inline-check">
-          <input type="checkbox" checked={maskEnabledVal} onChange={(e) => setMaskEnabled(e.target.checked)} /> enabled
-        </label>
-        {(masking?.available ?? []).map((b) => (
-          <label key={b} className="inline-check">
-            <input type="checkbox" checked={maskBuiltinsVal.includes(b)} onChange={() => toggleBuiltin(b)} /> {b}
-          </label>
-        ))}
-        <input
-          placeholder="redact with"
-          value={maskRedactVal}
-          onChange={(e) => setMaskRedact(e.target.value)}
-          style={{ width: 130 }}
-        />
-        <button disabled={saveMasking.isPending} onClick={() => saveMasking.mutate()}>
-          {saveMasking.isPending ? "Saving…" : "Save masking"}
-        </button>
-      </div>
-      <textarea
-        className="pg-input"
-        placeholder="custom regex patterns, one per line (e.g. sk-[a-z0-9]+)"
-        value={maskCustomVal}
-        onChange={(e) => setMaskCustom(e.target.value)}
-        rows={3}
+    <div className="space-y-6">
+      <PageHeader
+        title="Settings"
+        description="Project configuration: keys, providers, retention, automations, and pricing."
       />
 
-      <h2>Webhooks</h2>
-      <p className="obs-meta">
-        POST to a URL when a score is created. Set a threshold to only fire on low scores (value &lt; threshold).
-      </p>
-      <div className="filters">
-        <input placeholder="https://…" value={url} onChange={(e) => setUrl(e.target.value)} style={{ width: 320 }} />
-        <input
-          type="number"
-          step="0.1"
-          placeholder="threshold (optional)"
-          value={threshold}
-          onChange={(e) => setThreshold(e.target.value)}
-          style={{ width: 160 }}
-        />
-        <button disabled={!url || addWebhook.isPending} onClick={() => addWebhook.mutate()}>
-          {addWebhook.isPending ? "Saving…" : "Add webhook"}
-        </button>
-      </div>
-      {webhooks && webhooks.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>URL</th>
-              <th>Event</th>
-              <th>Threshold</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {webhooks.map((w) => (
-              <tr key={w.id}>
-                <td>{w.url}</td>
-                <td>
-                  <span className="badge gen">{w.event}</span>
-                </td>
-                <td>{w.threshold ?? "—"}</td>
-                <td>
-                  <button className="link-btn" onClick={() => removeWebhook.mutate(w.id)}>
-                    delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <Tabs defaultValue="api-keys">
+        <TabsList className="h-auto flex-wrap">
+          <TabsTrigger value="api-keys">API Keys</TabsTrigger>
+          <TabsTrigger value="providers">Providers</TabsTrigger>
+          <TabsTrigger value="retention">Data Retention</TabsTrigger>
+          <TabsTrigger value="exports">Exports &amp; Analytics</TabsTrigger>
+          <TabsTrigger value="masking">Masking</TabsTrigger>
+          <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
+          <TabsTrigger value="automations">Automations</TabsTrigger>
+          <TabsTrigger value="scores">Scores</TabsTrigger>
+          <TabsTrigger value="pricing">Model Pricing</TabsTrigger>
+        </TabsList>
 
-      <h2>Automations</h2>
-      <p className="obs-meta">
-        Run an action when a trigger fires. Triggers: score.created, trace.created, eval.completed. Actions: a generic
-        webhook (POST JSON) or a Slack message (to an incoming-webhook URL). Threshold fires only on low scores; filter
-        is a substring match on the entity name.
-      </p>
-      <div className="filters">
-        <input placeholder="name" value={auName} onChange={(e) => setAuName(e.target.value)} style={{ width: 140 }} />
-        <select value={auTrigger} onChange={(e) => setAuTrigger(e.target.value)}>
-          <option value="score.created">score.created</option>
-          <option value="trace.created">trace.created</option>
-          <option value="eval.completed">eval.completed</option>
-        </select>
-        <select value={auAction} onChange={(e) => setAuAction(e.target.value)}>
-          <option value="webhook">webhook</option>
-          <option value="slack">slack</option>
-        </select>
-        <input
-          placeholder="target URL"
-          value={auTarget}
-          onChange={(e) => setAuTarget(e.target.value)}
-          style={{ width: 240 }}
-        />
-        <input
-          type="number"
-          step="0.1"
-          placeholder="threshold"
-          value={auThreshold}
-          onChange={(e) => setAuThreshold(e.target.value)}
-          style={{ width: 110 }}
-        />
-        <input
-          placeholder="filter"
-          value={auFilter}
-          onChange={(e) => setAuFilter(e.target.value)}
-          style={{ width: 110 }}
-        />
-        <button disabled={!auName || !auTarget || addAutomation.isPending} onClick={() => addAutomation.mutate()}>
-          {addAutomation.isPending ? "Saving…" : "Add automation"}
-        </button>
-      </div>
-      {automations && automations.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Trigger</th>
-              <th>Action</th>
-              <th>Target</th>
-              <th>Threshold</th>
-              <th>Filter</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {automations.map((a) => (
-              <tr key={a.id}>
-                <td>{a.name}</td>
-                <td>
-                  <span className="badge gen">{a.trigger}</span>
-                </td>
-                <td>
-                  <span className="badge">{a.action}</span>
-                </td>
-                <td className="obs-meta">{a.target}</td>
-                <td>{a.threshold ?? "—"}</td>
-                <td className="obs-meta">{a.filter || "—"}</td>
-                <td>
-                  <button className="link-btn" onClick={() => removeAutomation.mutate(a.id)}>
-                    delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+        {/* ── API Keys ──────────────────────────────────────────────────── */}
+        <TabsContent value="api-keys" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Create API key</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-4 text-sm text-muted-foreground">
+                Project-scoped keys for the SDK / ingestion API (Basic auth: <code>publicKey:secretKey</code>). The
+                secret is shown once at creation — store it now; it can&apos;t be retrieved later.
+              </p>
+              <Form {...apiKeyForm}>
+                <form
+                  onSubmit={apiKeyForm.handleSubmit((v) =>
+                    createKey.mutate({
+                      name: v.name || undefined,
+                      scopes: v.scopes,
+                      expiresInDays: v.expiresInDays ? Number(v.expiresInDays) : null,
+                      rateLimitPerMinute: v.rateLimitPerMinute ? Number(v.rateLimitPerMinute) : null,
+                    }),
+                  )}
+                  className="space-y-4"
+                >
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <FormField
+                      control={apiKeyForm.control}
+                      name="name"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Name</FormLabel>
+                          <FormControl>
+                            <Input placeholder="key name (optional)" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={apiKeyForm.control}
+                      name="expiresInDays"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Expires (days)</FormLabel>
+                          <FormControl>
+                            <Input type="number" min="1" placeholder="never" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={apiKeyForm.control}
+                      name="rateLimitPerMinute"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Rate / min</FormLabel>
+                          <FormControl>
+                            <Input type="number" min="1" placeholder="unlimited" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  <FormField
+                    control={apiKeyForm.control}
+                    name="scopes"
+                    render={() => (
+                      <FormItem>
+                        <FormLabel>Scopes</FormLabel>
+                        <div className="flex flex-wrap gap-4">
+                          {["read", "write", "ingest"].map((s) => (
+                            <FormField
+                              key={s}
+                              control={apiKeyForm.control}
+                              name="scopes"
+                              render={({ field }) => (
+                                <FormItem className="flex flex-row items-center gap-2 space-y-0">
+                                  <FormControl>
+                                    <Checkbox
+                                      checked={field.value?.includes(s)}
+                                      onCheckedChange={(c) =>
+                                        c
+                                          ? field.onChange([...field.value, s])
+                                          : field.onChange(field.value.filter((x: string) => x !== s))
+                                      }
+                                    />
+                                  </FormControl>
+                                  <FormLabel className="font-normal">{s}</FormLabel>
+                                </FormItem>
+                              )}
+                            />
+                          ))}
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <Button type="submit" disabled={readOnly || createKey.isPending}>
+                    {createKey.isPending ? "Creating…" : "Create key"}
+                  </Button>
+                </form>
+              </Form>
+            </CardContent>
+          </Card>
 
-      <h2>Score configs</h2>
-      <p className="obs-meta">
-        Define the scores used for this project. Categorical configs drive the review form (dropdown of categories).
-      </p>
-      <div className="filters">
-        <input placeholder="score name" value={scName} onChange={(e) => setScName(e.target.value)} />
-        <select value={scType} onChange={(e) => setScType(e.target.value)}>
-          <option value="NUMERIC">numeric</option>
-          <option value="CATEGORICAL">categorical</option>
-          <option value="BOOLEAN">boolean</option>
-        </select>
-        {scType === "CATEGORICAL" && (
-          <input
-            placeholder="categories (comma-separated)"
-            value={scCategories}
-            onChange={(e) => setScCategories(e.target.value)}
-            style={{ width: 240 }}
-          />
-        )}
-        <button disabled={!scName || addScoreConfig.isPending} onClick={() => addScoreConfig.mutate()}>
-          {addScoreConfig.isPending ? "Saving…" : "Add score"}
-        </button>
-      </div>
-      {scoreConfigs && scoreConfigs.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Type</th>
-              <th>Categories</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {scoreConfigs.map((s) => (
-              <tr key={s.id}>
-                <td>{s.name}</td>
-                <td>
-                  <span className="badge">{s.dataType.toLowerCase()}</span>
-                </td>
-                <td className="obs-meta">{s.categories.join(", ") || "—"}</td>
-                <td>
-                  <button className="link-btn" onClick={() => removeScoreConfig.mutate(s.id)}>
-                    delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+          {newSecret && (
+            <Card className="border-emerald-500/40">
+              <CardHeader>
+                <CardTitle className="text-base">New key — copy the secret now, it won&apos;t be shown again</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <pre className="overflow-auto rounded-md border bg-muted/50 p-3 text-xs">{`publicKey: ${newSecret.publicKey}\nsecretKey: ${newSecret.secretKey}`}</pre>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${newSecret.publicKey}:${newSecret.secretKey}`);
+                      toast.success("Copied to clipboard");
+                    }}
+                  >
+                    <Copy className="size-4" /> Copy
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setNewSecret(null)}>
+                    Dismiss
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
-      <h2>Model pricing</h2>
-      <p className="obs-meta">
-        Override token prices (USD per 1M tokens) for models matched by a name pattern (a case-insensitive regex, e.g.{" "}
-        <code>^my-model</code>). Overrides take precedence over the built-in defaults and apply to newly ingested
-        generations.
-      </p>
-      <div className="filters">
-        <input
-          placeholder="pattern (e.g. ^my-model)"
-          value={mpPattern}
-          onChange={(e) => setMpPattern(e.target.value)}
-        />
-        <input placeholder="provider (optional)" value={mpProvider} onChange={(e) => setMpProvider(e.target.value)} />
-        <input
-          type="number"
-          step="0.01"
-          min="0"
-          placeholder="input / 1M"
-          value={mpInput}
-          onChange={(e) => setMpInput(e.target.value)}
-          style={{ width: 110 }}
-        />
-        <input
-          type="number"
-          step="0.01"
-          min="0"
-          placeholder="output / 1M"
-          value={mpOutput}
-          onChange={(e) => setMpOutput(e.target.value)}
-          style={{ width: 110 }}
-        />
-        <button
-          disabled={!mpPattern || mpInput === "" || mpOutput === "" || addModelPrice.isPending}
-          onClick={() => addModelPrice.mutate()}
-        >
-          {addModelPrice.isPending ? "Saving…" : "Add price"}
-        </button>
-      </div>
-      {modelPrices && modelPrices.data.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Pattern</th>
-              <th>Provider</th>
-              <th>Input / 1M</th>
-              <th>Output / 1M</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {modelPrices.data.map((p) => (
-              <tr key={p.id}>
-                <td>
-                  <code>{p.pattern}</code>
-                </td>
-                <td>{p.provider || "—"}</td>
-                <td>${p.inputPerMTok}</td>
-                <td>${p.outputPerMTok}</td>
-                <td>
-                  <button className="link-btn" onClick={() => removeModelPrice.mutate(p.id)}>
-                    delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {modelPrices && modelPrices.builtins.length > 0 && (
-        <details>
-          <summary className="obs-meta">Built-in defaults ({modelPrices.builtins.length})</summary>
-          <table>
-            <thead>
-              <tr>
-                <th>Pattern</th>
-                <th>Provider</th>
-                <th>Input / 1M</th>
-                <th>Output / 1M</th>
-              </tr>
-            </thead>
-            <tbody>
-              {modelPrices.builtins.map((p) => (
-                <tr key={p.pattern}>
-                  <td>
-                    <code>{p.pattern}</code>
-                  </td>
-                  <td>{p.provider}</td>
-                  <td>${p.inputPerMTok}</td>
-                  <td>${p.outputPerMTok}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </details>
-      )}
+          {!apiKeys || apiKeys.length === 0 ? (
+            <EmptyState
+              icon={KeyRound}
+              title="No API keys yet"
+              description="Create one above to use the SDK or ingestion API."
+            />
+          ) : (
+            <DataTable columns={apiKeyColumns} data={apiKeys} />
+          )}
+        </TabsContent>
+
+        {/* ── Providers ─────────────────────────────────────────────────── */}
+        <TabsContent value="providers" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>LLM provider connections</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-4 text-sm text-muted-foreground">
+                API keys are encrypted at rest and used by the playground + evaluators. The &quot;mock&quot; provider
+                needs no key.
+              </p>
+              <Form {...providerForm}>
+                <form
+                  onSubmit={providerForm.handleSubmit((v) => saveProvider.mutate(v))}
+                  className="flex flex-wrap items-end gap-4"
+                >
+                  <FormField
+                    control={providerForm.control}
+                    name="provider"
+                    render={({ field }) => (
+                      <FormItem className="w-40">
+                        <FormLabel>Provider</FormLabel>
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="anthropic">anthropic</SelectItem>
+                            <SelectItem value="openai">openai</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={providerForm.control}
+                    name="apiKey"
+                    render={({ field }) => (
+                      <FormItem className="flex-1 min-w-[260px]">
+                        <FormLabel>API key</FormLabel>
+                        <FormControl>
+                          <Input type="password" placeholder="API key" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <Button type="submit" disabled={readOnly || saveProvider.isPending}>
+                    {saveProvider.isPending ? "Saving…" : "Save key"}
+                  </Button>
+                </form>
+              </Form>
+            </CardContent>
+          </Card>
+
+          {!providers || providers.length === 0 ? (
+            <EmptyState icon={Plug} title="No provider keys configured" description="Add a provider key above." />
+          ) : (
+            <DataTable
+              columns={[
+                {
+                  accessorKey: "provider",
+                  header: "Provider",
+                  cell: ({ row }) => <span className="font-medium">{row.original.provider}</span>,
+                },
+                {
+                  accessorKey: "masked",
+                  header: "Key",
+                  cell: ({ row }) => <span className="text-muted-foreground">{row.original.masked}</span>,
+                },
+                {
+                  accessorKey: "createdAt",
+                  header: "Added",
+                  cell: ({ row }) => (
+                    <span className="text-muted-foreground">
+                      {row.original.createdAt.slice(0, 19).replace("T", " ")}
+                    </span>
+                  ),
+                },
+              ]}
+              data={providers}
+            />
+          )}
+        </TabsContent>
+
+        {/* ── Data Retention ────────────────────────────────────────────── */}
+        <TabsContent value="retention" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Data retention</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Delete traces/observations/scores older than N days (0 = keep forever). A daily worker job enforces
+                this.
+              </p>
+              <div className="flex items-end gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="retention-days">Days</Label>
+                  <Input
+                    id="retention-days"
+                    type="number"
+                    min="0"
+                    className="w-32"
+                    value={daysValue}
+                    onChange={(e) => setDays(Number(e.target.value))}
+                  />
+                </div>
+                <Button disabled={readOnly || saveRetention.isPending} onClick={() => saveRetention.mutate()}>
+                  {saveRetention.isPending ? "Saving…" : "Save retention"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Exports & Analytics ───────────────────────────────────────── */}
+        <TabsContent value="exports" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Scheduled exports</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                When enabled, a daily worker job writes the project&apos;s traces (NDJSON) to blob storage under{" "}
+                <code>exports/&lt;projectId&gt;/&lt;date&gt;/</code>. Use &quot;Run now&quot; to export immediately.
+              </p>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="se-enabled"
+                  checked={seEnabledValue}
+                  onCheckedChange={(c) => setSeEnabled(c === true)}
+                  disabled={readOnly}
+                />
+                <Label htmlFor="se-enabled" className="font-normal">
+                  enabled
+                </Label>
+              </div>
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="se-env">Environment (optional)</Label>
+                  <Input id="se-env" className="w-48" value={seEnvValue} onChange={(e) => setSeEnv(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="se-limit">Max traces</Label>
+                  <Input
+                    id="se-limit"
+                    type="number"
+                    min="1"
+                    className="w-32"
+                    value={seLimitValue}
+                    onChange={(e) => setSeLimit(Number(e.target.value))}
+                  />
+                </div>
+                <Button disabled={readOnly || saveSchedExport.isPending} onClick={() => saveSchedExport.mutate()}>
+                  {saveSchedExport.isPending ? "Saving…" : "Save"}
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={readOnly || runSchedExport.isPending}
+                  onClick={() => runSchedExport.mutate()}
+                >
+                  {runSchedExport.isPending ? "Exporting…" : "Run now"}
+                </Button>
+              </div>
+              {schedExport?.lastRunAt && (
+                <p className="text-sm text-muted-foreground">
+                  Last run {schedExport.lastRunAt.slice(0, 19).replace("T", " ")} — {schedExport.lastCount} traces →{" "}
+                  <code>{schedExport.lastKey}</code>
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Product analytics (PostHog)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                When enabled, the worker forwards <code>trace.created</code> and <code>score.created</code> events to
+                PostHog&apos;s capture API so you can build funnels/retention over LLM usage.
+              </p>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="an-enabled"
+                  checked={anEnabledValue}
+                  onCheckedChange={(c) => setAnEnabled(c === true)}
+                  disabled={readOnly}
+                />
+                <Label htmlFor="an-enabled" className="font-normal">
+                  enabled
+                </Label>
+              </div>
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="an-host">Host</Label>
+                  <Input
+                    id="an-host"
+                    className="w-64"
+                    value={anHostValue}
+                    onChange={(e) => setAnHost(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="an-key">API key</Label>
+                  <Input
+                    id="an-key"
+                    type="password"
+                    className="w-64"
+                    placeholder={analytics?.apiKey ? "API key (set — leave blank to keep)" : "PostHog project API key"}
+                    value={anKey}
+                    onChange={(e) => setAnKey(e.target.value)}
+                  />
+                </div>
+                <Button disabled={readOnly || saveAnalytics.isPending} onClick={() => saveAnalytics.mutate()}>
+                  {saveAnalytics.isPending ? "Saving…" : "Save"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Masking ───────────────────────────────────────────────────── */}
+        <TabsContent value="masking" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>PII masking</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                When enabled, the worker redacts matches from trace/observation input/output (and metadata) at ingest,
+                before they&apos;re stored. Built-in patterns plus your own regexes (one per line).
+              </p>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="mask-enabled"
+                  checked={maskEnabledVal}
+                  onCheckedChange={(c) => setMaskEnabled(c === true)}
+                  disabled={readOnly}
+                />
+                <Label htmlFor="mask-enabled" className="font-normal">
+                  enabled
+                </Label>
+              </div>
+              <div className="space-y-2">
+                <Label>Built-in patterns</Label>
+                <div className="flex flex-wrap gap-4">
+                  {(masking?.available ?? []).map((b) => (
+                    <div key={b} className="flex items-center gap-2">
+                      <Checkbox
+                        id={`mask-${b}`}
+                        checked={maskBuiltinsVal.includes(b)}
+                        onCheckedChange={() => toggleBuiltin(b)}
+                        disabled={readOnly}
+                      />
+                      <Label htmlFor={`mask-${b}`} className="font-normal">
+                        {b}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mask-redact">Redact with</Label>
+                <Input
+                  id="mask-redact"
+                  className="w-48"
+                  value={maskRedactVal}
+                  onChange={(e) => setMaskRedact(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mask-custom">Custom patterns</Label>
+                <Textarea
+                  id="mask-custom"
+                  rows={3}
+                  placeholder="custom regex patterns, one per line (e.g. sk-[a-z0-9]+)"
+                  value={maskCustomVal}
+                  onChange={(e) => setMaskCustom(e.target.value)}
+                />
+              </div>
+              <Button disabled={readOnly || saveMasking.isPending} onClick={() => saveMasking.mutate()}>
+                {saveMasking.isPending ? "Saving…" : "Save masking"}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Webhooks ──────────────────────────────────────────────────── */}
+        <TabsContent value="webhooks" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Webhooks</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-4 text-sm text-muted-foreground">
+                POST to a URL when a score is created. Set a threshold to only fire on low scores (value &lt;
+                threshold).
+              </p>
+              <Form {...webhookForm}>
+                <form
+                  onSubmit={webhookForm.handleSubmit((v) => addWebhook.mutate(v))}
+                  className="flex flex-wrap items-end gap-4"
+                >
+                  <FormField
+                    control={webhookForm.control}
+                    name="url"
+                    render={({ field }) => (
+                      <FormItem className="flex-1 min-w-[300px]">
+                        <FormLabel>URL</FormLabel>
+                        <FormControl>
+                          <Input placeholder="https://…" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={webhookForm.control}
+                    name="threshold"
+                    render={({ field }) => (
+                      <FormItem className="w-40">
+                        <FormLabel>Threshold</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.1" placeholder="optional" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <Button type="submit" disabled={readOnly || addWebhook.isPending}>
+                    {addWebhook.isPending ? "Saving…" : "Add webhook"}
+                  </Button>
+                </form>
+              </Form>
+            </CardContent>
+          </Card>
+
+          {!webhooks || webhooks.length === 0 ? (
+            <EmptyState
+              icon={WebhookIcon}
+              title="No webhooks yet"
+              description="Add one above to receive score events."
+            />
+          ) : (
+            <DataTable columns={webhookColumns} data={webhooks} />
+          )}
+        </TabsContent>
+
+        {/* ── Automations ───────────────────────────────────────────────── */}
+        <TabsContent value="automations" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Automations</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-4 text-sm text-muted-foreground">
+                Run an action when a trigger fires. Triggers: score.created, trace.created, eval.completed. Actions: a
+                generic webhook (POST JSON) or a Slack message (to an incoming-webhook URL). Threshold fires only on low
+                scores; filter is a substring match on the entity name.
+              </p>
+              <Form {...automationForm}>
+                <form onSubmit={automationForm.handleSubmit((v) => addAutomation.mutate(v))} className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <FormField
+                      control={automationForm.control}
+                      name="name"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Name</FormLabel>
+                          <FormControl>
+                            <Input placeholder="name" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={automationForm.control}
+                      name="trigger"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Trigger</FormLabel>
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="score.created">score.created</SelectItem>
+                              <SelectItem value="trace.created">trace.created</SelectItem>
+                              <SelectItem value="eval.completed">eval.completed</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={automationForm.control}
+                      name="action"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Action</FormLabel>
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="webhook">webhook</SelectItem>
+                              <SelectItem value="slack">slack</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={automationForm.control}
+                      name="target"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Target URL</FormLabel>
+                          <FormControl>
+                            <Input placeholder="target URL" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={automationForm.control}
+                      name="threshold"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Threshold</FormLabel>
+                          <FormControl>
+                            <Input type="number" step="0.1" placeholder="optional" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={automationForm.control}
+                      name="filter"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Filter</FormLabel>
+                          <FormControl>
+                            <Input placeholder="optional" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  <Button type="submit" disabled={readOnly || addAutomation.isPending}>
+                    {addAutomation.isPending ? "Saving…" : "Add automation"}
+                  </Button>
+                </form>
+              </Form>
+            </CardContent>
+          </Card>
+
+          {!automations || automations.length === 0 ? (
+            <EmptyState icon={Zap} title="No automations yet" description="Add one above to react to score events." />
+          ) : (
+            <DataTable columns={automationColumns} data={automations} />
+          )}
+        </TabsContent>
+
+        {/* ── Scores ────────────────────────────────────────────────────── */}
+        <TabsContent value="scores" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Score configs</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-4 text-sm text-muted-foreground">
+                Define the scores used for this project. Categorical configs drive the review form (dropdown of
+                categories).
+              </p>
+              <Form {...scoreForm}>
+                <form
+                  onSubmit={scoreForm.handleSubmit((v) => addScoreConfig.mutate(v))}
+                  className="flex flex-wrap items-end gap-4"
+                >
+                  <FormField
+                    control={scoreForm.control}
+                    name="name"
+                    render={({ field }) => (
+                      <FormItem className="w-48">
+                        <FormLabel>Name</FormLabel>
+                        <FormControl>
+                          <Input placeholder="score name" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={scoreForm.control}
+                    name="dataType"
+                    render={({ field }) => (
+                      <FormItem className="w-40">
+                        <FormLabel>Type</FormLabel>
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="NUMERIC">numeric</SelectItem>
+                            <SelectItem value="CATEGORICAL">categorical</SelectItem>
+                            <SelectItem value="BOOLEAN">boolean</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  {scoreType === "CATEGORICAL" && (
+                    <FormField
+                      control={scoreForm.control}
+                      name="categories"
+                      render={({ field }) => (
+                        <FormItem className="w-64">
+                          <FormLabel>Categories</FormLabel>
+                          <FormControl>
+                            <Input placeholder="comma-separated" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+                  <Button type="submit" disabled={readOnly || addScoreConfig.isPending}>
+                    {addScoreConfig.isPending ? "Saving…" : "Add score"}
+                  </Button>
+                </form>
+              </Form>
+            </CardContent>
+          </Card>
+
+          {!scoreConfigs || scoreConfigs.length === 0 ? (
+            <EmptyState icon={ListChecks} title="No score configs yet" description="Define a score above." />
+          ) : (
+            <DataTable columns={scoreColumns} data={scoreConfigs} />
+          )}
+        </TabsContent>
+
+        {/* ── Model Pricing ─────────────────────────────────────────────── */}
+        <TabsContent value="pricing" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Model pricing</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-4 text-sm text-muted-foreground">
+                Override token prices (USD per 1M tokens) for models matched by a name pattern (a case-insensitive
+                regex, e.g. <code>^my-model</code>). Overrides take precedence over the built-in defaults and apply to
+                newly ingested generations.
+              </p>
+              <Form {...pricingForm}>
+                <form
+                  onSubmit={pricingForm.handleSubmit((v) => addModelPrice.mutate(v))}
+                  className="flex flex-wrap items-end gap-4"
+                >
+                  <FormField
+                    control={pricingForm.control}
+                    name="pattern"
+                    render={({ field }) => (
+                      <FormItem className="w-56">
+                        <FormLabel>Pattern</FormLabel>
+                        <FormControl>
+                          <Input placeholder="^my-model" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={pricingForm.control}
+                    name="provider"
+                    render={({ field }) => (
+                      <FormItem className="w-40">
+                        <FormLabel>Provider</FormLabel>
+                        <FormControl>
+                          <Input placeholder="optional" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={pricingForm.control}
+                    name="inputPerMTok"
+                    render={({ field }) => (
+                      <FormItem className="w-32">
+                        <FormLabel>Input / 1M</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.01" min="0" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={pricingForm.control}
+                    name="outputPerMTok"
+                    render={({ field }) => (
+                      <FormItem className="w-32">
+                        <FormLabel>Output / 1M</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.01" min="0" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <Button type="submit" disabled={readOnly || addModelPrice.isPending}>
+                    {addModelPrice.isPending ? "Saving…" : "Add price"}
+                  </Button>
+                </form>
+              </Form>
+            </CardContent>
+          </Card>
+
+          {!modelPrices || modelPrices.data.length === 0 ? (
+            <EmptyState
+              icon={DollarSign}
+              title="No price overrides"
+              description="Add one above to override built-in pricing."
+            />
+          ) : (
+            <DataTable columns={modelPriceColumns} data={modelPrices.data} />
+          )}
+
+          {modelPrices && modelPrices.builtins.length > 0 && (
+            <Collapsible className="space-y-3">
+              <CollapsibleTrigger asChild>
+                <Button variant="outline" size="sm">
+                  Built-in defaults ({modelPrices.builtins.length})
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <DataTable columns={builtinColumns} data={modelPrices.builtins} pageSize={50} />
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

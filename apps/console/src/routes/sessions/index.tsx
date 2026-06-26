@@ -1,10 +1,46 @@
+import type { SessionSummary } from "@memoturn/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import type { ColumnDef } from "@tanstack/react-table";
+import { MessageSquare } from "lucide-react";
+import { DataTable } from "../../components/data-table";
+import { EmptyState } from "../../components/empty-state";
+import { PageHeader } from "../../components/page-header";
+import { Skeleton } from "../../components/ui/skeleton";
 import { api } from "../../lib/api";
 
 export const Route = createFileRoute("/sessions/")({ component: SessionsPage });
 
+const columns: ColumnDef<SessionSummary>[] = [
+  {
+    accessorKey: "session_id",
+    header: "Session",
+    cell: ({ row }) => (
+      <Link
+        to="/sessions/$id"
+        params={{ id: row.original.session_id }}
+        className="font-medium text-primary hover:underline"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {row.original.session_id}
+      </Link>
+    ),
+  },
+  { accessorKey: "trace_count", header: "Traces" },
+  {
+    accessorKey: "total_cost",
+    header: "Cost",
+    cell: ({ row }) => {
+      const cost = Number(row.original.total_cost);
+      return cost > 0 ? `$${cost.toFixed(6)}` : "—";
+    },
+  },
+  { accessorKey: "first_seen", header: "First seen", cell: ({ row }) => row.original.first_seen },
+  { accessorKey: "last_seen", header: "Last seen", cell: ({ row }) => row.original.last_seen },
+];
+
 function SessionsPage() {
+  const navigate = useNavigate();
   const {
     data: sessions,
     isLoading,
@@ -17,37 +53,25 @@ function SessionsPage() {
 
   return (
     <div>
-      <h1>Sessions</h1>
-      {isLoading && <div className="empty">Loading…</div>}
-      {error && <div className="empty">Failed to load: {String(error)}</div>}
-      {sessions && sessions.length === 0 && <div className="empty">No sessions yet.</div>}
-      {sessions && sessions.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Session</th>
-              <th>Traces</th>
-              <th>Cost</th>
-              <th>First seen</th>
-              <th>Last seen</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sessions.map((s) => (
-              <tr key={s.session_id}>
-                <td>
-                  <Link to="/sessions/$id" params={{ id: s.session_id }}>
-                    {s.session_id}
-                  </Link>
-                </td>
-                <td>{s.trace_count}</td>
-                <td>{Number(s.total_cost) > 0 ? `$${Number(s.total_cost).toFixed(6)}` : "—"}</td>
-                <td>{s.first_seen}</td>
-                <td>{s.last_seen}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <PageHeader title="Sessions" description="Grouped traces sharing a session id." />
+      {isLoading ? (
+        <Skeleton className="h-64 w-full" />
+      ) : error ? (
+        <EmptyState title="Failed to load sessions" description={String(error)} />
+      ) : !sessions || sessions.length === 0 ? (
+        <EmptyState
+          icon={MessageSquare}
+          title="No sessions yet"
+          description="Sessions appear when traces share a session id."
+        />
+      ) : (
+        <DataTable
+          columns={columns}
+          data={sessions}
+          filterColumn="session_id"
+          filterPlaceholder="Filter sessions…"
+          onRowClick={(s) => navigate({ to: "/sessions/$id", params: { id: s.session_id } })}
+        />
       )}
     </div>
   );

@@ -1,8 +1,58 @@
+import type { PromptListItem } from "@memoturn/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import type { ColumnDef } from "@tanstack/react-table";
+import { FileText } from "lucide-react";
+import { DataTable } from "../../components/data-table";
+import { EmptyState } from "../../components/empty-state";
+import { KindBadge } from "../../components/kind-badge";
+import { PageHeader } from "../../components/page-header";
+import { Skeleton } from "../../components/ui/skeleton";
 import { api } from "../../lib/api";
 
 export const Route = createFileRoute("/prompts/")({ component: PromptsPage });
+
+const columns: ColumnDef<PromptListItem>[] = [
+  {
+    accessorKey: "name",
+    header: "Name",
+    cell: ({ row }) => (
+      <Link
+        to="/prompts/$name"
+        params={{ name: row.original.name }}
+        className="font-medium text-primary hover:underline"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {row.original.folder ? `${row.original.folder}/` : ""}
+        {row.original.name}
+      </Link>
+    ),
+  },
+  {
+    accessorKey: "latestVersion",
+    header: "Latest",
+    cell: ({ row }) => <KindBadge tone="blue">v{row.original.latestVersion}</KindBadge>,
+  },
+  { accessorKey: "versions", header: "Versions" },
+  {
+    id: "channels",
+    header: "Channels",
+    cell: ({ row }) => (
+      <div className="flex flex-wrap gap-1">
+        {row.original.channels.map((c) => (
+          <KindBadge key={c.label} tone="green">
+            {c.label}→v{c.version}
+          </KindBadge>
+        ))}
+      </div>
+    ),
+  },
+  {
+    accessorKey: "updatedAt",
+    header: "Updated",
+    cell: ({ row }) => row.original.updatedAt.slice(0, 19).replace("T", " "),
+  },
+];
 
 function PromptsPage() {
   const {
@@ -17,48 +67,15 @@ function PromptsPage() {
 
   return (
     <div>
-      <h1>Prompts</h1>
-      {isLoading && <div className="empty">Loading…</div>}
-      {error && <div className="empty">Failed to load: {String(error)}</div>}
-      {prompts && prompts.length === 0 && (
-        <div className="empty">
-          No prompts yet. Create one with <code>POST /v1/prompts</code> or the SDK.
-        </div>
-      )}
-      {prompts && prompts.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Latest</th>
-              <th>Versions</th>
-              <th>Channels</th>
-              <th>Updated</th>
-            </tr>
-          </thead>
-          <tbody>
-            {prompts.map((p) => (
-              <tr key={p.name}>
-                <td>
-                  <Link to="/prompts/$name" params={{ name: p.name }}>
-                    {p.folder ? `${p.folder}/` : ""}
-                    {p.name}
-                  </Link>
-                </td>
-                <td>v{p.latestVersion}</td>
-                <td>{p.versions}</td>
-                <td>
-                  {p.channels.map((c) => (
-                    <span key={c.label} className="badge gen" style={{ marginRight: 4 }}>
-                      {c.label}→v{c.version}
-                    </span>
-                  ))}
-                </td>
-                <td>{p.updatedAt.slice(0, 19).replace("T", " ")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <PageHeader title="Prompts" description="Versioned prompt templates with deployment channels." />
+      {isLoading ? (
+        <Skeleton className="h-64 w-full" />
+      ) : error ? (
+        <EmptyState title="Failed to load prompts" description={String(error)} />
+      ) : !prompts || prompts.length === 0 ? (
+        <EmptyState icon={FileText} title="No prompts yet" description="Create one with POST /v1/prompts or the SDK." />
+      ) : (
+        <DataTable columns={columns} data={prompts} filterColumn="name" filterPlaceholder="Filter prompts…" />
       )}
     </div>
   );

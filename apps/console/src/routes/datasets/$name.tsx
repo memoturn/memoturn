@@ -1,5 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { EmptyState } from "../../components/empty-state";
+import { KindBadge } from "../../components/kind-badge";
+import { PageHeader } from "../../components/page-header";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "../../components/ui/breadcrumb";
+import { Skeleton } from "../../components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { api } from "../../lib/api";
 
 export const Route = createFileRoute("/datasets/$name")({ component: DatasetDetailPage });
@@ -20,67 +33,87 @@ function DatasetDetailPage() {
     queryFn: () => api.getDataset(name),
   });
 
-  if (isLoading) return <div className="empty">Loading…</div>;
-  if (error) return <div className="empty">Failed to load: {String(error)}</div>;
-  if (!data) return <div className="empty">Dataset not found.</div>;
+  if (isLoading) return <Skeleton className="h-64 w-full" />;
+  if (error) return <EmptyState title="Failed to load dataset" description={String(error)} />;
+  if (!data) return <EmptyState title="Dataset not found" />;
 
   return (
-    <div>
-      <p>
-        <Link to="/datasets">← Datasets</Link>
-      </p>
-      <h1>{data.name}</h1>
-      {data.description && <p className="obs-meta">{data.description}</p>}
+    <div className="space-y-6">
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild>
+              <Link to="/datasets">Datasets</Link>
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>{data.name}</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
 
-      <h2>Runs ({data.runs.length})</h2>
-      {data.runs.length === 0 ? (
-        <div className="empty">No experiment runs yet.</div>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Run</th>
-              <th>Items linked</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.runs.map((r) => (
-              <tr key={r.name}>
-                <td>
-                  <span className="badge gen">{r.name}</span>
-                </td>
-                <td>{r.itemCount}</td>
-                <td>{r.createdAt.slice(0, 19).replace("T", " ")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <PageHeader title={data.name} description={data.description || undefined} />
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold tracking-tight">Runs ({data.runs.length})</h2>
+        {data.runs.length === 0 ? (
+          <EmptyState title="No experiment runs yet" />
+        ) : (
+          <div className="rounded-lg border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Run</TableHead>
+                  <TableHead>Items linked</TableHead>
+                  <TableHead>Created</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.runs.map((r) => (
+                  <TableRow key={r.name}>
+                    <TableCell>
+                      <KindBadge tone="blue">{r.name}</KindBadge>
+                    </TableCell>
+                    <TableCell>{r.itemCount}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {r.createdAt.slice(0, 19).replace("T", " ")}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </section>
 
       {data.runs.length > 0 && <Comparison name={name} />}
 
-      <h2>Items ({data.items.length})</h2>
-      {data.items.length === 0 ? (
-        <div className="empty">No items yet.</div>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Input</th>
-              <th>Expected output</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.items.map((it) => (
-              <tr key={it.id}>
-                <td>{j(it.input)}</td>
-                <td>{j(it.expectedOutput)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold tracking-tight">Items ({data.items.length})</h2>
+        {data.items.length === 0 ? (
+          <EmptyState title="No items yet" />
+        ) : (
+          <div className="rounded-lg border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Input</TableHead>
+                  <TableHead>Expected output</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.items.map((it) => (
+                  <TableRow key={it.id}>
+                    <TableCell>{j(it.input)}</TableCell>
+                    <TableCell>{j(it.expectedOutput)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
@@ -93,52 +126,56 @@ function Comparison({ name }: { name: string }) {
   if (!data || data.runs.length === 0) return null;
 
   return (
-    <>
-      <h2>Run comparison</h2>
-      <div style={{ overflowX: "auto" }}>
-        <table>
-          <thead>
-            <tr>
-              <th>Input</th>
-              <th>Expected</th>
+    <section className="space-y-3">
+      <h2 className="text-lg font-semibold tracking-tight">Run comparison</h2>
+      <div className="overflow-x-auto rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Input</TableHead>
+              <TableHead>Expected</TableHead>
               {data.runs.map((r) => (
-                <th key={r}>{r}</th>
+                <TableHead key={r}>{r}</TableHead>
               ))}
-            </tr>
-          </thead>
-          <tbody>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {data.items.map((it) => (
-              <tr key={it.id}>
-                <td className="obs-meta">{trunc(j(it.input), 80)}</td>
-                <td className="obs-meta">{trunc(j(it.expectedOutput), 80)}</td>
+              <TableRow key={it.id}>
+                <TableCell className="text-muted-foreground">{trunc(j(it.input), 80)}</TableCell>
+                <TableCell className="text-muted-foreground">{trunc(j(it.expectedOutput), 80)}</TableCell>
                 {it.cells.map((cell, i) => (
-                  <td key={data.runs[i] ?? i}>
+                  <TableCell key={data.runs[i] ?? i}>
                     {cell ? (
                       <>
-                        <Link to="/traces/$id" params={{ id: cell.traceId }}>
+                        <Link
+                          to="/traces/$id"
+                          params={{ id: cell.traceId }}
+                          className="font-medium text-primary hover:underline"
+                        >
                           {trunc(cell.output, 80) || "view trace"}
                         </Link>
                         {cell.scores.length > 0 && (
-                          <div className="scores" style={{ marginTop: 4 }}>
+                          <div className="mt-1 flex flex-wrap gap-1">
                             {cell.scores.map((s, k) => (
-                              <span className="score-chip" key={`${s.name}:${k}`}>
-                                <span className="score-name">{s.name}</span>
-                                <span className="score-val">{s.value != null ? s.value : s.stringValue || "—"}</span>
-                              </span>
+                              <KindBadge tone="neutral" key={`${s.name}:${k}`}>
+                                <span className="text-muted-foreground">{s.name}</span>
+                                <span className="font-medium">{s.value != null ? s.value : s.stringValue || "—"}</span>
+                              </KindBadge>
                             ))}
                           </div>
                         )}
                       </>
                     ) : (
-                      <span className="obs-meta">—</span>
+                      <span className="text-muted-foreground">—</span>
                     )}
-                  </td>
+                  </TableCell>
                 ))}
-              </tr>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
-    </>
+    </section>
   );
 }

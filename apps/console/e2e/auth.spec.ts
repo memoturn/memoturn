@@ -19,6 +19,7 @@ test("rejects a wrong password and stays on the login page", async ({ page }) =>
   await page.getByLabel("Email").fill("admin@memoturn.dev");
   await page.getByLabel("Password").fill("not-the-password");
   await page.getByRole("button", { name: /sign in/i }).click();
-  await expect(page.locator(".login-error")).toBeVisible();
+  // The shadcn Form surfaces the sign-in error as a FormMessage under the field.
+  await expect(page.locator('[data-slot="form-message"]').first()).toBeVisible();
   await expect(page).toHaveURL(/\/login/);
 });
