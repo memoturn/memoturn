@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Check, Copy, Download, Trash2 } from "lucide-react";
+import { Download, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { CopyButton } from "../../components/copy-button";
 import { EmptyState } from "../../components/empty-state";
 import { KindBadge, type KindBadgeTone, toneForKind } from "../../components/kind-badge";
+import { StatTile } from "../../components/stat-tile";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../../components/ui/accordion";
 import { Badge } from "../../components/ui/badge";
 import {
@@ -22,39 +24,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/ta
 import { Textarea } from "../../components/ui/textarea";
 import { api, type ObservationDetail } from "../../lib/api";
 import { useIsReadOnly } from "../../lib/role";
-
-/** Inline copy-to-clipboard button used next to long ids. */
-function CopyButton({ value, label }: { value: string; label?: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <Button
-      variant="ghost"
-      size="icon-xs"
-      className="size-5 text-muted-foreground"
-      aria-label={`Copy ${label ?? "value"}`}
-      onClick={async () => {
-        await navigator.clipboard.writeText(value);
-        setCopied(true);
-        toast.success("Copied");
-        window.setTimeout(() => setCopied(false), 1200);
-      }}
-    >
-      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-    </Button>
-  );
-}
-
-/** Compact metric tile for the trace summary strip. */
-function Stat({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <Card size="sm" className="gap-1">
-      <CardContent>
-        <div className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{label}</div>
-        <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
-      </CardContent>
-    </Card>
-  );
-}
 
 export const Route = createFileRoute("/traces/$id")({ component: TraceDetailPage });
 
@@ -361,10 +330,10 @@ function TraceDetailPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Stat label="Observations" value={trace.observation_count} />
-        <Stat label="Tokens" value={trace.total_tokens} />
-        <Stat label="Cost" value={Number(trace.total_cost) > 0 ? `$${Number(trace.total_cost).toFixed(6)}` : "—"} />
-        <Stat label="Latency" value={`${trace.latency_ms} ms`} />
+        <StatTile label="Observations" value={trace.observation_count} />
+        <StatTile label="Tokens" value={trace.total_tokens} />
+        <StatTile label="Cost" value={Number(trace.total_cost) > 0 ? `$${Number(trace.total_cost).toFixed(6)}` : "—"} />
+        <StatTile label="Latency" value={`${trace.latency_ms} ms`} />
       </div>
 
       <Card>
