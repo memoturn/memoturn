@@ -47,7 +47,7 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 | ~~**Organizations**~~ | Done | Tenancy via the Better Auth organization plugin (org/member/invitation); projects scoped to an org, role-mapped to our RBAC, console org management. |
 | ~~**SSO**~~ | Done | Better Auth `@better-auth/sso` plugin (OIDC/SAML IdPs mapped by email domain → org); register/manage from the Organizations page. Full IdP sign-in needs a real provider. |
 | ~~**API rate limiting**~~ | Done | Per-project Redis fixed-window limiter on `/v1` (`RATE_LIMIT_PER_MINUTE`), 429 + `X-RateLimit-*`/`Retry-After`. |
-| **Worker health/metrics endpoint** | S | A small HTTP health/metrics surface on the worker for liveness + queue depth. |
+| ~~**Worker health/metrics endpoint**~~ | Done | `node:http` server on the worker (`WORKER_PORT`, default 3002) — `/health` liveness + `/metrics` BullMQ queue depths. |
 
 ## Integrations & SDKs
 

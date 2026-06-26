@@ -1,5 +1,6 @@
+import { createServer } from "node:http";
 import { QUEUE_NAMES, QUEUE_PREFIX } from "@memoturn/core";
-import { connectionOptions, type IngestJob } from "@memoturn/db/queue";
+import { connectionOptions, getIngestQueue, type IngestJob } from "@memoturn/db/queue";
 import { applyAllRetention, runAllScheduledExports } from "@memoturn/server";
 import { Queue, Worker } from "bullmq";
 import { processIngest } from "./processors/ingest.js";
@@ -62,8 +63,39 @@ await maintenanceQueue.add(
   },
 );
 
+// ── Health + metrics HTTP endpoint (liveness probes + queue depth) ───────────────
+const startedAt = Date.now();
+const healthPort = Number(process.env.WORKER_PORT ?? 3002);
+const ingestQueue = getIngestQueue();
+
+const healthServer = createServer(async (req, res) => {
+  const path = (req.url ?? "/").split("?")[0];
+  res.setHeader("content-type", "application/json");
+  if (path === "/health") {
+    res.end(
+      JSON.stringify({
+        status: "ok",
+        service: "memoturn-worker",
+        uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
+      }),
+    );
+    return;
+  }
+  if (path === "/metrics") {
+    const [ingest, maintenance] = await Promise.all([ingestQueue.getJobCounts(), maintenanceQueue.getJobCounts()]);
+    res.end(JSON.stringify({ concurrency, queues: { ingest, maintenance } }));
+    return;
+  }
+  res.statusCode = 404;
+  res.end(JSON.stringify({ error: "not found" }));
+});
+healthServer.listen(healthPort, () =>
+  console.log(`[worker] health + metrics on http://localhost:${healthPort} (/health, /metrics)`),
+);
+
 async function shutdown(signal: string) {
   console.log(`[worker] ${signal} received, draining…`);
+  healthServer.close();
   await Promise.all([ingestWorker.close(), maintenanceWorker.close()]);
   process.exit(0);
 }
@@ -71,4 +103,4 @@ async function shutdown(signal: string) {
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-console.log("[worker] memoturn worker started (ingest + retention + export crons)");
+console.log("[worker] memoturn worker started (ingest + retention + export crons + health endpoint)");

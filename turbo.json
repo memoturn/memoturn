@@ -22,7 +22,8 @@
     "MEMOTURN_EMAIL",
     "MEMOTURN_PASSWORD",
     "RATE_LIMIT_PER_MINUTE",
-    "WORKER_CONCURRENCY"
+    "WORKER_CONCURRENCY",
+    "WORKER_PORT"
   ],
   "tasks": {
     "build": {
