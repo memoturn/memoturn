@@ -20,7 +20,9 @@
     "REDIS_PORT",
     "CONSOLE_URL",
     "MEMOTURN_EMAIL",
-    "MEMOTURN_PASSWORD"
+    "MEMOTURN_PASSWORD",
+    "RATE_LIMIT_PER_MINUTE",
+    "WORKER_CONCURRENCY"
   ],
   "tasks": {
     "build": {

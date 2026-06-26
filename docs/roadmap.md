@@ -46,7 +46,7 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 | --- | --- | --- |
 | **Organizations** | L | An org layer above workspace with org-level membership/roles (tenancy change touching auth + schema). |
 | **SSO / social login** | M | Add OAuth/SAML providers to the auth layer (the auth library supports them; mostly config + UI). |
-| **API rate limiting** | M | Per-project ingestion/API limits backed by Redis. |
+| ~~**API rate limiting**~~ | Done | Per-project Redis fixed-window limiter on `/v1` (`RATE_LIMIT_PER_MINUTE`), 429 + `X-RateLimit-*`/`Retry-After`. |
 | **Worker health/metrics endpoint** | S | A small HTTP health/metrics surface on the worker for liveness + queue depth. |
 
 ## Integrations & SDKs

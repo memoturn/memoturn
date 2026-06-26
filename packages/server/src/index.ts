@@ -14,6 +14,7 @@ export * from "./otel.js";
 export * from "./playground.js";
 export * from "./prompts.js";
 export * from "./providers.js";
+export * from "./ratelimit.js";
 export * from "./retention.js";
 export * from "./review.js";
 export * from "./savedviews.js";

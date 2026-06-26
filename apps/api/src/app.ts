@@ -67,6 +67,7 @@ import {
 import { Scalar } from "@scalar/hono-api-reference";
 import { streamSSE } from "hono/streaming";
 import { type AuthVars, denyIfReadOnly, requireAuth } from "./middleware/auth.js";
+import { rateLimit } from "./middleware/ratelimit.js";
 
 /**
  * memoturn public API (Hono + OpenAPI). Runtime-agnostic: the same app is served by
@@ -123,6 +124,9 @@ app.use("/v1/scheduled-exports", requireAuth);
 app.use("/v1/scheduled-exports/*", requireAuth);
 app.use("/v1/automations", requireAuth);
 app.use("/v1/automations/*", requireAuth);
+
+// Per-project rate limiting runs after auth (projectId is set) on every /v1 route.
+app.use("/v1/*", rateLimit);
 
 // Streaming playground (SSE) — plain route; emits { delta } events then [DONE].
 app.post("/v1/playground/stream", async (c) => {
