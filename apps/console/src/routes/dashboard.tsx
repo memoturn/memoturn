@@ -1,10 +1,10 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { ModelMetric, Widget } from "@memoturn/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
-import { LayoutDashboard, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { Activity, Coins, DollarSign, LayoutDashboard, type LucideIcon, Sparkles, Trash2 } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
@@ -13,7 +13,15 @@ import { DataTable } from "../components/data-table";
 import { EmptyState } from "../components/empty-state";
 import { PageHeader } from "../components/page-header";
 import { Button } from "../components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "../components/ui/card";
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "../components/ui/chart";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "../components/ui/form";
 import { Input } from "../components/ui/input";
@@ -66,30 +74,32 @@ function UsageChart({
   const metrics: MetricKey[] = ["cost", "tokens", "gens", "latency"];
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Usage over time</CardTitle>
-        <CardDescription>
-          Daily {usageConfig[active].label.toLowerCase()} over the last {days} days
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap gap-2">
+    <Card className="gap-0 py-0">
+      <CardHeader className="flex flex-col items-stretch space-y-0 border-b p-0 sm:flex-row">
+        <div className="flex flex-1 flex-col justify-center gap-1.5 px-6 py-5">
+          <CardTitle>Usage over time</CardTitle>
+          <CardDescription>
+            Daily {usageConfig[active].label.toLowerCase()} over the last {days} days
+          </CardDescription>
+        </div>
+        <div className="flex">
           {metrics.map((m) => (
             <button
               type="button"
               key={m}
               data-active={active === m}
               onClick={() => setActive(m)}
-              className="flex flex-col gap-0.5 border px-3 py-2 text-left transition-colors hover:bg-muted/60 data-[active=true]:border-foreground/30 data-[active=true]:bg-muted"
+              className="flex flex-1 flex-col justify-center gap-1 border-t border-l px-4 py-3 text-left transition-colors hover:bg-muted/50 data-[active=true]:bg-muted sm:border-t-0 sm:px-5 sm:py-4"
             >
-              <span className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+              <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                 {usageConfig[m].label}
               </span>
-              <span className="text-base font-semibold tabular-nums">{totals[m]}</span>
+              <span className="text-sm font-semibold tabular-nums sm:text-lg">{totals[m]}</span>
             </button>
           ))}
         </div>
+      </CardHeader>
+      <CardContent className="px-2 pt-4 sm:px-6">
         <ChartContainer config={usageConfig} className="aspect-auto h-[260px] w-full">
           <AreaChart data={series} margin={{ left: 12, right: 12, top: 8 }}>
             <defs>
@@ -129,12 +139,14 @@ function ModelBarChart({
   data,
   metric,
   color,
+  footer,
 }: {
   title: string;
   description: string;
   data: { model: string; value: number }[];
   metric: string;
   color: string;
+  footer?: ReactNode;
 }) {
   const config = { value: { label: metric, color } } satisfies ChartConfig;
   return (
@@ -154,6 +166,7 @@ function ModelBarChart({
           </BarChart>
         </ChartContainer>
       </CardContent>
+      {footer && <CardFooter className="border-t text-sm text-muted-foreground">{footer}</CardFooter>}
     </Card>
   );
 }
@@ -186,16 +199,18 @@ function DashboardPage() {
   };
   const costByModel = data.byModel.map((m) => ({ model: m.model, value: Number(m.total_cost) }));
   const tokensByModel = data.byModel.map((m) => ({ model: m.model, value: Number(m.total_tokens) }));
+  const totalModelCost = costByModel.reduce((a, m) => a + m.value, 0);
+  const totalModelTokens = tokensByModel.reduce((a, m) => a + m.value, 0);
 
   return (
     <div className="space-y-6">
       <PageHeader title="Dashboard" description={`Overview of the last ${days} days.`} />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Traces" value={Number(data.total_traces).toLocaleString()} />
-        <Stat label="Generations" value={Number(data.total_generations).toLocaleString()} />
-        <Stat label="Tokens" value={Number(data.total_tokens).toLocaleString()} />
-        <Stat label="Cost" value={money(data.total_cost)} />
+        <Stat label="Traces" value={Number(data.total_traces).toLocaleString()} icon={Activity} />
+        <Stat label="Generations" value={Number(data.total_generations).toLocaleString()} icon={Sparkles} />
+        <Stat label="Tokens" value={Number(data.total_tokens).toLocaleString()} icon={Coins} />
+        <Stat label="Cost" value={money(data.total_cost)} icon={DollarSign} />
       </div>
 
       {data.byDay.length === 0 ? (
@@ -212,6 +227,7 @@ function DashboardPage() {
             data={costByModel}
             metric="Cost"
             color="var(--chart-1)"
+            footer={`${money(totalModelCost)} total across ${costByModel.length} model${costByModel.length === 1 ? "" : "s"}`}
           />
           <ModelBarChart
             title="Tokens by model"
@@ -219,6 +235,7 @@ function DashboardPage() {
             data={tokensByModel}
             metric="Tokens"
             color="var(--chart-2)"
+            footer={`${Math.round(totalModelTokens).toLocaleString()} tokens across ${tokensByModel.length} model${tokensByModel.length === 1 ? "" : "s"}`}
           />
         </div>
       )}
@@ -226,6 +243,14 @@ function DashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle>By model ({data.byModel.length})</CardTitle>
+          <CardDescription>Generations, tokens, and spend per model.</CardDescription>
+          {data.byModel.length > 0 && (
+            <CardAction>
+              <Button asChild variant="outline" size="sm">
+                <Link to="/traces">View traces</Link>
+              </Button>
+            </CardAction>
+          )}
         </CardHeader>
         <CardContent>
           {data.byModel.length === 0 ? (
@@ -283,6 +308,7 @@ function CustomWidgets() {
       <Card>
         <CardHeader>
           <CardTitle>New widget</CardTitle>
+          <CardDescription>Pin a metric to your dashboard.</CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -389,13 +415,11 @@ function WidgetCard({ widget, onDelete, disabled }: { widget: Widget; onDelete: 
   return (
     <Card size="sm" className="gap-3">
       <CardHeader>
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 space-y-0.5">
-            <CardTitle className="truncate">{widget.title}</CardTitle>
-            <CardDescription className="text-[0.6875rem]">
-              {widget.metric} · {widget.breakdown.replace("_", " ")} · {widget.days}d
-            </CardDescription>
-          </div>
+        <CardTitle className="truncate">{widget.title}</CardTitle>
+        <CardDescription className="text-[0.6875rem]">
+          {widget.metric} · {widget.breakdown.replace("_", " ")} · {widget.days}d
+        </CardDescription>
+        <CardAction>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -406,7 +430,7 @@ function WidgetCard({ widget, onDelete, disabled }: { widget: Widget; onDelete: 
           >
             <Trash2 className="size-4" />
           </Button>
-        </div>
+        </CardAction>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="space-y-0.5">
@@ -431,12 +455,17 @@ function WidgetCard({ widget, onDelete, disabled }: { widget: Widget; onDelete: 
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, icon: Icon }: { label: string; value: string; icon: LucideIcon }) {
   return (
     <Card>
       <CardHeader>
         <CardDescription>{label}</CardDescription>
         <CardTitle className="text-2xl tabular-nums">{value}</CardTitle>
+        <CardAction>
+          <span className="flex size-8 items-center justify-center bg-muted text-muted-foreground">
+            <Icon className="size-4" />
+          </span>
+        </CardAction>
       </CardHeader>
     </Card>
   );

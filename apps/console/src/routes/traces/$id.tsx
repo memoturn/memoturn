@@ -18,7 +18,7 @@ import {
   BreadcrumbSeparator,
 } from "../../components/ui/breadcrumb";
 import { Button } from "../../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { Textarea } from "../../components/ui/textarea";
@@ -339,6 +339,7 @@ function TraceDetailPage() {
       <Card>
         <CardHeader>
           <CardTitle>Details</CardTitle>
+          <CardDescription>Trace metadata and linked entities.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <dl className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-2.5 text-sm">
@@ -375,6 +376,7 @@ function TraceDetailPage() {
         <Card>
           <CardHeader>
             <CardTitle>Scores ({trace.scores.length})</CardTitle>
+            <CardDescription>Evaluations and annotations recorded on this trace.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
@@ -397,12 +399,15 @@ function TraceDetailPage() {
 
       <Card>
         <Tabs value={view} onValueChange={(v) => setView(v as "timeline" | "graph")}>
-          <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
+          <CardHeader>
             <CardTitle>Observations ({trace.observation_count})</CardTitle>
-            <TabsList>
-              <TabsTrigger value="timeline">Timeline</TabsTrigger>
-              <TabsTrigger value="graph">Graph</TabsTrigger>
-            </TabsList>
+            <CardDescription>Execution timeline and call graph for this trace.</CardDescription>
+            <CardAction>
+              <TabsList>
+                <TabsTrigger value="timeline">Timeline</TabsTrigger>
+                <TabsTrigger value="graph">Graph</TabsTrigger>
+              </TabsList>
+            </CardAction>
           </CardHeader>
           <CardContent className="px-0">
             <TabsContent value="timeline" className="mt-0">
@@ -432,6 +437,7 @@ function TraceDetailPage() {
       <Card>
         <CardHeader>
           <CardTitle>Payloads</CardTitle>
+          <CardDescription>Inputs and outputs captured per observation.</CardDescription>
         </CardHeader>
         <CardContent className={payloadObs.length === 0 ? undefined : "px-0"}>
           {payloadObs.length === 0 ? (
