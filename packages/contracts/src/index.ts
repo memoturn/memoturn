@@ -92,6 +92,19 @@ export const scheduledExportResult = z.object({
 });
 export type ScheduledExportResult = z.infer<typeof scheduledExportResult>;
 
+export const automation = z.object({
+  id: z.string(),
+  name: z.string(),
+  trigger: z.string(),
+  action: z.string(),
+  target: z.string(),
+  threshold: z.number().nullable(),
+  filter: z.string(),
+  enabled: z.boolean(),
+  createdAt: z.string(),
+});
+export type Automation = z.infer<typeof automation>;
+
 export const observationDetail = z.object({
   id: z.string(),
   trace_id: z.string(),

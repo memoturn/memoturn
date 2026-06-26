@@ -7,6 +7,7 @@
  */
 import type {
   AuditEntry,
+  Automation,
   ChatMessage,
   Comment,
   DatasetDetail,
@@ -122,6 +123,16 @@ export const api = {
   listWebhooks: () => get<{ data: Webhook[] }>(`/v1/webhooks`).then((r) => r.data),
   createWebhook: (body: { url: string; event?: string; threshold?: number | null }) => post(`/v1/webhooks`, body),
   deleteWebhook: (id: string) => del(`/v1/webhooks/${encodeURIComponent(id)}`),
+  listAutomations: () => get<{ data: Automation[] }>(`/v1/automations`).then((r) => r.data),
+  createAutomation: (body: {
+    name: string;
+    trigger?: string;
+    action?: string;
+    target: string;
+    threshold?: number | null;
+    filter?: string;
+  }) => post(`/v1/automations`, body),
+  deleteAutomation: (id: string) => del(`/v1/automations/${encodeURIComponent(id)}`),
   listScoreConfigs: () => get<{ data: ScoreConfig[] }>(`/v1/score-configs`).then((r) => r.data),
   listModelPrices: () => get<ModelPriceList>(`/v1/model-prices`),
   createModelPrice: (body: { pattern: string; provider?: string; inputPerMTok: number; outputPerMTok: number }) =>

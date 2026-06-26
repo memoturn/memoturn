@@ -64,6 +64,36 @@ function SettingsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["webhooks"] }),
   });
 
+  const { data: automations } = useQuery({ queryKey: ["automations"], queryFn: () => api.listAutomations() });
+  const [auName, setAuName] = useState("");
+  const [auTrigger, setAuTrigger] = useState("score.created");
+  const [auAction, setAuAction] = useState("webhook");
+  const [auTarget, setAuTarget] = useState("");
+  const [auThreshold, setAuThreshold] = useState("");
+  const [auFilter, setAuFilter] = useState("");
+  const addAutomation = useMutation({
+    mutationFn: () =>
+      api.createAutomation({
+        name: auName,
+        trigger: auTrigger,
+        action: auAction,
+        target: auTarget,
+        threshold: auThreshold === "" ? null : Number(auThreshold),
+        filter: auFilter || undefined,
+      }),
+    onSuccess: () => {
+      setAuName("");
+      setAuTarget("");
+      setAuThreshold("");
+      setAuFilter("");
+      qc.invalidateQueries({ queryKey: ["automations"] });
+    },
+  });
+  const removeAutomation = useMutation({
+    mutationFn: (id: string) => api.deleteAutomation(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["automations"] }),
+  });
+
   const { data: scoreConfigs } = useQuery({ queryKey: ["score-configs"], queryFn: () => api.listScoreConfigs() });
   const [scName, setScName] = useState("");
   const [scType, setScType] = useState("NUMERIC");
@@ -264,6 +294,84 @@ function SettingsPage() {
                 <td>{w.threshold ?? "—"}</td>
                 <td>
                   <button className="link-btn" onClick={() => removeWebhook.mutate(w.id)}>
+                    delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <h2>Automations</h2>
+      <p className="obs-meta">
+        Run an action when a trigger fires. Triggers: score.created, trace.created, eval.completed. Actions: a generic
+        webhook (POST JSON) or a Slack message (to an incoming-webhook URL). Threshold fires only on low scores; filter
+        is a substring match on the entity name.
+      </p>
+      <div className="filters">
+        <input placeholder="name" value={auName} onChange={(e) => setAuName(e.target.value)} style={{ width: 140 }} />
+        <select value={auTrigger} onChange={(e) => setAuTrigger(e.target.value)}>
+          <option value="score.created">score.created</option>
+          <option value="trace.created">trace.created</option>
+          <option value="eval.completed">eval.completed</option>
+        </select>
+        <select value={auAction} onChange={(e) => setAuAction(e.target.value)}>
+          <option value="webhook">webhook</option>
+          <option value="slack">slack</option>
+        </select>
+        <input
+          placeholder="target URL"
+          value={auTarget}
+          onChange={(e) => setAuTarget(e.target.value)}
+          style={{ width: 240 }}
+        />
+        <input
+          type="number"
+          step="0.1"
+          placeholder="threshold"
+          value={auThreshold}
+          onChange={(e) => setAuThreshold(e.target.value)}
+          style={{ width: 110 }}
+        />
+        <input
+          placeholder="filter"
+          value={auFilter}
+          onChange={(e) => setAuFilter(e.target.value)}
+          style={{ width: 110 }}
+        />
+        <button disabled={!auName || !auTarget || addAutomation.isPending} onClick={() => addAutomation.mutate()}>
+          {addAutomation.isPending ? "Saving…" : "Add automation"}
+        </button>
+      </div>
+      {automations && automations.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Trigger</th>
+              <th>Action</th>
+              <th>Target</th>
+              <th>Threshold</th>
+              <th>Filter</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {automations.map((a) => (
+              <tr key={a.id}>
+                <td>{a.name}</td>
+                <td>
+                  <span className="badge gen">{a.trigger}</span>
+                </td>
+                <td>
+                  <span className="badge">{a.action}</span>
+                </td>
+                <td className="obs-meta">{a.target}</td>
+                <td>{a.threshold ?? "—"}</td>
+                <td className="obs-meta">{a.filter || "—"}</td>
+                <td>
+                  <button className="link-btn" onClick={() => removeAutomation.mutate(a.id)}>
                     delete
                   </button>
                 </td>

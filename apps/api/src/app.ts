@@ -7,6 +7,7 @@ import {
   applyRetention,
   auth,
   builtinModelPrices,
+  createAutomation,
   createComment,
   createDataset,
   createEvaluator,
@@ -18,6 +19,7 @@ import {
   createScoreConfig,
   createWebhook,
   createWidget,
+  deleteAutomation,
   deleteComment,
   deleteModelPrice,
   deleteSavedView,
@@ -32,6 +34,7 @@ import {
   getScheduledExport,
   getTrace,
   listAuditLogs,
+  listAutomations,
   listComments,
   listDatasets,
   listEvaluators,
@@ -118,6 +121,8 @@ app.use("/v1/model-prices", requireAuth);
 app.use("/v1/model-prices/*", requireAuth);
 app.use("/v1/scheduled-exports", requireAuth);
 app.use("/v1/scheduled-exports/*", requireAuth);
+app.use("/v1/automations", requireAuth);
+app.use("/v1/automations/*", requireAuth);
 
 // Streaming playground (SSE) — plain route; emits { delta } events then [DONE].
 app.post("/v1/playground/stream", async (c) => {
@@ -1496,6 +1501,78 @@ app.openapi(
     const result = await runScheduledExport(projectId);
     await recordAudit(projectId, c.get("actor"), "scheduled-export.run", `count:${result.count}`);
     return c.json(result);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/automations",
+    summary: "List trigger->action automations",
+    tags: ["platform"],
+    security,
+    responses: {
+      200: { description: "Automations", content: { "application/json": { schema: C.listOf(C.automation) } } },
+    },
+  }),
+  async (c) => c.json({ data: await listAutomations(c.get("projectId")) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/automations",
+    summary: "Create an automation (trigger: score.created/trace.created/eval.completed; action: webhook/slack)",
+    tags: ["platform"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              name: z.string().min(1),
+              trigger: z.enum(["score.created", "trace.created", "eval.completed"]).optional(),
+              action: z.enum(["webhook", "slack"]).optional(),
+              target: z.string().url(),
+              threshold: z.number().nullable().optional(),
+              filter: z.string().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: C.automation } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    const result = await createAutomation(c.get("projectId"), body);
+    await recordAudit(c.get("projectId"), c.get("actor"), "automation.create", `${result.trigger}->${result.action}`);
+    return c.json(result, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/automations/{id}",
+    summary: "Delete an automation",
+    tags: ["platform"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Deleted", content: { "application/json": { schema: z.object({ deleted: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    return c.json(await deleteAutomation(c.get("projectId"), c.req.valid("param").id));
   },
 );
 

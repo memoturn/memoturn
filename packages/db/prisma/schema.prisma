@@ -45,6 +45,7 @@ model Project {
   savedViews  SavedView[]
   modelPrices ModelPrice[]
   scheduledExport ScheduledExport?
+  automations Automation[]
 
   @@unique([workspaceId, slug])
 }
@@ -340,6 +341,25 @@ model Webhook {
   createdAt DateTime @default(now())
 
   @@index([projectId, event])
+}
+
+// A trigger->action automation: when `trigger` fires (score.created / trace.created /
+// eval.completed), run `action` (webhook POST or Slack message) against `target`.
+// Optional threshold (score triggers) + filter (substring on the entity name).
+model Automation {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  trigger   String   @default("score.created") // score.created | trace.created | eval.completed
+  action    String   @default("webhook") // webhook | slack
+  target    String // URL (HTTP endpoint or Slack incoming webhook)
+  threshold Float?
+  filter    String   @default("") // substring match on the entity name ("" = any)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([projectId, trigger])
 }
 
 // A comment on a trace / observation / session / prompt.

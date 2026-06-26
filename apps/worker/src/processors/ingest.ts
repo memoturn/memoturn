@@ -2,7 +2,13 @@ import { compileModelPrices, type IngestEvent, ingestRequest } from "@memoturn/c
 import { getRawBatch } from "@memoturn/db/blob";
 import { clickhouse } from "@memoturn/db/clickhouse";
 import type { IngestJob } from "@memoturn/db/queue";
-import { dispatchWebhooks, listOnlineEvaluators, loadProjectPriceOverrides, runEvaluator } from "@memoturn/server";
+import {
+  dispatchAutomations,
+  dispatchWebhooks,
+  listOnlineEvaluators,
+  loadProjectPriceOverrides,
+  runEvaluator,
+} from "@memoturn/server";
 import type { Job } from "bullmq";
 import { mapEvents } from "../mappers.js";
 
@@ -39,6 +45,7 @@ async function runOnlineEvals(projectId: string, batch: IngestEvent[]): Promise<
       try {
         await runEvaluator(projectId, ev.name, { traceId: trace.id, input: trace.input, output: trace.output });
         console.log(`[online-eval] ${ev.name} -> trace ${trace.id}`);
+        await dispatchAutomations(projectId, "eval.completed", { traceId: trace.id, name: ev.name });
       } catch (err) {
         console.error(`[online-eval] ${ev.name} failed for ${trace.id}:`, err instanceof Error ? err.message : err);
       }
@@ -78,14 +85,18 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     `[ingest] project=${projectId} traces=${traces.length} observations=${observations.length} scores=${scores.length}`,
   );
 
-  // Fire score.created webhooks for any scores in this batch (threshold-filtered).
+  // Fire score.created webhooks + automations for any scores in this batch.
   for (const s of scores) {
-    await dispatchWebhooks(projectId, "score.created", {
-      traceId: s.trace_id,
-      name: s.name,
-      value: s.value,
-      source: s.source,
-    });
+    const payload = { traceId: s.trace_id, name: s.name, value: s.value, source: s.source };
+    await dispatchWebhooks(projectId, "score.created", payload);
+    await dispatchAutomations(projectId, "score.created", payload);
+  }
+
+  // Fire trace.created automations for completed traces (those carrying an output).
+  for (const t of traces) {
+    if (t.output) {
+      await dispatchAutomations(projectId, "trace.created", { traceId: t.id, name: t.name });
+    }
   }
 
   await runOnlineEvals(projectId, parsed.batch);

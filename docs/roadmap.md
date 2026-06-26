@@ -27,7 +27,7 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 | Feature | Effort | Notes |
 | --- | --- | --- |
 | **Experiment comparison view** | M | Side-by-side run comparison (per-item output + scores across runs). |
-| **Generalized automations** | M | Generalize webhooks to trigger→action rules over more events (`trace.created`, `eval.completed`) with Slack as an action. |
+| ~~**Generalized automations**~~ | Done | Trigger→action rules (`/v1/automations`): triggers score.created/trace.created/eval.completed, actions webhook + Slack. |
 | **Playground tools + structured output** | M | Tool definitions and JSON-schema structured outputs in the playground (the gateway already abstracts providers). |
 
 ## Data platform
