@@ -244,6 +244,24 @@ export const datasetDetail = z.object({
 });
 export type DatasetDetail = z.infer<typeof datasetDetail>;
 
+export const experimentCell = z.object({
+  traceId: z.string(),
+  output: z.string(),
+  scores: z.array(z.object({ name: z.string(), value: z.number().nullable(), stringValue: z.string() })),
+});
+export const experimentItem = z.object({
+  id: z.string(),
+  input: z.unknown(),
+  expectedOutput: z.unknown(),
+  cells: z.array(experimentCell.nullable()),
+});
+export const experimentComparison = z.object({
+  dataset: z.string(),
+  runs: z.array(z.string()),
+  items: z.array(experimentItem),
+});
+export type ExperimentComparison = z.infer<typeof experimentComparison>;
+
 // ── Providers / evaluators ───────────────────────────────────────────────────────
 export const providerConnection = z.object({ provider: z.string(), masked: z.string(), createdAt: z.string() });
 export type ProviderConnection = z.infer<typeof providerConnection>;

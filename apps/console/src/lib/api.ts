@@ -13,6 +13,7 @@ import type {
   DatasetDetail,
   DatasetListItem,
   Evaluator,
+  ExperimentComparison,
   MetricsSummary,
   ModelPriceList,
   PlaygroundResponse,
@@ -112,6 +113,8 @@ export const api = {
   getPrompt: (name: string) => get<PromptDetail>(`/v1/prompts/${encodeURIComponent(name)}/detail`),
   listDatasets: () => get<{ data: DatasetListItem[] }>(`/v1/datasets`).then((r) => r.data),
   getDataset: (name: string) => get<DatasetDetail>(`/v1/datasets/${encodeURIComponent(name)}`),
+  getDatasetComparison: (name: string) =>
+    get<ExperimentComparison>(`/v1/datasets/${encodeURIComponent(name)}/comparison`),
   playgroundChat: (body: PlaygroundRequest) => post<PlaygroundResponse>(`/v1/playground/chat`, body),
   listProviders: () => get<{ data: ProviderConnection[] }>(`/v1/providers`).then((r) => r.data),
   addProvider: (provider: string, apiKey: string) => post(`/v1/providers`, { provider, apiKey }),

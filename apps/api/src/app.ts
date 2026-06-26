@@ -27,6 +27,7 @@ import {
   deleteWebhook,
   deleteWidget,
   exportTracesJsonl,
+  getDatasetComparison,
   getDatasetDetail,
   getMetrics,
   getPromptDetail,
@@ -530,6 +531,27 @@ app.openapi(
     const detail = await getDatasetDetail(c.get("projectId"), c.req.valid("param").name);
     if (!detail) return c.json({ error: "dataset not found" }, 404);
     return c.json(detail);
+  },
+);
+
+// ── Datasets: experiment comparison (items × runs) ───────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/datasets/{name}/comparison",
+    summary: "Compare a dataset's runs side by side (per-item output + scores)",
+    tags: ["datasets"],
+    security,
+    request: { params: z.object({ name: z.string() }) },
+    responses: {
+      200: { description: "Comparison", content: { "application/json": { schema: C.experimentComparison } } },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const result = await getDatasetComparison(c.get("projectId"), c.req.valid("param").name);
+    if (!result) return c.json({ error: "dataset not found" }, 404);
+    return c.json(result);
   },
 );
 

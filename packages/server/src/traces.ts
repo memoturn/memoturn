@@ -183,6 +183,33 @@ export async function getTraceIO(projectId: string, traceIds: string[]): Promise
   return new Map(rows.map((r) => [r.id, r]));
 }
 
+export interface TraceScore {
+  trace_id: string;
+  name: string;
+  value: number | null;
+  string_value: string;
+}
+
+/** Fetch scores for a set of traces, grouped by trace id (for experiment comparison). */
+export async function getScoresByTraceIds(projectId: string, traceIds: string[]): Promise<Map<string, TraceScore[]>> {
+  if (traceIds.length === 0) return new Map();
+  const rows = await query<TraceScore>(
+    `
+    SELECT trace_id, name, value, string_value
+    FROM scores FINAL
+    WHERE project_id = {projectId:String} AND trace_id IN {ids:Array(String)}
+    `,
+    { projectId, ids: traceIds },
+  );
+  const map = new Map<string, TraceScore[]>();
+  for (const r of rows) {
+    const arr = map.get(r.trace_id) ?? [];
+    arr.push(r);
+    map.set(r.trace_id, arr);
+  }
+  return map;
+}
+
 export async function getTrace(projectId: string, traceId: string): Promise<TraceDetail | null> {
   const traces = await query<
     Omit<TraceDetail, "observations" | "observation_count" | "total_cost" | "total_tokens" | "latency_ms">

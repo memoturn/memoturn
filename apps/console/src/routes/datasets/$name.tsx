@@ -9,6 +9,10 @@ function j(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+function trunc(s: string, n = 100): string {
+  return s.length > n ? `${s.slice(0, n)}…` : s;
+}
+
 function DatasetDetailPage() {
   const { name } = Route.useParams();
   const { data, isLoading, error } = useQuery({
@@ -54,6 +58,8 @@ function DatasetDetailPage() {
         </table>
       )}
 
+      {data.runs.length > 0 && <Comparison name={name} />}
+
       <h2>Items ({data.items.length})</h2>
       {data.items.length === 0 ? (
         <div className="empty">No items yet.</div>
@@ -76,5 +82,63 @@ function DatasetDetailPage() {
         </table>
       )}
     </div>
+  );
+}
+
+function Comparison({ name }: { name: string }) {
+  const { data } = useQuery({
+    queryKey: ["dataset-compare", name],
+    queryFn: () => api.getDatasetComparison(name),
+  });
+  if (!data || data.runs.length === 0) return null;
+
+  return (
+    <>
+      <h2>Run comparison</h2>
+      <div style={{ overflowX: "auto" }}>
+        <table>
+          <thead>
+            <tr>
+              <th>Input</th>
+              <th>Expected</th>
+              {data.runs.map((r) => (
+                <th key={r}>{r}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.items.map((it) => (
+              <tr key={it.id}>
+                <td className="obs-meta">{trunc(j(it.input), 80)}</td>
+                <td className="obs-meta">{trunc(j(it.expectedOutput), 80)}</td>
+                {it.cells.map((cell, i) => (
+                  <td key={data.runs[i] ?? i}>
+                    {cell ? (
+                      <>
+                        <Link to="/traces/$id" params={{ id: cell.traceId }}>
+                          {trunc(cell.output, 80) || "view trace"}
+                        </Link>
+                        {cell.scores.length > 0 && (
+                          <div className="scores" style={{ marginTop: 4 }}>
+                            {cell.scores.map((s, k) => (
+                              <span className="score-chip" key={`${s.name}:${k}`}>
+                                <span className="score-name">{s.name}</span>
+                                <span className="score-val">{s.value != null ? s.value : s.stringValue || "—"}</span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <span className="obs-meta">—</span>
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }

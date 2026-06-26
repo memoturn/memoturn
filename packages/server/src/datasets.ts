@@ -1,4 +1,5 @@
 import { prisma } from "@memoturn/db";
+import { getScoresByTraceIds, getTraceIO } from "./traces.js";
 
 /**
  * Datasets & experiments. A dataset holds items (input + optional expectedOutput). An
@@ -120,4 +121,47 @@ export async function recordRun(projectId: string, datasetName: string, runName:
   );
 
   return { run: run.name, linked: links.length };
+}
+
+export interface ExperimentCell {
+  traceId: string;
+  output: string;
+  scores: { name: string; value: number | null; stringValue: string }[];
+}
+
+/**
+ * Side-by-side comparison of a dataset's runs: every item × every run, with the run's
+ * trace output + scores. `cells` is aligned to `runs` (null where a run skipped an item).
+ */
+export async function getDatasetComparison(projectId: string, name: string) {
+  const ds = await prisma.dataset.findUnique({
+    where: { projectId_name: { projectId, name } },
+    include: {
+      items: { orderBy: { createdAt: "asc" } },
+      runs: { orderBy: { createdAt: "asc" }, include: { items: true } },
+    },
+  });
+  if (!ds) return null;
+
+  const traceIds = ds.runs.flatMap((r) => r.items.map((i) => i.traceId)).filter(Boolean);
+  const io = await getTraceIO(projectId, traceIds);
+  const scoresMap = await getScoresByTraceIds(projectId, traceIds);
+
+  const items = ds.items.map((it) => ({
+    id: it.id,
+    input: it.input,
+    expectedOutput: (it.expectedOutput ?? null) as unknown,
+    cells: ds.runs.map((run): ExperimentCell | null => {
+      const ri = run.items.find((x) => x.datasetItemId === it.id);
+      if (!ri) return null;
+      const scores = (scoresMap.get(ri.traceId) ?? []).map((s) => ({
+        name: s.name,
+        value: s.value,
+        stringValue: s.string_value,
+      }));
+      return { traceId: ri.traceId, output: io.get(ri.traceId)?.output ?? "", scores };
+    }),
+  }));
+
+  return { dataset: ds.name, runs: ds.runs.map((r) => r.name), items };
 }
