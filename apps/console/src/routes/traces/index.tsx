@@ -6,14 +6,18 @@ interface TraceSearch {
   search?: string;
   environment?: string;
   userId?: string;
+  tag?: string;
 }
+
+const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
 
 export const Route = createFileRoute("/traces/")({
   // Filters live in the URL so they're shareable/bookmarkable (deep linkable).
   validateSearch: (s: Record<string, unknown>): TraceSearch => ({
-    search: typeof s.search === "string" && s.search ? s.search : undefined,
-    environment: typeof s.environment === "string" && s.environment ? s.environment : undefined,
-    userId: typeof s.userId === "string" && s.userId ? s.userId : undefined,
+    search: str(s.search),
+    environment: str(s.environment),
+    userId: str(s.userId),
+    tag: str(s.tag),
   }),
   component: TracesPage,
 });
@@ -63,7 +67,8 @@ function TracesPage() {
           defaultValue={filters.userId ?? ""}
           onChange={(e) => setFilter("userId", e.target.value)}
         />
-        {(filters.search || filters.environment || filters.userId) && (
+        {filters.tag && <span className="badge gen">tag: {filters.tag}</span>}
+        {(filters.search || filters.environment || filters.userId || filters.tag) && (
           <button onClick={() => navigate({ search: {} })}>Clear</button>
         )}
         <div style={{ flex: 1 }} />
@@ -90,6 +95,7 @@ function TracesPage() {
               <th>Cost</th>
               <th>Latency</th>
               <th>Env</th>
+              <th>Tags</th>
             </tr>
           </thead>
           <tbody>
@@ -107,6 +113,13 @@ function TracesPage() {
                 <td>{t.latency_ms} ms</td>
                 <td>
                   <span className="badge">{t.environment}</span>
+                </td>
+                <td>
+                  {t.tags.map((tag) => (
+                    <button key={tag} className="tag-chip" onClick={() => setFilter("tag", tag)} title="Filter by tag">
+                      {tag}
+                    </button>
+                  ))}
                 </td>
               </tr>
             ))}

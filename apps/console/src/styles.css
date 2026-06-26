@@ -425,6 +425,23 @@ pre {
   text-overflow: ellipsis;
 }
 
+.tag-chip {
+  display: inline-block;
+  margin: 0 4px 2px 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.tag-chip:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 /* trace scores */
 .scores {
   display: flex;

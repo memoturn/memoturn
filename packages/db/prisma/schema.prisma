@@ -41,6 +41,7 @@ model Project {
   retention   RetentionPolicy?
   webhooks    Webhook[]
   widgets     Widget[]
+  comments    Comment[]
 
   @@unique([workspaceId, slug])
 }
@@ -336,6 +337,20 @@ model Webhook {
   createdAt DateTime @default(now())
 
   @@index([projectId, event])
+}
+
+// A comment on a trace / observation / session / prompt.
+model Comment {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  objectType String // TRACE | OBSERVATION | SESSION | PROMPT
+  objectId   String
+  author     String
+  content    String
+  createdAt  DateTime @default(now())
+
+  @@index([projectId, objectType, objectId])
 }
 
 // A user-defined dashboard widget: a metric query over the daily rollup.

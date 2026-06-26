@@ -1,6 +1,7 @@
 export * from "./audit.js";
 export * from "./auth.js";
 export * from "./betterauth.js";
+export * from "./comments.js";
 export * from "./datasets.js";
 export * from "./evaluators.js";
 export * from "./export.js";

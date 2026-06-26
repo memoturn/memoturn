@@ -1,5 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { api, type ObservationDetail } from "../../lib/api";
 
 export const Route = createFileRoute("/traces/$id")({ component: TraceDetailPage });
@@ -180,6 +181,59 @@ function TraceDetailPage() {
           <ObservationDetailRow key={obs.id} obs={obs} />
         ))}
       </div>
+
+      <Comments traceId={trace.id} />
     </div>
+  );
+}
+
+function Comments({ traceId }: { traceId: string }) {
+  const qc = useQueryClient();
+  const { data: comments } = useQuery({
+    queryKey: ["comments", traceId],
+    queryFn: () => api.listComments("TRACE", traceId),
+  });
+  const [text, setText] = useState("");
+  const add = useMutation({
+    mutationFn: () => api.createComment("TRACE", traceId, text),
+    onSuccess: () => {
+      setText("");
+      qc.invalidateQueries({ queryKey: ["comments", traceId] });
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deleteComment(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["comments", traceId] }),
+  });
+
+  return (
+    <>
+      <h2>Comments ({comments?.length ?? 0})</h2>
+      <ul className="tree">
+        {comments?.map((cm) => (
+          <li key={cm.id}>
+            <div className="obs-meta">
+              {cm.author} · {cm.createdAt.slice(0, 19).replace("T", " ")}{" "}
+              <button className="link-btn" onClick={() => remove.mutate(cm.id)}>
+                delete
+              </button>
+            </div>
+            <div>{cm.content}</div>
+          </li>
+        ))}
+      </ul>
+      <div className="filters">
+        <input
+          placeholder="Add a comment…"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && text && add.mutate()}
+          style={{ width: 420 }}
+        />
+        <button disabled={!text || add.isPending} onClick={() => add.mutate()}>
+          {add.isPending ? "Posting…" : "Comment"}
+        </button>
+      </div>
+    </>
   );
 }

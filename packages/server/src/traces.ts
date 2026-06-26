@@ -13,6 +13,7 @@ export interface TraceSummary {
   user_id: string;
   session_id: string;
   environment: string;
+  tags: string[];
   observation_count: number;
   total_cost: number;
   total_tokens: number;
@@ -73,10 +74,11 @@ export interface TraceFilters {
   sessionId?: string;
   environment?: string;
   search?: string; // matches trace name (case-insensitive substring)
+  tag?: string; // trace must carry this tag
 }
 
 export async function listTraces(projectId: string, filters: TraceFilters = {}): Promise<TraceSummary[]> {
-  const { limit = 50, userId, sessionId, environment, search } = filters;
+  const { limit = 50, userId, sessionId, environment, search, tag } = filters;
 
   // Build optional filters as parameterized predicates on the trace row.
   const conds: string[] = ["t.project_id = {projectId:String}"];
@@ -97,6 +99,10 @@ export async function listTraces(projectId: string, filters: TraceFilters = {}):
     conds.push("positionCaseInsensitive(t.name, {search:String}) > 0");
     params.search = search;
   }
+  if (tag) {
+    conds.push("has(t.tags, {tag:String})");
+    params.tag = tag;
+  }
 
   return query<TraceSummary>(
     `
@@ -107,6 +113,7 @@ export async function listTraces(projectId: string, filters: TraceFilters = {}):
       t.user_id AS user_id,
       t.session_id AS session_id,
       t.environment AS environment,
+      t.tags AS tags,
       count(o.id) AS observation_count,
       sum(o.total_cost) AS total_cost,
       sum(o.total_tokens) AS total_tokens,
@@ -114,7 +121,7 @@ export async function listTraces(projectId: string, filters: TraceFilters = {}):
     FROM traces AS t FINAL
     LEFT JOIN observations AS o FINAL ON o.trace_id = t.id AND o.project_id = t.project_id
     WHERE ${conds.join(" AND ")}
-    GROUP BY t.id, t.name, t.timestamp, t.user_id, t.session_id, t.environment
+    GROUP BY t.id, t.name, t.timestamp, t.user_id, t.session_id, t.environment, t.tags
     ORDER BY t.timestamp DESC
     LIMIT {limit:UInt32}
     `,

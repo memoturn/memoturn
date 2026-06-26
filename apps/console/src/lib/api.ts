@@ -8,6 +8,7 @@
 import type {
   AuditEntry,
   ChatMessage,
+  Comment,
   DatasetDetail,
   DatasetListItem,
   Evaluator,
@@ -83,6 +84,7 @@ export interface TraceFilters {
   sessionId?: string;
   environment?: string;
   search?: string;
+  tag?: string;
 }
 export interface PlaygroundRequest {
   provider: string;
@@ -109,6 +111,11 @@ export const api = {
   listWebhooks: () => get<{ data: Webhook[] }>(`/v1/webhooks`).then((r) => r.data),
   createWebhook: (body: { url: string; event?: string; threshold?: number | null }) => post(`/v1/webhooks`, body),
   deleteWebhook: (id: string) => del(`/v1/webhooks/${encodeURIComponent(id)}`),
+  listComments: (objectType: string, objectId: string) =>
+    get<{ data: Comment[] }>(`/v1/comments${qs({ objectType, objectId })}`).then((r) => r.data),
+  createComment: (objectType: string, objectId: string, content: string) =>
+    post(`/v1/comments`, { objectType, objectId, content }),
+  deleteComment: (id: string) => del(`/v1/comments/${encodeURIComponent(id)}`),
   listWidgets: () => get<{ data: Widget[] }>(`/v1/widgets`).then((r) => r.data),
   createWidget: (body: { title: string; metric?: string; breakdown?: string; days?: number }) =>
     post(`/v1/widgets`, body),

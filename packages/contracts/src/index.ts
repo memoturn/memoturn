@@ -15,12 +15,23 @@ export const traceSummary = z.object({
   user_id: z.string(),
   session_id: z.string(),
   environment: z.string(),
+  tags: z.array(z.string()),
   observation_count: z.number(),
   total_cost: z.number(),
   total_tokens: z.number(),
   latency_ms: z.number(),
 });
 export type TraceSummary = z.infer<typeof traceSummary>;
+
+export const comment = z.object({
+  id: z.string(),
+  objectType: z.string(),
+  objectId: z.string(),
+  author: z.string(),
+  content: z.string(),
+  createdAt: z.string(),
+});
+export type Comment = z.infer<typeof comment>;
 
 export const observationDetail = z.object({
   id: z.string(),

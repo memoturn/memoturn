@@ -6,6 +6,7 @@ import {
   addReviewItems,
   applyRetention,
   auth,
+  createComment,
   createDataset,
   createEvaluator,
   createPromptVersion,
@@ -13,6 +14,7 @@ import {
   createReviewQueue,
   createWebhook,
   createWidget,
+  deleteComment,
   deleteWebhook,
   deleteWidget,
   exportTracesJsonl,
@@ -22,6 +24,7 @@ import {
   getRetention,
   getTrace,
   listAuditLogs,
+  listComments,
   listDatasets,
   listEvaluators,
   listPrompts,
@@ -91,6 +94,8 @@ app.use("/v1/webhooks", requireAuth);
 app.use("/v1/webhooks/*", requireAuth);
 app.use("/v1/widgets", requireAuth);
 app.use("/v1/widgets/*", requireAuth);
+app.use("/v1/comments", requireAuth);
+app.use("/v1/comments/*", requireAuth);
 
 // Streaming playground (SSE) — plain route; emits { delta } events then [DONE].
 app.post("/v1/playground/stream", async (c) => {
@@ -218,6 +223,7 @@ app.openapi(
         sessionId: z.string().optional(),
         environment: z.string().optional(),
         search: z.string().optional(),
+        tag: z.string().optional(),
       }),
     },
     responses: {
@@ -225,8 +231,8 @@ app.openapi(
     },
   }),
   async (c) => {
-    const { limit, userId, sessionId, environment, search } = c.req.valid("query");
-    const data = await listTraces(c.get("projectId"), { limit, userId, sessionId, environment, search });
+    const { limit, userId, sessionId, environment, search, tag } = c.req.valid("query");
+    const data = await listTraces(c.get("projectId"), { limit, userId, sessionId, environment, search, tag });
     return c.json({ data });
   },
 );
@@ -1079,6 +1085,71 @@ app.openapi(
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
     return c.json(await deleteWidget(c.get("projectId"), c.req.valid("param").id));
+  },
+);
+
+// ── Comments ─────────────────────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/comments",
+    summary: "List comments on an object (trace/observation/session/prompt)",
+    tags: ["platform"],
+    security,
+    request: { query: z.object({ objectType: z.string(), objectId: z.string() }) },
+    responses: { 200: { description: "Comments", content: { "application/json": { schema: C.listOf(C.comment) } } } },
+  }),
+  async (c) => {
+    const { objectType, objectId } = c.req.valid("query");
+    return c.json({ data: await listComments(c.get("projectId"), objectType, objectId) });
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/comments",
+    summary: "Add a comment",
+    tags: ["platform"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({ objectType: z.string(), objectId: z.string(), content: z.string().min(1) }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: C.comment } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    return c.json(await createComment(c.get("projectId"), c.get("actor"), c.req.valid("json")), 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/comments/{id}",
+    summary: "Delete a comment",
+    tags: ["platform"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Deleted", content: { "application/json": { schema: z.object({ deleted: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    return c.json(await deleteComment(c.get("projectId"), c.req.valid("param").id));
   },
 );
 
