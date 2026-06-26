@@ -42,6 +42,7 @@ model Project {
   webhooks    Webhook[]
   widgets     Widget[]
   comments    Comment[]
+  savedViews  SavedView[]
 
   @@unique([workspaceId, slug])
 }
@@ -379,4 +380,17 @@ model ReviewItem {
 
   @@unique([queueId, traceId])
   @@index([queueId, status])
+}
+
+// A named, saved set of table filters (e.g. for the traces explorer) a user can re-apply.
+model SavedView {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  table     String   @default("traces") // which table the view applies to
+  name      String
+  filters   Json     @default("{}") // serialized filter object
+  createdAt DateTime @default(now())
+
+  @@index([projectId, table])
 }

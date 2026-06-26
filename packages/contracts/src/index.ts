@@ -43,6 +43,15 @@ export const comment = z.object({
 });
 export type Comment = z.infer<typeof comment>;
 
+export const savedView = z.object({
+  id: z.string(),
+  table: z.string(),
+  name: z.string(),
+  filters: z.record(z.string(), z.any()),
+  createdAt: z.string(),
+});
+export type SavedView = z.infer<typeof savedView>;
+
 export const observationDetail = z.object({
   id: z.string(),
   trace_id: z.string(),

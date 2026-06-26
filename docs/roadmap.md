@@ -35,9 +35,9 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 | Feature | Effort | Notes |
 | --- | --- | --- |
 | **Custom model definitions** | M | Per-project model pricing overrides (the cost registry is currently static in `packages/core`). |
-| **Batch actions** | M | Multi-select on the trace table → bulk delete / add-to-dataset / enqueue-for-review, run via the worker. |
+| ~~**Batch actions**~~ | Done | Multi-select on the trace table → bulk delete / add-to-dataset / enqueue-for-review (`POST /v1/traces/batch`). |
 | **Scheduled blob exports** | M | Recurring exports to a project's own S3/GCS bucket (we have on-demand NDJSON); a worker cron + destination config. |
-| **Saved table views** | M | Persist filters + visible columns per user/table. |
+| ~~**Saved table views**~~ | Done | Persist named filter sets per table (`/v1/saved-views`), applied from the trace explorer. |
 | **Multimodal media** | L | Store image/audio/file attachments referenced in traces in blob; render in the trace view. |
 
 ## Tenancy & enterprise
@@ -67,9 +67,9 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 
 ## Suggested next slices
 
-1. **Comments** + **Tags/facets** — collaboration quick wins, no external deps, fully verifiable.
-2. **Score configs** — completes the eval story (the model already exists).
-3. **Batch actions** + **saved table views** — make the trace table production-grade.
+1. ~~**Comments** + **Tags/facets**~~ — done.
+2. ~~**Score configs**~~ — done.
+3. ~~**Batch actions** + **saved table views**~~ — done.
 4. **MCP server** — high-leverage integration surface.
 
 Larger bets (organizations, multimodal media) are scoped separately when prioritized.

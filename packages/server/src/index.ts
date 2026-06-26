@@ -1,5 +1,6 @@
 export * from "./audit.js";
 export * from "./auth.js";
+export * from "./batch.js";
 export * from "./betterauth.js";
 export * from "./comments.js";
 export * from "./datasets.js";
@@ -13,6 +14,7 @@ export * from "./prompts.js";
 export * from "./providers.js";
 export * from "./retention.js";
 export * from "./review.js";
+export * from "./savedviews.js";
 export * from "./scoreconfigs.js";
 export * from "./traces.js";
 export * from "./webhooks.js";

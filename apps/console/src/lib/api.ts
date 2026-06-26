@@ -20,6 +20,7 @@ import type {
   ProviderConnection,
   ReviewItemsResponse,
   ReviewQueue,
+  SavedView,
   ScoreConfig,
   SessionSummary,
   TraceDetail,
@@ -99,6 +100,8 @@ export const api = {
   listTraces: (filters: TraceFilters & { limit?: number } = {}) =>
     get<{ data: TraceSummary[] }>(`/v1/traces${qs(filters as Record<string, unknown>)}`).then((r) => r.data),
   getTrace: (id: string) => get<TraceDetail>(`/v1/traces/${encodeURIComponent(id)}`),
+  batchTraces: (body: { action: string; traceIds: string[]; datasetName?: string; queueName?: string }) =>
+    post<{ action: string; affected: number }>(`/v1/traces/batch`, body),
   getMetrics: (days = 30) => get<MetricsSummary>(`/v1/metrics${qs({ days })}`),
   listPrompts: () => get<{ data: PromptListItem[] }>(`/v1/prompts`).then((r) => r.data),
   getPrompt: (name: string) => get<PromptDetail>(`/v1/prompts/${encodeURIComponent(name)}/detail`),
@@ -121,6 +124,11 @@ export const api = {
     max?: number | null;
   }) => post(`/v1/score-configs`, body),
   deleteScoreConfig: (id: string) => del(`/v1/score-configs/${encodeURIComponent(id)}`),
+  listSavedViews: (table = "traces") =>
+    get<{ data: SavedView[] }>(`/v1/saved-views${qs({ table })}`).then((r) => r.data),
+  createSavedView: (body: { name: string; table?: string; filters: Record<string, unknown> }) =>
+    post<SavedView>(`/v1/saved-views`, body),
+  deleteSavedView: (id: string) => del(`/v1/saved-views/${encodeURIComponent(id)}`),
   listComments: (objectType: string, objectId: string) =>
     get<{ data: Comment[] }>(`/v1/comments${qs({ objectType, objectId })}`).then((r) => r.data),
   createComment: (objectType: string, objectId: string, content: string) =>

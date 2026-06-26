@@ -12,10 +12,12 @@ import {
   createPromptVersion,
   createProviderConnection,
   createReviewQueue,
+  createSavedView,
   createScoreConfig,
   createWebhook,
   createWidget,
   deleteComment,
+  deleteSavedView,
   deleteScoreConfig,
   deleteWebhook,
   deleteWidget,
@@ -33,6 +35,7 @@ import {
   listProviderConnections,
   listReviewItems,
   listReviewQueues,
+  listSavedViews,
   listScoreConfigs,
   listSessions,
   listTraces,
@@ -43,6 +46,7 @@ import {
   recordAudit,
   recordRun,
   resolvePrompt,
+  runBatchAction,
   runEvaluator,
   runPlayground,
   setRetention,
@@ -101,6 +105,8 @@ app.use("/v1/comments", requireAuth);
 app.use("/v1/comments/*", requireAuth);
 app.use("/v1/score-configs", requireAuth);
 app.use("/v1/score-configs/*", requireAuth);
+app.use("/v1/saved-views", requireAuth);
+app.use("/v1/saved-views/*", requireAuth);
 
 // Streaming playground (SSE) — plain route; emits { delta } events then [DONE].
 app.post("/v1/playground/stream", async (c) => {
@@ -210,6 +216,45 @@ app.openapi(
       await submitBatch(c.get("projectId"), parsed.data);
     }
     return c.json({ partialSuccess: {} }, 200);
+  },
+);
+
+// ── Batch actions on traces ──────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/traces/batch",
+    summary: "Bulk action on selected traces: delete | add-to-dataset | review",
+    tags: ["traces"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              action: z.enum(["delete", "add-to-dataset", "review"]),
+              traceIds: z.array(z.string()).min(1),
+              datasetName: z.string().optional(),
+              queueName: z.string().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Result", content: { "application/json": { schema: z.any() } } },
+      400: { description: "Bad request" },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    const result = await runBatchAction(c.get("projectId"), body);
+    if (!result) return c.json({ error: "missing datasetName/queueName for action" }, 400);
+    await recordAudit(c.get("projectId"), c.get("actor"), `batch.${body.action}`, `${body.traceIds.length} traces`);
+    return c.json(result);
   },
 );
 
@@ -1226,6 +1271,79 @@ app.openapi(
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
     return c.json(await deleteComment(c.get("projectId"), c.req.valid("param").id));
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/saved-views",
+    summary: "List saved table views",
+    tags: ["platform"],
+    security,
+    request: { query: z.object({ table: z.string().optional() }) },
+    responses: {
+      200: { description: "Saved views", content: { "application/json": { schema: C.listOf(C.savedView) } } },
+    },
+  }),
+  async (c) => {
+    const { table } = c.req.valid("query");
+    return c.json({ data: await listSavedViews(c.get("projectId"), table) });
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/saved-views",
+    summary: "Save a table view (named set of filters)",
+    tags: ["platform"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              name: z.string().min(1),
+              table: z.string().optional(),
+              filters: z.record(z.string(), z.any()),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: C.savedView } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    const view = await createSavedView(c.get("projectId"), body);
+    await recordAudit(c.get("projectId"), c.get("actor"), "saved-view.create", `view:${body.name}`);
+    return c.json(view, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/saved-views/{id}",
+    summary: "Delete a saved view",
+    tags: ["platform"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Deleted", content: { "application/json": { schema: z.object({ deleted: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    return c.json(await deleteSavedView(c.get("projectId"), c.req.valid("param").id));
   },
 );
 
