@@ -3,7 +3,15 @@ import { ArrowRight, Play } from "lucide-react";
 import { useState } from "react";
 import { PageHeader } from "../components/page-header";
 import { Button } from "../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -86,6 +94,7 @@ function PlaygroundPage() {
       <Card>
         <CardHeader>
           <CardTitle>Request</CardTitle>
+          <CardDescription>Configure a prompt and run it against a provider.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -130,19 +139,6 @@ function PlaygroundPage() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Switch id="pg-stream" checked={streaming} disabled={mode !== "chat"} onCheckedChange={setStreaming} />
-              <Label htmlFor="pg-stream" className="text-muted-foreground">
-                Stream {mode !== "chat" && "(chat only)"}
-              </Label>
-            </div>
-            <Button onClick={run} disabled={busy} className="ml-auto">
-              <Play className="size-4" />
-              {busy ? "Running…" : "Run"}
-            </Button>
-          </div>
-
           <div className="space-y-2">
             <Label htmlFor="pg-system">System</Label>
             <Textarea id="pg-system" value={system} onChange={(e) => setSystem(e.target.value)} rows={2} />
@@ -177,10 +173,25 @@ function PlaygroundPage() {
             </div>
           )}
         </CardContent>
+        <CardFooter className="flex-wrap items-center gap-4 border-t">
+          <div className="flex items-center gap-2">
+            <Switch id="pg-stream" checked={streaming} disabled={mode !== "chat"} onCheckedChange={setStreaming} />
+            <Label htmlFor="pg-stream" className="text-muted-foreground">
+              Stream {mode !== "chat" && "(chat only)"}
+            </Label>
+          </div>
+          <Button onClick={run} disabled={busy} className="ml-auto">
+            <Play className="size-4" />
+            {busy ? "Running…" : "Run"}
+          </Button>
+        </CardFooter>
       </Card>
 
       {error && (
         <Card className="border-destructive/50">
+          <CardHeader>
+            <CardTitle className="text-destructive">Error</CardTitle>
+          </CardHeader>
           <CardContent className="text-sm text-destructive">{error}</CardContent>
         </Card>
       )}
@@ -189,11 +200,10 @@ function PlaygroundPage() {
         <Card>
           <CardHeader>
             <CardTitle>Response (streaming)</CardTitle>
+            <CardDescription>Live output streamed from the provider.</CardDescription>
           </CardHeader>
           <CardContent>
-            <pre className="overflow-auto rounded-md border bg-muted/50 p-3 text-xs whitespace-pre-wrap">
-              {streamed}
-            </pre>
+            <pre className="overflow-auto border bg-muted/50 p-3 text-xs whitespace-pre-wrap">{streamed}</pre>
           </CardContent>
         </Card>
       )}
@@ -202,26 +212,26 @@ function PlaygroundPage() {
         <Card>
           <CardHeader>
             <CardTitle>Response</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <pre className="overflow-auto rounded-md border bg-muted/50 p-3 text-xs whitespace-pre-wrap">
-              {result.content}
-            </pre>
-            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <span>
-                {result.provider}/{result.model} · {result.usage.totalTokens} tokens ({result.usage.promptTokens}+
-                {result.usage.completionTokens})
-              </span>
-              {result.traceId && (
-                <Button asChild variant="link" size="sm" className="h-auto p-0">
+            <CardDescription>
+              {result.provider}/{result.model}
+            </CardDescription>
+            {result.traceId && (
+              <CardAction>
+                <Button asChild variant="outline" size="sm">
                   <Link to="/traces/$id" params={{ id: result.traceId }}>
-                    view trace
+                    View trace
                     <ArrowRight className="size-3.5" />
                   </Link>
                 </Button>
-              )}
-            </div>
+              </CardAction>
+            )}
+          </CardHeader>
+          <CardContent>
+            <pre className="overflow-auto border bg-muted/50 p-3 text-xs whitespace-pre-wrap">{result.content}</pre>
           </CardContent>
+          <CardFooter className="border-t text-sm text-muted-foreground">
+            {result.usage.totalTokens} tokens ({result.usage.promptTokens}+{result.usage.completionTokens})
+          </CardFooter>
         </Card>
       )}
     </div>

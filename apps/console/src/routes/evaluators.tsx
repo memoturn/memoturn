@@ -12,7 +12,7 @@ import { EmptyState } from "../components/empty-state";
 import { KindBadge } from "../components/kind-badge";
 import { PageHeader } from "../components/page-header";
 import { Button } from "../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "../components/ui/form";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -92,6 +92,7 @@ function EvaluatorsPage() {
       <Card>
         <CardHeader>
           <CardTitle>New evaluator</CardTitle>
+          <CardDescription>Define an LLM-as-judge that scores trace input/output.</CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
