@@ -2,7 +2,7 @@ import type { SessionSummary } from "@memoturn/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
-import { MessageSquare } from "lucide-react";
+import { Activity, DollarSign, MessageSquare } from "lucide-react";
 import { DataTable } from "../../components/data-table";
 import { EmptyState } from "../../components/empty-state";
 import { PageHeader } from "../../components/page-header";
@@ -70,9 +70,13 @@ function SessionsPage() {
       ) : (
         <div className="space-y-6">
           <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
-            <StatTile label="Sessions" value={sessions.length} />
-            <StatTile label="Traces" value={sessions.reduce((a, s) => a + Number(s.trace_count), 0)} />
-            <StatTile label="Cost" value={money(sessions.reduce((a, s) => a + Number(s.total_cost), 0))} />
+            <StatTile label="Sessions" value={sessions.length} icon={MessageSquare} />
+            <StatTile label="Traces" value={sessions.reduce((a, s) => a + Number(s.trace_count), 0)} icon={Activity} />
+            <StatTile
+              label="Cost"
+              value={money(sessions.reduce((a, s) => a + Number(s.total_cost), 0))}
+              icon={DollarSign}
+            />
           </div>
           <DataTable
             columns={columns}

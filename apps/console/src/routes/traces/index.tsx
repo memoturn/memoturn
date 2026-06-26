@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Download, Save, X } from "lucide-react";
+import { Activity, Coins, DollarSign, Download, Save, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "../../components/empty-state";
@@ -138,9 +138,13 @@ function TracesPage() {
 
       {traces && traces.length > 0 && (
         <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
-          <StatTile label="Traces" value={traces.length} />
-          <StatTile label="Tokens" value={traces.reduce((a, t) => a + Number(t.total_tokens), 0)} />
-          <StatTile label="Cost" value={fmtCost(traces.reduce((a, t) => a + Number(t.total_cost), 0))} />
+          <StatTile label="Traces" value={traces.length} icon={Activity} />
+          <StatTile label="Tokens" value={traces.reduce((a, t) => a + Number(t.total_tokens), 0)} icon={Coins} />
+          <StatTile
+            label="Cost"
+            value={fmtCost(traces.reduce((a, t) => a + Number(t.total_cost), 0))}
+            icon={DollarSign}
+          />
         </div>
       )}
 

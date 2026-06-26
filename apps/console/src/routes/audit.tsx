@@ -2,7 +2,7 @@ import type { AuditEntry } from "@memoturn/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
-import { ScrollText } from "lucide-react";
+import { ScrollText, Users } from "lucide-react";
 import { DataTable } from "../components/data-table";
 import { EmptyState } from "../components/empty-state";
 import { KindBadge } from "../components/kind-badge";
@@ -51,8 +51,8 @@ function AuditPage() {
       ) : (
         <div className="space-y-6">
           <div className="grid grid-cols-2 gap-4 sm:max-w-md">
-            <StatTile label="Entries" value={logs.length} />
-            <StatTile label="Actors" value={new Set(logs.map((l) => l.actor)).size} />
+            <StatTile label="Entries" value={logs.length} icon={ScrollText} />
+            <StatTile label="Actors" value={new Set(logs.map((l) => l.actor)).size} icon={Users} />
           </div>
           <DataTable columns={columns} data={logs} filterColumn="actor" filterPlaceholder="Filter by actor…" />
         </div>

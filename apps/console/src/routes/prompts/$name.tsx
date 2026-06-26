@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { GitBranch, Radio, Tag } from "lucide-react";
 import { EmptyState } from "../../components/empty-state";
 import { KindBadge } from "../../components/kind-badge";
 import { StatTile } from "../../components/stat-tile";
@@ -68,9 +69,9 @@ function PromptDetailPage() {
       </div>
 
       <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
-        <StatTile label="Latest" value={`v${prompt.latestVersion}`} />
-        <StatTile label="Versions" value={prompt.allVersions.length} />
-        <StatTile label="Channels" value={prompt.channels.length} />
+        <StatTile label="Latest" value={`v${prompt.latestVersion}`} icon={Tag} />
+        <StatTile label="Versions" value={prompt.allVersions.length} icon={GitBranch} />
+        <StatTile label="Channels" value={prompt.channels.length} icon={Radio} />
       </div>
 
       {prompt.channels.length > 0 && (

@@ -13,7 +13,7 @@ import { EmptyState } from "../components/empty-state";
 import { KindBadge } from "../components/kind-badge";
 import { PageHeader } from "../components/page-header";
 import { Button } from "../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Checkbox } from "../components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "../components/ui/form";
@@ -545,12 +545,12 @@ function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Create API key</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="mb-4 text-sm text-muted-foreground">
+              <CardDescription>
                 Project-scoped keys for the SDK / ingestion API (Basic auth: <code>publicKey:secretKey</code>). The
                 secret is shown once at creation — store it now; it can&apos;t be retrieved later.
-              </p>
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
               <Form {...apiKeyForm}>
                 <form
                   onSubmit={apiKeyForm.handleSubmit((v) =>
@@ -688,12 +688,12 @@ function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>LLM provider connections</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="mb-4 text-sm text-muted-foreground">
+              <CardDescription>
                 API keys are encrypted at rest and used by the playground + evaluators. The &quot;mock&quot; provider
                 needs no key.
-              </p>
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
               <Form {...providerForm}>
                 <form
                   onSubmit={providerForm.handleSubmit((v) => saveProvider.mutate(v))}
@@ -776,12 +776,12 @@ function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Data retention</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
+              <CardDescription>
                 Delete traces/observations/scores older than N days (0 = keep forever). A daily worker job enforces
                 this.
-              </p>
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="flex items-end gap-3">
                 <div className="space-y-2">
                   <Label htmlFor="retention-days">Days</Label>
@@ -807,12 +807,12 @@ function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Scheduled exports</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
+              <CardDescription>
                 When enabled, a daily worker job writes the project&apos;s traces (NDJSON) to blob storage under{" "}
                 <code>exports/&lt;projectId&gt;/&lt;date&gt;/</code>. Use &quot;Run now&quot; to export immediately.
-              </p>
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="se-enabled"
@@ -863,12 +863,12 @@ function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Product analytics (PostHog)</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
+              <CardDescription>
                 When enabled, the worker forwards <code>trace.created</code> and <code>score.created</code> events to
                 PostHog&apos;s capture API so you can build funnels/retention over LLM usage.
-              </p>
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="an-enabled"
@@ -914,12 +914,12 @@ function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>PII masking</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
+              <CardDescription>
                 When enabled, the worker redacts matches from trace/observation input/output (and metadata) at ingest,
                 before they&apos;re stored. Built-in patterns plus your own regexes (one per line).
-              </p>
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="mask-enabled"
@@ -980,12 +980,12 @@ function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Webhooks</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="mb-4 text-sm text-muted-foreground">
+              <CardDescription>
                 POST to a URL when a score is created. Set a threshold to only fire on low scores (value &lt;
                 threshold).
-              </p>
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
               <Form {...webhookForm}>
                 <form
                   onSubmit={webhookForm.handleSubmit((v) => addWebhook.mutate(v))}
@@ -1041,13 +1041,13 @@ function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Automations</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="mb-4 text-sm text-muted-foreground">
+              <CardDescription>
                 Run an action when a trigger fires. Triggers: score.created, trace.created, eval.completed. Actions: a
                 generic webhook (POST JSON) or a Slack message (to an incoming-webhook URL). Threshold fires only on low
                 scores; filter is a substring match on the entity name.
-              </p>
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
               <Form {...automationForm}>
                 <form onSubmit={automationForm.handleSubmit((v) => addAutomation.mutate(v))} className="space-y-4">
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -1167,12 +1167,12 @@ function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Score configs</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="mb-4 text-sm text-muted-foreground">
+              <CardDescription>
                 Define the scores used for this project. Categorical configs drive the review form (dropdown of
                 categories).
-              </p>
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
               <Form {...scoreForm}>
                 <form
                   onSubmit={scoreForm.handleSubmit((v) => addScoreConfig.mutate(v))}
@@ -1248,13 +1248,13 @@ function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Model pricing</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="mb-4 text-sm text-muted-foreground">
+              <CardDescription>
                 Override token prices (USD per 1M tokens) for models matched by a name pattern (a case-insensitive
                 regex, e.g. <code>^my-model</code>). Overrides take precedence over the built-in defaults and apply to
                 newly ingested generations.
-              </p>
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
               <Form {...pricingForm}>
                 <form
                   onSubmit={pricingForm.handleSubmit((v) => addModelPrice.mutate(v))}
