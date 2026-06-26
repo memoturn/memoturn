@@ -7,16 +7,29 @@ triggered by pushing a `v*` tag (or run manually via *workflow_dispatch*).
 
 ## One-time setup
 
-Add these repository secrets (Settings → Secrets and variables → Actions):
+**npm** — add one repository secret (Settings → Secrets and variables → Actions):
 
 | Secret | Used by | How to get it |
 | --- | --- | --- |
-| `NPM_TOKEN` | npm publish | npm → Access Tokens → **Automation** token for the `@memoturn` scope |
-| `PYPI_TOKEN` | PyPI publish | PyPI → Account → API tokens (scope it to the `memoturn` project) |
+| `NPM_TOKEN` | npm publish | npm → Access Tokens → **Granular** token, read+write, scoped to `@memoturn` |
 
-`GITHUB_TOKEN` is provided automatically and is what pushes images to GHCR (the `images` job
-requests `packages: write`). The npm job requests `id-token: write` so npm **provenance** is
-attached to the published package.
+**PyPI** — uses **Trusted Publishing** (OIDC), so there is *no* secret to manage. Register a
+pending publisher once at PyPI → your account → **Publishing → Add a pending publisher**:
+
+- PyPI Project Name: `memoturn` · Owner: `memoturn` · Repository: `memoturn`
+- Workflow name: `release.yml` · Environment: *(blank)*
+
+**GHCR** — `GITHUB_TOKEN` is provided automatically (the `images` job requests `packages: write`).
+
+The `npm` and `pypi` jobs request `id-token: write` — for npm **provenance** and PyPI Trusted
+Publishing respectively (both via GitHub's OIDC).
+
+## Validate first (dry run)
+
+Before tagging, run the workflow from the **Actions → Release → Run workflow** menu with
+**Dry run** checked. It exercises the whole pipeline without publishing: `npm whoami` +
+`npm publish --dry-run` (confirms the token + tarball), `uv build`, and all three images built
+but **not** pushed. A green dry run means the real tag is safe.
 
 ## Cut a release
 
@@ -32,7 +45,7 @@ attached to the published package.
 3. The workflow runs three independent jobs:
    - **npm** — `bun install` → `bun --filter @memoturn/sdk build` → flatten `publishConfig`
      into the manifest (points `main`/`types`/`exports` at `dist/`) → `npm publish --provenance`.
-   - **pypi** — `uv build` (wheel + sdist) → `uv publish`.
+   - **pypi** — `uv build` (wheel + sdist) → `uv publish --trusted-publishing always`.
    - **images** — matrix over `api` / `worker` / `console`: build each
      `docker/<svc>.Dockerfile` and push to `ghcr.io/memoturn/<svc>` tagged
      `{version}`, `{major}.{minor}`, and `latest`.
