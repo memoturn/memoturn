@@ -13,7 +13,7 @@ bun run quickstart   # emit a sample trace via the SDK, then open http://localho
 
 bun run lint         # Biome check (format + lint + import order); `bun run format` to auto-fix
 bun run typecheck    # turbo: tsc --noEmit across packages
-bun run test         # turbo: vitest (only core + worker have real tests)
+bun run test         # turbo: vitest (core + server + worker have real tests)
 bun run build        # turbo build (respects ^build dependency order)
 
 bun run infra:up / infra:down / infra:logs   # docker compose for PG/ClickHouse/Redis/MinIO
