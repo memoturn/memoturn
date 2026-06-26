@@ -138,6 +138,8 @@ app.use("/v1/analytics-sink", requireAuth);
 // Per-project rate limiting runs after auth (projectId is set) on every /v1 route.
 app.use("/v1/*", rateLimit);
 
+const security = [{ apiKey: [] }];
+
 // Streaming playground (SSE) — plain route; emits { delta } events then [DONE].
 app.post("/v1/playground/stream", async (c) => {
   const input = (await c.req.json()) as Parameters<typeof streamPlayground>[1];
@@ -153,15 +155,33 @@ app.post("/v1/playground/stream", async (c) => {
   });
 });
 
-// Multimodal media — store a base64 data URI; fetch raw bytes back. Plain routes so
-// the GET can return binary with the right content-type.
-app.post("/v1/media", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { dataUri?: string } | null;
-  if (!body?.dataUri) return c.json({ error: "dataUri required" }, 400);
-  const stored = await storeDataUri(c.get("projectId"), body.dataUri);
-  if (!stored) return c.json({ error: "not a base64 data URI" }, 400);
-  return c.json({ ...stored, url: `/v1/media/${stored.key}` }, 201);
-});
+// Multimodal media — store a base64 data URI (OpenAPI route); the GET below is a plain
+// route so it can stream raw bytes with the right content-type.
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/media",
+    summary: "Store a base64 data URI as a media attachment",
+    tags: ["ingestion"],
+    security,
+    request: {
+      body: { content: { "application/json": { schema: z.object({ dataUri: z.string() }) } } },
+    },
+    responses: {
+      201: { description: "Stored", content: { "application/json": { schema: z.any() } } },
+      400: { description: "Bad request" },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const stored = await storeDataUri(c.get("projectId"), c.req.valid("json").dataUri);
+    if (!stored) return c.json({ error: "not a base64 data URI" }, 400);
+    await recordAudit(c.get("projectId"), c.get("actor"), "media.store", stored.key);
+    return c.json({ ...stored, url: `/v1/media/${stored.key}` }, 201);
+  },
+);
 
 app.get("/v1/media/*", async (c) => {
   const key = c.req.path.replace(/^\/v1\/media\//, "");
@@ -184,8 +204,6 @@ app.get("/v1/exports/traces", async (c) => {
     "content-disposition": "attachment; filename=memoturn-traces.jsonl",
   });
 });
-
-const security = [{ apiKey: [] }];
 
 // ── Health ───────────────────────────────────────────────────────────────────────
 app.openapi(
@@ -617,13 +635,20 @@ app.openapi(
     },
     responses: {
       201: { description: "Added", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
       404: { description: "Not found" },
     },
   }),
   async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const name = c.req.valid("param").name;
     const items = c.req.valid("json").items as Parameters<typeof addDatasetItems>[2];
-    const result = await addDatasetItems(c.get("projectId"), c.req.valid("param").name, items);
+    const result = await addDatasetItems(c.get("projectId"), name, items);
     if (!result) return c.json({ error: "dataset not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "dataset.items.add", `dataset:${name}`, {
+      count: items.length,
+    });
     return c.json(result, 201);
   },
 );
@@ -651,13 +676,20 @@ app.openapi(
     },
     responses: {
       201: { description: "Recorded", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
       404: { description: "Not found" },
     },
   }),
   async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const name = c.req.valid("param").name;
     const body = c.req.valid("json");
-    const result = await recordRun(c.get("projectId"), c.req.valid("param").name, body.runName, body.links);
+    const result = await recordRun(c.get("projectId"), name, body.runName, body.links);
     if (!result) return c.json({ error: "dataset not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "dataset.run.record", `dataset:${name}`, {
+      run: body.runName,
+    });
     return c.json(result, 201);
   },
 );
@@ -841,12 +873,17 @@ app.openapi(
     },
     responses: {
       200: { description: "Score", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
       404: { description: "Not found" },
     },
   }),
   async (c) => {
-    const result = await runEvaluator(c.get("projectId"), c.req.valid("param").name, c.req.valid("json"));
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const name = c.req.valid("param").name;
+    const result = await runEvaluator(c.get("projectId"), name, c.req.valid("json"));
     if (!result) return c.json({ error: "evaluator not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "evaluator.run", `evaluator:${name}`);
     return c.json(result);
   },
 );
@@ -960,8 +997,13 @@ app.openapi(
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
-    const result = await addReviewItems(c.get("projectId"), c.req.valid("param").name, c.req.valid("json").traceIds);
+    const name = c.req.valid("param").name;
+    const traceIds = c.req.valid("json").traceIds;
+    const result = await addReviewItems(c.get("projectId"), name, traceIds);
     if (!result) return c.json({ error: "queue not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "review.items.add", `queue:${name}`, {
+      count: traceIds.length,
+    });
     return c.json(result, 201);
   },
 );
@@ -1051,10 +1093,13 @@ app.openapi(
     },
     responses: {
       200: { description: "Scored", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
       404: { description: "Not found" },
     },
   }),
   async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
     const { name, itemId } = c.req.valid("param");
     const result = await submitReviewScore(c.get("projectId"), name, itemId, c.req.valid("json"));
     if (!result) return c.json({ error: "queue or item not found" }, 404);
@@ -1258,7 +1303,10 @@ app.openapi(
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
-    return c.json(await deleteWidget(c.get("projectId"), c.req.valid("param").id));
+    const id = c.req.valid("param").id;
+    const result = await deleteWidget(c.get("projectId"), id);
+    await recordAudit(c.get("projectId"), c.get("actor"), "widget.delete", id);
+    return c.json(result);
   },
 );
 
@@ -1329,7 +1377,10 @@ app.openapi(
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
-    return c.json(await deleteScoreConfig(c.get("projectId"), c.req.valid("param").id));
+    const id = c.req.valid("param").id;
+    const result = await deleteScoreConfig(c.get("projectId"), id);
+    await recordAudit(c.get("projectId"), c.get("actor"), "score-config.delete", id);
+    return c.json(result);
   },
 );
 
@@ -1374,7 +1425,9 @@ app.openapi(
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
-    return c.json(await createComment(c.get("projectId"), c.get("actor"), c.req.valid("json")), 201);
+    const result = await createComment(c.get("projectId"), c.get("actor"), c.req.valid("json"));
+    await recordAudit(c.get("projectId"), c.get("actor"), "comment.create", `${result.objectType}:${result.objectId}`);
+    return c.json(result, 201);
   },
 );
 
@@ -1394,7 +1447,10 @@ app.openapi(
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
-    return c.json(await deleteComment(c.get("projectId"), c.req.valid("param").id));
+    const id = c.req.valid("param").id;
+    const result = await deleteComment(c.get("projectId"), id);
+    await recordAudit(c.get("projectId"), c.get("actor"), "comment.delete", id);
+    return c.json(result);
   },
 );
 
@@ -1467,7 +1523,10 @@ app.openapi(
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
-    return c.json(await deleteSavedView(c.get("projectId"), c.req.valid("param").id));
+    const id = c.req.valid("param").id;
+    const result = await deleteSavedView(c.get("projectId"), id);
+    await recordAudit(c.get("projectId"), c.get("actor"), "saved-view.delete", id);
+    return c.json(result);
   },
 );
 
@@ -1537,7 +1596,10 @@ app.openapi(
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
-    return c.json(await deleteModelPrice(c.get("projectId"), c.req.valid("param").id));
+    const id = c.req.valid("param").id;
+    const result = await deleteModelPrice(c.get("projectId"), id);
+    await recordAudit(c.get("projectId"), c.get("actor"), "model-price.delete", id);
+    return c.json(result);
   },
 );
 
@@ -1680,7 +1742,10 @@ app.openapi(
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
-    return c.json(await deleteAutomation(c.get("projectId"), c.req.valid("param").id));
+    const id = c.req.valid("param").id;
+    const result = await deleteAutomation(c.get("projectId"), id);
+    await recordAudit(c.get("projectId"), c.get("actor"), "automation.delete", id);
+    return c.json(result);
   },
 );
 
