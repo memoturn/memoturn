@@ -523,6 +523,21 @@ pre {
   border-color: var(--accent);
 }
 
+/* multimodal media */
+.media-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+.media-thumb {
+  max-height: 160px;
+  max-width: 240px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
 /* agent graph */
 .agraph {
   border: 1px solid var(--border);

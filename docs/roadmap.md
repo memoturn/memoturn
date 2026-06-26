@@ -26,9 +26,9 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 
 | Feature | Effort | Notes |
 | --- | --- | --- |
-| **Experiment comparison view** | M | Side-by-side run comparison (per-item output + scores across runs). |
+| ~~**Experiment comparison view**~~ | Done | `GET /v1/datasets/{name}/comparison` items × runs matrix (output + scores per cell); rendered on the dataset page. |
 | ~~**Generalized automations**~~ | Done | Trigger→action rules (`/v1/automations`): triggers score.created/trace.created/eval.completed, actions webhook + Slack. |
-| **Playground tools + structured output** | M | Tool definitions and JSON-schema structured outputs in the playground (the gateway already abstracts providers). |
+| ~~**Playground tools + structured output**~~ | Done | Playground modes for JSON-schema structured output (generateObject) and tool calling (surfaces tool calls). |
 
 ## Data platform
 
@@ -38,7 +38,7 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 | ~~**Batch actions**~~ | Done | Multi-select on the trace table → bulk delete / add-to-dataset / enqueue-for-review (`POST /v1/traces/batch`). |
 | ~~**Scheduled blob exports**~~ | Done | Daily worker cron writes per-project traces (NDJSON) to blob (`/v1/scheduled-exports`, plus run-now). |
 | ~~**Saved table views**~~ | Done | Persist named filter sets per table (`/v1/saved-views`), applied from the trace explorer. |
-| **Multimodal media** | L | Store image/audio/file attachments referenced in traces in blob; render in the trace view. |
+| ~~**Multimodal media**~~ | Done | Inline base64 data URIs offloaded to blob at ingest (`memoturn-media://`), served via `/v1/media`, rendered in the trace view. |
 
 ## Tenancy & enterprise
 
@@ -61,9 +61,9 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 
 | Feature | Effort | Notes |
 | --- | --- | --- |
-| **Command-K menu** | S | Global navigation/search palette. |
-| **Global time-range filter** | S | Shared time window across dashboard/traces/metrics. |
-| **Agent-graph view** | M | Graph visualization for agent runs (nodes = observations, edges = parent links). |
+| ~~**Command-K menu**~~ | Done | ⌘K palette: fuzzy nav + open-trace-by-id. |
+| ~~**Global time-range filter**~~ | Done | Topbar 24h/7d/30d/90d selector shared by dashboard/metrics + traces. |
+| ~~**Agent-graph view**~~ | Done | Timeline/Graph toggle on the trace page; SVG graph layered by parent-chain depth. |
 
 ## Suggested next slices
 

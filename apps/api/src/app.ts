@@ -29,6 +29,7 @@ import {
   exportTracesJsonl,
   getDatasetComparison,
   getDatasetDetail,
+  getMedia,
   getMetrics,
   getPromptDetail,
   getRetention,
@@ -61,6 +62,7 @@ import {
   runScheduledExport,
   setRetention,
   setScheduledExport,
+  storeDataUri,
   streamPlayground,
   submitBatch,
   submitReviewScore,
@@ -125,6 +127,8 @@ app.use("/v1/scheduled-exports", requireAuth);
 app.use("/v1/scheduled-exports/*", requireAuth);
 app.use("/v1/automations", requireAuth);
 app.use("/v1/automations/*", requireAuth);
+app.use("/v1/media", requireAuth);
+app.use("/v1/media/*", requireAuth);
 
 // Per-project rate limiting runs after auth (projectId is set) on every /v1 route.
 app.use("/v1/*", rateLimit);
@@ -141,6 +145,26 @@ app.post("/v1/playground/stream", async (c) => {
     } catch (err) {
       await s.writeSSE({ data: JSON.stringify({ error: String(err instanceof Error ? err.message : err) }) });
     }
+  });
+});
+
+// Multimodal media — store a base64 data URI; fetch raw bytes back. Plain routes so
+// the GET can return binary with the right content-type.
+app.post("/v1/media", async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { dataUri?: string } | null;
+  if (!body?.dataUri) return c.json({ error: "dataUri required" }, 400);
+  const stored = await storeDataUri(c.get("projectId"), body.dataUri);
+  if (!stored) return c.json({ error: "not a base64 data URI" }, 400);
+  return c.json({ ...stored, url: `/v1/media/${stored.key}` }, 201);
+});
+
+app.get("/v1/media/*", async (c) => {
+  const key = c.req.path.replace(/^\/v1\/media\//, "");
+  const media = await getMedia(c.get("projectId"), key);
+  if (!media) return c.json({ error: "not found" }, 404);
+  return c.body(media.body.buffer as ArrayBuffer, 200, {
+    "content-type": media.contentType,
+    "cache-control": "private, max-age=31536000",
   });
 });
 

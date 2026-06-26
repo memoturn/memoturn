@@ -26,6 +26,37 @@ function ms(t: string | null): number | null {
   return Number.isNaN(v) ? null : v;
 }
 
+// ── Multimodal media: render attachments referenced in input/output ───────────────
+const MEDIA_BASE = import.meta.env.VITE_API_BASE ?? "/api";
+const MEDIA_RE = /memoturn-media:\/\/[A-Za-z0-9/_.-]+/g;
+const DATA_IMG_RE = /data:image\/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g;
+const IMG_EXT = /\.(png|jpe?g|webp|gif|svg)$/i;
+
+function MediaPreview({ raw }: { raw: string }) {
+  if (!raw) return null;
+  const markers = raw.match(MEDIA_RE) ?? [];
+  const dataImgs = raw.match(DATA_IMG_RE) ?? [];
+  if (markers.length === 0 && dataImgs.length === 0) return null;
+  return (
+    <div className="media-row">
+      {markers.map((m) => {
+        const key = m.slice("memoturn-media://".length);
+        const url = `${MEDIA_BASE}/v1/media/${key}`;
+        return IMG_EXT.test(key) ? (
+          <img key={m} className="media-thumb" src={url} alt="attachment" />
+        ) : (
+          <a key={m} href={url} className="badge" target="_blank" rel="noreferrer">
+            download
+          </a>
+        );
+      })}
+      {dataImgs.map((d) => (
+        <img key={d.slice(0, 48)} className="media-thumb" src={d} alt="inline attachment" />
+      ))}
+    </div>
+  );
+}
+
 interface Laid extends ObservationDetail {
   depth: number;
   offsetPct: number;
@@ -186,6 +217,8 @@ function ObservationDetailRow({ obs }: { obs: ObservationDetail }) {
         {Number(obs.total_cost) > 0 && <span className="obs-meta"> · ${Number(obs.total_cost).toFixed(6)}</span>}
         {obs.level !== "DEFAULT" && <span className="obs-meta"> · {obs.level}</span>}
       </summary>
+      <MediaPreview raw={obs.input} />
+      <MediaPreview raw={obs.output} />
       {obs.input && <pre>{pretty(obs.input)}</pre>}
       {obs.output && <pre>{pretty(obs.output)}</pre>}
       {obs.status_message && <pre>{obs.status_message}</pre>}
@@ -242,6 +275,9 @@ function TraceDetailPage() {
         <dt>Latency</dt>
         <dd>{trace.latency_ms} ms</dd>
       </dl>
+
+      <MediaPreview raw={trace.input} />
+      <MediaPreview raw={trace.output} />
 
       {trace.scores.length > 0 && (
         <>

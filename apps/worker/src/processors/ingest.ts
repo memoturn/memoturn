@@ -7,6 +7,7 @@ import {
   dispatchWebhooks,
   listOnlineEvaluators,
   loadProjectPriceOverrides,
+  offloadMedia,
   runEvaluator,
 } from "@memoturn/server";
 import type { Job } from "bullmq";
@@ -69,6 +70,14 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
   if (!raw) throw new Error(`raw batch not found at ${blobKey}`);
 
   const parsed = ingestRequest.parse(JSON.parse(raw));
+
+  // Offload any inline base64 media (data: URIs) in input/output to blob storage.
+  for (const e of parsed.batch) {
+    const body = e.body as { input?: unknown; output?: unknown };
+    if (body.input !== undefined) body.input = await offloadMedia(projectId, body.input);
+    if (body.output !== undefined) body.output = await offloadMedia(projectId, body.output);
+  }
+
   const priceOverrides = compileModelPrices(await loadProjectPriceOverrides(projectId));
   const { traces, observations, scores } = mapEvents(projectId, parsed.batch, priceOverrides);
 

@@ -52,3 +52,21 @@ export async function putBlobObject(
   await blob().send(new PutObjectCommand({ Bucket: BLOB_BUCKET, Key: key, Body: body, ContentType: contentType }));
   return key;
 }
+
+/** Store raw bytes (multimodal media attachments). */
+export async function putBlobBytes(key: string, bytes: Uint8Array, contentType: string): Promise<string> {
+  await blob().send(new PutObjectCommand({ Bucket: BLOB_BUCKET, Key: key, Body: bytes, ContentType: contentType }));
+  return key;
+}
+
+/** Fetch raw bytes + content type for a key, or null if missing. */
+export async function getBlobBytes(key: string): Promise<{ body: Uint8Array; contentType: string } | null> {
+  try {
+    const res = await blob().send(new GetObjectCommand({ Bucket: BLOB_BUCKET, Key: key }));
+    const body = await res.Body?.transformToByteArray();
+    if (!body) return null;
+    return { body, contentType: res.ContentType ?? "application/octet-stream" };
+  } catch {
+    return null;
+  }
+}

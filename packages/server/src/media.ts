@@ -1,0 +1,75 @@
+import { createHash } from "node:crypto";
+import { getBlobBytes, putBlobBytes } from "@memoturn/db/blob";
+
+/**
+ * Multimodal media: image/audio/file attachments referenced in trace/observation
+ * input/output. Inline base64 data URIs are offloaded to blob at ingest time (so they
+ * don't bloat ClickHouse) and replaced with a `memoturn-media://<key>` reference; the
+ * console fetches them back through GET /v1/media/<key>.
+ */
+const DATA_URI = /^data:([^;,]+);base64,([\s\S]+)$/;
+export const MEDIA_PREFIX = "memoturn-media://";
+
+const EXT: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/svg+xml": "svg",
+  "audio/mpeg": "mp3",
+  "audio/wav": "wav",
+  "application/pdf": "pdf",
+};
+const extOf = (mime: string) => EXT[mime] ?? "bin";
+
+export interface StoredMedia {
+  key: string;
+  mimeType: string;
+}
+
+export async function storeMediaBytes(projectId: string, bytes: Uint8Array, contentType: string): Promise<StoredMedia> {
+  const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 32);
+  const key = `media/${projectId}/${hash}.${extOf(contentType)}`;
+  await putBlobBytes(key, bytes, contentType);
+  return { key, mimeType: contentType };
+}
+
+/** Store a `data:<mime>;base64,<data>` URI, returning its blob key. Null if not a data URI. */
+export async function storeDataUri(projectId: string, dataUri: string): Promise<StoredMedia | null> {
+  const m = DATA_URI.exec(dataUri);
+  if (!m) return null;
+  const mimeType = m[1] as string;
+  const bytes = new Uint8Array(Buffer.from(m[2] as string, "base64"));
+  return storeMediaBytes(projectId, bytes, mimeType);
+}
+
+/** Fetch media bytes, scoped to the project (keys are `media/<projectId>/…`). */
+export async function getMedia(
+  projectId: string,
+  key: string,
+): Promise<{ body: Uint8Array; contentType: string } | null> {
+  if (!key.startsWith(`media/${projectId}/`)) return null;
+  return getBlobBytes(key);
+}
+
+/**
+ * Deep-walk a JSON value; any base64 data URI string is offloaded to blob and replaced
+ * with a `memoturn-media://<key>` reference. Returns the transformed value.
+ */
+export async function offloadMedia(projectId: string, value: unknown): Promise<unknown> {
+  if (typeof value === "string") {
+    if (value.startsWith("data:") && DATA_URI.test(value)) {
+      const stored = await storeDataUri(projectId, value);
+      return stored ? `${MEDIA_PREFIX}${stored.key}` : value;
+    }
+    return value;
+  }
+  if (Array.isArray(value)) return Promise.all(value.map((v) => offloadMedia(projectId, v)));
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = await offloadMedia(projectId, v);
+    return out;
+  }
+  return value;
+}
