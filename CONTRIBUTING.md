@@ -46,6 +46,17 @@ bun run lint        # Biome (format + lint + import order); `bun run format` to 
 bun run typecheck && bun run test && bun run build
 ```
 
+`bun run test` is infra-free by default; the API/worker integration tests run only when
+the datastore env (`DATABASE_URL`, `CLICKHOUSE_URL`, `REDIS_URL`, `BLOB_ENDPOINT`) is set,
+so they exercise real infra in CI but stay skipped locally unless you opt in.
+
+### End-to-end (console)
+
+Playwright drives the console against the full stack. With infra up (`bun run infra:up`),
+run `bun --filter @memoturn/console test:e2e` — it boots the API + console, seeds the dev
+org/project/user, and runs the browser suite (reusing a running `bun run dev` if present).
+First run: `cd apps/console && bunx playwright install chromium`. CI runs it in `e2e.yml`.
+
 Git hooks (lefthook): pre-commit runs Biome on staged files; pre-push runs typecheck.
 
 ## Conventions

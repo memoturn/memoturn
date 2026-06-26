@@ -1,0 +1,83 @@
+name: E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push supersedes an in-flight run on the same ref.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: memoturn
+          POSTGRES_PASSWORD: memoturn
+          POSTGRES_DB: memoturn
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U memoturn" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8-alpine
+        env:
+          CLICKHOUSE_USER: memoturn
+          CLICKHOUSE_PASSWORD: memoturn
+          CLICKHOUSE_DB: memoturn
+        ports: ["8123:8123"]
+      redis:
+        image: valkey/valkey:8-alpine
+        ports: ["6379:6379"]
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: memoturn
+          MINIO_ROOT_PASSWORD: memoturn123
+          MINIO_DEFAULT_BUCKETS: memoturn
+        ports: ["9000:9000"]
+
+    env:
+      DATABASE_URL: postgresql://memoturn:memoturn@localhost:5432/memoturn?schema=public
+      CLICKHOUSE_URL: http://localhost:8123
+      CLICKHOUSE_USER: memoturn
+      CLICKHOUSE_PASSWORD: memoturn
+      CLICKHOUSE_DB: memoturn
+      REDIS_URL: redis://localhost:6379
+      BLOB_ENDPOINT: http://localhost:9000
+      BLOB_REGION: us-east-1
+      BLOB_BUCKET: memoturn
+      BLOB_ACCESS_KEY_ID: memoturn
+      BLOB_SECRET_ACCESS_KEY: memoturn123
+      BLOB_FORCE_PATH_STYLE: "true"
+      BETTER_AUTH_SECRET: e2e-better-auth-secret-please-change
+      ENCRYPTION_KEY: e2e-encryption-key-32-bytes-long!!
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.4"
+      - run: bun install --frozen-lockfile
+      - run: bun --filter @memoturn/db generate
+      - run: bun --filter @memoturn/db migrate
+      - run: bun run db:clickhouse
+      - name: Install Playwright browser
+        run: bunx playwright install --with-deps chromium
+        working-directory: apps/console
+      # Playwright boots the API (start) + console (dev) via webServer and seeds in globalSetup.
+      - name: Run E2E tests
+        run: bun --filter @memoturn/console test:e2e
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/console/playwright-report
+          retention-days: 7

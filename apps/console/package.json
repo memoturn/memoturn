@@ -11,7 +11,9 @@
     "typecheck": "tsr generate && tsc --noEmit",
     "lint": "biome check .",
     "test": "echo 'no tests'",
-    "clean": "rm -rf dist .turbo src/routeTree.gen.ts"
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "clean": "rm -rf dist .turbo src/routeTree.gen.ts playwright-report test-results"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.1",
@@ -28,6 +30,7 @@
     "@types/node": "^26.0.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@playwright/test": "^1.50.0",
     "@vitejs/plugin-react": "^6.0.3",
     "typescript": "^6.0.3",
     "vite": "^8.1.0"

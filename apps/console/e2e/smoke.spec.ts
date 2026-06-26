@@ -1,0 +1,32 @@
+import { expect, test } from "@playwright/test";
+import { login } from "./helpers";
+
+test.beforeEach(async ({ page }) => {
+  await login(page);
+});
+
+test("the topbar exposes the core navigation", async ({ page }) => {
+  for (const name of ["Dashboard", "Traces", "Prompts", "Datasets", "Playground"]) {
+    await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
+  }
+});
+
+test("navigates to the traces page", async ({ page }) => {
+  await page.getByRole("link", { name: "Traces", exact: true }).click();
+  await expect(page).toHaveURL(/\/traces/);
+  await expect(page.getByRole("heading", { name: "Traces" })).toBeVisible();
+});
+
+test("lists the seeded support-reply prompt", async ({ page }) => {
+  await page.getByRole("link", { name: "Prompts", exact: true }).click();
+  await expect(page).toHaveURL(/\/prompts/);
+  await expect(page.getByRole("heading", { name: "Prompts" })).toBeVisible();
+  // Seeded by scripts/seed.ts under the "support" folder.
+  await expect(page.getByRole("link", { name: /support-reply/ })).toBeVisible();
+});
+
+test("the project switcher shows the default project", async ({ page }) => {
+  const switcher = page.locator('select[title="Active project"]');
+  await expect(switcher).toBeVisible();
+  await expect(switcher.locator("option")).toContainText([/Default Project/]);
+});

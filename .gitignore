@@ -27,3 +27,8 @@ __pycache__/
 *.egg-info/
 .venv/
 sdks/python/dist/
+
+# playwright (e2e)
+**/playwright-report/
+**/test-results/
+**/.playwright/

@@ -1,6 +1,6 @@
 {
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["dist", "node_modules"],
+  "exclude": ["dist", "node_modules", "e2e", "playwright.config.ts", "playwright-report", "test-results"],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",
