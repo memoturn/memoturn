@@ -81,5 +81,10 @@ jobs:
           done
           echo "minio did not become ready" >&2; exit 1
       - run: bun run test
+      # Python SDK unit tests (stdlib-only SDK; pytest mocks urllib, no infra needed).
+      - uses: astral-sh/setup-uv@v6
+      - name: Python SDK tests
+        working-directory: sdks/python
+        run: uv run --with pytest pytest -q
       - run: bun run typecheck
       - run: bun run build

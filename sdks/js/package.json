@@ -15,7 +15,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "biome check .",
-    "test": "echo 'no tests'",
+    "test": "vitest run",
     "clean": "rm -rf dist .turbo"
   },
   "peerDependencies": {
@@ -28,6 +28,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.0.1",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
   }
 }
