@@ -28,10 +28,15 @@ linked by `trace_id` / `project_id`.
 
 ## Tenancy
 
-- **Workspace** → **Project**. All telemetry and config is scoped to a project.
-- **Membership** binds a user to a workspace with a **role**: `OWNER`, `ADMIN`,
+- **Organization** → **Project** (the data model still names it `Workspace` in places).
+  All telemetry and config is scoped to a project; tenancy is the Better Auth organization
+  plugin (`organization`/`member`/`invitation`).
+- **Membership** binds a user to an organization with a **role**: `OWNER`, `ADMIN`,
   `MEMBER`, `VIEWER`. Viewers are read-only.
-- **API keys** are per-project (`pk-mt-…` public, `sk-mt-…` secret).
+- **API keys** are per-project (`pk-mt-…` public, `sk-mt-…` secret); mint and revoke them
+  from the console or `POST`/`DELETE /v1/api-keys`.
+- **SSO** — customers can sign in with their own OIDC/SAML IdP (Better Auth SSO plugin),
+  mapped to an organization by email domain.
 
 ## Observability
 
@@ -93,6 +98,23 @@ Human-in-the-loop annotation. A **review queue** holds traces to score manually;
 submitting a review writes an `ANNOTATION` score and marks the item done.
 
 See [Evaluation](./evaluation.md) for all three modes.
+
+## Score configs
+
+A **score config** defines an allowed score name and shape (numeric range, categorical
+options, or boolean) so manual and automated scores stay consistent across a project.
+
+## Automations & webhooks
+
+- **Webhook** — POSTs to a URL on an event (`score.created` supports a low-score threshold).
+- **Automation** — a trigger→action rule: trigger (`score.created` / `trace.created` /
+  `eval.completed`) → action (`webhook` or `slack`).
+- **Analytics sink** — optionally forwards trace/score events to PostHog for product analytics.
+
+## PII masking
+
+An optional per-project **masking policy** redacts trace input/output at ingest using
+built-in and custom patterns, so sensitive data never lands in ClickHouse or the blob log.
 
 ## Audit log & retention
 

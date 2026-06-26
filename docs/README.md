@@ -14,6 +14,7 @@ Bun-native.
 - [TypeScript SDK](./sdk-typescript.md)
 - [Python SDK](./sdk-python.md)
 - [Integrations](./integrations.md) — OpenTelemetry, OpenAI, LangChain, LiteLLM
+- [MCP server](../apps/mcp/README.md) — prompts, datasets, and review queues as agent-IDE tools
 - [Prompt management](./prompts.md)
 - [Evaluation](./evaluation.md) — offline, online, and human review
 - [Deployment](./deployment.md) — Docker, scaling, retention
@@ -45,5 +46,9 @@ More: [evaluators](./images/evaluators.png) · [review queues](./images/review.p
 | Datasets & experiments | [evaluation](./evaluation.md) |
 | Evaluators (LLM-as-judge, offline + online) | [evaluation](./evaluation.md) |
 | Human annotation / review queues | [evaluation](./evaluation.md) |
-| Auth, projects, RBAC, audit logs, retention | [deployment](./deployment.md), [api](./api.md) |
+| Auth, organizations, RBAC, SSO, API keys, audit logs, retention | [deployment](./deployment.md), [api](./api.md) |
+| PII masking + per-project rate limiting | [api](./api.md#platform), [configuration](./configuration.md) |
+| Automations, webhooks, analytics export (PostHog) | [api](./api.md#webhooks--automations) |
+| Custom model prices, scheduled blob exports | [api](./api.md#platform) |
+| MCP server (prompts / datasets / review queues for agent IDEs) | [apps/mcp](../apps/mcp/README.md) |
 | SDKs (TypeScript + Python) | [TS](./sdk-typescript.md), [Py](./sdk-python.md) |

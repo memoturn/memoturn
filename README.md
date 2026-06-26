@@ -20,7 +20,8 @@ management, playground, and datasets. Self-hostable, OpenTelemetry-native, Bun-n
 - **Playground** — multi-provider (mock / Anthropic / OpenAI), **streaming**, runs recorded as traces.
 - **Evaluation (trifecta)** — **offline** (datasets & experiments), **online** (sampled production traces via the worker), and **human** (review queues). All write scores into ClickHouse; scores show on the trace.
 - **Datasets & experiments** — dataset items, runs linking items to traces.
-- **Platform** — Better Auth login, workspaces → projects with a project switcher, RBAC (read-only viewers), audit logs, data retention, NDJSON batch export.
+- **Platform** — Better Auth login, organizations → projects with a project switcher, RBAC (read-only viewers), **SSO** (OIDC/SAML), API-key management (mint/revoke), per-project **rate limiting**, **PII masking** at ingest, audit logs, data retention, and scheduled NDJSON exports to blob.
+- **Automations & integrations** — webhooks and trigger→action automations (`score.created`/`trace.created`/`eval.completed` → webhook/Slack), product-analytics export (PostHog), custom model prices, and an **MCP server** exposing prompts/datasets/review queues to agent IDEs.
 - **SDKs** — TypeScript (`@memoturn/sdk`) and Python (`memoturn`): tracing, `@observe`/`wrapOpenAI`, LangChain callbacks, prompts.
 
 ## Architecture
@@ -85,7 +86,7 @@ def rag(q): ...           # nested @observe calls become child spans
 ## Monorepo
 
 ```
-apps/{api,console,worker}   packages/{core,contracts,db,server,llm}   sdks/{js,python}   infra/   docker/
+apps/{api,console,worker,mcp}   packages/{core,contracts,db,server,llm}   sdks/{js,python}   infra/   docker/
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev workflow, [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
