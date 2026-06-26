@@ -67,6 +67,22 @@ Key consequence: the API **never writes telemetry synchronously**. It persists t
 
 Both set `projectId` + `role` on the context. Mutating handlers must call `denyIfReadOnly(c)` — `VIEWER` is read-only (returns 403). RBAC roles: OWNER/ADMIN/MEMBER (write) vs VIEWER.
 
+## Recipes
+
+### Add a read endpoint
+1. Add/extend the zod schema in `packages/contracts/src/index.ts` (export schema + inferred type).
+2. Implement the query in `packages/server/src/<domain>.ts`; its return type is the inferred contract type.
+3. Add the route in `apps/api/src/app.ts` with the contract schema in `responses` (rich OpenAPI) + a `app.use("/v1/…", requireAuth)` guard. Because `app.openapi` type-checks `c.json(...)` against the response schema, a server result that doesn't match the contract is a **compile error** — that's the drift guard, so don't cast it away.
+4. Add a method in `apps/console/src/lib/api.ts`; response types come from contracts via the re-export (no new console interfaces).
+
+### Add a mutating endpoint
+Same as above, plus: call `denyIfReadOnly(c)` first and `recordAudit(projectId, actor, action, target)` after; declare a `403` response in the route.
+
+### Change the Prisma schema
+1. Edit `packages/db/prisma/schema.prisma` — **add the reverse relation on `Project`** for any new project-scoped model.
+2. `cd packages/db && set -a; . ../../.env; set +a; bunx prisma migrate dev --name <change>`.
+3. Re-run `bun run typecheck`. Stale-client type errors (e.g. "Property X does not exist") mean the generated client needs `bun run db:generate`.
+
 ## Conventions & gotchas
 
 - **Dev infra uses non-default host ports** to avoid clashes: Postgres **5433**, Redis **6380** (ClickHouse 8123, MinIO standard). The `.env` reflects this — don't "fix" them to 5432/6379.
@@ -74,4 +90,6 @@ Both set `projectId` + `role` on the context. Mutating handlers must call `denyI
 - **Git hooks (lefthook)**: pre-commit runs Biome on staged files; pre-push runs `typecheck`. Keep `typecheck` + `build` green.
 - **Online eval failures never fail ingestion** — they're wrapped best-effort in the worker. Sampling is deterministic (FNV hash of `traceId:evaluatorName`), not random.
 - **Local curl testing under zsh**: zsh does not word-split unquoted vars, so `A='-u pk:sk'; curl $A ...` silently 401s. Use literal flags: `curl -u pk-mt-dev:sk-mt-dev http://localhost:3001/v1/metrics`. For scripted verification prefer `bun --filter @memoturn/api start` (stable) over `dev` (`--watch`), and allow a few seconds after boot for cold connections.
+- **ClickHouse counts** (`count()`, `sum()`) come back as **strings** in JSONEachRow — coerce with `Number(...)` (contract types declare them as `number`; the console already coerces).
+- **`start` vs `dev` env**: the `dev` scripts load `--env-file=../../.env`; the `start` scripts don't (Docker injects env). When running a `start` script locally, export the env first: `set -a; . ./.env; set +a`.
 - Commits: conventional-ish (`feat(scope): …`, `fix(scope): …`, `chore: …`).
