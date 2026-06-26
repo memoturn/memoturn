@@ -17,7 +17,10 @@
     "MEMOTURN_PUBLIC_KEY",
     "MEMOTURN_SECRET_KEY",
     "PG_PORT",
-    "REDIS_PORT"
+    "REDIS_PORT",
+    "CONSOLE_URL",
+    "MEMOTURN_EMAIL",
+    "MEMOTURN_PASSWORD"
   ],
   "tasks": {
     "build": {
