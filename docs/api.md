@@ -107,6 +107,15 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET / POST | `/v1/automations` | List / create a trigger→action automation (trigger: `score.created`/`trace.created`/`eval.completed`; action: `webhook`/`slack`). |
 | DELETE | `/v1/automations/{id}` | Delete an automation. |
 
+### Media / attachments
+
+Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/observation input/output are offloaded to blob storage at ingest time and replaced with a `memoturn-media://<key>` reference, so large payloads never bloat ClickHouse; the console fetches them back through the `GET` route. Both routes require auth and are project-scoped.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| POST | `/v1/media` | Store a base64 data URI (`{ "dataUri": "data:<mime>;base64,…" }`). Returns `201` with `{ key, mimeType, url }`. |
+| GET | `/v1/media/{key}` | Fetch raw bytes back with the stored `content-type` (immutable, long-cache). `404` if the key isn't in the caller's project. |
+
 ### Platform
 
 | Method | Path | Description |
