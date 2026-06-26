@@ -47,6 +47,21 @@ function SettingsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["scheduled-export"] }),
   });
 
+  const { data: analytics } = useQuery({ queryKey: ["analytics-sink"], queryFn: () => api.getAnalyticsSink() });
+  const [anEnabled, setAnEnabled] = useState<boolean | null>(null);
+  const [anHost, setAnHost] = useState<string | null>(null);
+  const [anKey, setAnKey] = useState("");
+  const anEnabledValue = anEnabled ?? analytics?.enabled ?? false;
+  const anHostValue = anHost ?? analytics?.host ?? "https://us.i.posthog.com";
+  const saveAnalytics = useMutation({
+    mutationFn: () =>
+      api.setAnalyticsSink({ enabled: anEnabledValue, host: anHostValue, apiKey: anKey || analytics?.apiKey }),
+    onSuccess: () => {
+      setAnKey("");
+      qc.invalidateQueries({ queryKey: ["analytics-sink"] });
+    },
+  });
+
   const { data: webhooks } = useQuery({ queryKey: ["webhooks"], queryFn: () => api.listWebhooks() });
   const [url, setUrl] = useState("");
   const [threshold, setThreshold] = useState("");
@@ -255,6 +270,34 @@ function SettingsPage() {
           <code>{schedExport.lastKey}</code>
         </p>
       )}
+
+      <h2>Product analytics (PostHog)</h2>
+      <p className="obs-meta">
+        When enabled, the worker forwards <code>trace.created</code> and <code>score.created</code> events to PostHog's
+        capture API so you can build funnels/retention over LLM usage.
+      </p>
+      <div className="filters">
+        <label style={{ alignSelf: "center", display: "flex", gap: 6, alignItems: "center" }}>
+          <input type="checkbox" checked={anEnabledValue} onChange={(e) => setAnEnabled(e.target.checked)} />
+          enabled
+        </label>
+        <input
+          placeholder="host"
+          value={anHostValue}
+          onChange={(e) => setAnHost(e.target.value)}
+          style={{ width: 240 }}
+        />
+        <input
+          type="password"
+          placeholder={analytics?.apiKey ? "API key (set — leave blank to keep)" : "PostHog project API key"}
+          value={anKey}
+          onChange={(e) => setAnKey(e.target.value)}
+          style={{ width: 240 }}
+        />
+        <button disabled={saveAnalytics.isPending} onClick={() => saveAnalytics.mutate()}>
+          {saveAnalytics.isPending ? "Saving…" : "Save"}
+        </button>
+      </div>
 
       <h2>Webhooks</h2>
       <p className="obs-meta">

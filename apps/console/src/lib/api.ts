@@ -6,6 +6,7 @@
  * its OpenAPI doc) — single source of truth, no hand-maintained duplicates.
  */
 import type {
+  AnalyticsSink,
   AuditEntry,
   Automation,
   ChatMessage,
@@ -122,6 +123,9 @@ export const api = {
   addProvider: (provider: string, apiKey: string) => post(`/v1/providers`, { provider, apiKey }),
   getRetention: () => get<{ days: number }>(`/v1/retention`),
   setRetention: (days: number) => post<{ days: number }>(`/v1/retention`, { days }),
+  getAnalyticsSink: () => get<AnalyticsSink>(`/v1/analytics-sink`),
+  setAnalyticsSink: (body: { enabled?: boolean; host?: string; apiKey?: string }) =>
+    post<AnalyticsSink>(`/v1/analytics-sink`, body),
   getScheduledExport: () => get<ScheduledExport>(`/v1/scheduled-exports`),
   setScheduledExport: (body: { enabled?: boolean; environment?: string; limit?: number }) =>
     post<ScheduledExport>(`/v1/scheduled-exports`, body),

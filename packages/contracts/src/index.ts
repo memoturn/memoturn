@@ -92,6 +92,14 @@ export const scheduledExportResult = z.object({
 });
 export type ScheduledExportResult = z.infer<typeof scheduledExportResult>;
 
+export const analyticsSink = z.object({
+  enabled: z.boolean(),
+  type: z.string(),
+  host: z.string(),
+  apiKey: z.string(),
+});
+export type AnalyticsSink = z.infer<typeof analyticsSink>;
+
 export const automation = z.object({
   id: z.string(),
   name: z.string(),

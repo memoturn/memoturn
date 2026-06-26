@@ -5,6 +5,7 @@ import type { IngestJob } from "@memoturn/db/queue";
 import {
   dispatchAutomations,
   dispatchWebhooks,
+  forwardEvent,
   listOnlineEvaluators,
   loadProjectPriceOverrides,
   offloadMedia,
@@ -94,17 +95,24 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     `[ingest] project=${projectId} traces=${traces.length} observations=${observations.length} scores=${scores.length}`,
   );
 
-  // Fire score.created webhooks + automations for any scores in this batch.
+  // Fire score.created webhooks + automations + analytics for any scores in this batch.
   for (const s of scores) {
     const payload = { traceId: s.trace_id, name: s.name, value: s.value, source: s.source };
     await dispatchWebhooks(projectId, "score.created", payload);
     await dispatchAutomations(projectId, "score.created", payload);
+    await forwardEvent(projectId, "score.created", s.trace_id, payload);
   }
 
-  // Fire trace.created automations for completed traces (those carrying an output).
+  // Fire trace.created automations + analytics for completed traces (those with an output).
   for (const t of traces) {
     if (t.output) {
       await dispatchAutomations(projectId, "trace.created", { traceId: t.id, name: t.name });
+      await forwardEvent(projectId, "trace.created", t.user_id || t.id, {
+        traceId: t.id,
+        name: t.name,
+        environment: t.environment,
+        sessionId: t.session_id,
+      });
     }
   }
 

@@ -55,7 +55,7 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 | --- | --- | --- |
 | ~~**MCP server**~~ | Done | Stdio MCP server (`apps/mcp`) exposing prompts / datasets / review queues as tools for agent IDEs. |
 | **More OTel coverage** | M | Richer GenAI semconv mapping done (model params, log level, session/user, deployment env, newer `gen_ai.*.messages`). OTLP/protobuf decode still pending (JSON only). |
-| **Product-analytics export** | M | Forward events to an analytics sink (e.g. PostHog) for funnels. |
+| ~~**Product-analytics export**~~ | Done | Per-project PostHog sink (`/v1/analytics-sink`); the worker forwards trace.created/score.created to PostHog's capture API. |
 
 ## UX
 

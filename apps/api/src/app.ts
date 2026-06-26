@@ -28,6 +28,7 @@ import {
   deleteWebhook,
   deleteWidget,
   exportTracesJsonl,
+  getAnalyticsSink,
   getDatasetComparison,
   getDatasetDetail,
   getMedia,
@@ -61,6 +62,7 @@ import {
   runEvaluator,
   runPlayground,
   runScheduledExport,
+  setAnalyticsSink,
   setRetention,
   setScheduledExport,
   storeDataUri,
@@ -130,6 +132,7 @@ app.use("/v1/automations", requireAuth);
 app.use("/v1/automations/*", requireAuth);
 app.use("/v1/media", requireAuth);
 app.use("/v1/media/*", requireAuth);
+app.use("/v1/analytics-sink", requireAuth);
 
 // Per-project rate limiting runs after auth (projectId is set) on every /v1 route.
 app.use("/v1/*", rateLimit);
@@ -1672,6 +1675,53 @@ app.openapi(
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
     return c.json(await deleteAutomation(c.get("projectId"), c.req.valid("param").id));
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/analytics-sink",
+    summary: "Get the project's product-analytics sink (PostHog forwarding) config",
+    tags: ["platform"],
+    security,
+    responses: { 200: { description: "Config", content: { "application/json": { schema: C.analyticsSink } } } },
+  }),
+  async (c) => c.json(await getAnalyticsSink(c.get("projectId"))),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/analytics-sink",
+    summary: "Configure forwarding trace/score events to PostHog",
+    tags: ["platform"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              enabled: z.boolean().optional(),
+              host: z.string().url().optional(),
+              apiKey: z.string().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Updated", content: { "application/json": { schema: C.analyticsSink } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    const result = await setAnalyticsSink(c.get("projectId"), body);
+    await recordAudit(c.get("projectId"), c.get("actor"), "analytics-sink.set", `enabled:${result.enabled}`);
+    return c.json(result);
   },
 );
 

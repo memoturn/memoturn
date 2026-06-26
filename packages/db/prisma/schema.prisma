@@ -82,6 +82,7 @@ model Project {
   modelPrices ModelPrice[]
   scheduledExport ScheduledExport?
   automations Automation[]
+  analyticsSink AnalyticsSink?
 
   @@unique([organizationId, slug])
 }
@@ -454,6 +455,19 @@ model SavedView {
   createdAt DateTime @default(now())
 
   @@index([projectId, table])
+}
+
+// Product-analytics sink: forward trace/score events to PostHog for funnels.
+model AnalyticsSink {
+  id        String   @id @default(cuid())
+  projectId String   @unique
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  enabled   Boolean  @default(false)
+  type      String   @default("posthog")
+  host      String   @default("https://us.i.posthog.com")
+  apiKey    String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // Recurring export of a project's traces (NDJSON) to blob storage. A daily worker
