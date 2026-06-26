@@ -7,6 +7,8 @@
  */
 import type {
   AnalyticsSink,
+  ApiKey,
+  ApiKeyCreated,
   AuditEntry,
   Automation,
   ChatMessage,
@@ -123,6 +125,9 @@ export const api = {
   addProvider: (provider: string, apiKey: string) => post(`/v1/providers`, { provider, apiKey }),
   getRetention: () => get<{ days: number }>(`/v1/retention`),
   setRetention: (days: number) => post<{ days: number }>(`/v1/retention`, { days }),
+  listApiKeys: () => get<{ data: ApiKey[] }>(`/v1/api-keys`).then((r) => r.data),
+  createApiKey: (name?: string) => post<ApiKeyCreated>(`/v1/api-keys`, { name }),
+  revokeApiKey: (id: string) => del(`/v1/api-keys/${encodeURIComponent(id)}`),
   getAnalyticsSink: () => get<AnalyticsSink>(`/v1/analytics-sink`),
   setAnalyticsSink: (body: { enabled?: boolean; host?: string; apiKey?: string }) =>
     post<AnalyticsSink>(`/v1/analytics-sink`, body),

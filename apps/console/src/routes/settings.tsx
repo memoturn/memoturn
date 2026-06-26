@@ -20,6 +20,22 @@ function SettingsPage() {
     },
   });
 
+  const { data: apiKeys } = useQuery({ queryKey: ["api-keys"], queryFn: () => api.listApiKeys() });
+  const [keyName, setKeyName] = useState("");
+  const [newSecret, setNewSecret] = useState<{ publicKey: string; secretKey: string } | null>(null);
+  const createKey = useMutation({
+    mutationFn: () => api.createApiKey(keyName || undefined),
+    onSuccess: (k) => {
+      setKeyName("");
+      setNewSecret({ publicKey: k.publicKey, secretKey: k.secretKey });
+      qc.invalidateQueries({ queryKey: ["api-keys"] });
+    },
+  });
+  const revokeKey = useMutation({
+    mutationFn: (id: string) => api.revokeApiKey(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }),
+  });
+
   const { data: retention } = useQuery({ queryKey: ["retention"], queryFn: () => api.getRetention() });
   const [days, setDays] = useState<number | null>(null);
   const saveRetention = useMutation({
@@ -166,6 +182,57 @@ function SettingsPage() {
   return (
     <div>
       <h1>Settings</h1>
+
+      <h2>API keys</h2>
+      <p className="obs-meta">
+        Project-scoped keys for the SDK / ingestion API (Basic auth: <code>publicKey:secretKey</code>). The secret is
+        shown once at creation — store it now; it can't be retrieved later.
+      </p>
+      <div className="filters">
+        <input placeholder="key name (optional)" value={keyName} onChange={(e) => setKeyName(e.target.value)} />
+        <button disabled={createKey.isPending} onClick={() => createKey.mutate()}>
+          {createKey.isPending ? "Creating…" : "Create key"}
+        </button>
+      </div>
+      {newSecret && (
+        <div className="empty" style={{ textAlign: "left" }}>
+          <div className="obs-meta">New key — copy the secret now, it won't be shown again:</div>
+          <pre>{`publicKey: ${newSecret.publicKey}\nsecretKey: ${newSecret.secretKey}`}</pre>
+          <button className="link-btn" onClick={() => setNewSecret(null)}>
+            dismiss
+          </button>
+        </div>
+      )}
+      {apiKeys && apiKeys.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Public key</th>
+              <th>Secret</th>
+              <th>Last used</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {apiKeys.map((k) => (
+              <tr key={k.id}>
+                <td>{k.name || "—"}</td>
+                <td>
+                  <code>{k.publicKey}</code>
+                </td>
+                <td className="obs-meta">sk-…{k.secretHint}</td>
+                <td className="obs-meta">{k.lastUsedAt ? k.lastUsedAt.slice(0, 19).replace("T", " ") : "never"}</td>
+                <td>
+                  <button className="link-btn" onClick={() => revokeKey.mutate(k.id)}>
+                    revoke
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
 
       <h2>LLM provider connections</h2>
       <p className="obs-meta">

@@ -8,6 +8,7 @@ import {
   assignReviewItem,
   auth,
   builtinModelPrices,
+  createApiKey,
   createAutomation,
   createComment,
   createDataset,
@@ -38,6 +39,7 @@ import {
   getRetention,
   getScheduledExport,
   getTrace,
+  listApiKeys,
   listAuditLogs,
   listAutomations,
   listComments,
@@ -59,6 +61,7 @@ import {
   recordAudit,
   recordRun,
   resolvePrompt,
+  revokeApiKey,
   runBatchAction,
   runEvaluator,
   runPlayground,
@@ -134,6 +137,8 @@ app.use("/v1/automations/*", requireAuth);
 app.use("/v1/media", requireAuth);
 app.use("/v1/media/*", requireAuth);
 app.use("/v1/analytics-sink", requireAuth);
+app.use("/v1/api-keys", requireAuth);
+app.use("/v1/api-keys/*", requireAuth);
 
 // Per-project rate limiting runs after auth (projectId is set) on every /v1 route.
 app.use("/v1/*", rateLimit);
@@ -1792,6 +1797,68 @@ app.openapi(
     const body = c.req.valid("json");
     const result = await setAnalyticsSink(c.get("projectId"), body);
     await recordAudit(c.get("projectId"), c.get("actor"), "analytics-sink.set", `enabled:${result.enabled}`);
+    return c.json(result);
+  },
+);
+
+// ── API keys (project-scoped ingestion keys) ─────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/api-keys",
+    summary: "List the project's API keys (public key + hint; never the secret)",
+    tags: ["platform"],
+    security,
+    responses: {
+      200: { description: "API keys", content: { "application/json": { schema: C.listOf(C.apiKey) } } },
+    },
+  }),
+  async (c) => c.json({ data: await listApiKeys(c.get("projectId")) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/api-keys",
+    summary: "Mint a new API key pair (the secret is returned once and never again)",
+    tags: ["platform"],
+    security,
+    request: {
+      body: { content: { "application/json": { schema: z.object({ name: z.string().optional() }) } } },
+    },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: C.apiKeyCreated } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const key = await createApiKey(c.get("projectId"), c.req.valid("json").name);
+    await recordAudit(c.get("projectId"), c.get("actor"), "api-key.create", key.publicKey);
+    return c.json(key, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/api-keys/{id}",
+    summary: "Revoke an API key",
+    tags: ["platform"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Revoked", content: { "application/json": { schema: z.object({ deleted: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const id = c.req.valid("param").id;
+    const result = await revokeApiKey(c.get("projectId"), id);
+    await recordAudit(c.get("projectId"), c.get("actor"), "api-key.revoke", id);
     return c.json(result);
   },
 );

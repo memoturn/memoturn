@@ -303,6 +303,26 @@ export const playgroundResponse = z.object({
 export type PlaygroundResponse = z.infer<typeof playgroundResponse>;
 
 // ── Platform ─────────────────────────────────────────────────────────────────────
+export const apiKey = z.object({
+  id: z.string(),
+  publicKey: z.string(),
+  secretHint: z.string(),
+  name: z.string(),
+  createdAt: z.string(),
+  lastUsedAt: z.string().nullable(),
+});
+export type ApiKey = z.infer<typeof apiKey>;
+
+export const apiKeyCreated = z.object({
+  id: z.string(),
+  publicKey: z.string(),
+  secretKey: z.string(), // shown once at creation
+  secretHint: z.string(),
+  name: z.string(),
+  createdAt: z.string(),
+});
+export type ApiKeyCreated = z.infer<typeof apiKeyCreated>;
+
 export const project = z.object({
   id: z.string(),
   name: z.string(),

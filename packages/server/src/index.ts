@@ -1,4 +1,5 @@
 export * from "./analytics.js";
+export * from "./apikeys.js";
 export * from "./audit.js";
 export * from "./auth.js";
 export * from "./automations.js";
