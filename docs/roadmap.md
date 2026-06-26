@@ -36,7 +36,7 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 | --- | --- | --- |
 | ~~**Custom model definitions**~~ | Done | Per-project model price overrides (`/v1/model-prices`); the worker applies them over the built-in registry at ingest. |
 | ~~**Batch actions**~~ | Done | Multi-select on the trace table → bulk delete / add-to-dataset / enqueue-for-review (`POST /v1/traces/batch`). |
-| **Scheduled blob exports** | M | Recurring exports to a project's own S3/GCS bucket (we have on-demand NDJSON); a worker cron + destination config. |
+| ~~**Scheduled blob exports**~~ | Done | Daily worker cron writes per-project traces (NDJSON) to blob (`/v1/scheduled-exports`, plus run-now). |
 | ~~**Saved table views**~~ | Done | Persist named filter sets per table (`/v1/saved-views`), applied from the trace explorer. |
 | **Multimodal media** | L | Store image/audio/file attachments referenced in traces in blob; render in the trace view. |
 

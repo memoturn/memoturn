@@ -16,6 +16,7 @@ export * from "./providers.js";
 export * from "./retention.js";
 export * from "./review.js";
 export * from "./savedviews.js";
+export * from "./scheduledexports.js";
 export * from "./scoreconfigs.js";
 export * from "./traces.js";
 export * from "./webhooks.js";

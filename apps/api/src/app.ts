@@ -29,6 +29,7 @@ import {
   getMetrics,
   getPromptDetail,
   getRetention,
+  getScheduledExport,
   getTrace,
   listAuditLogs,
   listComments,
@@ -53,7 +54,9 @@ import {
   runBatchAction,
   runEvaluator,
   runPlayground,
+  runScheduledExport,
   setRetention,
+  setScheduledExport,
   streamPlayground,
   submitBatch,
   submitReviewScore,
@@ -113,6 +116,8 @@ app.use("/v1/saved-views", requireAuth);
 app.use("/v1/saved-views/*", requireAuth);
 app.use("/v1/model-prices", requireAuth);
 app.use("/v1/model-prices/*", requireAuth);
+app.use("/v1/scheduled-exports", requireAuth);
+app.use("/v1/scheduled-exports/*", requireAuth);
 
 // Streaming playground (SSE) — plain route; emits { delta } events then [DONE].
 app.post("/v1/playground/stream", async (c) => {
@@ -1420,6 +1425,77 @@ app.openapi(
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
     return c.json(await deleteModelPrice(c.get("projectId"), c.req.valid("param").id));
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/scheduled-exports",
+    summary: "Get the project's scheduled blob-export config (with last-run status)",
+    tags: ["platform"],
+    security,
+    responses: {
+      200: { description: "Config", content: { "application/json": { schema: C.scheduledExport } } },
+    },
+  }),
+  async (c) => c.json(await getScheduledExport(c.get("projectId"))),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/scheduled-exports",
+    summary: "Configure the recurring daily export of traces (NDJSON) to blob storage",
+    tags: ["platform"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              enabled: z.boolean().optional(),
+              environment: z.string().optional(),
+              limit: z.number().int().positive().max(100000).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Updated", content: { "application/json": { schema: C.scheduledExport } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    const result = await setScheduledExport(c.get("projectId"), body);
+    await recordAudit(c.get("projectId"), c.get("actor"), "scheduled-export.set", `enabled:${result.enabled}`);
+    return c.json(result);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/scheduled-exports/run",
+    summary: "Run the export now and write the NDJSON to blob storage",
+    tags: ["platform"],
+    security,
+    responses: {
+      200: { description: "Result", content: { "application/json": { schema: C.scheduledExportResult } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const projectId = c.get("projectId");
+    const result = await runScheduledExport(projectId);
+    await recordAudit(projectId, c.get("actor"), "scheduled-export.run", `count:${result.count}`);
+    return c.json(result);
   },
 );
 

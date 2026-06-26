@@ -42,3 +42,13 @@ export async function getRawBatch(key: string): Promise<string> {
   const res = await blob().send(new GetObjectCommand({ Bucket: BLOB_BUCKET, Key: key }));
   return (await res.Body?.transformToString()) ?? "";
 }
+
+/** Store an arbitrary object at a chosen key (used by scheduled exports, media, …). */
+export async function putBlobObject(
+  key: string,
+  body: string,
+  contentType = "application/octet-stream",
+): Promise<string> {
+  await blob().send(new PutObjectCommand({ Bucket: BLOB_BUCKET, Key: key, Body: body, ContentType: contentType }));
+  return key;
+}

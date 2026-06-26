@@ -74,6 +74,24 @@ export const modelPriceList = z.object({
 });
 export type ModelPriceList = z.infer<typeof modelPriceList>;
 
+export const scheduledExport = z.object({
+  enabled: z.boolean(),
+  environment: z.string(),
+  limit: z.number(),
+  lastRunAt: z.string().nullable(),
+  lastKey: z.string(),
+  lastCount: z.number(),
+});
+export type ScheduledExport = z.infer<typeof scheduledExport>;
+
+export const scheduledExportResult = z.object({
+  projectId: z.string(),
+  key: z.string(),
+  count: z.number(),
+  ranAt: z.string(),
+});
+export type ScheduledExportResult = z.infer<typeof scheduledExportResult>;
+
 export const observationDetail = z.object({
   id: z.string(),
   trace_id: z.string(),

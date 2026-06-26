@@ -28,6 +28,25 @@ function SettingsPage() {
   });
   const daysValue = days ?? retention?.days ?? 0;
 
+  const { data: schedExport } = useQuery({
+    queryKey: ["scheduled-export"],
+    queryFn: () => api.getScheduledExport(),
+  });
+  const [seEnabled, setSeEnabled] = useState<boolean | null>(null);
+  const [seEnv, setSeEnv] = useState<string | null>(null);
+  const [seLimit, setSeLimit] = useState<number | null>(null);
+  const seEnabledValue = seEnabled ?? schedExport?.enabled ?? false;
+  const seEnvValue = seEnv ?? schedExport?.environment ?? "";
+  const seLimitValue = seLimit ?? schedExport?.limit ?? 1000;
+  const saveSchedExport = useMutation({
+    mutationFn: () => api.setScheduledExport({ enabled: seEnabledValue, environment: seEnvValue, limit: seLimitValue }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["scheduled-export"] }),
+  });
+  const runSchedExport = useMutation({
+    mutationFn: () => api.runScheduledExport(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["scheduled-export"] }),
+  });
+
   const { data: webhooks } = useQuery({ queryKey: ["webhooks"], queryFn: () => api.listWebhooks() });
   const [url, setUrl] = useState("");
   const [threshold, setThreshold] = useState("");
@@ -166,6 +185,46 @@ function SettingsPage() {
           {saveRetention.isPending ? "Saving…" : "Save retention"}
         </button>
       </div>
+
+      <h2>Scheduled exports</h2>
+      <p className="obs-meta">
+        When enabled, a daily worker job writes the project's traces (NDJSON) to blob storage under{" "}
+        <code>exports/&lt;projectId&gt;/&lt;date&gt;/</code>. Use "Run now" to export immediately.
+      </p>
+      <div className="filters">
+        <label style={{ alignSelf: "center", display: "flex", gap: 6, alignItems: "center" }}>
+          <input type="checkbox" checked={seEnabledValue} onChange={(e) => setSeEnabled(e.target.checked)} />
+          enabled
+        </label>
+        <input
+          placeholder="environment (optional)"
+          value={seEnvValue}
+          onChange={(e) => setSeEnv(e.target.value)}
+          style={{ width: 180 }}
+        />
+        <input
+          type="number"
+          min="1"
+          value={seLimitValue}
+          onChange={(e) => setSeLimit(Number(e.target.value))}
+          style={{ width: 110 }}
+        />
+        <span className="obs-meta" style={{ alignSelf: "center" }}>
+          max traces
+        </span>
+        <button disabled={saveSchedExport.isPending} onClick={() => saveSchedExport.mutate()}>
+          {saveSchedExport.isPending ? "Saving…" : "Save"}
+        </button>
+        <button disabled={runSchedExport.isPending} onClick={() => runSchedExport.mutate()}>
+          {runSchedExport.isPending ? "Exporting…" : "Run now"}
+        </button>
+      </div>
+      {schedExport?.lastRunAt && (
+        <p className="obs-meta">
+          Last run {schedExport.lastRunAt.slice(0, 19).replace("T", " ")} — {schedExport.lastCount} traces →{" "}
+          <code>{schedExport.lastKey}</code>
+        </p>
+      )}
 
       <h2>Webhooks</h2>
       <p className="obs-meta">

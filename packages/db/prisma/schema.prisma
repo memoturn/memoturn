@@ -44,6 +44,7 @@ model Project {
   comments    Comment[]
   savedViews  SavedView[]
   modelPrices ModelPrice[]
+  scheduledExport ScheduledExport?
 
   @@unique([workspaceId, slug])
 }
@@ -394,6 +395,22 @@ model SavedView {
   createdAt DateTime @default(now())
 
   @@index([projectId, table])
+}
+
+// Recurring export of a project's traces (NDJSON) to blob storage. A daily worker
+// cron sweeps every enabled config; status fields record the last run for the UI.
+model ScheduledExport {
+  id          String    @id @default(cuid())
+  projectId   String    @unique
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  enabled     Boolean   @default(false)
+  environment String    @default("") // optional environment filter ("" = all)
+  limit       Int       @default(1000)
+  lastRunAt   DateTime?
+  lastKey     String    @default("")
+  lastCount   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 // Per-project model price override. `pattern` is a case-insensitive regex matched
