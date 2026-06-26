@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { api, type ReviewItem, type ScoreConfig } from "../lib/api";
+import { useSession } from "../lib/auth";
 
 export const Route = createFileRoute("/review")({ component: ReviewPage });
 
@@ -18,11 +19,13 @@ function ReviewCard({
   queue,
   item,
   config,
+  myId,
   onDone,
 }: {
   queue: string;
   item: ReviewItem;
   config?: ScoreConfig;
+  myId?: string;
   onDone: () => void;
 }) {
   const categorical = config?.dataType === "CATEGORICAL" && config.categories.length > 0;
@@ -34,12 +37,33 @@ function ReviewCard({
       api.submitReviewScore(queue, item.id, categorical ? { stringValue, comment } : { value, comment }),
     onSuccess: onDone,
   });
+  const assign = useMutation({
+    mutationFn: (assigneeId?: string) => api.assignReviewItem(queue, item.id, assigneeId),
+    onSuccess: onDone,
+  });
+  const mine = item.assigneeId && item.assigneeId === myId;
   return (
     <li>
       <div className="obs-meta">
         <Link to="/traces/$id" params={{ id: item.traceId }}>
           {item.trace.name || item.traceId.slice(0, 8)} →
         </Link>
+        {item.assigneeId ? (
+          <>
+            {" · "}
+            <span className="badge gen">{mine ? "assigned to you" : "assigned"}</span>{" "}
+            <button className="link-btn" onClick={() => assign.mutate("")}>
+              unassign
+            </button>
+          </>
+        ) : (
+          <>
+            {" · "}
+            <button className="link-btn" onClick={() => assign.mutate(undefined)}>
+              assign to me
+            </button>
+          </>
+        )}
       </div>
       {item.trace.input && <pre>{pretty(item.trace.input)}</pre>}
       {item.trace.output && <pre>{pretty(item.trace.output)}</pre>}
@@ -78,8 +102,11 @@ function ReviewCard({
 
 function ReviewPage() {
   const qc = useQueryClient();
+  const { data: session } = useSession();
+  const myId = session?.user.id;
   const { data: queues } = useQuery({ queryKey: ["review-queues"], queryFn: () => api.listReviewQueues() });
   const [selected, setSelected] = useState<string | null>(null);
+  const [mineOnly, setMineOnly] = useState(false);
 
   const [name, setName] = useState("");
   const [scoreName, setScoreName] = useState("human-rating");
@@ -92,8 +119,8 @@ function ReviewPage() {
   });
 
   const { data: items } = useQuery({
-    queryKey: ["review-items", selected],
-    queryFn: () => api.listReviewItems(selected!),
+    queryKey: ["review-items", selected, mineOnly],
+    queryFn: () => api.listReviewItems(selected!, mineOnly ? { assignee: "me" } : {}),
     enabled: !!selected,
     refetchInterval: 5_000,
   });
@@ -151,6 +178,12 @@ function ReviewPage() {
           <h2>
             Reviewing: {selected} ({items?.items.length ?? 0} pending)
           </h2>
+          <div className="filters">
+            <label className="inline-check">
+              <input type="checkbox" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} /> assigned to
+              me only
+            </label>
+          </div>
           {items && items.items.length === 0 ? (
             <div className="empty">Nothing to review.</div>
           ) : (
@@ -161,6 +194,7 @@ function ReviewPage() {
                   queue={selected}
                   item={item}
                   config={queueConfig}
+                  myId={myId}
                   onDone={() => {
                     qc.invalidateQueries({ queryKey: ["review-items", selected] });
                     qc.invalidateQueries({ queryKey: ["review-queues"] });

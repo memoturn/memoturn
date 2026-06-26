@@ -20,7 +20,7 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 | **Comments** | M | Threaded comments on traces/observations/sessions/prompts. New `Comment` table, `/v1/comments` CRUD, thread UI on the trace page. |
 | **Tags + tag facets** | S | Traces already carry `tags`; add a tag filter on the trace list, a tags column, and tag management. |
 | **Score configs** | M | The `ScoreConfig` model exists but is unused — expose CRUD; enforce allowed names/data-types/categories on score creation; drive the review form from configs. |
-| **Annotation assignments** | M | Assign review-queue items to specific users; "my queue" filter. |
+| ~~**Annotation assignments**~~ | Done | Assign review items to a user (`/items/{id}/assign`); "assigned to me only" filter on the review page. |
 
 ## Evaluation depth
 

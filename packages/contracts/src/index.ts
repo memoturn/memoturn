@@ -359,6 +359,7 @@ export const reviewItem = z.object({
   id: z.string(),
   traceId: z.string(),
   status: z.string(),
+  assigneeId: z.string(),
   trace: z.object({ id: z.string(), name: z.string(), input: z.string(), output: z.string() }),
 });
 export type ReviewItem = z.infer<typeof reviewItem>;

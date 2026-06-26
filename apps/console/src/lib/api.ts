@@ -184,9 +184,12 @@ export const api = {
     post(`/v1/review-queues`, body),
   addReviewItems: (name: string, traceIds: string[]) =>
     post(`/v1/review-queues/${encodeURIComponent(name)}/items`, { traceIds }),
-  listReviewItems: (name: string) => get<ReviewItemsResponse>(`/v1/review-queues/${encodeURIComponent(name)}/items`),
+  listReviewItems: (name: string, opts: { status?: string; assignee?: string } = {}) =>
+    get<ReviewItemsResponse>(`/v1/review-queues/${encodeURIComponent(name)}/items${qs(opts)}`),
   submitReviewScore: (name: string, itemId: string, body: { value?: number; stringValue?: string; comment?: string }) =>
     post(`/v1/review-queues/${encodeURIComponent(name)}/items/${encodeURIComponent(itemId)}/score`, body),
+  assignReviewItem: (name: string, itemId: string, assigneeId?: string) =>
+    post(`/v1/review-queues/${encodeURIComponent(name)}/items/${encodeURIComponent(itemId)}/assign`, { assigneeId }),
 };
 
 /** Stream a playground completion (SSE), invoking onDelta for each text chunk. */

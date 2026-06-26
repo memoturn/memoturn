@@ -32,6 +32,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/v1/traces` | List; filters: `limit`, `userId`, `sessionId`, `environment`, `search`. |
+| POST | `/v1/traces/batch` | Bulk action on selected traces: `delete`, `add-to-dataset`, or `review`. |
 | GET | `/v1/traces/{id}` | Assembled trace: observations + scores. |
 | GET | `/v1/sessions` | Sessions (traces grouped by `sessionId`). |
 | GET | `/v1/metrics` | Cost/token/latency rollups by day and model (`days` query). |
@@ -51,6 +52,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | --- | --- | --- |
 | GET / POST | `/v1/datasets` | List / create. |
 | GET | `/v1/datasets/{name}` | Items + runs. |
+| GET | `/v1/datasets/{name}/comparison` | Compare a dataset's runs side by side (per-item output + scores). |
 | POST | `/v1/datasets/{name}/items` | Append items. |
 | POST | `/v1/datasets/{name}/runs` | Record an experiment run (link items → traces). |
 
@@ -83,6 +85,28 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | --- | --- | --- |
 | GET / POST | `/v1/providers` | List (masked) / add an encrypted provider API key. |
 
+### Dashboards, scoring & collaboration
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET / POST | `/v1/widgets` | List dashboard widgets (with computed data series) / create. |
+| DELETE | `/v1/widgets/{id}` | Delete a dashboard widget. |
+| GET / POST | `/v1/score-configs` | List / create-update a score config. |
+| DELETE | `/v1/score-configs/{id}` | Delete a score config. |
+| GET / POST | `/v1/saved-views` | List / save a table view (named set of filters). |
+| DELETE | `/v1/saved-views/{id}` | Delete a saved view. |
+| GET / POST | `/v1/comments` | List comments on an object (trace/observation/session/prompt) / add one. |
+| DELETE | `/v1/comments/{id}` | Delete a comment. |
+
+### Webhooks & automations
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET / POST | `/v1/webhooks` | List / create a webhook (POSTs on an event; `score.created` supports a low-score threshold). |
+| DELETE | `/v1/webhooks/{id}` | Delete a webhook. |
+| GET / POST | `/v1/automations` | List / create a trigger→action automation (trigger: `score.created`/`trace.created`/`eval.completed`; action: `webhook`/`slack`). |
+| DELETE | `/v1/automations/{id}` | Delete an automation. |
+
 ### Platform
 
 | Method | Path | Description |
@@ -91,6 +115,10 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/audit-logs` | Recent audit entries. |
 | GET / POST | `/v1/retention` | Get / set retention (days; 0 = keep forever). |
 | POST | `/v1/retention/apply` | Apply retention now. |
+| GET / POST | `/v1/model-prices` | List / create-update custom model price overrides (matched by name pattern, override built-ins). |
+| DELETE | `/v1/model-prices/{id}` | Delete a model price override. |
+| GET / POST | `/v1/scheduled-exports` | Get / configure the recurring daily NDJSON export of traces to blob storage. |
+| POST | `/v1/scheduled-exports/run` | Run the export now and write the NDJSON to blob storage. |
 | GET | `/v1/exports/traces` | NDJSON export (download). |
 | GET | `/v1/health` | Liveness (no auth). |
 | `*` | `/auth/*` | Better Auth (sign-in/out, session). |

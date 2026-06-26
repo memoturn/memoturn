@@ -434,11 +434,13 @@ model ReviewItem {
   queue       ReviewQueue @relation(fields: [queueId], references: [id], onDelete: Cascade)
   traceId     String
   status      String      @default("PENDING") // PENDING | DONE | SKIPPED
+  assigneeId  String? // user id this item is assigned to (annotation assignments)
   createdAt   DateTime    @default(now())
   completedAt DateTime?
 
   @@unique([queueId, traceId])
   @@index([queueId, status])
+  @@index([assigneeId])
 }
 
 // A named, saved set of table filters (e.g. for the traces explorer) a user can re-apply.

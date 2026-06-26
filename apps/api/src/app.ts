@@ -5,6 +5,7 @@ import {
   addDatasetItems,
   addReviewItems,
   applyRetention,
+  assignReviewItem,
   auth,
   builtinModelPrices,
   createAutomation,
@@ -965,7 +966,10 @@ app.openapi(
     security,
     request: {
       params: z.object({ name: z.string() }),
-      query: z.object({ status: z.enum(["PENDING", "DONE", "SKIPPED"]).optional() }),
+      query: z.object({
+        status: z.enum(["PENDING", "DONE", "SKIPPED"]).optional(),
+        assignee: z.string().optional(), // a user id, or "me" for the current user
+      }),
     },
     responses: {
       200: { description: "Items", content: { "application/json": { schema: C.reviewItemsResponse } } },
@@ -973,12 +977,44 @@ app.openapi(
     },
   }),
   async (c) => {
+    const { status, assignee } = c.req.valid("query");
+    const assigneeId = assignee === "me" ? c.get("userId") : assignee;
     const result = await listReviewItems(
       c.get("projectId"),
       c.req.valid("param").name,
-      c.req.valid("query").status ?? "PENDING",
+      status ?? "PENDING",
+      assigneeId,
     );
     if (!result) return c.json({ error: "queue not found" }, 404);
+    return c.json(result);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/review-queues/{name}/items/{itemId}/assign",
+    summary: "Assign a review item to a user (empty assigneeId unassigns; defaults to self)",
+    tags: ["review"],
+    security,
+    request: {
+      params: z.object({ name: z.string(), itemId: z.string() }),
+      body: { content: { "application/json": { schema: z.object({ assigneeId: z.string().optional() }) } } },
+    },
+    responses: {
+      200: { description: "Assigned", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const { name, itemId } = c.req.valid("param");
+    const assigneeId = c.req.valid("json").assigneeId ?? c.get("userId");
+    const result = await assignReviewItem(c.get("projectId"), name, itemId, assigneeId);
+    if (!result) return c.json({ error: "queue or item not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "review.assign", `item:${itemId}`, { assigneeId });
     return c.json(result);
   },
 );

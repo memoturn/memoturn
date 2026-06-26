@@ -68,11 +68,11 @@ export async function addReviewItems(projectId: string, name: string, traceIds: 
 }
 
 /** Pending items for a queue, enriched with each trace's name/input/output for review. */
-export async function listReviewItems(projectId: string, name: string, status = "PENDING") {
+export async function listReviewItems(projectId: string, name: string, status = "PENDING", assigneeId?: string) {
   const queue = await findQueue(projectId, name);
   if (!queue) return null;
   const items = await prisma.reviewItem.findMany({
-    where: { queueId: queue.id, status },
+    where: { queueId: queue.id, status, ...(assigneeId ? { assigneeId } : {}) },
     orderBy: { createdAt: "asc" },
     take: 100,
   });
@@ -86,9 +86,20 @@ export async function listReviewItems(projectId: string, name: string, status = 
       id: i.id,
       traceId: i.traceId,
       status: i.status,
+      assigneeId: i.assigneeId ?? "",
       trace: io.get(i.traceId) ?? { id: i.traceId, name: "", input: "", output: "" },
     })),
   };
+}
+
+/** Assign (or unassign, with assigneeId="") a review item to a user. */
+export async function assignReviewItem(projectId: string, name: string, itemId: string, assigneeId: string) {
+  const queue = await findQueue(projectId, name);
+  if (!queue) return null;
+  const item = await prisma.reviewItem.findFirst({ where: { id: itemId, queueId: queue.id } });
+  if (!item) return null;
+  await prisma.reviewItem.update({ where: { id: item.id }, data: { assigneeId: assigneeId || null } });
+  return { itemId: item.id, assigneeId: assigneeId || "" };
 }
 
 export interface ReviewScoreInput {
