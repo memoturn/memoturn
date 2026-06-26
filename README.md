@@ -5,6 +5,8 @@ management, playground, and datasets. Self-hostable, OpenTelemetry-native, Bun-n
 
 📚 **[Documentation](./docs/README.md)** — getting started, architecture, API, SDKs, integrations, evaluation, deployment.
 
+![memoturn dashboard](./docs/images/dashboard.png)
+
 ## Features
 
 - **Observability** — traces, spans, generations, scores; a waterfall timeline; sessions; OTel (OTLP/JSON, GenAI semconv) ingestion; SDK + LangChain + OpenAI integrations.

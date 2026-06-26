@@ -18,6 +18,21 @@ Bun-native.
 - [Evaluation](./evaluation.md) — offline, online, and human review
 - [Deployment](./deployment.md) — Docker, scaling, retention
 
+## Screenshots
+
+| Dashboard | Traces |
+| --- | --- |
+| [![dashboard](./images/dashboard.png)](./images/dashboard.png) | [![traces](./images/traces.png)](./images/traces.png) |
+
+| Trace waterfall | Playground |
+| --- | --- |
+| [![trace detail](./images/trace-detail.png)](./images/trace-detail.png) | [![playground](./images/playground.png)](./images/playground.png) |
+
+More: [evaluators](./images/evaluators.png) · [review queues](./images/review.png) ·
+[prompts](./images/prompts.png) · [datasets](./images/datasets.png) ·
+[sessions](./images/sessions.png) · [settings](./images/settings.png). Regenerate with
+`bun run screenshots` (requires `bun run dev` + seeded data).
+
 ## At a glance
 
 | Capability | Where |

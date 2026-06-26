@@ -32,6 +32,7 @@
     "db:clickhouse": "bun --filter @memoturn/db clickhouse:migrate",
     "seed": "bun --env-file=.env scripts/seed.ts",
     "quickstart": "bun --env-file=.env examples/quickstart.ts",
+    "screenshots": "bun scripts/screenshots.ts",
     "postinstall": "bun --filter @memoturn/db generate || true",
     "prepare": "lefthook install || true"
   },
@@ -42,6 +43,7 @@
     "@memoturn/server": "workspace:*",
     "@types/node": "^26.0.1",
     "lefthook": "^2.1.9",
+    "playwright": "^1.61.1",
     "turbo": "^2.10.0",
     "typescript": "^6.0.3"
   },

@@ -82,3 +82,5 @@ curl -u pk-mt-dev:sk-mt-dev -X POST http://localhost:3001/v1/review-queues/q1/it
 
 The console **Review** page shows each pending item's trace input/output with an inline
 scoring form.
+
+![Review queues](./images/review.png)
