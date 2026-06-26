@@ -167,7 +167,7 @@ function TracesPage() {
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-muted-foreground">Saved views:</span>
           {savedViews.map((v) => (
-            <span key={v.id} className="inline-flex items-center gap-1 rounded-md border bg-muted px-1.5 py-0.5">
+            <span key={v.id} className="inline-flex items-center gap-1 border bg-muted px-1.5 py-0.5">
               <button
                 type="button"
                 className="text-xs font-medium hover:underline"
@@ -233,7 +233,7 @@ function TracesPage() {
           description="Run `bun run quickstart` to emit one, or adjust your filters."
         />
       ) : (
-        <div className="rounded-lg border">
+        <div className="border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -283,7 +283,7 @@ function TracesPage() {
                         <button
                           key={tag}
                           type="button"
-                          className="rounded-md border bg-muted px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+                          className="border bg-muted px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground"
                           onClick={() => setFilter("tag", tag)}
                           title="Filter by tag"
                         >

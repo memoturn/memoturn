@@ -353,7 +353,7 @@ function TraceDetailPage() {
               <div
                 key={i}
                 title={s.comment}
-                className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2 py-1 text-sm"
+                className="inline-flex items-center gap-1.5 border bg-card px-2 py-1 text-sm"
               >
                 <KindBadge tone={toneForSource(s.source)}>{s.source.toLowerCase()}</KindBadge>
                 <span className="text-muted-foreground">{s.name}</span>

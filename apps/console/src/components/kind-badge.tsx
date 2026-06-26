@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
  * both light and dark mode.
  */
 const kindBadgeVariants = cva(
-  "inline-flex w-fit shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[0.6875rem] font-medium tracking-normal whitespace-nowrap normal-case",
+  "inline-flex w-fit shrink-0 items-center gap-1 border px-1.5 py-0.5 text-[0.6875rem] font-medium tracking-normal whitespace-nowrap normal-case",
   {
     variants: {
       tone: {

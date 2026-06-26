@@ -60,7 +60,7 @@ function DatasetDetailPage() {
         {data.runs.length === 0 ? (
           <EmptyState title="No experiment runs yet" />
         ) : (
-          <div className="rounded-lg border">
+          <div className="border">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -94,7 +94,7 @@ function DatasetDetailPage() {
         {data.items.length === 0 ? (
           <EmptyState title="No items yet" />
         ) : (
-          <div className="rounded-lg border">
+          <div className="border">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -128,7 +128,7 @@ function Comparison({ name }: { name: string }) {
   return (
     <section className="space-y-3">
       <h2 className="text-lg font-semibold tracking-tight">Run comparison</h2>
-      <div className="overflow-x-auto rounded-lg border">
+      <div className="overflow-x-auto border">
         <Table>
           <TableHeader>
             <TableRow>

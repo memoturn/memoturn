@@ -82,7 +82,7 @@ export function DataTable<TData, TValue>({
           {toolbar && <div className="ml-auto flex items-center gap-2">{toolbar}</div>}
         </div>
       )}
-      <div className="rounded-lg border">
+      <div className="border">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
