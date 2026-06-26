@@ -15,7 +15,7 @@
     },
     {
       "match": ["apps/api/src/app.ts"],
-      "note": "The endpoint tables in docs/api.md are hand-maintained (no OpenAPI export to disk). If you added/removed/renamed a /v1 route, update docs/api.md to match."
+      "note": "(1) The endpoint tables in docs/api.md are hand-maintained (no OpenAPI export to disk). If you added/removed/renamed a /v1 route, update docs/api.md to match. (2) If you added a mutating route (POST/PUT/PATCH/DELETE), it must call denyIfReadOnly(c) + declare a 403 — verify with `bun run rbac:check` (or delegate to the rbac-auditor agent)."
     },
     {
       "match": ["apps/mcp/src/tools.ts"],

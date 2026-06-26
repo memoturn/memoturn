@@ -34,6 +34,7 @@
     "quickstart": "bun --env-file=.env examples/quickstart.ts",
     "screenshots": "bun scripts/screenshots.ts",
     "docs:check": "bun scripts/check-doc-drift.ts",
+    "rbac:check": "bun scripts/check-rbac.ts",
     "postinstall": "bun --filter @memoturn/db generate || true",
     "prepare": "lefthook install || true"
   },
