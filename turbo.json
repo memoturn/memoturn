@@ -15,7 +15,9 @@
     "BLOB_SECRET_ACCESS_KEY",
     "MEMOTURN_BASE_URL",
     "MEMOTURN_PUBLIC_KEY",
-    "MEMOTURN_SECRET_KEY"
+    "MEMOTURN_SECRET_KEY",
+    "PG_PORT",
+    "REDIS_PORT"
   ],
   "tasks": {
     "build": {
