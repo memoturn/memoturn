@@ -2,6 +2,7 @@ import { prisma } from "@memoturn/db";
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { createAccessControl } from "better-auth/plugins/access";
+import { oidcProvider } from "better-auth/plugins/oidc-provider";
 import { organization } from "better-auth/plugins/organization";
 import { adminAc, defaultStatements, memberAc, ownerAc } from "better-auth/plugins/organization/access";
 
@@ -30,7 +31,10 @@ export const auth = betterAuth({
   baseURL: process.env.AUTH_BASE_URL ?? `http://localhost:${process.env.API_PORT ?? 3001}`,
   secret: process.env.BETTER_AUTH_SECRET ?? "dev-only-change-me",
   trustedOrigins: (process.env.AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000").split(","),
+  advanced: { cookiePrefix: "memoturn" },
   plugins: [
+    // Make memoturn an OAuth2/OIDC provider ("Sign in with memoturn" for third parties).
+    oidcProvider({ loginPage: `${process.env.CONSOLE_URL ?? "http://localhost:3000"}/login` }),
     organization({
       ac,
       roles: orgRoles,

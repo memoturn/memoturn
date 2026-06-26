@@ -95,10 +95,13 @@ model User {
   image         String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
-  sessions      Session[]
-  accounts      Account[]
-  members       Member[]
-  invitations   Invitation[]
+  sessions          Session[]
+  accounts          Account[]
+  members           Member[]
+  invitations       Invitation[]
+  oauthApplications OauthApplication[]
+  oauthAccessTokens OauthAccessToken[]
+  oauthConsents     OauthConsent[]
 
   @@map("user")
 }
@@ -146,6 +149,64 @@ model Verification {
   updatedAt  DateTime @updatedAt
 
   @@map("verification")
+}
+
+// ── OIDC provider (Better Auth oidc-provider plugin) ─────────────────────────────
+// memoturn acts as an OAuth2/OIDC provider: registered apps + issued tokens + consent.
+model OauthApplication {
+  id           String             @id @default(cuid())
+  name         String
+  icon         String?
+  metadata     String?
+  clientId     String             @unique
+  clientSecret String?
+  redirectUrls String
+  type         String
+  disabled     Boolean            @default(false)
+  userId       String?
+  user         User?              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  accessTokens OauthAccessToken[]
+  consents     OauthConsent[]
+
+  @@index([userId])
+  @@map("oauthApplication")
+}
+
+model OauthAccessToken {
+  id                    String           @id @default(cuid())
+  accessToken           String           @unique
+  refreshToken          String?          @unique
+  accessTokenExpiresAt  DateTime
+  refreshTokenExpiresAt DateTime?
+  clientId              String
+  application           OauthApplication @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  userId                String?
+  user                  User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scopes                String
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  @@index([clientId])
+  @@index([userId])
+  @@map("oauthAccessToken")
+}
+
+model OauthConsent {
+  id           String           @id @default(cuid())
+  clientId     String
+  application  OauthApplication @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  userId       String
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scopes       String
+  consentGiven Boolean          @default(false)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([clientId])
+  @@index([userId])
+  @@map("oauthConsent")
 }
 
 // API keys are project scoped. The secret is hashed; the public key and a

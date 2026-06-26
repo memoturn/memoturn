@@ -70,6 +70,8 @@ Both set `projectId` + `role` (+ `organizationId`) on the context. Mutating hand
 
 Tenancy is the **Better Auth organization plugin** (`organization`/`member`/`invitation` tables; config + roles in `packages/server/src/betterauth.ts`). Projects belong to an `Organization`; `member.role` is a lowercase string mapped to our `WorkspaceRole` via `toWorkspaceRole`. Org management (create/switch/invite) uses `authClient.organization.*` directly — note org mutations require an `Origin` header (browsers send it; scripts must set a trusted one). New orgs auto-provision a default project via the plugin's `afterCreateOrganization` hook.
 
+memoturn is also an **OIDC provider** (Better Auth `oidc-provider` plugin → `oauthApplication`/`oauthAccessToken`/`oauthConsent` tables; discovery at `/auth/.well-known/openid-configuration`, register at `/auth/oauth2/register`) so third parties can "Sign in with memoturn". Session cookies are prefixed `memoturn.` (`advanced.cookiePrefix`).
+
 ## Recipes
 
 ### Add a read endpoint
