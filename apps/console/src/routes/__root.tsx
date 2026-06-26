@@ -100,7 +100,7 @@ function RootComponent() {
               <Link
                 key={item.to}
                 to={item.to}
-                className="rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground data-[status=active]:bg-muted data-[status=active]:text-foreground"
+                className="px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground data-[status=active]:bg-muted data-[status=active]:text-foreground"
               >
                 {item.label}
               </Link>
@@ -115,7 +115,7 @@ function RootComponent() {
             >
               <Search />
               <span className="hidden sm:inline">Search</span>
-              <kbd className="hidden rounded border bg-muted px-1 font-mono text-[0.625rem] sm:inline">⌘K</kbd>
+              <kbd className="hidden border bg-muted px-1 font-mono text-[0.625rem] sm:inline">⌘K</kbd>
             </Button>
             <TimeRangeSelect />
             <ProjectSwitcher />
