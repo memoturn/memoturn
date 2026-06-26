@@ -1,10 +1,35 @@
+import { zodResolver } from "@hookform/resolvers/zod";
+import type { ReviewItem, ReviewQueue, ScoreConfig } from "@memoturn/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import type { ColumnDef } from "@tanstack/react-table";
+import { ArrowRight, ClipboardList, UserCheck } from "lucide-react";
 import { useState } from "react";
-import { api, type ReviewItem, type ScoreConfig } from "../lib/api";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
+import { z } from "zod";
+import { DataTable } from "../components/data-table";
+import { EmptyState } from "../components/empty-state";
+import { KindBadge } from "../components/kind-badge";
+import { PageHeader } from "../components/page-header";
+import { Button } from "../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Checkbox } from "../components/ui/checkbox";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "../components/ui/form";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { api } from "../lib/api";
 import { useSession } from "../lib/auth";
+import { useIsReadOnly } from "../lib/role";
 
 export const Route = createFileRoute("/review")({ component: ReviewPage });
+
+const queueSchema = z.object({
+  name: z.string().min(1, "Queue name is required"),
+  scoreName: z.string().min(1, "Score name is required"),
+});
+type QueueForm = z.infer<typeof queueSchema>;
 
 function pretty(v: string): string {
   if (!v) return "—";
@@ -20,12 +45,14 @@ function ReviewCard({
   item,
   config,
   myId,
+  readOnly,
   onDone,
 }: {
   queue: string;
   item: ReviewItem;
   config?: ScoreConfig;
   myId?: string;
+  readOnly: boolean;
   onDone: () => void;
 }) {
   const categorical = config?.dataType === "CATEGORICAL" && config.categories.length > 0;
@@ -35,87 +62,112 @@ function ReviewCard({
   const submit = useMutation({
     mutationFn: () =>
       api.submitReviewScore(queue, item.id, categorical ? { stringValue, comment } : { value, comment }),
-    onSuccess: onDone,
+    onSuccess: () => {
+      toast.success("Score submitted");
+      onDone();
+    },
+    onError: (e) => toast.error(`Failed to submit score: ${String(e)}`),
   });
   const assign = useMutation({
     mutationFn: (assigneeId?: string) => api.assignReviewItem(queue, item.id, assigneeId),
     onSuccess: onDone,
+    onError: (e) => toast.error(`Failed to assign: ${String(e)}`),
   });
   const mine = item.assigneeId && item.assigneeId === myId;
+
   return (
-    <li>
-      <div className="obs-meta">
-        <Link to="/traces/$id" params={{ id: item.traceId }}>
-          {item.trace.name || item.traceId.slice(0, 8)} →
-        </Link>
-        {item.assigneeId ? (
-          <>
-            {" · "}
-            <span className="badge gen">{mine ? "assigned to you" : "assigned"}</span>{" "}
-            <button className="link-btn" onClick={() => assign.mutate("")}>
-              unassign
-            </button>
-          </>
-        ) : (
-          <>
-            {" · "}
-            <button className="link-btn" onClick={() => assign.mutate(undefined)}>
+    <Card>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Button asChild variant="link" size="sm" className="h-auto p-0 font-medium">
+            <Link to="/traces/$id" params={{ id: item.traceId }}>
+              {item.trace.name || item.traceId.slice(0, 8)}
+              <ArrowRight className="size-3.5" />
+            </Link>
+          </Button>
+          {item.assigneeId ? (
+            <>
+              <KindBadge tone="blue">{mine ? "assigned to you" : "assigned"}</KindBadge>
+              <Button variant="ghost" size="sm" disabled={readOnly} onClick={() => assign.mutate("")}>
+                unassign
+              </Button>
+            </>
+          ) : (
+            <Button variant="ghost" size="sm" disabled={readOnly} onClick={() => assign.mutate(undefined)}>
               assign to me
-            </button>
-          </>
+            </Button>
+          )}
+        </div>
+        {item.trace.input && (
+          <pre className="overflow-auto rounded-md border bg-muted/50 p-3 text-xs max-h-60 whitespace-pre-wrap">
+            {pretty(item.trace.input)}
+          </pre>
         )}
-      </div>
-      {item.trace.input && <pre>{pretty(item.trace.input)}</pre>}
-      {item.trace.output && <pre>{pretty(item.trace.output)}</pre>}
-      <div className="filters">
-        {categorical ? (
-          <select value={stringValue} onChange={(e) => setStringValue(e.target.value)}>
-            {config!.categories.map((cat) => (
-              <option key={cat} value={cat}>
-                {cat}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <input
-            type="number"
-            step="0.1"
-            value={value}
-            onChange={(e) => setValue(Number(e.target.value))}
-            title="score value"
-            style={{ width: 90 }}
+        {item.trace.output && (
+          <pre className="overflow-auto rounded-md border bg-muted/50 p-3 text-xs max-h-60 whitespace-pre-wrap">
+            {pretty(item.trace.output)}
+          </pre>
+        )}
+        <div className="flex flex-wrap items-end gap-2">
+          {categorical ? (
+            <Select value={stringValue} onValueChange={setStringValue}>
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {config!.categories.map((cat) => (
+                  <SelectItem key={cat} value={cat}>
+                    {cat}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input
+              type="number"
+              step="0.1"
+              value={value}
+              onChange={(e) => setValue(Number(e.target.value))}
+              className="w-24"
+              aria-label="score value"
+            />
+          )}
+          <Input
+            placeholder="comment"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            className="max-w-xs"
           />
-        )}
-        <input
-          placeholder="comment"
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          style={{ width: 260 }}
-        />
-        <button disabled={submit.isPending} onClick={() => submit.mutate()}>
-          {submit.isPending ? "Saving…" : "Submit score"}
-        </button>
-      </div>
-    </li>
+          <Button disabled={readOnly || submit.isPending} onClick={() => submit.mutate()}>
+            {submit.isPending ? "Saving…" : "Submit score"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
 function ReviewPage() {
   const qc = useQueryClient();
+  const readOnly = useIsReadOnly();
   const { data: session } = useSession();
   const myId = session?.user.id;
   const { data: queues } = useQuery({ queryKey: ["review-queues"], queryFn: () => api.listReviewQueues() });
   const [selected, setSelected] = useState<string | null>(null);
   const [mineOnly, setMineOnly] = useState(false);
 
-  const [name, setName] = useState("");
-  const [scoreName, setScoreName] = useState("human-rating");
+  const form = useForm<QueueForm>({
+    resolver: zodResolver(queueSchema),
+    defaultValues: { name: "", scoreName: "human-rating" },
+  });
   const create = useMutation({
-    mutationFn: () => api.createReviewQueue({ name, scoreName }),
+    mutationFn: (values: QueueForm) => api.createReviewQueue(values),
     onSuccess: () => {
-      setName("");
+      toast.success("Review queue created");
+      form.reset({ name: "", scoreName: "human-rating" });
       qc.invalidateQueries({ queryKey: ["review-queues"] });
     },
+    onError: (e) => toast.error(`Failed to create queue: ${String(e)}`),
   });
 
   const { data: items } = useQuery({
@@ -127,67 +179,103 @@ function ReviewPage() {
   const { data: scoreConfigs } = useQuery({ queryKey: ["score-configs"], queryFn: () => api.listScoreConfigs() });
   const queueConfig = scoreConfigs?.find((s) => s.name === items?.queue.scoreName);
 
-  return (
-    <div>
-      <h1>Review queues</h1>
-      <p className="obs-meta">
-        Human-in-the-loop annotation. Submitting a review writes an ANNOTATION score on the trace.
-      </p>
+  const columns: ColumnDef<ReviewQueue>[] = [
+    {
+      accessorKey: "name",
+      header: "Name",
+      cell: ({ row }) => <span className="font-medium text-primary">{row.original.name}</span>,
+    },
+    { accessorKey: "scoreName", header: "Score" },
+    { accessorKey: "pending", header: "Pending" },
+    { accessorKey: "done", header: "Done" },
+  ];
 
-      <h2>New queue</h2>
-      <div className="filters">
-        <input placeholder="queue name" value={name} onChange={(e) => setName(e.target.value)} />
-        <input placeholder="score name" value={scoreName} onChange={(e) => setScoreName(e.target.value)} />
-        <button disabled={!name || create.isPending} onClick={() => create.mutate()}>
-          {create.isPending ? "Saving…" : "Create"}
-        </button>
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Review queues"
+        description="Human-in-the-loop annotation. Submitting a review writes an ANNOTATION score on the trace."
+      />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>New queue</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit((v) => create.mutate(v))} className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField
+                  control={form.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Queue name</FormLabel>
+                      <FormControl>
+                        <Input placeholder="my-review-queue" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="scoreName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Score name</FormLabel>
+                      <FormControl>
+                        <Input placeholder="human-rating" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <Button type="submit" disabled={readOnly || create.isPending}>
+                {create.isPending ? "Saving…" : "Create"}
+              </Button>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
+
+      <div className="space-y-3">
+        <h2 className="text-lg font-semibold tracking-tight">Queues ({queues?.length ?? 0})</h2>
+        {!queues || queues.length === 0 ? (
+          <EmptyState
+            icon={ClipboardList}
+            title="No review queues yet"
+            description="Create one above to get started."
+          />
+        ) : (
+          <DataTable
+            columns={columns}
+            data={queues}
+            filterColumn="name"
+            filterPlaceholder="Filter queues…"
+            onRowClick={(q) => setSelected(q.name)}
+          />
+        )}
       </div>
 
-      <h2>Queues</h2>
-      {!queues || queues.length === 0 ? (
-        <div className="empty">No review queues yet.</div>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Score</th>
-              <th>Pending</th>
-              <th>Done</th>
-            </tr>
-          </thead>
-          <tbody>
-            {queues.map((q) => (
-              <tr key={q.name}>
-                <td>
-                  <button className="link-btn" onClick={() => setSelected(q.name)}>
-                    {q.name}
-                  </button>
-                </td>
-                <td>{q.scoreName}</td>
-                <td>{q.pending}</td>
-                <td>{q.done}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
       {selected && (
-        <>
-          <h2>
-            Reviewing: {selected} ({items?.items.length ?? 0} pending)
-          </h2>
-          <div className="filters">
-            <label className="inline-check">
-              <input type="checkbox" checked={mineOnly} onChange={(e) => setMineOnly(e.target.checked)} /> assigned to
-              me only
-            </label>
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold tracking-tight">
+              Reviewing: {selected} ({items?.items.length ?? 0} pending)
+            </h2>
+            <div className="flex items-center gap-2">
+              <Checkbox id="mine-only" checked={mineOnly} onCheckedChange={(c) => setMineOnly(c === true)} />
+              <Label htmlFor="mine-only" className="text-muted-foreground">
+                assigned to me only
+              </Label>
+            </div>
           </div>
           {items && items.items.length === 0 ? (
-            <div className="empty">Nothing to review.</div>
+            <EmptyState icon={UserCheck} title="Nothing to review" description="No pending items in this queue." />
           ) : (
-            <ul className="tree">
+            <div className="space-y-3">
               {items?.items.map((item) => (
                 <ReviewCard
                   key={item.id}
@@ -195,15 +283,16 @@ function ReviewPage() {
                   item={item}
                   config={queueConfig}
                   myId={myId}
+                  readOnly={readOnly}
                   onDone={() => {
                     qc.invalidateQueries({ queryKey: ["review-items", selected] });
                     qc.invalidateQueries({ queryKey: ["review-queues"] });
                   }}
                 />
               ))}
-            </ul>
+            </div>
           )}
-        </>
+        </div>
       )}
     </div>
   );
