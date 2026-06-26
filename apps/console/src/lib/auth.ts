@@ -1,4 +1,5 @@
-import { oidcClient, organizationClient } from "better-auth/client/plugins";
+import { ssoClient } from "@better-auth/sso/client";
+import { organizationClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 
 /**
@@ -9,7 +10,7 @@ import { createAuthClient } from "better-auth/react";
  */
 export const authClient = createAuthClient({
   basePath: "/api/auth",
-  plugins: [organizationClient(), oidcClient()],
+  plugins: [organizationClient(), ssoClient()],
 });
 
 export const { signIn, signOut, useSession } = authClient;

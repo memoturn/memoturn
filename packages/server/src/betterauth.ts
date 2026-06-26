@@ -1,17 +1,17 @@
+import { sso } from "@better-auth/sso";
 import { prisma } from "@memoturn/db";
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { createAccessControl } from "better-auth/plugins/access";
-import { oidcProvider } from "better-auth/plugins/oidc-provider";
 import { organization } from "better-auth/plugins/organization";
 import { adminAc, defaultStatements, memberAc, ownerAc } from "better-auth/plugins/organization/access";
 
 /**
- * Better Auth instance — email/password auth + the organization plugin (tenancy) on
- * the Prisma (Postgres) adapter. Lives in @memoturn/server so the API (handler +
- * session checks) and the seed script (server-side signup) share one configured
- * instance. Mounted at /auth/* by the API; the console reaches it via its dev proxy
- * (/api/auth/* -> /auth/*).
+ * Better Auth instance — email/password auth + the organization plugin (tenancy) + SSO
+ * (external OIDC/SAML identity providers) on the Prisma (Postgres) adapter. Lives in
+ * @memoturn/server so the API (handler + session checks) and the seed script
+ * (server-side signup) share one configured instance. Mounted at /auth/* by the API;
+ * the console reaches it via its dev proxy (/api/auth/* -> /auth/*).
  */
 
 // Four-role access model: owner/admin/member inherit the org plugin defaults; viewer is
@@ -33,8 +33,8 @@ export const auth = betterAuth({
   trustedOrigins: (process.env.AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000").split(","),
   advanced: { cookiePrefix: "memoturn" },
   plugins: [
-    // Make memoturn an OAuth2/OIDC provider ("Sign in with memoturn" for third parties).
-    oidcProvider({ loginPage: `${process.env.CONSOLE_URL ?? "http://localhost:3000"}/login` }),
+    // Let customers sign into memoturn with their own IdP (OIDC/SAML), mapped by email domain.
+    sso(),
     organization({
       ac,
       roles: orgRoles,

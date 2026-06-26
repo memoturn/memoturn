@@ -45,7 +45,7 @@ export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 | Feature | Effort | Notes |
 | --- | --- | --- |
 | ~~**Organizations**~~ | Done | Tenancy via the Better Auth organization plugin (org/member/invitation); projects scoped to an org, role-mapped to our RBAC, console org management. |
-| **SSO / social login** | M | Add OAuth/SAML providers to the auth layer (the auth library supports them; mostly config + UI). |
+| ~~**SSO**~~ | Done | Better Auth `@better-auth/sso` plugin (OIDC/SAML IdPs mapped by email domain → org); register/manage from the Organizations page. Full IdP sign-in needs a real provider. |
 | ~~**API rate limiting**~~ | Done | Per-project Redis fixed-window limiter on `/v1` (`RATE_LIMIT_PER_MINUTE`), 429 + `X-RateLimit-*`/`Retry-After`. |
 | **Worker health/metrics endpoint** | S | A small HTTP health/metrics surface on the worker for liveness + queue depth. |
 

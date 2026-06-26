@@ -99,9 +99,7 @@ model User {
   accounts          Account[]
   members           Member[]
   invitations       Invitation[]
-  oauthApplications OauthApplication[]
-  oauthAccessTokens OauthAccessToken[]
-  oauthConsents     OauthConsent[]
+  ssoProviders       SsoProvider[]
 
   @@map("user")
 }
@@ -151,62 +149,21 @@ model Verification {
   @@map("verification")
 }
 
-// ── OIDC provider (Better Auth oidc-provider plugin) ─────────────────────────────
-// memoturn acts as an OAuth2/OIDC provider: registered apps + issued tokens + consent.
-model OauthApplication {
-  id           String             @id @default(cuid())
-  name         String
-  icon         String?
-  metadata     String?
-  clientId     String             @unique
-  clientSecret String?
-  redirectUrls String
-  type         String
-  disabled     Boolean            @default(false)
-  userId       String?
-  user         User?              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
-  accessTokens OauthAccessToken[]
-  consents     OauthConsent[]
+// ── SSO (Better Auth @better-auth/sso plugin) ────────────────────────────────────
+// An external identity provider (OIDC or SAML) a customer's users authenticate with.
+// Mapped to an organization + email domain so domain users land in the right tenant.
+model SsoProvider {
+  id             String  @id @default(cuid())
+  issuer         String
+  oidcConfig     String?
+  samlConfig     String?
+  userId         String?
+  user           User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  providerId     String  @unique
+  organizationId String?
+  domain         String
 
-  @@index([userId])
-  @@map("oauthApplication")
-}
-
-model OauthAccessToken {
-  id                    String           @id @default(cuid())
-  accessToken           String           @unique
-  refreshToken          String?          @unique
-  accessTokenExpiresAt  DateTime
-  refreshTokenExpiresAt DateTime?
-  clientId              String
-  application           OauthApplication @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
-  userId                String?
-  user                  User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  scopes                String
-  createdAt             DateTime         @default(now())
-  updatedAt             DateTime         @updatedAt
-
-  @@index([clientId])
-  @@index([userId])
-  @@map("oauthAccessToken")
-}
-
-model OauthConsent {
-  id           String           @id @default(cuid())
-  clientId     String
-  application  OauthApplication @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
-  userId       String
-  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  scopes       String
-  consentGiven Boolean          @default(false)
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-
-  @@index([clientId])
-  @@index([userId])
-  @@map("oauthConsent")
+  @@map("ssoProvider")
 }
 
 // API keys are project scoped. The secret is hashed; the public key and a
