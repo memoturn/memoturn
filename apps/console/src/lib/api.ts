@@ -16,6 +16,7 @@ import type {
   DatasetDetail,
   DatasetListItem,
   Evaluator,
+  EvaluatorAnalytics,
   ExperimentComparison,
   MaskingPolicy,
   MetricsSummary,
@@ -25,12 +26,14 @@ import type {
   PromptDetail,
   PromptListItem,
   ProviderConnection,
+  ReviewAnalytics,
   ReviewItemsResponse,
   ReviewQueue,
   SavedView,
   ScheduledExport,
   ScheduledExportResult,
   ScoreConfig,
+  ScoreCorrected,
   SessionSummary,
   TraceDetail,
   TraceSummary,
@@ -80,6 +83,16 @@ async function del<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function patch<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "PATCH",
+    headers: headers({ "content-type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  return res.json() as Promise<T>;
+}
+
 function qs(params: Record<string, unknown>): string {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -114,6 +127,8 @@ export const api = {
   getTrace: (id: string) => get<TraceDetail>(`/v1/traces/${encodeURIComponent(id)}`),
   batchTraces: (body: { action: string; traceIds: string[]; datasetName?: string; queueName?: string }) =>
     post<{ action: string; affected: number }>(`/v1/traces/batch`, body),
+  replayTrace: (id: string, body: { provider?: string; model?: string } = {}) =>
+    post<PlaygroundResponse>(`/v1/traces/${encodeURIComponent(id)}/replay`, body),
   getMetrics: (days = 30) => get<MetricsSummary>(`/v1/metrics${qs({ days })}`),
   listPrompts: () => get<{ data: PromptListItem[] }>(`/v1/prompts`).then((r) => r.data),
   getPrompt: (name: string) => get<PromptDetail>(`/v1/prompts/${encodeURIComponent(name)}/detail`),
@@ -149,7 +164,8 @@ export const api = {
     post<ScheduledExport>(`/v1/scheduled-exports`, body),
   runScheduledExport: () => post<ScheduledExportResult>(`/v1/scheduled-exports/run`, {}),
   listWebhooks: () => get<{ data: Webhook[] }>(`/v1/webhooks`).then((r) => r.data),
-  createWebhook: (body: { url: string; event?: string; threshold?: number | null }) => post(`/v1/webhooks`, body),
+  createWebhook: (body: { url: string; event?: string; threshold?: number | null }) =>
+    post<Webhook>(`/v1/webhooks`, body),
   deleteWebhook: (id: string) => del(`/v1/webhooks/${encodeURIComponent(id)}`),
   listAutomations: () => get<{ data: Automation[] }>(`/v1/automations`).then((r) => r.data),
   createAutomation: (body: {
@@ -174,6 +190,9 @@ export const api = {
     max?: number | null;
   }) => post(`/v1/score-configs`, body),
   deleteScoreConfig: (id: string) => del(`/v1/score-configs/${encodeURIComponent(id)}`),
+  correctScore: (id: string, body: { value?: number; stringValue?: string; comment?: string }) =>
+    patch<ScoreCorrected>(`/v1/scores/${encodeURIComponent(id)}`, body),
+  deleteScore: (id: string) => del<{ deleted: boolean }>(`/v1/scores/${encodeURIComponent(id)}`),
   listSavedViews: (table = "traces") =>
     get<{ data: SavedView[] }>(`/v1/saved-views${qs({ table })}`).then((r) => r.data),
   createSavedView: (body: { name: string; table?: string; filters: Record<string, unknown> }) =>
@@ -189,6 +208,7 @@ export const api = {
     post(`/v1/widgets`, body),
   deleteWidget: (id: string) => del(`/v1/widgets/${encodeURIComponent(id)}`),
   listEvaluators: () => get<{ data: Evaluator[] }>(`/v1/evaluators`).then((r) => r.data),
+  getEvaluatorAnalytics: (days = 30) => get<EvaluatorAnalytics>(`/v1/evaluators/analytics${qs({ days })}`),
   createEvaluator: (body: {
     name: string;
     prompt: string;
@@ -202,6 +222,7 @@ export const api = {
   listProjects: () => get<{ data: Project[] }>(`/v1/projects`).then((r) => r.data),
   listAuditLogs: () => get<{ data: AuditEntry[] }>(`/v1/audit-logs`).then((r) => r.data),
   listReviewQueues: () => get<{ data: ReviewQueue[] }>(`/v1/review-queues`).then((r) => r.data),
+  getReviewAnalytics: () => get<ReviewAnalytics>(`/v1/review-queues/analytics`),
   createReviewQueue: (body: { name: string; scoreName: string; dataType?: string; description?: string }) =>
     post(`/v1/review-queues`, body),
   addReviewItems: (name: string, traceIds: string[]) =>
@@ -247,15 +268,16 @@ export async function streamPlayground(body: PlaygroundRequest, onDelta: (delta:
   }
 }
 
-/** Download the traces export (NDJSON) for the active project via an object URL. */
-export async function downloadTracesExport(): Promise<void> {
-  const res = await fetch(`${API_BASE}/v1/exports/traces`, { headers: headers() });
+/** Download the traces export for the active project via an object URL (NDJSON or CSV). */
+export async function downloadTracesExport(format: "jsonl" | "csv" = "jsonl"): Promise<void> {
+  const qs = format === "csv" ? "?format=csv" : "";
+  const res = await fetch(`${API_BASE}/v1/exports/traces${qs}`, { headers: headers() });
   if (!res.ok) throw new Error(`export failed: ${res.status}`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "memoturn-traces.jsonl";
+  a.download = `memoturn-traces.${format}`;
   a.click();
   URL.revokeObjectURL(url);
 }

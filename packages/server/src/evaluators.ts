@@ -1,5 +1,7 @@
+import type { EvaluatorAnalytics } from "@memoturn/contracts";
 import { isoNow, newId } from "@memoturn/core";
 import { prisma } from "@memoturn/db";
+import { clickhouse } from "@memoturn/db/clickhouse";
 import { generate, type Provider } from "@memoturn/llm";
 import { submitBatch } from "./ingest.js";
 import { resolveProviderKey } from "./providers.js";
@@ -60,6 +62,66 @@ export async function listEvaluators(projectId: string) {
 /** Online evaluators for a project (run automatically on sampled incoming traces). */
 export async function listOnlineEvaluators(projectId: string) {
   return prisma.evaluator.findMany({ where: { projectId, online: true } });
+}
+
+/**
+ * Score trends for EVAL-sourced scores (evaluator output) over the last `days`.
+ * Reads `scores FINAL` (ReplacingMergeTree de-dup) and returns a per-evaluator
+ * summary plus a daily trend. ClickHouse count()/avg() come back as strings in
+ * JSONEachRow, so coerce with Number().
+ */
+export async function getEvaluatorAnalytics(projectId: string, days = 30): Promise<EvaluatorAnalytics> {
+  const ch = clickhouse();
+
+  const summaryRs = await ch.query({
+    query: `
+      SELECT
+        name,
+        count() AS count,
+        avg(value) AS avgValue
+      FROM scores FINAL
+      WHERE project_id = {projectId:String}
+        AND source = 'EVAL'
+        AND timestamp >= now() - toIntervalDay({days:UInt32})
+        AND value IS NOT NULL
+      GROUP BY name
+      ORDER BY count DESC
+    `,
+    query_params: { projectId, days },
+    format: "JSONEachRow",
+  });
+  const summaryRows = await summaryRs.json<{ name: string; count: string; avgValue: string }>();
+
+  const trendRs = await ch.query({
+    query: `
+      SELECT
+        toString(toDate(timestamp)) AS date,
+        name,
+        count() AS count,
+        avg(value) AS avgValue
+      FROM scores FINAL
+      WHERE project_id = {projectId:String}
+        AND source = 'EVAL'
+        AND timestamp >= now() - toIntervalDay({days:UInt32})
+        AND value IS NOT NULL
+      GROUP BY date, name
+      ORDER BY date ASC, name ASC
+    `,
+    query_params: { projectId, days },
+    format: "JSONEachRow",
+  });
+  const trendRows = await trendRs.json<{ date: string; name: string; count: string; avgValue: string }>();
+
+  return {
+    days,
+    summary: summaryRows.map((r) => ({ name: r.name, count: Number(r.count), avgValue: Number(r.avgValue) })),
+    trend: trendRows.map((r) => ({
+      date: r.date,
+      name: r.name,
+      count: Number(r.count),
+      avgValue: Number(r.avgValue),
+    })),
+  };
 }
 
 export interface RunEvaluatorInput {

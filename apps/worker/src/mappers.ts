@@ -1,4 +1,4 @@
-import { computeCost, type IngestEvent, type ModelPrice, providerForModel } from "@memoturn/core";
+import { clampTokens, computeCost, type IngestEvent, type ModelPrice, providerForModel } from "@memoturn/core";
 
 /**
  * Maps validated ingest events into ClickHouse row shapes. Multiple events for the
@@ -162,9 +162,9 @@ export function mapEvents(projectId: string, events: IngestEvent[], priceOverrid
 
   const observations: ObservationRow[] = [...obsAcc.values()].map(({ body, type, event_ts }) => {
     const b = body as Record<string, any>;
-    const promptTokens = b.usage?.promptTokens ?? 0;
-    const completionTokens = b.usage?.completionTokens ?? 0;
-    const totalTokens = b.usage?.totalTokens ?? promptTokens + completionTokens;
+    const promptTokens = clampTokens(b.usage?.promptTokens);
+    const completionTokens = clampTokens(b.usage?.completionTokens);
+    const totalTokens = clampTokens(b.usage?.totalTokens ?? promptTokens + completionTokens);
     const cost = computeCost(b.model, promptTokens, completionTokens, priceOverrides);
     return {
       id: b.id,

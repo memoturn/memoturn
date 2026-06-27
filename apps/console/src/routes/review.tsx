@@ -3,7 +3,7 @@ import type { ReviewItem, ReviewQueue, ScoreConfig } from "@memoturn/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
-import { ArrowRight, ClipboardList, UserCheck } from "lucide-react";
+import { ArrowRight, CheckCircle2, ClipboardList, Hourglass, ListChecks, SkipForward, UserCheck } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ import { DataTable } from "../components/data-table";
 import { EmptyState } from "../components/empty-state";
 import { KindBadge } from "../components/kind-badge";
 import { PageHeader } from "../components/page-header";
+import { StatTile } from "../components/stat-tile";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Checkbox } from "../components/ui/checkbox";
@@ -153,6 +154,10 @@ function ReviewPage() {
   const { data: session } = useSession();
   const myId = session?.user.id;
   const { data: queues } = useQuery({ queryKey: ["review-queues"], queryFn: () => api.listReviewQueues() });
+  const { data: throughput } = useQuery({
+    queryKey: ["review-analytics"],
+    queryFn: () => api.getReviewAnalytics(),
+  });
   const [selected, setSelected] = useState<string | null>(null);
   const [mineOnly, setMineOnly] = useState(false);
 
@@ -196,6 +201,46 @@ function ReviewPage() {
         title="Review queues"
         description="Human-in-the-loop annotation. Submitting a review writes an ANNOTATION score on the trace."
       />
+
+      {throughput && throughput.totals.total > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold tracking-tight">Throughput</h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatTile label="Total items" value={throughput.totals.total} icon={ListChecks} />
+            <StatTile label="Pending" value={throughput.totals.pending} icon={Hourglass} />
+            <StatTile label="Done" value={throughput.totals.done} icon={CheckCircle2} />
+            <StatTile label="Skipped" value={throughput.totals.skipped} icon={SkipForward} />
+          </div>
+          {throughput.queues.length > 0 && (
+            <Card>
+              <CardContent>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-muted-foreground">
+                      <th className="py-2 font-medium">Queue</th>
+                      <th className="py-2 text-right font-medium">Pending</th>
+                      <th className="py-2 text-right font-medium">Done</th>
+                      <th className="py-2 text-right font-medium">Skipped</th>
+                      <th className="py-2 text-right font-medium">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {throughput.queues.map((q) => (
+                      <tr key={q.queueName} className="border-b last:border-0">
+                        <td className="py-2 font-medium">{q.queueName}</td>
+                        <td className="py-2 text-right tabular-nums">{q.pending}</td>
+                        <td className="py-2 text-right tabular-nums">{q.done}</td>
+                        <td className="py-2 text-right tabular-nums">{q.skipped}</td>
+                        <td className="py-2 text-right tabular-nums">{q.total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
 
       <Card>
         <CardHeader>

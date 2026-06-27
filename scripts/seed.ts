@@ -3,14 +3,33 @@
  * (pk-mt-dev / sk-mt-dev) so the SDK + examples work out of the box. Idempotent.
  *
  * Run with: pnpm seed
+ *
+ * SAFETY: refuses to run when NODE_ENV=production unless ALLOW_SEED=1 — the dev
+ * credentials below are public knowledge, so seeding them into a production database
+ * would create a trivially-compromised admin + API key. When explicitly allowed in
+ * production it generates RANDOM credentials (overridable via SEED_ADMIN_EMAIL /
+ * SEED_ADMIN_PASSWORD) and prints them once.
  */
+import { randomBytes } from "node:crypto";
 import { hashSecret, prisma } from "@memoturn/db";
 import { auth } from "@memoturn/server";
 
-const DEV_PUBLIC_KEY = "pk-mt-dev";
-const DEV_SECRET_KEY = "sk-mt-dev";
-const DEV_EMAIL = "admin@memoturn.dev";
-const DEV_PASSWORD = "memoturn-dev-123";
+const isProd = process.env.NODE_ENV === "production";
+if (isProd && process.env.ALLOW_SEED !== "1") {
+  console.error(
+    "Refusing to seed in production. The default credentials are public. " +
+      "Set ALLOW_SEED=1 to bootstrap with randomly generated credentials.",
+  );
+  process.exit(1);
+}
+
+const rand = () => randomBytes(18).toString("base64url");
+
+// Dev defaults are used in non-production; production (ALLOW_SEED=1) gets random secrets.
+const DEV_PUBLIC_KEY = isProd ? `pk-mt-${rand()}` : "pk-mt-dev";
+const DEV_SECRET_KEY = isProd ? `sk-mt-${rand()}` : "sk-mt-dev";
+const DEV_EMAIL = process.env.SEED_ADMIN_EMAIL ?? "admin@memoturn.dev";
+const DEV_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? (isProd ? rand() : "memoturn-dev-123");
 
 async function main() {
   const org = await prisma.organization.upsert({

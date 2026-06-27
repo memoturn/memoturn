@@ -2,6 +2,7 @@ import { isoNow, newId } from "@memoturn/core";
 import { type ChatMessage, generate, generateStream, type Provider, type ToolDef } from "@memoturn/llm";
 import { submitBatch } from "./ingest.js";
 import { resolveProviderKey } from "./providers.js";
+import { getTrace } from "./traces.js";
 
 /**
  * Playground: resolve the project's provider key and run a one-shot chat completion
@@ -68,6 +69,56 @@ export async function runPlayground(projectId: string, input: PlaygroundInput, o
   });
 
   return { ...result, traceId };
+}
+
+/**
+ * Replay a stored trace through the LLM gateway and record the result as a new trace
+ * (environment "playground"). Input messages are derived from the stored trace input:
+ * - JSON array of {role, content} → used directly
+ * - JSON object with a .messages array → that array is used
+ * - Anything else → wrapped as a single user message
+ * Provider/model fall back to "mock" / "mock-gpt-4o" when no overrides are given so the
+ * replay always works without needing provider keys configured.
+ * Returns null when the trace doesn't exist.
+ */
+export async function replayTrace(
+  projectId: string,
+  traceId: string,
+  overrides: { provider?: string; model?: string } = {},
+) {
+  const trace = await getTrace(projectId, traceId);
+  if (!trace) return null;
+
+  let messages: ChatMessage[] = [];
+  const raw = trace.input ?? "";
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      Array.isArray(parsed) &&
+      parsed.every((m) => m !== null && typeof m === "object" && "role" in m && "content" in m)
+    ) {
+      // [{role, content}, ...]
+      messages = parsed as ChatMessage[];
+    } else if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      Array.isArray((parsed as Record<string, unknown>).messages)
+    ) {
+      // {messages: [{role, content}, ...], ...}
+      messages = (parsed as { messages: ChatMessage[] }).messages;
+    } else {
+      messages = [{ role: "user", content: raw || "(empty input)" }];
+    }
+  } catch {
+    messages = [{ role: "user", content: raw || "(empty input)" }];
+  }
+
+  const provider = (overrides.provider ?? "mock") as Provider;
+  const model = overrides.model ?? "mock-gpt-4o";
+
+  return runPlayground(projectId, { provider, model, messages });
 }
 
 /** Streaming playground — yields text deltas (no trace recording). */

@@ -264,6 +264,7 @@ function SettingsPage() {
   });
 
   // ── Webhooks ──────────────────────────────────────────────────────────────
+  const [newWebhookSecret, setNewWebhookSecret] = useState<string | null>(null);
   const { data: webhooks } = useQuery({ queryKey: ["webhooks"], queryFn: () => api.listWebhooks() });
   const webhookForm = useForm<WebhookForm>({
     resolver: zodResolver(webhookSchema),
@@ -276,8 +277,9 @@ function SettingsPage() {
         event: "score.created",
         threshold: v.threshold === "" ? null : Number(v.threshold),
       }),
-    onSuccess: () => {
-      toast.success("Webhook added");
+    onSuccess: (w) => {
+      if (w?.secret) setNewWebhookSecret(w.secret);
+      toast.success("Webhook added — copy the signing secret now");
       webhookForm.reset();
       qc.invalidateQueries({ queryKey: ["webhooks"] });
     },
@@ -299,6 +301,20 @@ function SettingsPage() {
       cell: ({ row }) => <KindBadge tone="blue">{row.original.event}</KindBadge>,
     },
     { accessorKey: "threshold", header: "Threshold", cell: ({ row }) => row.original.threshold ?? "—" },
+    {
+      id: "delivery",
+      header: "Last delivery",
+      cell: ({ row }) => {
+        const { lastStatus, lastAttemptAt, failureCount } = row.original;
+        if (!lastAttemptAt) return <span className="text-muted-foreground">never fired</span>;
+        const ok = lastStatus != null && lastStatus >= 200 && lastStatus < 300;
+        return (
+          <KindBadge tone={ok ? "green" : "red"}>
+            {ok ? `OK ${lastStatus}` : `fail ${lastStatus ?? "err"}${failureCount ? ` ×${failureCount}` : ""}`}
+          </KindBadge>
+        );
+      },
+    },
     {
       id: "actions",
       header: "",
@@ -1024,6 +1040,37 @@ function SettingsPage() {
               </Form>
             </CardContent>
           </Card>
+
+          {newWebhookSecret && (
+            <Card className="border-emerald-500/40">
+              <CardHeader>
+                <CardTitle className="text-base">Signing secret — copy it now, it won&apos;t be shown again</CardTitle>
+                <CardDescription>
+                  Verify deliveries: the <code>X-Memoturn-Signature</code> header is <code>sha256=</code> + HMAC-SHA256
+                  of <code>timestamp.body</code> keyed by this secret, where <code>timestamp</code> is the{" "}
+                  <code>X-Memoturn-Timestamp</code> header and <code>body</code> is the raw request body.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <pre className="overflow-auto rounded-md border bg-muted/50 p-3 text-xs">{newWebhookSecret}</pre>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(newWebhookSecret);
+                      toast.success("Copied to clipboard");
+                    }}
+                  >
+                    <Copy className="size-4" /> Copy
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setNewWebhookSecret(null)}>
+                    Dismiss
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {!webhooks || webhooks.length === 0 ? (
             <EmptyState

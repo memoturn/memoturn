@@ -24,16 +24,17 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 
 | Method | Path | Description |
 | --- | --- | --- |
-| POST | `/v1/ingest` | Batched events (`trace-create`, `span/generation-create/update`, `event-create`, `score-create`). Returns `207`. |
+| POST | `/v1/ingest` | Batched events (`trace-create`, `span/generation-create/update`, `event-create`, `score-create`). Returns `207`. Per-event `input`/`output`/`metadata` JSON capped at 1 MB (400 on oversize). Returns `429` when the per-project event rate limit (`INGEST_EVENTS_PER_MINUTE`) is exceeded; `Retry-After` header indicates when to retry. |
 | POST | `/v1/otel/v1/traces` | OpenTelemetry OTLP/HTTP (JSON) receiver; maps GenAI semconv spans. |
 
 ### Traces & sessions
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/v1/traces` | List; filters: `limit`, `userId`, `sessionId`, `environment`, `search`. |
+| GET | `/v1/traces` | List; filters: `limit`, `userId`, `sessionId`, `environment`, `search`, `tag`, `days`. |
 | POST | `/v1/traces/batch` | Bulk action on selected traces: `delete`, `add-to-dataset`, or `review`. |
 | GET | `/v1/traces/{id}` | Assembled trace: observations + scores. |
+| POST | `/v1/traces/{id}/replay` | Re-run a stored trace's input through the LLM gateway and record the result as a new trace. Body: `{ provider?, model? }`. Audited. |
 | GET | `/v1/sessions` | Sessions (traces grouped by `sessionId`). |
 | GET | `/v1/metrics` | Cost/token/latency rollups by day and model (`days` query). |
 
@@ -68,6 +69,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | Method | Path | Description |
 | --- | --- | --- |
 | GET / POST | `/v1/evaluators` | List / create (supports `online`, `samplingRate`, `filterName`). |
+| GET | `/v1/evaluators/analytics` | Per-evaluator EVAL score summary (avg, count) + daily trend (`days` query, default 30). |
 | POST | `/v1/evaluators/{name}/run` | Run over a trace's input/output → writes an `EVAL` score. |
 
 ### Review queues
@@ -75,6 +77,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | Method | Path | Description |
 | --- | --- | --- |
 | GET / POST | `/v1/review-queues` | List / create. |
+| GET | `/v1/review-queues/analytics` | Per-queue review throughput (pending/done/skipped totals). |
 | POST | `/v1/review-queues/{name}/items` | Enqueue traces. |
 | GET | `/v1/review-queues/{name}/items` | Pending items with trace input/output. |
 | POST | `/v1/review-queues/{name}/items/{itemId}/assign` | Assign an item to a user (empty `assigneeId` unassigns; defaults to self). |
@@ -94,6 +97,8 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | DELETE | `/v1/widgets/{id}` | Delete a dashboard widget. |
 | GET / POST | `/v1/score-configs` | List / create-update a score config. |
 | DELETE | `/v1/score-configs/{id}` | Delete a score config. |
+| PATCH | `/v1/scores/{id}` | Correct a score's `value`/`stringValue`/`comment` (inserts a replacement row; audited). |
+| DELETE | `/v1/scores/{id}` | Hard-delete a score (ClickHouse lightweight DELETE, project-scoped). |
 | GET / POST | `/v1/saved-views` | List / save a table view (named set of filters). |
 | DELETE | `/v1/saved-views/{id}` | Delete a saved view. |
 | GET / POST | `/v1/comments` | List comments on an object (trace/observation/session/prompt) / add one. |
@@ -101,11 +106,13 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 
 ### Webhooks & automations
 
+Webhook and automation target URLs are SSRF-validated on write: private IP ranges, loopback addresses, and cloud metadata endpoints are rejected with `400` (override with `ALLOW_PRIVATE_WEBHOOK_TARGETS=1` for dev/LAN). The same check runs again at dispatch time to guard against DNS rebinding. Webhook deliveries carry `X-Memoturn-Signature: sha256=<hmac>` (HMAC-SHA256 of `timestamp.body` using the webhook secret) and `X-Memoturn-Timestamp`; the `secret` is returned once on creation and never again.
+
 | Method | Path | Description |
 | --- | --- | --- |
-| GET / POST | `/v1/webhooks` | List / create a webhook (POSTs on an event; `score.created` supports a low-score threshold). |
+| GET / POST | `/v1/webhooks` | List (includes `lastStatus`/`lastError`/`lastAttemptAt`/`failureCount` delivery tracking) / create a webhook (POSTs on an event; `score.created` supports a low-score threshold). `secret` returned once on `201`. |
 | DELETE | `/v1/webhooks/{id}` | Delete a webhook. |
-| GET / POST | `/v1/automations` | List / create a trigger→action automation (trigger: `score.created`/`trace.created`/`eval.completed`; action: `webhook`/`slack`). |
+| GET / POST | `/v1/automations` | List / create a trigger→action automation (trigger: `score.created`/`trace.created`/`eval.completed`; action: `webhook`/`slack`). Target URL is SSRF-validated. |
 | DELETE | `/v1/automations/{id}` | Delete an automation. |
 
 ### Media / attachments
@@ -127,10 +134,11 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | POST | `/v1/retention/apply` | Apply retention now. |
 | GET / POST | `/v1/model-prices` | List / create-update custom model price overrides (matched by name pattern, override built-ins). |
 | DELETE | `/v1/model-prices/{id}` | Delete a model price override. |
+| GET | `/v1/exports/traces` | Download traces as NDJSON (`application/x-ndjson`, default) or CSV (`?format=csv`); params: `limit`, `environment`. |
 | GET / POST | `/v1/scheduled-exports` | Get / configure the recurring daily NDJSON export of traces to blob storage. |
 | POST | `/v1/scheduled-exports/run` | Run the export now and write the NDJSON to blob storage. |
 | GET / POST | `/v1/masking` | Get / configure the PII redaction policy (built-in + custom patterns) applied to trace input/output at ingest. |
-| GET / POST | `/v1/analytics-sink` | Get / configure forwarding of trace/score events to PostHog. |
+| GET / POST | `/v1/analytics-sink` | Get / configure forwarding of trace/score events to PostHog. POST `host` URL is SSRF-validated (400 on private/loopback targets). |
 | GET / POST | `/v1/api-keys` | List project API keys (public key + hint) / mint a new pair (secret returned once). |
 | DELETE | `/v1/api-keys/{id}` | Revoke an API key. |
 | GET | `/v1/health` | Liveness (no auth). |

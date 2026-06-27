@@ -1,5 +1,6 @@
 import { prisma } from "@memoturn/db";
 import { redisConnection } from "@memoturn/db/queue";
+import { isPublicUrl } from "./net.js";
 
 /**
  * Product-analytics sink: forward trace/score events to PostHog (capture API) so teams
@@ -77,8 +78,10 @@ export async function forwardEvent(
 ): Promise<boolean> {
   const sink = await loadSink(projectId);
   if (!sink?.enabled || sink.type !== "posthog" || !sink.apiKey) return false;
+  const captureUrl = `${sink.host.replace(/\/$/, "")}/capture/`;
+  if (!(await isPublicUrl(captureUrl))) return false; // SSRF re-check at dispatch
   try {
-    await fetch(`${sink.host.replace(/\/$/, "")}/capture/`, {
+    await fetch(captureUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({

@@ -32,7 +32,18 @@ export const auth = betterAuth({
   baseURL: process.env.AUTH_BASE_URL ?? `http://localhost:${process.env.API_PORT ?? 3001}`,
   secret: process.env.BETTER_AUTH_SECRET ?? "dev-only-change-me",
   trustedOrigins: (process.env.AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000").split(","),
-  advanced: { cookiePrefix: "memoturn" },
+  // 7-day sessions, refreshed at most daily.
+  session: { expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24 },
+  advanced: {
+    cookiePrefix: "memoturn",
+    // Secure cookies in production; httpOnly + SameSite=Lax always (CSRF defense-in-depth).
+    useSecureCookies: process.env.NODE_ENV === "production",
+    defaultCookieAttributes: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    },
+  },
   plugins: [
     // Reject passwords found in known breaches at signup/change (k-anonymity HIBP check).
     haveIBeenPwned(),

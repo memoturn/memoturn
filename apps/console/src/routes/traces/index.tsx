@@ -128,9 +128,13 @@ function TracesPage() {
               <Save />
               Save view
             </Button>
-            <Button variant="outline" size="sm" onClick={() => void downloadTracesExport()} className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => void downloadTracesExport("jsonl")} className="gap-2">
               <Download />
               Export JSONL
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => void downloadTracesExport("csv")} className="gap-2">
+              <Download />
+              Export CSV
             </Button>
           </>
         }

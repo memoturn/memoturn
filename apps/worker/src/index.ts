@@ -1,8 +1,9 @@
 import { createServer } from "node:http";
 import { QUEUE_NAMES, QUEUE_PREFIX } from "@memoturn/core";
 import { connectionOptions, getIngestQueue, type IngestJob } from "@memoturn/db/queue";
-import { applyAllRetention, runAllScheduledExports } from "@memoturn/server";
+import { applyAllRetention, runAllScheduledExports, validateRuntimeEnv, withLock } from "@memoturn/server";
 import { Queue, Worker } from "bullmq";
+import { logJson, snapshot } from "./metrics.js";
 import { processIngest } from "./processors/ingest.js";
 
 /**
@@ -10,7 +11,13 @@ import { processIngest } from "./processors/ingest.js";
  * Runs the ingest processor (+ online evaluations) and daily maintenance crons
  * (retention sweep + scheduled blob exports).
  */
+validateRuntimeEnv("worker");
 const concurrency = Number(process.env.WORKER_CONCURRENCY ?? 10);
+
+// Dead-letter queue: jobs that exhaust their retries land here (with the blob key) instead
+// of being discarded, so lost batches can be inspected and replayed.
+const DLQ_NAME = "ingest-dlq";
+const dlq = new Queue(DLQ_NAME, { connection: connectionOptions(), prefix: QUEUE_PREFIX });
 
 const ingestWorker = new Worker<IngestJob>(QUEUE_NAMES.ingest, processIngest, {
   connection: connectionOptions(),
@@ -19,7 +26,26 @@ const ingestWorker = new Worker<IngestJob>(QUEUE_NAMES.ingest, processIngest, {
 });
 
 ingestWorker.on("ready", () => console.log(`[worker] ingest ready (concurrency=${concurrency})`));
-ingestWorker.on("failed", (job, err) => console.error(`[worker] job ${job?.id} failed:`, err.message));
+ingestWorker.on("failed", async (job, err) => {
+  logJson("error", "ingest job failed", { jobId: job?.id, attemptsMade: job?.attemptsMade, error: err.message });
+  // Only DLQ after all retry attempts are exhausted.
+  const maxAttempts = job?.opts.attempts ?? 1;
+  if (job && job.attemptsMade >= maxAttempts) {
+    try {
+      await dlq.add(
+        "dead",
+        { ...job.data, error: err.message, failedAt: new Date().toISOString() },
+        { removeOnComplete: false, removeOnFail: false },
+      );
+      logJson("warn", "ingest job sent to DLQ", { jobId: job.id, blobKey: job.data.blobKey });
+    } catch (e) {
+      logJson("error", "failed to enqueue DLQ job", {
+        jobId: job.id,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+});
 
 // ── Daily maintenance crons (retention + scheduled exports) ──────────────────────
 const maintenanceQueue = new Queue(QUEUE_NAMES.export, {
@@ -30,13 +56,20 @@ const maintenanceWorker = new Worker(
   QUEUE_NAMES.export,
   async (job) => {
     if (job.name === "retention") {
-      const results = await applyAllRetention();
-      const total = results.reduce((n, r) => n + r.deletedTraces, 0);
-      console.log(`[retention] swept ${results.length} project(s), deleted ${total} traces`);
+      // Lock so two workers / a manual trigger can't sweep concurrently (racing deletes).
+      const ran = await withLock("retention", 30 * 60, async () => {
+        const results = await applyAllRetention();
+        const total = results.reduce((n, r) => n + r.deletedTraces, 0);
+        console.log(`[retention] swept ${results.length} project(s), deleted ${total} traces`);
+      });
+      if (ran === null) console.log("[retention] skipped — another run holds the lock");
     } else if (job.name === "export") {
-      const results = await runAllScheduledExports();
-      const total = results.reduce((n, r) => n + r.count, 0);
-      console.log(`[export] ran ${results.length} project export(s), wrote ${total} traces`);
+      const ran = await withLock("scheduled-export", 30 * 60, async () => {
+        const results = await runAllScheduledExports();
+        const total = results.reduce((n, r) => n + r.count, 0);
+        console.log(`[export] ran ${results.length} project export(s), wrote ${total} traces`);
+      });
+      if (ran === null) console.log("[export] skipped — another run holds the lock");
     }
   },
   { connection: connectionOptions(), prefix: QUEUE_PREFIX },
@@ -82,8 +115,20 @@ const healthServer = createServer(async (req, res) => {
     return;
   }
   if (path === "/metrics") {
-    const [ingest, maintenance] = await Promise.all([ingestQueue.getJobCounts(), maintenanceQueue.getJobCounts()]);
-    res.end(JSON.stringify({ concurrency, queues: { ingest, maintenance } }));
+    const [ingest, maintenance, dlqCounts] = await Promise.all([
+      ingestQueue.getJobCounts(),
+      maintenanceQueue.getJobCounts(),
+      dlq.getJobCounts(),
+    ]);
+    const dlqDepth = (dlqCounts.waiting ?? 0) + (dlqCounts.completed ?? 0) + (dlqCounts.failed ?? 0);
+    res.end(
+      JSON.stringify({
+        concurrency,
+        queues: { ingest, maintenance, dlq: dlqCounts },
+        dlqDepth,
+        metrics: snapshot(),
+      }),
+    );
     return;
   }
   res.statusCode = 404;
@@ -96,7 +141,7 @@ healthServer.listen(healthPort, () =>
 async function shutdown(signal: string) {
   console.log(`[worker] ${signal} received, draining…`);
   healthServer.close();
-  await Promise.all([ingestWorker.close(), maintenanceWorker.close()]);
+  await Promise.all([ingestWorker.close(), maintenanceWorker.close(), dlq.close()]);
   process.exit(0);
 }
 

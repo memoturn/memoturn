@@ -58,6 +58,10 @@ function EvaluatorsPage() {
   const qc = useQueryClient();
   const readOnly = useIsReadOnly();
   const { data: evaluators } = useQuery({ queryKey: ["evaluators"], queryFn: () => api.listEvaluators() });
+  const { data: analytics } = useQuery({
+    queryKey: ["evaluator-analytics"],
+    queryFn: () => api.getEvaluatorAnalytics(30),
+  });
 
   const form = useForm<EvaluatorForm>({
     resolver: zodResolver(evaluatorSchema),
@@ -206,6 +210,35 @@ function EvaluatorsPage() {
           </Form>
         </CardContent>
       </Card>
+
+      {analytics && analytics.summary.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Score trends</CardTitle>
+            <CardDescription>Average EVAL score and run count per evaluator over the last 30 days.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-muted-foreground">
+                  <th className="py-2 font-medium">Evaluator</th>
+                  <th className="py-2 text-right font-medium">Avg score</th>
+                  <th className="py-2 text-right font-medium">Scores</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analytics.summary.map((s) => (
+                  <tr key={s.name} className="border-b last:border-0">
+                    <td className="py-2 font-medium">{s.name}</td>
+                    <td className="py-2 text-right tabular-nums">{s.avgValue.toFixed(3)}</td>
+                    <td className="py-2 text-right tabular-nums">{s.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="space-y-3">
         <h2 className="text-lg font-semibold tracking-tight">Evaluators ({evaluators?.length ?? 0})</h2>

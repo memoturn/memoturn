@@ -29,12 +29,14 @@ export interface RetentionResult {
 export async function applyRetention(projectId: string, days: number): Promise<RetentionResult> {
   if (days <= 0) return { projectId, days, deletedTraces: 0 };
   const ch = clickhouse();
-  const cutoff = `now() - INTERVAL ${Math.floor(days)} DAY`;
+  // Parameterized cutoff (no string interpolation): now() - toIntervalDay({days:UInt32}).
+  const cutoff = "now() - toIntervalDay({days:UInt32})";
+  const params = { p: projectId, days: Math.floor(days) };
 
   const before = await ch
     .query({
       query: `SELECT count() AS c FROM traces FINAL WHERE project_id = {p:String} AND timestamp < ${cutoff}`,
-      query_params: { p: projectId },
+      query_params: params,
       format: "JSONEachRow",
     })
     .then((r) => r.json<{ c: string }>())
@@ -42,15 +44,15 @@ export async function applyRetention(projectId: string, days: number): Promise<R
 
   await ch.command({
     query: `DELETE FROM traces WHERE project_id = {p:String} AND timestamp < ${cutoff}`,
-    query_params: { p: projectId },
+    query_params: params,
   });
   await ch.command({
     query: `DELETE FROM observations WHERE project_id = {p:String} AND start_time < ${cutoff}`,
-    query_params: { p: projectId },
+    query_params: params,
   });
   await ch.command({
     query: `DELETE FROM scores WHERE project_id = {p:String} AND timestamp < ${cutoff}`,
-    query_params: { p: projectId },
+    query_params: params,
   });
 
   return { projectId, days, deletedTraces: before };

@@ -5,9 +5,12 @@ import {
   addDatasetItems,
   addReviewItems,
   applyRetention,
+  assertPublicUrl,
   assignReviewItem,
   auth,
   builtinModelPrices,
+  checkRateLimit,
+  correctScore,
   createApiKey,
   createAutomation,
   createComment,
@@ -26,20 +29,25 @@ import {
   deleteComment,
   deleteModelPrice,
   deleteSavedView,
+  deleteScore,
   deleteScoreConfig,
   deleteWebhook,
   deleteWidget,
+  exportTracesCsv,
   exportTracesJsonl,
   getAnalyticsSink,
   getDatasetComparison,
   getDatasetDetail,
+  getEvaluatorAnalytics,
   getMaskingPolicy,
   getMedia,
   getMetrics,
   getPromptDetail,
   getRetention,
+  getReviewAnalytics,
   getScheduledExport,
   getTrace,
+  ingestRateLimitConfig,
   listApiKeys,
   listAuditLogs,
   listAutomations,
@@ -61,6 +69,7 @@ import {
   otlpToEvents,
   recordAudit,
   recordRun,
+  replayTrace,
   resolvePrompt,
   revokeApiKey,
   runBatchAction,
@@ -77,6 +86,9 @@ import {
   submitReviewScore,
 } from "@memoturn/server";
 import { Scalar } from "@scalar/hono-api-reference";
+import { bodyLimit } from "hono/body-limit";
+import { cors } from "hono/cors";
+import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
 import { type AuthVars, denyIfReadOnly, requireAuth } from "./middleware/auth.js";
 import { rateLimit } from "./middleware/ratelimit.js";
@@ -89,6 +101,31 @@ import { rateLimit } from "./middleware/ratelimit.js";
 type Env = { Variables: AuthVars };
 
 export const app = new OpenAPIHono<Env>();
+
+// ── Global hardening middleware ──────────────────────────────────────────────────
+// Security headers (X-Frame-Options, nosniff, Referrer-Policy, HSTS, …). Defaults are
+// kept (no restrictive CSP) so the Scalar /docs UI keeps working.
+app.use("*", secureHeaders({ xFrameOptions: "DENY", referrerPolicy: "no-referrer" }));
+
+// CORS for the browser console: explicit trusted origins + credentials (cookie auth).
+const trustedOrigins = (process.env.AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+app.use("/v1/*", cors({ origin: trustedOrigins, credentials: true }));
+app.use("/auth/*", cors({ origin: trustedOrigins, credentials: true }));
+
+// Request body-size limits (memory-exhaustion DoS guard). Ingest/OTel/media accept large
+// payloads; everything else is capped at 1 MB. Exactly one limit applies per request.
+const LARGE_BODY_BYTES = 12 * 1024 * 1024;
+const DEFAULT_BODY_BYTES = 1 * 1024 * 1024;
+const largeBodyLimit = bodyLimit({ maxSize: LARGE_BODY_BYTES });
+const defaultBodyLimit = bodyLimit({ maxSize: DEFAULT_BODY_BYTES });
+app.use("/v1/*", (c, next) => {
+  const p = c.req.path;
+  const isLarge = p === "/v1/ingest" || p.startsWith("/v1/otel") || p.startsWith("/v1/media");
+  return (isLarge ? largeBodyLimit : defaultBodyLimit)(c, next);
+});
 
 // ── Better Auth: dashboard auth routes (email/password, sessions) ────────────────
 app.on(["GET", "POST"], "/auth/*", (c) => auth.handler(c.req.raw));
@@ -142,6 +179,8 @@ app.use("/v1/analytics-sink", requireAuth);
 app.use("/v1/api-keys", requireAuth);
 app.use("/v1/api-keys/*", requireAuth);
 app.use("/v1/masking", requireAuth);
+app.use("/v1/scores", requireAuth);
+app.use("/v1/scores/*", requireAuth);
 
 // Per-project rate limiting runs after auth (projectId is set) on every /v1 route.
 app.use("/v1/*", rateLimit);
@@ -206,6 +245,14 @@ app.get("/v1/exports/traces", async (c) => {
   const url = new URL(c.req.url);
   const limit = Number(url.searchParams.get("limit") ?? 1000);
   const environment = url.searchParams.get("environment") || undefined;
+  const format = url.searchParams.get("format") === "csv" ? "csv" : "jsonl";
+  if (format === "csv") {
+    const body = await exportTracesCsv(c.get("projectId"), { limit, environment });
+    return c.body(body, 200, {
+      "content-type": "text/csv",
+      "content-disposition": "attachment; filename=memoturn-traces.csv",
+    });
+  }
   const body = await exportTracesJsonl(c.get("projectId"), { limit, environment });
   return c.body(body, 200, {
     "content-type": "application/x-ndjson",
@@ -252,12 +299,22 @@ app.openapi(
       },
       400: { description: "Invalid batch" },
       401: { description: "Unauthorized" },
+      429: { description: "Event rate limit exceeded" },
     },
   }),
   async (c) => {
     const json = await c.req.json().catch(() => null);
     const parsed = ingestRequest.safeParse(json);
     if (!parsed.success) return c.json({ error: "invalid batch", details: z.flattenError(parsed.error) }, 400);
+
+    // Event-volume rate limit (separate budget from the per-request limit): a single POST
+    // can carry up to 1000 events, so meter the actual event count.
+    const { limit: evLimit, window: evWindow } = ingestRateLimitConfig();
+    const ev = await checkRateLimit(`ingest-events:${c.get("projectId")}`, evLimit, evWindow, parsed.data.batch.length);
+    if (!ev.allowed) {
+      c.header("Retry-After", String(ev.resetSeconds));
+      return c.json({ error: "ingest event rate limit exceeded", limit: ev.limit, retryAfter: ev.resetSeconds }, 429);
+    }
 
     await submitBatch(c.get("projectId"), parsed.data);
     const successes = parsed.data.batch.map((e) => ({ id: e.id, status: 201 }));
@@ -424,6 +481,50 @@ app.openapi(
     const trace = await getTrace(c.get("projectId"), c.req.valid("param").id);
     if (!trace) return c.json({ error: "not found" }, 404);
     return c.json(trace);
+  },
+);
+
+// ── Replay a trace through the LLM gateway ───────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/traces/{id}/replay",
+    summary: "Re-run a stored trace's input through the LLM gateway and record the result as a new trace",
+    tags: ["traces"],
+    security,
+    request: {
+      params: z.object({ id: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              provider: z.string().optional(),
+              model: z.string().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Replay result", content: { "application/json": { schema: C.playgroundResponse } } },
+      400: { description: "Gateway error" },
+      403: { description: "Forbidden" },
+      404: { description: "Trace not found" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const id = c.req.valid("param").id;
+    const body = c.req.valid("json");
+    try {
+      const result = await replayTrace(c.get("projectId"), id, body);
+      if (!result) return c.json({ error: "trace not found" }, 404);
+      await recordAudit(c.get("projectId"), c.get("actor"), "trace.replay", `trace:${id}`);
+      return c.json(result, 200);
+    } catch (err) {
+      return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+    }
   },
 );
 
@@ -818,6 +919,26 @@ app.openapi(
   async (c) => c.json({ data: await listEvaluators(c.get("projectId")) }),
 );
 
+// Static `/analytics` path — registered before any `/v1/evaluators/{name}/...`
+// param route so it is never shadowed by a path-param match.
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/evaluators/analytics",
+    summary: "Evaluator score trends (per-evaluator avg + count, plus daily trend)",
+    tags: ["evaluators"],
+    security,
+    request: { query: z.object({ days: z.coerce.number().int().min(1).max(365).optional() }) },
+    responses: {
+      200: { description: "Evaluator analytics", content: { "application/json": { schema: C.evaluatorAnalytics } } },
+    },
+  }),
+  async (c) => {
+    const data = await getEvaluatorAnalytics(c.get("projectId"), c.req.valid("query").days ?? 30);
+    return c.json(data);
+  },
+);
+
 app.openapi(
   createRoute({
     method: "post",
@@ -947,6 +1068,22 @@ app.openapi(
     },
   }),
   async (c) => c.json({ data: await listReviewQueues(c.get("projectId")) }),
+);
+
+// Static `/analytics` path — registered before the `/v1/review-queues/{name}/...`
+// param routes so it resolves to this handler, not a queue-name match.
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/review-queues/analytics",
+    summary: "Review-queue throughput (per-queue pending/done/skipped totals)",
+    tags: ["review"],
+    security,
+    responses: {
+      200: { description: "Review analytics", content: { "application/json": { schema: C.reviewAnalytics } } },
+    },
+  }),
+  async (c) => c.json(await getReviewAnalytics(c.get("projectId"))),
 );
 
 app.openapi(
@@ -1212,6 +1349,7 @@ app.openapi(
     },
     responses: {
       201: { description: "Created", content: { "application/json": { schema: C.webhook.partial() } } },
+      400: { description: "Invalid or disallowed URL" },
       403: { description: "Forbidden" },
     },
   }),
@@ -1219,6 +1357,11 @@ app.openapi(
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
     const body = c.req.valid("json");
+    try {
+      await assertPublicUrl(body.url);
+    } catch {
+      return c.json({ error: "url must be a public https endpoint (private/loopback targets are blocked)" }, 400);
+    }
     const result = await createWebhook(c.get("projectId"), body);
     await recordAudit(c.get("projectId"), c.get("actor"), "webhook.create", `webhook:${result.id}`, { url: body.url });
     return c.json(result, 201);
@@ -1388,6 +1531,68 @@ app.openapi(
     const id = c.req.valid("param").id;
     const result = await deleteScoreConfig(c.get("projectId"), id);
     await recordAudit(c.get("projectId"), c.get("actor"), "score-config.delete", id);
+    return c.json(result);
+  },
+);
+
+// ── Score correction / deletion ──────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "patch",
+    path: "/v1/scores/{id}",
+    summary: "Correct a score (insert a replacement row; ReplacingMergeTree keeps the latest event_ts)",
+    tags: ["evaluators"],
+    security,
+    request: {
+      params: z.object({ id: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              value: z.number().optional(),
+              stringValue: z.string().optional(),
+              comment: z.string().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Corrected score", content: { "application/json": { schema: C.scoreCorrected } } },
+      403: { description: "Forbidden" },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const id = c.req.valid("param").id;
+    const result = await correctScore(c.get("projectId"), id, c.req.valid("json"));
+    if (!result) return c.json({ error: "score not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "score.correct", `score:${id}`);
+    return c.json(result);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/scores/{id}",
+    summary: "Hard-delete a score (ClickHouse lightweight DELETE scoped to the active project)",
+    tags: ["evaluators"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Deleted", content: { "application/json": { schema: z.object({ deleted: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const id = c.req.valid("param").id;
+    const result = await deleteScore(c.get("projectId"), id);
+    await recordAudit(c.get("projectId"), c.get("actor"), "score.delete", `score:${id}`);
     return c.json(result);
   },
 );
@@ -1721,6 +1926,7 @@ app.openapi(
     },
     responses: {
       201: { description: "Created", content: { "application/json": { schema: C.automation } } },
+      400: { description: "Invalid or disallowed target URL" },
       403: { description: "Forbidden" },
     },
   }),
@@ -1728,6 +1934,11 @@ app.openapi(
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
     const body = c.req.valid("json");
+    try {
+      await assertPublicUrl(body.target);
+    } catch {
+      return c.json({ error: "target must be a public https endpoint (private/loopback targets are blocked)" }, 400);
+    }
     const result = await createAutomation(c.get("projectId"), body);
     await recordAudit(c.get("projectId"), c.get("actor"), "automation.create", `${result.trigger}->${result.action}`);
     return c.json(result, 201);
@@ -1791,6 +2002,7 @@ app.openapi(
     },
     responses: {
       200: { description: "Updated", content: { "application/json": { schema: C.analyticsSink } } },
+      400: { description: "Invalid or disallowed host URL" },
       403: { description: "Forbidden" },
     },
   }),
@@ -1798,6 +2010,13 @@ app.openapi(
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
     const body = c.req.valid("json");
+    if (body.host) {
+      try {
+        await assertPublicUrl(body.host);
+      } catch {
+        return c.json({ error: "host must be a public https endpoint (private/loopback targets are blocked)" }, 400);
+      }
+    }
     const result = await setAnalyticsSink(c.get("projectId"), body);
     await recordAudit(c.get("projectId"), c.get("actor"), "analytics-sink.set", `enabled:${result.enabled}`);
     return c.json(result);

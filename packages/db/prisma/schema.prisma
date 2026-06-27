@@ -380,7 +380,12 @@ model Webhook {
   event     String   @default("score.created")
   threshold Float?
   enabled   Boolean  @default(true)
-  createdAt DateTime @default(now())
+  secret        String    @default("")
+  lastStatus    Int?                  // HTTP status of the most recent delivery attempt (null = never fired)
+  lastError     String    @default("") // error message of the last failed attempt
+  lastAttemptAt DateTime?             // when the most recent delivery was attempted
+  failureCount  Int       @default(0) // consecutive failures since the last success
+  createdAt     DateTime  @default(now())
 
   @@index([projectId, event])
 }
