@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { putBlobObject } from "@memoturn/db/blob";
+import { getBlobBytes, putBlobObject } from "@memoturn/db/blob";
 
 /**
  * Large-payload offload. The ClickHouse schema documents that oversized input/output is
@@ -45,4 +45,21 @@ export async function offloadLargePayload(
     preview: serialized.slice(0, 512),
   };
   return marker;
+}
+
+/**
+ * Fetch a previously-offloaded payload by its blob key (or `memoturn-blob://` ref),
+ * scoped to the project. Keys are `payloads/<projectId>/…`, so a caller can only read its
+ * own project's payloads. Returns the raw serialized string, or null if missing/out-of-scope.
+ */
+export async function getOffloadedPayload(
+  projectId: string,
+  keyOrRef: string,
+  fetch: (key: string) => Promise<{ body: Uint8Array } | null> = getBlobBytes,
+): Promise<string | null> {
+  const key = keyOrRef.startsWith(PAYLOAD_REF_PREFIX) ? keyOrRef.slice(PAYLOAD_REF_PREFIX.length) : keyOrRef;
+  if (!key.startsWith(`payloads/${projectId}/`)) return null; // cross-project / malformed
+  const obj = await fetch(key);
+  if (!obj) return null;
+  return new TextDecoder().decode(obj.body);
 }

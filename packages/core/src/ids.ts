@@ -15,6 +15,7 @@ export function isoNow(d: Date = new Date()): string {
 export const QUEUE_PREFIX = "memoturn";
 export const QUEUE_NAMES = {
   ingest: "ingest",
+  ingestDlq: "ingest-dlq", // dead-letter for ingest jobs that exhaust retries
   eval: "eval",
   export: "export",
   automation: "automation",

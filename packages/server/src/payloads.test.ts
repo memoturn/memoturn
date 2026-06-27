@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getOffloadedPayload,
   MAX_INLINE_PAYLOAD_BYTES,
   offloadLargePayload,
   PAYLOAD_REF_PREFIX,
@@ -41,5 +42,32 @@ describe("offloadLargePayload", () => {
     const { store } = stub();
     expect(await offloadLargePayload("p", undefined, store)).toBeUndefined();
     expect(await offloadLargePayload("p", null, store)).toBeNull();
+  });
+});
+
+describe("getOffloadedPayload", () => {
+  const fetch = (key: string) =>
+    Promise.resolve(key === "payloads/proj1/2026/abc.json" ? { body: new TextEncoder().encode('{"v":1}') } : null);
+
+  it("returns the payload for an in-scope key (raw or memoturn-blob:// ref)", async () => {
+    expect(await getOffloadedPayload("proj1", "payloads/proj1/2026/abc.json", fetch)).toBe('{"v":1}');
+    expect(await getOffloadedPayload("proj1", `${PAYLOAD_REF_PREFIX}payloads/proj1/2026/abc.json`, fetch)).toBe(
+      '{"v":1}',
+    );
+  });
+
+  it("rejects a cross-project key without touching blob storage", async () => {
+    let touched = false;
+    const spy = (k: string) => {
+      touched = true;
+      return fetch(k);
+    };
+    // proj2 trying to read proj1's payload → null, and the fetch must not even run.
+    expect(await getOffloadedPayload("proj2", "payloads/proj1/2026/abc.json", spy)).toBeNull();
+    expect(touched).toBe(false);
+  });
+
+  it("returns null when the object is missing", async () => {
+    expect(await getOffloadedPayload("proj1", "payloads/proj1/2026/missing.json", fetch)).toBeNull();
   });
 });

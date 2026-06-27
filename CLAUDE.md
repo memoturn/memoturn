@@ -20,6 +20,7 @@ bun run infra:up / infra:down / infra:logs   # docker compose for PG/ClickHouse/
 bun run db:migrate   # prisma migrate deploy
 bun run db:clickhouse # apply ClickHouse migrations (infra/clickhouse)
 bun run seed         # seed organization/project/dev API key
+bun run dlq          # inspect the ingest dead-letter queue; `--replay` re-enqueues failed batches from blob
 ```
 
 Per-package: `bun --filter @memoturn/<name> <script>` (e.g. `bun --filter @memoturn/worker test`).

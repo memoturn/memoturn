@@ -123,6 +123,7 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | --- | --- | --- |
 | POST | `/v1/media` | Store a base64 data URI (`{ "dataUri": "data:<mime>;base64,…" }`). Returns `201` with `{ key, mimeType, url }`. |
 | GET | `/v1/media/{key}` | Fetch raw bytes back with the stored `content-type` (immutable, long-cache). `404` if the key isn't in the caller's project. |
+| GET | `/v1/payloads/{key}` | Fetch a large input/output payload that was offloaded to blob at ingest (> 256 KB). The trace stores a `{ "_truncated": true, "ref": "memoturn-blob://<key>", "preview": … }` marker; this returns the full serialized value. Project-scoped — `404` if the key isn't `payloads/<projectId>/…`. |
 
 ### Platform
 
