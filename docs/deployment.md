@@ -24,6 +24,40 @@ console is a static SPA — build it (`bun --filter @memoturn/console build`) an
 output behind any static host / CDN, with a reverse proxy routing `/api/*` to the API and
 SPA-fallback (rewrite unknown paths to `index.html`) for deep links.
 
+## Single-VM production (Docker Compose + Caddy)
+
+`infra/docker-compose.prod.yml` is a self-contained, HTTPS-terminated stack for one server:
+Caddy (auto Let's Encrypt) in front of the console + API + worker, plus self-hosted Postgres,
+ClickHouse, Valkey, and MinIO. Caddy is the only published port (80/443); everything else stays
+on the internal network. A one-shot `migrate` service runs the Prisma + ClickHouse migrations
+before the API/worker start.
+
+**Prerequisites:** a VM with Docker, a DNS A/AAAA record pointing at it, and ports 80+443 open.
+
+```bash
+cp .env.production.example .env          # set MEMOTURN_DOMAIN, ACME_EMAIL, and the secrets
+openssl rand -base64 48                  # generate each secret (BETTER_AUTH_SECRET, ENCRYPTION_KEY, passwords)
+bun run prod:up                          # docker compose -f infra/docker-compose.prod.yml --env-file .env up -d --build
+```
+
+Companion scripts: `bun run prod:ps` (status), `bun run prod:logs` (tail logs), `bun run prod:down` (stop).
+
+The compose file derives `AUTH_BASE_URL=https://DOMAIN/api` and `AUTH_TRUSTED_ORIGINS=https://DOMAIN`
+from `MEMOTURN_DOMAIN`; required secrets use `${VAR:?}` so a missing value aborts the command. Caddy
+routes `/api/*` to the API (prefix stripped, matching the dev Vite proxy) and everything else to the
+console SPA — so the console's default `VITE_API_BASE=/api` works unchanged.
+
+**First admin:** do **not** run `bun run seed` in production (it seeds the well-known dev key). Open
+`https://DOMAIN/`, sign up the first admin (Better Auth email/password) — the org plugin auto-provisions
+a default project — then mint an SDK API key from Settings. Point the SDK at `https://DOMAIN/api`.
+
+**Backups:** MinIO holds the replayable raw event log (the source of truth — ClickHouse can be rebuilt
+from it), so it is the highest priority; also `pg_dump` Postgres and snapshot/`clickhouse-backup`
+ClickHouse. All four persist to named volumes (`pgdata`, `chdata`, `redisdata`, `miniodata`).
+
+**Note:** a single VM has no HA. If volume or uptime needs grow, move to the Helm chart below with
+managed datastores.
+
 ## Kubernetes (Helm)
 
 For production, the chart at `infra/helm/memoturn` deploys the stateless API (behind an

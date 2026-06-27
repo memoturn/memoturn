@@ -1,0 +1,207 @@
+# Single-VM production stack — Caddy (TLS) + console + API + worker + all dependencies.
+#
+# Usage:
+#   cp .env.production.example .env   # then fill in MEMOTURN_DOMAIN, ACME_EMAIL, and secrets
+#   docker compose -f infra/docker-compose.prod.yml --env-file .env up -d --build
+#
+# Caddy is the ONLY publicly exposed service (80/443). It terminates TLS (auto Let's Encrypt
+# for MEMOTURN_DOMAIN) and routes `/api/*` -> the API (prefix stripped) and everything else ->
+# the console. The datastores and app services are reachable only on the internal compose
+# network. Required secrets use `${VAR:?message}` so a missing value fails the command loudly
+# instead of silently falling back to a dev default (which the API/worker would reject anyway —
+# see packages/server/src/env.ts).
+name: memoturn
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+      - console
+    environment:
+      MEMOTURN_DOMAIN: ${MEMOTURN_DOMAIN:?set MEMOTURN_DOMAIN in .env (the public hostname, e.g. memoturn.example.com)}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env (for Let's Encrypt cert notices)}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: memoturn
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: memoturn
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memoturn -d memoturn"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: memoturn
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env}
+      CLICKHOUSE_DB: memoturn
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes:
+      - chdata:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user $$CLICKHOUSE_USER --password $$CLICKHOUSE_PASSWORD --query 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--save", "60", "1"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${BLOB_ACCESS_KEY_ID:-memoturn}
+      MINIO_ROOT_PASSWORD: ${BLOB_SECRET_ACCESS_KEY:?set BLOB_SECRET_ACCESS_KEY in .env}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio-setup:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${BLOB_ACCESS_KEY_ID:-memoturn} ${BLOB_SECRET_ACCESS_KEY:?set BLOB_SECRET_ACCESS_KEY in .env} &&
+      mc mb --ignore-existing local/${BLOB_BUCKET:-memoturn};
+      "
+
+  # One-shot schema migration. Runs Prisma (Postgres) then the ClickHouse DDL, reading
+  # connection config from the injected env. Calls the ClickHouse script directly rather than
+  # `bun run db:clickhouse` to bypass that script's hardcoded `--env-file=../../.env` (no such
+  # file in the image). api/worker wait for this to complete successfully before starting.
+  migrate:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:?}@postgres:5432/memoturn?schema=public
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: memoturn
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?}
+      CLICKHOUSE_DB: memoturn
+    command: ["sh", "-c", "bun --filter @memoturn/db migrate && bun packages/db/src/migrate-clickhouse.ts"]
+
+  # Public API (Hono on Bun): /v1 ingest + OTel receiver + read API + /auth + OpenAPI.
+  # No host port — reached only through Caddy at https://DOMAIN/api.
+  api:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      postgres: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      API_PORT: "3001"
+      DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:?}@postgres:5432/memoturn?schema=public
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: memoturn
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?}
+      CLICKHOUSE_DB: memoturn
+      REDIS_URL: redis://redis:6379
+      BLOB_ENDPOINT: http://minio:9000
+      BLOB_REGION: us-east-1
+      BLOB_BUCKET: ${BLOB_BUCKET:-memoturn}
+      BLOB_ACCESS_KEY_ID: ${BLOB_ACCESS_KEY_ID:-memoturn}
+      BLOB_SECRET_ACCESS_KEY: ${BLOB_SECRET_ACCESS_KEY:?}
+      BLOB_FORCE_PATH_STYLE: "true"
+      # Auth / encryption — mandatory in production (env.ts refuses to boot without them).
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env (openssl rand -base64 48)}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (openssl rand -base64 48)}
+      AUTH_BASE_URL: https://${MEMOTURN_DOMAIN:?}/api
+      AUTH_TRUSTED_ORIGINS: https://${MEMOTURN_DOMAIN:?}
+      ALLOW_PRIVATE_WEBHOOK_TARGETS: ${ALLOW_PRIVATE_WEBHOOK_TARGETS:-0}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-0}
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/worker.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      postgres: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:?}@postgres:5432/memoturn?schema=public
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: memoturn
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?}
+      CLICKHOUSE_DB: memoturn
+      REDIS_URL: redis://redis:6379
+      BLOB_ENDPOINT: http://minio:9000
+      BLOB_REGION: us-east-1
+      BLOB_BUCKET: ${BLOB_BUCKET:-memoturn}
+      BLOB_ACCESS_KEY_ID: ${BLOB_ACCESS_KEY_ID:-memoturn}
+      BLOB_SECRET_ACCESS_KEY: ${BLOB_SECRET_ACCESS_KEY:?}
+      BLOB_FORCE_PATH_STYLE: "true"
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?}
+      AUTH_TRUSTED_ORIGINS: https://${MEMOTURN_DOMAIN:?}
+      ALLOW_PRIVATE_WEBHOOK_TARGETS: ${ALLOW_PRIVATE_WEBHOOK_TARGETS:-0}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-10}
+
+  # Console SPA (Vite preview). `--host 0.0.0.0` so Caddy can reach it across the container
+  # network (preview binds to localhost by default). Built with VITE_API_BASE=/api (image
+  # default), so the SPA calls same-origin /api/* which Caddy forwards to the API.
+  console:
+    build:
+      context: ..
+      dockerfile: docker/console.Dockerfile
+    restart: unless-stopped
+    command: ["bun", "--filter", "@memoturn/console", "preview", "--host", "0.0.0.0"]
+
+volumes:
+  pgdata:
+  chdata:
+  redisdata:
+  miniodata:
+  caddy_data:
+  caddy_config:
