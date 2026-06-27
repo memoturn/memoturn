@@ -1,0 +1,22 @@
+# memoturn reverse proxy — single public entrypoint for the single-VM production stack.
+# Caddy auto-provisions a TLS cert (Let's Encrypt) for MEMOTURN_DOMAIN. Requirements:
+#   - DNS A/AAAA record for MEMOTURN_DOMAIN points at this VM
+#   - ports 80 and 443 are reachable from the internet (ACME HTTP/TLS challenge)
+#
+# Routing mirrors the dev Vite proxy (apps/console/vite.config.ts): `/api/*` is forwarded to
+# the API with the `/api` prefix stripped (handle_path), so /api/v1/* -> /v1/* and
+# /api/auth/* -> /auth/*. Everything else serves the console SPA.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$MEMOTURN_DOMAIN} {
+	handle_path /api/* {
+		reverse_proxy api:3001
+	}
+
+	handle {
+		reverse_proxy console:3000
+	}
+}
