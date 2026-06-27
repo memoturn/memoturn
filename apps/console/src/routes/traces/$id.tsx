@@ -22,7 +22,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Skeleton } from "../../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { Textarea } from "../../components/ui/textarea";
-import { api, type ObservationDetail } from "../../lib/api";
+import { api, fetchOffloadedPayload, type ObservationDetail } from "../../lib/api";
 import { useIsReadOnly } from "../../lib/role";
 
 export const Route = createFileRoute("/traces/$id")({ component: TraceDetailPage });
@@ -50,6 +50,56 @@ function toneForSource(source: string): KindBadgeTone {
 }
 
 const PRE_CLASS = "overflow-auto border bg-muted/50 p-3 text-xs max-h-80";
+
+/** Parse a large-payload offload marker ({_truncated, ref, preview, bytes}), else null. */
+function truncatedMarker(raw: string): { ref: string; preview: string; bytes: number } | null {
+  if (!raw?.includes("_truncated")) return null;
+  try {
+    const v = JSON.parse(raw);
+    if (v && typeof v === "object" && v._truncated === true && typeof v.ref === "string") {
+      return { ref: v.ref, preview: String(v.preview ?? ""), bytes: Number(v.bytes ?? 0) };
+    }
+  } catch {
+    /* not a marker */
+  }
+  return null;
+}
+
+/**
+ * Render an input/output payload. If it was offloaded to blob at ingest (too large for
+ * ClickHouse), show the stored preview + a button to fetch the full value on demand.
+ */
+function PayloadView({ raw }: { raw: string }) {
+  const marker = truncatedMarker(raw);
+  const [full, setFull] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  if (!marker) return <pre className={PRE_CLASS}>{pretty(raw)}</pre>;
+  if (full !== null) return <pre className={PRE_CLASS}>{pretty(full)}</pre>;
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      setFull(await fetchOffloadedPayload(marker.ref));
+    } catch (e) {
+      toast.error(`Failed to load payload: ${String(e)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <pre className={PRE_CLASS}>{pretty(marker.preview)}…</pre>
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span>Truncated · {(marker.bytes / 1024).toFixed(0)} KB offloaded to blob</span>
+        <Button variant="outline" size="sm" disabled={loading} onClick={load}>
+          {loading ? "Loading…" : "Load full payload"}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 // ── Multimodal media: render attachments referenced in input/output ───────────────
 const MEDIA_BASE = import.meta.env.VITE_API_BASE ?? "/api";
@@ -274,8 +324,8 @@ function ObservationDetailItem({ obs }: { obs: ObservationDetail }) {
       <AccordionContent className="space-y-3">
         <MediaPreview raw={obs.input} />
         <MediaPreview raw={obs.output} />
-        {obs.input && <pre className={PRE_CLASS}>{pretty(obs.input)}</pre>}
-        {obs.output && <pre className={PRE_CLASS}>{pretty(obs.output)}</pre>}
+        {obs.input && <PayloadView raw={obs.input} />}
+        {obs.output && <PayloadView raw={obs.output} />}
         {obs.status_message && <pre className={PRE_CLASS}>{obs.status_message}</pre>}
       </AccordionContent>
     </AccordionItem>
@@ -390,6 +440,9 @@ function TraceDetailPage() {
           </dl>
           <MediaPreview raw={trace.input} />
           <MediaPreview raw={trace.output} />
+          {/* Surface truncated trace payloads (otherwise the Details card shows only metadata/media). */}
+          {truncatedMarker(trace.input) && <PayloadView raw={trace.input} />}
+          {truncatedMarker(trace.output) && <PayloadView raw={trace.output} />}
         </CardContent>
       </Card>
 

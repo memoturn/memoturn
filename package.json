@@ -35,6 +35,7 @@
     "db:migrate": "bun --filter @memoturn/db migrate",
     "db:clickhouse": "bun --filter @memoturn/db clickhouse:migrate",
     "seed": "bun --env-file=.env scripts/seed.ts",
+    "dlq": "bun --env-file=.env scripts/replay-dlq.ts",
     "quickstart": "bun --env-file=.env examples/quickstart.ts",
     "screenshots": "bun scripts/screenshots.ts",
     "docs:check": "bun scripts/check-doc-drift.ts",

@@ -42,6 +42,7 @@ import {
   getMaskingPolicy,
   getMedia,
   getMetrics,
+  getOffloadedPayload,
   getPromptDetail,
   getRetention,
   getReviewAnalytics,
@@ -175,6 +176,7 @@ app.use("/v1/automations", requireAuth);
 app.use("/v1/automations/*", requireAuth);
 app.use("/v1/media", requireAuth);
 app.use("/v1/media/*", requireAuth);
+app.use("/v1/payloads/*", requireAuth);
 app.use("/v1/analytics-sink", requireAuth);
 app.use("/v1/api-keys", requireAuth);
 app.use("/v1/api-keys/*", requireAuth);
@@ -238,6 +240,15 @@ app.get("/v1/media/*", async (c) => {
     "content-type": media.contentType,
     "cache-control": "private, max-age=31536000",
   });
+});
+
+// Fetch a large input/output payload that was offloaded to blob at ingest (the trace shows
+// a {_truncated, ref, preview} marker; the console resolves the full value through here).
+app.get("/v1/payloads/*", async (c) => {
+  const key = c.req.path.replace(/^\/v1\/payloads\//, "");
+  const body = await getOffloadedPayload(c.get("projectId"), key);
+  if (body === null) return c.json({ error: "not found" }, 404);
+  return c.body(body, 200, { "content-type": "application/json", "cache-control": "private, max-age=31536000" });
 });
 
 // Batch export (NDJSON download) — plain route so we can set a file download header.

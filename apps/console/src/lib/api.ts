@@ -281,3 +281,13 @@ export async function downloadTracesExport(format: "jsonl" | "csv" = "jsonl"): P
   a.click();
   URL.revokeObjectURL(url);
 }
+
+const BLOB_REF_PREFIX = "memoturn-blob://";
+
+/** Fetch a large input/output payload that was offloaded to blob at ingest (returns raw text). */
+export async function fetchOffloadedPayload(ref: string): Promise<string> {
+  const key = ref.startsWith(BLOB_REF_PREFIX) ? ref.slice(BLOB_REF_PREFIX.length) : ref;
+  const res = await fetch(`${API_BASE}/v1/payloads/${key}`, { headers: headers() });
+  if (!res.ok) throw new Error(`payload fetch failed: ${res.status}`);
+  return res.text();
+}

@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { QUEUE_NAMES, QUEUE_PREFIX } from "@memoturn/core";
-import { connectionOptions, getIngestQueue, type IngestJob } from "@memoturn/db/queue";
+import { connectionOptions, getDlqQueue, getIngestQueue, type IngestJob } from "@memoturn/db/queue";
 import { applyAllRetention, runAllScheduledExports, validateRuntimeEnv, withLock } from "@memoturn/server";
 import { Queue, Worker } from "bullmq";
 import { logJson, snapshot } from "./metrics.js";
@@ -16,8 +16,7 @@ const concurrency = Number(process.env.WORKER_CONCURRENCY ?? 10);
 
 // Dead-letter queue: jobs that exhaust their retries land here (with the blob key) instead
 // of being discarded, so lost batches can be inspected and replayed.
-const DLQ_NAME = "ingest-dlq";
-const dlq = new Queue(DLQ_NAME, { connection: connectionOptions(), prefix: QUEUE_PREFIX });
+const dlq = getDlqQueue();
 
 const ingestWorker = new Worker<IngestJob>(QUEUE_NAMES.ingest, processIngest, {
   connection: connectionOptions(),

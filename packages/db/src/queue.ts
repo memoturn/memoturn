@@ -28,6 +28,12 @@ export interface IngestJob {
   blobKey: string;
 }
 
+/** Dead-lettered ingest job — the original payload plus failure context. */
+export interface IngestDlqJob extends IngestJob {
+  error?: string;
+  failedAt?: string;
+}
+
 let ingestQueue: Queue<IngestJob> | undefined;
 
 export function getIngestQueue(): Queue<IngestJob> {
@@ -44,6 +50,19 @@ export function getIngestQueue(): Queue<IngestJob> {
     });
   }
   return ingestQueue;
+}
+
+let dlqQueue: Queue<IngestDlqJob> | undefined;
+
+/** Dead-letter queue for ingest batches that exhaust their retries (inspect/replay). */
+export function getDlqQueue(): Queue<IngestDlqJob> {
+  if (!dlqQueue) {
+    dlqQueue = new Queue<IngestDlqJob>(QUEUE_NAMES.ingestDlq, {
+      connection: connectionOptions(),
+      prefix: QUEUE_PREFIX,
+    });
+  }
+  return dlqQueue;
 }
 
 export type { ConnectionOptions };
