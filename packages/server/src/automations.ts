@@ -1,4 +1,5 @@
 import { prisma } from "@memoturn/db";
+import { isPublicUrl } from "./net.js";
 
 /**
  * Generalized trigger->action automations. A successful trigger (score.created,
@@ -108,6 +109,7 @@ export async function dispatchAutomations(projectId: string, event: string, payl
   await Promise.all(
     automations.map(async (a) => {
       if (!automationMatches(a, payload)) return;
+      if (!(await isPublicUrl(a.target))) return; // SSRF re-check at dispatch (DNS rebinding)
 
       const body =
         a.action === "slack"

@@ -1,0 +1,65 @@
+import { describe, expect, it } from "vitest";
+import { assertPublicUrl, isBlockedIp } from "./net.js";
+
+describe("isBlockedIp", () => {
+  it("blocks loopback, private, link-local and metadata addresses", () => {
+    for (const ip of [
+      "127.0.0.1",
+      "10.0.0.1",
+      "172.16.5.4",
+      "172.31.255.255",
+      "192.168.1.1",
+      "169.254.169.254", // cloud metadata
+      "0.0.0.0",
+      "::1",
+      "fc00::1",
+      "fd12:3456::1",
+      "fe80::1",
+      "::ffff:127.0.0.1", // IPv4-mapped loopback
+    ]) {
+      expect(isBlockedIp(ip), ip).toBe(true);
+    }
+  });
+
+  it("allows public addresses", () => {
+    for (const ip of ["8.8.8.8", "1.1.1.1", "203.0.113.7", "2606:4700:4700::1111"]) {
+      expect(isBlockedIp(ip), ip).toBe(false);
+    }
+  });
+});
+
+describe("assertPublicUrl (production policy)", () => {
+  // Force the strict policy regardless of the test runner's NODE_ENV.
+  const orig = { node: process.env.NODE_ENV, allow: process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS };
+  const strict = async <T>(fn: () => Promise<T>): Promise<T> => {
+    process.env.NODE_ENV = "production";
+    process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS = "0";
+    try {
+      return await fn();
+    } finally {
+      process.env.NODE_ENV = orig.node;
+      if (orig.allow === undefined) delete process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS;
+      else process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS = orig.allow;
+    }
+  };
+
+  it("rejects http://", async () => {
+    await strict(async () => {
+      await expect(assertPublicUrl("http://example.com/hook")).rejects.toThrow();
+    });
+  });
+
+  it("rejects literal private IPs", async () => {
+    await strict(async () => {
+      await expect(assertPublicUrl("https://127.0.0.1/x")).rejects.toThrow();
+      await expect(assertPublicUrl("https://169.254.169.254/latest/meta-data")).rejects.toThrow();
+      await expect(assertPublicUrl("https://10.1.2.3/x")).rejects.toThrow();
+    });
+  });
+
+  it("rejects malformed URLs", async () => {
+    await strict(async () => {
+      await expect(assertPublicUrl("not a url")).rejects.toThrow();
+    });
+  });
+});

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { compileModelPrices, computeCost, type ModelPriceOverride, providerForModel } from "./models.js";
+import {
+  clampTokens,
+  compileModelPrices,
+  computeCost,
+  MAX_EVENT_TOKENS,
+  type ModelPriceOverride,
+  providerForModel,
+} from "./models.js";
 
 describe("computeCost", () => {
   it("prices a known built-in model by token usage", () => {
@@ -26,6 +33,22 @@ describe("computeCost", () => {
     const overrides = compileModelPrices([{ pattern: "^claude-sonnet-4", inputPerMTok: 1, outputPerMTok: 2 }]);
     const cost = computeCost("claude-sonnet-4-5", 1_000_000, 0, overrides);
     expect(cost.inputCost).toBeCloseTo(1); // override, not the built-in 3
+  });
+});
+
+describe("clampTokens", () => {
+  it("clamps negatives to 0 and caps absurd counts", () => {
+    expect(clampTokens(-5)).toBe(0);
+    expect(clampTokens(undefined)).toBe(0);
+    expect(clampTokens(Number.NaN)).toBe(0);
+    expect(clampTokens(1_000)).toBe(1_000);
+    expect(clampTokens(MAX_EVENT_TOKENS + 1)).toBe(MAX_EVENT_TOKENS);
+  });
+
+  it("bounds cost so an absurd token count can't inflate billing", () => {
+    const cost = computeCost("claude-sonnet-4-5", 1e18, 0);
+    // input is capped at MAX_EVENT_TOKENS (10M) → 10 * 3/1M = 30
+    expect(cost.inputCost).toBeCloseTo((MAX_EVENT_TOKENS / 1_000_000) * 3);
   });
 });
 

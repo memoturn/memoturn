@@ -156,6 +156,13 @@ export const scoreRow = z.object({
 });
 export type ScoreRow = z.infer<typeof scoreRow>;
 
+/** Response from PATCH /v1/scores/{id} — the full corrected score row. */
+export const scoreCorrected = scoreRow.extend({
+  id: z.string(),
+  trace_id: z.string(),
+});
+export type ScoreCorrected = z.infer<typeof scoreCorrected>;
+
 export const traceDetail = traceSummary.extend({
   release: z.string(),
   version: z.string(),
@@ -205,6 +212,29 @@ export const metricsSummary = z.object({
   byModel: z.array(modelMetric),
 });
 export type MetricsSummary = z.infer<typeof metricsSummary>;
+
+// ── Evaluator analytics ────────────────────────────────────────────────────────
+export const evaluatorScoreSummary = z.object({
+  name: z.string(),
+  count: z.number(),
+  avgValue: z.number(),
+});
+export type EvaluatorScoreSummary = z.infer<typeof evaluatorScoreSummary>;
+
+export const evaluatorScoreTrend = z.object({
+  date: z.string(),
+  name: z.string(),
+  count: z.number(),
+  avgValue: z.number(),
+});
+export type EvaluatorScoreTrend = z.infer<typeof evaluatorScoreTrend>;
+
+export const evaluatorAnalytics = z.object({
+  days: z.number(),
+  summary: z.array(evaluatorScoreSummary),
+  trend: z.array(evaluatorScoreTrend),
+});
+export type EvaluatorAnalytics = z.infer<typeof evaluatorAnalytics>;
 
 // ── Prompts ──────────────────────────────────────────────────────────────────────
 export const promptChannel = z.object({ label: z.string(), version: z.number() });
@@ -366,6 +396,13 @@ export const webhook = z.object({
   threshold: z.number().nullable(),
   enabled: z.boolean(),
   createdAt: z.string(),
+  // Signing secret — returned ONLY in the create response, never when listing.
+  secret: z.string().optional(),
+  // Delivery tracking (present when listing; absent on the create response).
+  lastStatus: z.number().nullable().optional(),
+  lastError: z.string().optional(),
+  lastAttemptAt: z.string().nullable().optional(),
+  failureCount: z.number().optional(),
 });
 export type Webhook = z.infer<typeof webhook>;
 
@@ -397,6 +434,26 @@ export const reviewQueue = z.object({
   done: z.number(),
 });
 export type ReviewQueue = z.infer<typeof reviewQueue>;
+
+export const reviewQueueThroughput = z.object({
+  queueName: z.string(),
+  pending: z.number(),
+  done: z.number(),
+  skipped: z.number(),
+  total: z.number(),
+});
+export type ReviewQueueThroughput = z.infer<typeof reviewQueueThroughput>;
+
+export const reviewAnalytics = z.object({
+  queues: z.array(reviewQueueThroughput),
+  totals: z.object({
+    pending: z.number(),
+    done: z.number(),
+    skipped: z.number(),
+    total: z.number(),
+  }),
+});
+export type ReviewAnalytics = z.infer<typeof reviewAnalytics>;
 
 export const reviewItem = z.object({
   id: z.string(),

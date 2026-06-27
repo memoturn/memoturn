@@ -10,7 +10,7 @@ export interface ExportFilters {
   environment?: string;
 }
 
-export async function exportTracesJsonl(projectId: string, filters: ExportFilters = {}): Promise<string> {
+async function queryTraceRows(projectId: string, filters: ExportFilters = {}): Promise<Record<string, unknown>[]> {
   const { limit = 1000, environment } = filters;
   const conds = ["t.project_id = {projectId:String}"];
   const params: Record<string, unknown> = { projectId, limit };
@@ -42,6 +42,40 @@ export async function exportTracesJsonl(projectId: string, filters: ExportFilter
     format: "JSONEachRow",
   });
 
-  const rows = await rs.json<Record<string, unknown>>();
+  return rs.json<Record<string, unknown>>();
+}
+
+export async function exportTracesJsonl(projectId: string, filters: ExportFilters = {}): Promise<string> {
+  const rows = await queryTraceRows(projectId, filters);
   return rows.map((r) => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : "");
+}
+
+/** Quote a CSV field (RFC 4180): wrap in quotes and double any embedded quotes. */
+function csvField(v: unknown): string {
+  const s = v == null ? "" : typeof v === "string" ? v : JSON.stringify(v);
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+/** Export traces as CSV. Nested observations are summarized to a count (CSV is flat). */
+export async function exportTracesCsv(projectId: string, filters: ExportFilters = {}): Promise<string> {
+  const rows = await queryTraceRows(projectId, filters);
+  const cols = [
+    "id",
+    "name",
+    "timestamp",
+    "user_id",
+    "session_id",
+    "environment",
+    "observation_count",
+    "input",
+    "output",
+  ];
+  const header = cols.join(",");
+  const lines = rows.map((r) => {
+    const obs = Array.isArray(r.observations) ? r.observations.length : 0;
+    return [r.id, r.name, r.timestamp, r.user_id, r.session_id, r.environment, obs, r.input, r.output]
+      .map(csvField)
+      .join(",");
+  });
+  return [header, ...lines].join("\n") + (lines.length ? "\n" : "");
 }

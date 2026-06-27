@@ -3,7 +3,7 @@ name = "memoturn"
 version = "0.1.0"
 description = "memoturn Python SDK — tracing, @observe, OpenAI wrapper, prompts."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 keywords = ["memoturn", "llm", "observability", "tracing", "openai", "langchain", "evals", "opentelemetry"]
 dependencies = []
@@ -23,7 +23,7 @@ Issues = "https://github.com/memoturn/memoturn/issues"
 
 [project.optional-dependencies]
 openai = ["openai>=1.0"]
-dev = ["pytest>=8"]
+dev = ["pytest>=9.0.3"]
 
 [build-system]
 requires = ["hatchling"]

@@ -64,6 +64,18 @@ function priceTable(overrides?: ModelPrice[]): ModelPrice[] {
   return overrides?.length ? [...overrides, ...MODEL_PRICES] : MODEL_PRICES;
 }
 
+/**
+ * Sanity cap for per-event token counts. A buggy/malicious SDK reporting billions of
+ * tokens would inflate cost rollups and poison metrics, so values above this are clamped.
+ */
+export const MAX_EVENT_TOKENS = 10_000_000;
+
+/** Clamp a token count into [0, MAX_EVENT_TOKENS]; returns the clamped value. */
+export function clampTokens(n: number | undefined): number {
+  if (!Number.isFinite(n ?? 0)) return 0;
+  return Math.min(Math.max(0, Math.floor(n ?? 0)), MAX_EVENT_TOKENS);
+}
+
 export function computeCost(
   model: string | undefined,
   promptTokens = 0,
@@ -74,8 +86,10 @@ export function computeCost(
   if (!model) return zero;
   const price = priceTable(overrides).find((p) => p.match.test(model));
   if (!price) return zero;
-  const inputCost = (promptTokens / 1_000_000) * price.inputPerMTok;
-  const outputCost = (completionTokens / 1_000_000) * price.outputPerMTok;
+  const pt = clampTokens(promptTokens);
+  const ct = clampTokens(completionTokens);
+  const inputCost = (pt / 1_000_000) * price.inputPerMTok;
+  const outputCost = (ct / 1_000_000) * price.outputPerMTok;
   return { inputCost, outputCost, totalCost: inputCost + outputCost };
 }
 

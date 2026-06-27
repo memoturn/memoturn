@@ -8,6 +8,12 @@ import {
 } from "@memoturn/server";
 import type { Context, Next } from "hono";
 
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const TRUSTED_ORIGINS = (process.env.AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 export type AuthVars = {
   projectId: string;
   role: WorkspaceRole;
@@ -46,6 +52,16 @@ export async function requireAuth(c: Context<{ Variables: AuthVars }>, next: Nex
 
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session) return c.json({ error: "unauthorized" }, 401);
+
+  // CSRF defense-in-depth for cookie auth: reject cross-origin mutations from an untrusted
+  // Origin. SameSite=Lax already blocks most cross-site cookies; this closes the gap for
+  // browser-issued state changes. API-key auth (above) is exempt — it carries no cookie.
+  if (MUTATING_METHODS.has(c.req.method)) {
+    const origin = c.req.header("origin");
+    if (origin && !TRUSTED_ORIGINS.includes(origin)) {
+      return c.json({ error: "forbidden: untrusted origin" }, 403);
+    }
+  }
 
   const requested = c.req.header("x-memoturn-project") || undefined;
   const access = await getUserProjectAccess(session.user.id, requested, session.session.activeOrganizationId);

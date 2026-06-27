@@ -3,9 +3,23 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 /**
  * AES-256-GCM encryption for provider API keys at rest. The key is derived from
  * ENCRYPTION_KEY (any length) via SHA-256. Format: base64(iv).base64(tag).base64(ct).
+ *
+ * The key role is independent of BETTER_AUTH_SECRET — they must not be conflated, so a
+ * rotation of one doesn't silently re-key the other. In production ENCRYPTION_KEY is
+ * mandatory (boot-time validation in @memoturn/server also enforces this); the hardcoded
+ * fallback is development-only. Rotating ENCRYPTION_KEY invalidates all stored provider
+ * keys (they must be re-entered).
  */
+const DEV_ENCRYPTION_KEY = "memoturn-dev-encryption-key";
+
 function key(): Buffer {
-  const secret = process.env.ENCRYPTION_KEY ?? process.env.BETTER_AUTH_SECRET ?? "memoturn-dev-encryption-key";
+  const secret = process.env.ENCRYPTION_KEY;
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("ENCRYPTION_KEY is required in production to encrypt provider keys at rest");
+    }
+    return createHash("sha256").update(DEV_ENCRYPTION_KEY).digest();
+  }
   return createHash("sha256").update(secret).digest();
 }
 

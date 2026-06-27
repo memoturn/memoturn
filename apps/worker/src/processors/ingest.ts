@@ -11,11 +11,48 @@ import {
   listOnlineEvaluators,
   loadMaskingPolicy,
   loadProjectPriceOverrides,
+  offloadLargePayload,
   offloadMedia,
   runEvaluator,
 } from "@memoturn/server";
 import type { Job } from "bullmq";
 import { mapEvents } from "../mappers.js";
+import { inc, logJson, observeInsert } from "../metrics.js";
+
+/** True for errors worth retrying (rate limits / transient upstream failures). */
+function isTransient(err: unknown): boolean {
+  const m = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return /\b(429|5\d\d|timeout|timed out|econnreset|etimedout|temporarily|rate limit)\b/.test(m);
+}
+
+/** Run `fn` with a few backoff retries for transient errors only. */
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (!isTransient(err) || i === attempts - 1) throw err;
+      await new Promise((r) => setTimeout(r, 200 * 2 ** i));
+    }
+  }
+  throw lastErr;
+}
+
+/** Insert one ClickHouse table in isolation, recording metrics; throws on failure. */
+async function insertTable(table: string, values: unknown[]): Promise<void> {
+  if (values.length === 0) return;
+  const start = Date.now();
+  try {
+    await clickhouse().insert({ table, values, format: "JSONEachRow" });
+    observeInsert(Date.now() - start);
+    inc("ingest_rows_total", { table }, values.length);
+  } catch (err) {
+    inc("ingest_errors_total", { table });
+    throw err;
+  }
+}
 
 /** Stable [0,1) hash of a seed string — for deterministic per-trace sampling. */
 function sample(seed: string): number {
@@ -48,11 +85,20 @@ async function runOnlineEvals(projectId: string, batch: IngestEvent[]): Promise<
       if (ev.filterName && !(trace.name ?? "").includes(ev.filterName)) continue;
       if (sample(`${trace.id}:${ev.name}`) >= ev.samplingRate) continue;
       try {
-        await runEvaluator(projectId, ev.name, { traceId: trace.id, input: trace.input, output: trace.output });
-        console.log(`[online-eval] ${ev.name} -> trace ${trace.id}`);
+        await withRetry(() =>
+          runEvaluator(projectId, ev.name, { traceId: trace.id, input: trace.input, output: trace.output }),
+        );
+        inc("evaluator_runs_total", { evaluator: ev.name, result: "ok" });
         await dispatchAutomations(projectId, "eval.completed", { traceId: trace.id, name: ev.name });
       } catch (err) {
-        console.error(`[online-eval] ${ev.name} failed for ${trace.id}:`, err instanceof Error ? err.message : err);
+        // Best-effort: never fail ingestion, but COUNT failures so silent eval gaps surface.
+        inc("evaluator_runs_total", { evaluator: ev.name, result: "error" });
+        logJson("error", "online-eval failed", {
+          evaluator: ev.name,
+          projectId,
+          traceId: trace.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   }
@@ -94,21 +140,38 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     }
   }
 
+  // Offload large input/output payloads to blob (AFTER masking) so ClickHouse only stores a
+  // small reference marker — honors the schema's "large payloads live in blob" contract.
+  for (const e of parsed.batch) {
+    const body = e.body as { input?: unknown; output?: unknown };
+    if (body.input !== undefined) body.input = await offloadLargePayload(projectId, body.input);
+    if (body.output !== undefined) body.output = await offloadLargePayload(projectId, body.output);
+  }
+
   const priceOverrides = compileModelPrices(await loadProjectPriceOverrides(projectId));
   const { traces, observations, scores } = mapEvents(projectId, parsed.batch, priceOverrides);
 
-  const ch = clickhouse();
-  await Promise.all([
-    traces.length ? ch.insert({ table: "traces", values: traces, format: "JSONEachRow" }) : Promise.resolve(),
-    observations.length
-      ? ch.insert({ table: "observations", values: observations, format: "JSONEachRow" })
-      : Promise.resolve(),
-    scores.length ? ch.insert({ table: "scores", values: scores, format: "JSONEachRow" }) : Promise.resolve(),
+  // Insert each table independently so one table's failure is isolated and observable.
+  // Re-insert on retry is safe — ReplacingMergeTree(event_ts) dedupes by entity id.
+  const results = await Promise.allSettled([
+    insertTable("traces", traces),
+    insertTable("observations", observations),
+    insertTable("scores", scores),
   ]);
+  const failed = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+  inc("ingest_events_total", undefined, parsed.batch.length);
+  if (failed.length > 0) {
+    // Throw so BullMQ retries the whole job (idempotent). DLQ catches terminal failures.
+    const reasons = failed.map((f) => (f.reason instanceof Error ? f.reason.message : String(f.reason))).join("; ");
+    throw new Error(`ClickHouse insert failed for ${failed.length} table(s): ${reasons}`);
+  }
 
-  console.log(
-    `[ingest] project=${projectId} traces=${traces.length} observations=${observations.length} scores=${scores.length}`,
-  );
+  logJson("info", "ingest ok", {
+    projectId,
+    traces: traces.length,
+    observations: observations.length,
+    scores: scores.length,
+  });
 
   // Fire score.created webhooks + automations + analytics for any scores in this batch.
   for (const s of scores) {

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { GitBranch, Radio, Tag } from "lucide-react";
+import { useState } from "react";
 import { EmptyState } from "../../components/empty-state";
 import { KindBadge } from "../../components/kind-badge";
 import { StatTile } from "../../components/stat-tile";
@@ -14,8 +15,9 @@ import {
   BreadcrumbSeparator,
 } from "../../components/ui/breadcrumb";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Skeleton } from "../../components/ui/skeleton";
-import { api, type PromptVersionDetail } from "../../lib/api";
+import { api, type PromptDetail, type PromptVersionDetail } from "../../lib/api";
 
 export const Route = createFileRoute("/prompts/$name")({ component: PromptDetailPage });
 
@@ -24,6 +26,120 @@ function renderContent(v: PromptVersionDetail): string {
     return (v.content as { role: string; content: string }[]).map((m) => `[${m.role}] ${m.content}`).join("\n");
   }
   return String(v.content ?? "");
+}
+
+/** Full version text (messages + config) used as the diff input. */
+function versionText(v: PromptVersionDetail): string {
+  const config =
+    v.config != null && Object.keys(v.config as object).length > 0
+      ? `\n--- config ---\n${JSON.stringify(v.config, null, 2)}`
+      : "";
+  return renderContent(v) + config;
+}
+
+type DiffRow = { type: "same" | "add" | "del"; text: string };
+
+/** Line-level diff via longest-common-subsequence (dependency-free). */
+function diffLines(a: string, b: string): DiffRow[] {
+  const aL = a.split("\n");
+  const bL = b.split("\n");
+  const n = aL.length;
+  const m = bL.length;
+  const at = (xs: string[], k: number): string => xs[k] ?? "";
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  const cell = (i: number, j: number): number => dp[i]?.[j] ?? 0;
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      const row = dp[i];
+      if (row) row[j] = at(aL, i) === at(bL, j) ? cell(i + 1, j + 1) + 1 : Math.max(cell(i + 1, j), cell(i, j + 1));
+    }
+  }
+  const rows: DiffRow[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (at(aL, i) === at(bL, j)) {
+      rows.push({ type: "same", text: at(aL, i) });
+      i++;
+      j++;
+    } else if (cell(i + 1, j) >= cell(i, j + 1)) {
+      rows.push({ type: "del", text: at(aL, i) });
+      i++;
+    } else {
+      rows.push({ type: "add", text: at(bL, j) });
+      j++;
+    }
+  }
+  while (i < n) rows.push({ type: "del", text: at(aL, i++) });
+  while (j < m) rows.push({ type: "add", text: at(bL, j++) });
+  return rows;
+}
+
+function VersionDiff({ prompt }: { prompt: PromptDetail }) {
+  const versions = prompt.allVersions;
+  const [a, setA] = useState<number>(versions[1]?.version ?? 0);
+  const [b, setB] = useState<number>(versions[0]?.version ?? 0);
+  const va = versions.find((v) => v.version === a);
+  const vb = versions.find((v) => v.version === b);
+  const rows = va && vb ? diffLines(versionText(va), versionText(vb)) : [];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Compare versions</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Select value={String(a)} onValueChange={(v) => setA(Number(v))}>
+            <SelectTrigger className="w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {versions.map((v) => (
+                <SelectItem key={v.version} value={String(v.version)}>
+                  v{v.version}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="text-muted-foreground">→</span>
+          <Select value={String(b)} onValueChange={(v) => setB(Number(v))}>
+            <SelectTrigger className="w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {versions.map((v) => (
+                <SelectItem key={v.version} value={String(v.version)}>
+                  v{v.version}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {a === b ? (
+          <p className="text-sm text-muted-foreground">Select two different versions to see a diff.</p>
+        ) : (
+          <pre className="overflow-auto border bg-muted/30 p-3 text-xs max-h-96 leading-relaxed">
+            {rows.map((r, idx) => (
+              <div
+                key={`${idx}-${r.type}`}
+                className={
+                  r.type === "add"
+                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                    : r.type === "del"
+                      ? "bg-red-500/15 text-red-700 dark:text-red-300"
+                      : ""
+                }
+              >
+                {r.type === "add" ? "+ " : r.type === "del" ? "- " : "  "}
+                {r.text}
+              </div>
+            ))}
+          </pre>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function PromptDetailPage() {
@@ -90,6 +206,8 @@ function PromptDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {prompt.allVersions.length > 1 && <VersionDiff prompt={prompt} />}
 
       <Card>
         <CardHeader>

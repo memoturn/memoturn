@@ -23,8 +23,25 @@ export type ScoreDataType = z.infer<typeof ScoreDataType>;
 export const ScoreSource = z.enum(["API", "EVAL", "ANNOTATION"]);
 export type ScoreSource = z.infer<typeof ScoreSource>;
 
-/** JSON-serializable payload (input/output/metadata). */
-const Json = z.any();
+/**
+ * Hard ceiling for a single serialized JSON field (input/output/metadata). Oversized
+ * fields are rejected at ingest (400) to bound memory/storage. This is the ceiling — the
+ * worker soft-truncates large-but-allowed payloads to blob storage well below this.
+ */
+export const MAX_JSON_FIELD_BYTES = 1024 * 1024; // 1 MB
+
+/** JSON-serializable payload (input/output/metadata), capped at MAX_JSON_FIELD_BYTES. */
+const Json = z.any().refine(
+  (v) => {
+    if (v === undefined) return true;
+    try {
+      return JSON.stringify(v).length <= MAX_JSON_FIELD_BYTES;
+    } catch {
+      return true; // non-serializable values are handled elsewhere; don't block here
+    }
+  },
+  { message: `JSON field exceeds the ${MAX_JSON_FIELD_BYTES}-byte limit` },
+);
 
 const usage = z
   .object({

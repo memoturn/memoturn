@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Coins, DollarSign, Download, Layers, Timer, Trash2 } from "lucide-react";
+import { Coins, DollarSign, Download, Layers, RotateCcw, Timer, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { CopyButton } from "../../components/copy-button";
@@ -285,6 +285,8 @@ function ObservationDetailItem({ obs }: { obs: ObservationDetail }) {
 function TraceDetailPage() {
   const { id } = Route.useParams();
   const [view, setView] = useState<"timeline" | "graph">("timeline");
+  const qc = useQueryClient();
+  const readOnly = useIsReadOnly();
   const {
     data: trace,
     isLoading,
@@ -292,6 +294,15 @@ function TraceDetailPage() {
   } = useQuery({
     queryKey: ["trace", id],
     queryFn: () => api.getTrace(id),
+  });
+
+  const replay = useMutation({
+    mutationFn: () => api.replayTrace(id),
+    onSuccess: (result) => {
+      toast.success(result.traceId ? `Replay recorded — trace ${result.traceId}` : "Replay complete");
+      qc.invalidateQueries({ queryKey: ["traces"] });
+    },
+    onError: (e) => toast.error(`Replay failed: ${String(e)}`),
   });
 
   if (isLoading) return <Skeleton className="h-64 w-full" />;
@@ -324,9 +335,15 @@ function TraceDetailPage() {
             <CopyButton value={trace.id} label="trace id" />
           </div>
         </div>
-        <Badge variant="secondary" className="font-medium">
-          {trace.environment}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="font-medium">
+            {trace.environment}
+          </Badge>
+          <Button variant="outline" size="sm" disabled={readOnly || replay.isPending} onClick={() => replay.mutate()}>
+            <RotateCcw className="size-3.5" />
+            {replay.isPending ? "Replaying…" : "Replay"}
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
