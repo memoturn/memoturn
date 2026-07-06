@@ -144,3 +144,11 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | DELETE | `/v1/api-keys/{id}` | Revoke an API key. |
 | GET | `/v1/health` | Liveness (no auth). |
 | `*` | `/auth/*` | Better Auth (sign-in/out, session). |
+
+### MCP (remote, per-project)
+
+A remote [Model Context Protocol](https://modelcontextprotocol.io) endpoint exposing the project's prompts, datasets, and review queues as tools for agent IDEs — the same tool registry (`packages/server/src/mcp-tools.ts`) the local stdio server (`apps/mcp`) serves, over Streamable HTTP. Each project is its own MCP resource, so clients connect per-project. Auth is API-key Basic (`pk-mt-…:sk-mt-…`) and the key must belong to the `{projectId}` in the URL. RBAC is per-tool (not per-method — every call is a POST): a tool's mutating flag maps to the key's `read`/`write` scope, and write tools are audited.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET / POST / DELETE` | `/v1/mcp/{projectId}` | Streamable-HTTP MCP endpoint scoped to `{projectId}`. `401` (with `WWW-Authenticate: Basic`) when the key is missing/invalid or scoped to a different project. |

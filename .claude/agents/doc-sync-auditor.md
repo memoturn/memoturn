@@ -22,7 +22,7 @@ You keep the memoturn docs in sync with the code. The repo hand-restates concret
 - Dev credentials: `scripts/seed.ts` (`DEV_PUBLIC_KEY`/`DEV_SECRET_KEY`/`DEV_EMAIL`/`DEV_PASSWORD`).
 - Ports: `.env.example` and `infra/docker-compose.dev.yml`.
 - Worker crons: `apps/worker/src/index.ts` (`repeat: { pattern }`).
-- MCP tools: `apps/mcp/src/tools.ts` (`name:` of each `ToolDef`) → `apps/mcp/README.md`.
+- MCP tools: `packages/server/src/mcp-tools.ts` (`name:` of each `ToolDef`) → `apps/mcp/README.md`.
 - `/v1` routes: `apps/api/src/app.ts` → `docs/api.md` tables (the script does not diff these — check by hand).
 
 ## Output

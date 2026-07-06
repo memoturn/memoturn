@@ -1,8 +1,7 @@
-import { authenticateKeys } from "@memoturn/server";
+import { authenticateKeys, tools } from "@memoturn/server";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { tools } from "./tools.js";
 
 /**
  * memoturn MCP server — exposes prompts, datasets, and review queues as tools for

@@ -18,7 +18,7 @@ memoturn has **no generated API docs** (Scalar/OpenAPI are runtime-only). `CLAUD
 | `scripts/seed.ts` dev creds | README.md, CLAUDE.md, CONTRIBUTING.md, docs/getting-started.md, docs/sdk-*.md |
 | `.env.example` / `infra/docker-compose.dev.yml` ports | docs/configuration.md, docs/getting-started.md, CLAUDE.md |
 | `apps/worker/src/index.ts` crons | CLAUDE.md |
-| `apps/mcp/src/tools.ts` tool names | apps/mcp/README.md |
+| `packages/server/src/mcp-tools.ts` tool names | apps/mcp/README.md |
 | `apps/api/src/app.ts` routes | docs/api.md tables (checked by hand, not by the script) |
 
 ## Rule
