@@ -79,6 +79,7 @@ import {
   runEvaluator,
   runPlayground,
   runScheduledExport,
+  safeServeContentType,
   setAnalyticsSink,
   setMaskingPolicy,
   setRetention,
@@ -214,6 +215,7 @@ app.post("/v1/playground/stream", async (c) => {
       }
       await s.writeSSE({ data: "[DONE]" });
     } catch (err) {
+      console.error(JSON.stringify({ level: "error", scope: "playground.stream", message: String(err) }));
       await s.writeSSE({ data: JSON.stringify({ error: String(err instanceof Error ? err.message : err) }) });
     }
   });
@@ -251,8 +253,12 @@ app.get("/v1/media/*", async (c) => {
   const key = c.req.path.replace(/^\/v1\/media\//, "");
   const media = await getMedia(c.get("projectId"), key);
   if (!media) return c.json({ error: "not found" }, 404);
+  // Serve inert: force a safe content-type, disable MIME sniffing, and download rather
+  // than render inline — so a stored svg/html payload can't execute script same-origin.
   return c.body(media.body.buffer as ArrayBuffer, 200, {
-    "content-type": media.contentType,
+    "content-type": safeServeContentType(media.contentType),
+    "content-disposition": "attachment",
+    "x-content-type-options": "nosniff",
     "cache-control": "private, max-age=31536000",
   });
 });
@@ -549,6 +555,7 @@ app.openapi(
       await recordAudit(c.get("projectId"), c.get("actor"), "trace.replay", `trace:${id}`);
       return c.json(result, 200);
     } catch (err) {
+      console.error(JSON.stringify({ level: "error", scope: "trace.replay", message: String(err) }));
       return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
     }
   },
@@ -925,6 +932,7 @@ app.openapi(
       const result = await runPlayground(c.get("projectId"), input, { trace });
       return c.json(result);
     } catch (err) {
+      console.error(JSON.stringify({ level: "error", scope: "playground.run", message: String(err) }));
       return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
     }
   },

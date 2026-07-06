@@ -30,6 +30,12 @@ export type ScoreSource = z.infer<typeof ScoreSource>;
  */
 export const MAX_JSON_FIELD_BYTES = 1024 * 1024; // 1 MB
 
+/** Length caps for identifier/label strings and tag arrays (bound cardinality + memory). */
+export const MAX_IDENTIFIER_LEN = 2048;
+export const MAX_TAGS = 256;
+/** Free-text status/message fields — larger than identifiers, still bounded. */
+export const MAX_MESSAGE_LEN = 16 * 1024;
+
 /** JSON-serializable payload (input/output/metadata), capped at MAX_JSON_FIELD_BYTES. */
 const Json = z.any().refine(
   (v) => {
@@ -53,16 +59,16 @@ const usage = z
 
 // ── Trace ─────────────────────────────────────────────────────────────────────
 export const traceBody = z.object({
-  id: z.string().min(1),
-  name: z.string().optional(),
+  id: z.string().min(1).max(MAX_IDENTIFIER_LEN),
+  name: z.string().max(MAX_IDENTIFIER_LEN).optional(),
   timestamp: ISO_DATETIME.optional(),
-  userId: z.string().optional(),
-  sessionId: z.string().optional(),
-  release: z.string().optional(),
-  version: z.string().optional(),
-  environment: z.string().default("default"),
+  userId: z.string().max(MAX_IDENTIFIER_LEN).optional(),
+  sessionId: z.string().max(MAX_IDENTIFIER_LEN).optional(),
+  release: z.string().max(MAX_IDENTIFIER_LEN).optional(),
+  version: z.string().max(MAX_IDENTIFIER_LEN).optional(),
+  environment: z.string().max(MAX_IDENTIFIER_LEN).default("default"),
   public: z.boolean().optional(),
-  tags: z.array(z.string()).optional(),
+  tags: z.array(z.string().max(MAX_IDENTIFIER_LEN)).max(MAX_TAGS).optional(),
   metadata: Json.optional(),
   input: Json.optional(),
   output: Json.optional(),
@@ -71,15 +77,15 @@ export type TraceBody = z.infer<typeof traceBody>;
 
 // ── Observation (span / generation / event) ─────────────────────────────────────
 const observationBase = z.object({
-  id: z.string().min(1),
-  traceId: z.string().min(1),
-  parentObservationId: z.string().optional(),
-  name: z.string().optional(),
+  id: z.string().min(1).max(MAX_IDENTIFIER_LEN),
+  traceId: z.string().min(1).max(MAX_IDENTIFIER_LEN),
+  parentObservationId: z.string().max(MAX_IDENTIFIER_LEN).optional(),
+  name: z.string().max(MAX_IDENTIFIER_LEN).optional(),
   startTime: ISO_DATETIME.optional(),
   endTime: ISO_DATETIME.optional(),
-  environment: z.string().default("default"),
+  environment: z.string().max(MAX_IDENTIFIER_LEN).default("default"),
   level: ObservationLevel.optional(),
-  statusMessage: z.string().optional(),
+  statusMessage: z.string().max(MAX_MESSAGE_LEN).optional(),
   metadata: Json.optional(),
   input: Json.optional(),
   output: Json.optional(),
@@ -103,18 +109,18 @@ export type EventBody = z.infer<typeof eventBody>;
 
 // ── Score ───────────────────────────────────────────────────────────────────────
 export const scoreBody = z.object({
-  id: z.string().min(1),
-  traceId: z.string().min(1),
-  observationId: z.string().optional(),
-  name: z.string().min(1),
+  id: z.string().min(1).max(MAX_IDENTIFIER_LEN),
+  traceId: z.string().min(1).max(MAX_IDENTIFIER_LEN),
+  observationId: z.string().max(MAX_IDENTIFIER_LEN).optional(),
+  name: z.string().min(1).max(MAX_IDENTIFIER_LEN),
   timestamp: ISO_DATETIME.optional(),
-  environment: z.string().default("default"),
+  environment: z.string().max(MAX_IDENTIFIER_LEN).default("default"),
   source: ScoreSource.default("API"),
   dataType: ScoreDataType.default("NUMERIC"),
   value: z.number().optional(),
-  stringValue: z.string().optional(),
-  comment: z.string().optional(),
-  configId: z.string().optional(),
+  stringValue: z.string().max(MAX_MESSAGE_LEN).optional(),
+  comment: z.string().max(MAX_MESSAGE_LEN).optional(),
+  configId: z.string().max(MAX_IDENTIFIER_LEN).optional(),
 });
 export type ScoreBody = z.infer<typeof scoreBody>;
 

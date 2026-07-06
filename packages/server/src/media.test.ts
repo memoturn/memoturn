@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { isDataUri, MEDIA_PREFIX, offloadMedia, type StoredMedia } from "./media.js";
+import {
+  isDataUri,
+  MEDIA_PREFIX,
+  offloadMedia,
+  type StoredMedia,
+  safeServeContentType,
+  storeDataUri,
+} from "./media.js";
 
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==";
 const fakeStore = async (_projectId: string, uri: string): Promise<StoredMedia> => ({
@@ -34,5 +41,27 @@ describe("offloadMedia", () => {
   it("keeps the original string when the store declines", async () => {
     const out = await offloadMedia("p", PNG, async () => null);
     expect(out).toBe(PNG);
+  });
+});
+
+describe("storeDataUri content-type allowlist", () => {
+  it("declines a text/html data URI (no XSS payload is ever stored as media)", async () => {
+    const html = "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==";
+    expect(await storeDataUri("p", html)).toBeNull();
+  });
+  it("declines a non-data-URI string", async () => {
+    expect(await storeDataUri("p", "hello")).toBeNull();
+  });
+});
+
+describe("safeServeContentType", () => {
+  it("keeps inline-safe raster image types", () => {
+    expect(safeServeContentType("image/png")).toBe("image/png");
+    expect(safeServeContentType("image/jpeg")).toBe("image/jpeg");
+  });
+  it("downgrades svg and everything else to octet-stream", () => {
+    expect(safeServeContentType("image/svg+xml")).toBe("application/octet-stream");
+    expect(safeServeContentType("text/html")).toBe("application/octet-stream");
+    expect(safeServeContentType("application/pdf")).toBe("application/octet-stream");
   });
 });

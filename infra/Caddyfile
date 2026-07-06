@@ -23,6 +23,10 @@
 	}
 
 	handle {
+		# Defense-in-depth CSP for the console document (where user-controlled trace/LLM
+		# content renders). Tuned for the bundled Vite SPA — no external origins; images allow
+		# data:/blob: for inline media, styles allow 'unsafe-inline' for Tailwind/chart styles.
+		header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
 		reverse_proxy console:3000
 	}
 }

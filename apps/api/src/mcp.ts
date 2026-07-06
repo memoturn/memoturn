@@ -2,7 +2,9 @@ import { StreamableHTTPTransport } from "@hono/mcp";
 import {
   authenticateKeys,
   auth as betterAuth,
+  checkRateLimit,
   getUserProjectAccess,
+  mcpRateLimitConfig,
   parseBasicAuth,
   recordAudit,
   tools,
@@ -94,9 +96,24 @@ function buildServer(mcpAuth: McpAuth): Server {
   return server;
 }
 
+/** Best-effort client IP for pre-auth throttling (behind Caddy, X-Forwarded-For is set). */
+function clientIp(c: Context): string {
+  const xff = c.req.header("x-forwarded-for");
+  if (xff) return xff.split(",")[0]?.trim() || "unknown";
+  return c.req.header("x-real-ip")?.trim() || "unknown";
+}
+
 export async function handleMcp(c: Context): Promise<Response> {
   const projectId = c.req.param("projectId");
   if (!projectId) return c.json({ error: "missing project id" }, 404);
+
+  // Per-IP throttle BEFORE auth — this route sits ahead of the global rate limiter and runs
+  // a credential lookup on every call, so it must not offer unauthenticated clients free tries.
+  const { limit, window } = mcpRateLimitConfig();
+  const rl = await checkRateLimit(`mcp:${clientIp(c)}`, limit, window);
+  if (!rl.allowed) {
+    return c.json({ error: "rate limited" }, 429, { "retry-after": String(rl.resetSeconds) });
+  }
 
   const mcpAuth = await resolveMcpAuth(c, projectId);
   if (!mcpAuth) {

@@ -35,6 +35,10 @@ export const auth = betterAuth({
   trustedOrigins: (process.env.AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000").split(","),
   // 7-day sessions, refreshed at most daily.
   session: { expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24 },
+  // Brute-force protection on the auth routes (login/signup/reset). Explicit + enabled in
+  // every env (Better Auth only auto-enables in production). Default in-memory storage is
+  // per-replica — multi-replica deployments should back this with shared storage.
+  rateLimit: { enabled: true, window: 60, max: 30 },
   advanced: {
     cookiePrefix: "memoturn",
     // Secure cookies in production; httpOnly + SameSite=Lax always (CSRF defense-in-depth).

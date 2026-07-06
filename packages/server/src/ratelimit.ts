@@ -28,6 +28,17 @@ export function ingestRateLimitConfig(): { limit: number; window: number } {
   return { limit: Number(process.env.INGEST_EVENTS_PER_MINUTE ?? 0), window: WINDOW_SECONDS };
 }
 
+/**
+ * Per-IP budget for the unauthenticated remote MCP endpoint (MCP_RATE_LIMIT_PER_MINUTE).
+ * Unlike the project limiter this defaults to ON (120/min) because the endpoint runs a
+ * credential lookup before auth resolves — an attacker shouldn't get unthrottled tries.
+ * Set to 0 to disable.
+ */
+export function mcpRateLimitConfig(): { limit: number; window: number } {
+  const raw = process.env.MCP_RATE_LIMIT_PER_MINUTE;
+  return { limit: raw === undefined ? 120 : Number(raw), window: WINDOW_SECONDS };
+}
+
 /** Fixed-window math for a given clock (seconds): the window start + seconds until reset. */
 export function rateLimitWindow(
   nowSeconds: number,

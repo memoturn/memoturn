@@ -48,7 +48,18 @@ export async function resolveProviderKey(projectId: string, provider: Provider):
     try {
       return decryptSecret(conn.encryptedKey);
     } catch {
-      /* fall through to env */
+      // A stored key that won't decrypt (e.g. ENCRYPTION_KEY was rotated) must NOT silently
+      // fall back to the operator's shared env key — that would mis-attribute cost/traffic.
+      // Surface it so the project owner re-enters the key.
+      console.error(
+        JSON.stringify({
+          level: "error",
+          scope: "providers.resolveKey",
+          provider,
+          message: "stored key undecryptable",
+        }),
+      );
+      throw new Error(`stored ${provider} key could not be decrypted — re-enter it in provider settings`);
     }
   }
   const envName = ENV_KEYS[provider];
