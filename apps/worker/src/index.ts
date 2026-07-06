@@ -98,6 +98,10 @@ await maintenanceQueue.add(
 // ── Health + metrics HTTP endpoint (liveness probes + queue depth) ───────────────
 const startedAt = Date.now();
 const healthPort = Number(process.env.WORKER_PORT ?? 3002);
+// Bind to loopback by default — /metrics is unauthenticated and leaks queue depths and
+// per-project evaluator names, so it must not be reachable off-host. The in-container Docker
+// healthcheck still works over 127.0.0.1; set WORKER_HOST=0.0.0.0 for cross-host probes.
+const healthHost = process.env.WORKER_HOST ?? "127.0.0.1";
 const ingestQueue = getIngestQueue();
 
 const healthServer = createServer(async (req, res) => {
@@ -133,8 +137,8 @@ const healthServer = createServer(async (req, res) => {
   res.statusCode = 404;
   res.end(JSON.stringify({ error: "not found" }));
 });
-healthServer.listen(healthPort, () =>
-  console.log(`[worker] health + metrics on http://localhost:${healthPort} (/health, /metrics)`),
+healthServer.listen(healthPort, healthHost, () =>
+  console.log(`[worker] health + metrics on http://${healthHost}:${healthPort} (/health, /metrics)`),
 );
 
 async function shutdown(signal: string) {

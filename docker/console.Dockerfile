@@ -29,5 +29,7 @@ ENV VITE_API_BASE=$VITE_API_BASE
 RUN bun --filter @memoturn/console build
 
 FROM build AS runner
+# Drop root for the runtime process (the oven/bun image ships a non-root `bun` user).
+USER bun
 EXPOSE 3000
 CMD ["bun", "--filter", "@memoturn/console", "preview"]

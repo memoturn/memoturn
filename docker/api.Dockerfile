@@ -23,5 +23,7 @@ FROM deps AS runner
 COPY . .
 RUN bun --filter @memoturn/db generate
 ENV NODE_ENV=production
+# Drop root for the runtime process (the oven/bun image ships a non-root `bun` user).
+USER bun
 EXPOSE 3001
 CMD ["bun", "--filter", "@memoturn/api", "start"]

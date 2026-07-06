@@ -23,6 +23,22 @@ const EXT: Record<string, string> = {
 };
 const extOf = (mime: string) => EXT[mime] ?? "bin";
 
+/** MIME types accepted for storage. Anything else is declined (never offloaded/served). */
+export const ALLOWED_MEDIA_TYPES = new Set(Object.keys(EXT));
+
+/** Raster image types safe to serve with their real content-type (render inline in <img>). */
+const INLINE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"]);
+
+/**
+ * Content-type to serve a stored blob with. Inline-safe raster images keep their real type;
+ * everything else (svg, pdf, audio, and any legacy/unknown stored type) is downgraded to
+ * `application/octet-stream` so a same-origin `data:text/html`/`image/svg+xml` payload can't
+ * execute script when the URL is opened directly.
+ */
+export function safeServeContentType(mime: string): string {
+  return INLINE_IMAGE_TYPES.has(mime) ? mime : "application/octet-stream";
+}
+
 export interface StoredMedia {
   key: string;
   mimeType: string;
@@ -40,6 +56,7 @@ export async function storeDataUri(projectId: string, dataUri: string): Promise<
   const m = DATA_URI.exec(dataUri);
   if (!m) return null;
   const mimeType = m[1] as string;
+  if (!ALLOWED_MEDIA_TYPES.has(mimeType)) return null;
   const bytes = new Uint8Array(Buffer.from(m[2] as string, "base64"));
   return storeMediaBytes(projectId, bytes, mimeType);
 }

@@ -28,7 +28,7 @@ async function main() {
     log("error: invalid API key pair — could not resolve a project");
     process.exit(1);
   }
-  const { projectId } = auth;
+  const { projectId, scopes } = auth;
 
   const server = new Server({ name: "memoturn", version: "0.1.0" }, { capabilities: { tools: {} } });
 
@@ -40,6 +40,15 @@ async function main() {
     const tool = tools.find((t) => t.name === req.params.name);
     if (!tool) {
       return { isError: true, content: [{ type: "text", text: `unknown tool: ${req.params.name}` }] };
+    }
+    // Enforce the key's scopes (mirrors the HTTP transport): write tools need the `write`
+    // scope, reads the `read` scope — so a read-only key can't mutate through the IDE.
+    const need = tool.write ? "write" : "read";
+    if (!scopes.includes(need)) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `error: forbidden — API key lacks the '${need}' scope` }],
+      };
     }
     try {
       const result = await tool.handler(projectId, req.params.arguments ?? {});

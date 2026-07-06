@@ -155,7 +155,11 @@ services:
       AUTH_BASE_URL: https://${MEMOTURN_DOMAIN:?}/api
       AUTH_TRUSTED_ORIGINS: https://${MEMOTURN_DOMAIN:?}
       ALLOW_PRIVATE_WEBHOOK_TARGETS: ${ALLOW_PRIVATE_WEBHOOK_TARGETS:-0}
-      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-0}
+      # Per-project request rate limit, ON by default in production (generous — raise/lower
+      # to taste, or set 0 to disable). INGEST_EVENTS_PER_MINUTE additionally caps event
+      # volume (0 = off) for deployments that need to bound a single project's ingest.
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
+      INGEST_EVENTS_PER_MINUTE: ${INGEST_EVENTS_PER_MINUTE:-0}
 
   worker:
     build:

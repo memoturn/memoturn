@@ -1,5 +1,8 @@
 # Full self-host stack — web + worker + all dependencies.
-# Usage: docker compose -f infra/docker-compose.yml up -d --build
+# Usage: docker compose -f infra/docker-compose.yml --env-file .env up -d --build
+# Datastore credentials are required (no weak defaults): set POSTGRES_PASSWORD,
+# CLICKHOUSE_PASSWORD, BLOB_ACCESS_KEY_ID, BLOB_SECRET_ACCESS_KEY (plus the api/worker
+# secrets BETTER_AUTH_SECRET, ENCRYPTION_KEY, AUTH_TRUSTED_ORIGINS) in .env before `up`.
 name: memoturn
 
 services:
@@ -8,7 +11,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: memoturn
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-memoturn}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: memoturn
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -23,7 +26,7 @@ services:
     restart: unless-stopped
     environment:
       CLICKHOUSE_USER: memoturn
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-memoturn}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env}
       CLICKHOUSE_DB: memoturn
     ulimits:
       nofile: { soft: 262144, hard: 262144 }
@@ -52,8 +55,8 @@ services:
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: ${BLOB_ACCESS_KEY_ID:-memoturn}
-      MINIO_ROOT_PASSWORD: ${BLOB_SECRET_ACCESS_KEY:-memoturn123}
+      MINIO_ROOT_USER: ${BLOB_ACCESS_KEY_ID:?set BLOB_ACCESS_KEY_ID in .env}
+      MINIO_ROOT_PASSWORD: ${BLOB_SECRET_ACCESS_KEY:?set BLOB_SECRET_ACCESS_KEY in .env}
     volumes:
       - miniodata:/data
     healthcheck:
@@ -69,7 +72,7 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 ${BLOB_ACCESS_KEY_ID:-memoturn} ${BLOB_SECRET_ACCESS_KEY:-memoturn123} &&
+      mc alias set local http://minio:9000 ${BLOB_ACCESS_KEY_ID:?set BLOB_ACCESS_KEY_ID in .env} ${BLOB_SECRET_ACCESS_KEY:?set BLOB_SECRET_ACCESS_KEY in .env} &&
       mc mb --ignore-existing local/${BLOB_BUCKET:-memoturn};
       "
 
@@ -87,17 +90,17 @@ services:
     environment:
       NODE_ENV: production
       API_PORT: "3001"
-      DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:-memoturn}@postgres:5432/memoturn?schema=public
+      DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/memoturn?schema=public
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: memoturn
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-memoturn}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env}
       CLICKHOUSE_DB: memoturn
       REDIS_URL: redis://redis:6379
       BLOB_ENDPOINT: http://minio:9000
       BLOB_REGION: us-east-1
       BLOB_BUCKET: ${BLOB_BUCKET:-memoturn}
-      BLOB_ACCESS_KEY_ID: ${BLOB_ACCESS_KEY_ID:-memoturn}
-      BLOB_SECRET_ACCESS_KEY: ${BLOB_SECRET_ACCESS_KEY:-memoturn123}
+      BLOB_ACCESS_KEY_ID: ${BLOB_ACCESS_KEY_ID:?set BLOB_ACCESS_KEY_ID in .env}
+      BLOB_SECRET_ACCESS_KEY: ${BLOB_SECRET_ACCESS_KEY:?set BLOB_SECRET_ACCESS_KEY in .env}
       BLOB_FORCE_PATH_STYLE: "true"
     ports:
       - "${API_PORT:-3001}:3001"
@@ -113,17 +116,17 @@ services:
       minio: { condition: service_healthy }
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:-memoturn}@postgres:5432/memoturn?schema=public
+      DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/memoturn?schema=public
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: memoturn
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-memoturn}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env}
       CLICKHOUSE_DB: memoturn
       REDIS_URL: redis://redis:6379
       BLOB_ENDPOINT: http://minio:9000
       BLOB_REGION: us-east-1
       BLOB_BUCKET: ${BLOB_BUCKET:-memoturn}
-      BLOB_ACCESS_KEY_ID: ${BLOB_ACCESS_KEY_ID:-memoturn}
-      BLOB_SECRET_ACCESS_KEY: ${BLOB_SECRET_ACCESS_KEY:-memoturn123}
+      BLOB_ACCESS_KEY_ID: ${BLOB_ACCESS_KEY_ID:?set BLOB_ACCESS_KEY_ID in .env}
+      BLOB_SECRET_ACCESS_KEY: ${BLOB_SECRET_ACCESS_KEY:?set BLOB_SECRET_ACCESS_KEY in .env}
       BLOB_FORCE_PATH_STYLE: "true"
 
 volumes:
