@@ -147,8 +147,17 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 
 ### MCP (remote, per-project)
 
-A remote [Model Context Protocol](https://modelcontextprotocol.io) endpoint exposing the project's prompts, datasets, and review queues as tools for agent IDEs — the same tool registry (`packages/server/src/mcp-tools.ts`) the local stdio server (`apps/mcp`) serves, over Streamable HTTP. Each project is its own MCP resource, so clients connect per-project. Auth is API-key Basic (`pk-mt-…:sk-mt-…`) and the key must belong to the `{projectId}` in the URL. RBAC is per-tool (not per-method — every call is a POST): a tool's mutating flag maps to the key's `read`/`write` scope, and write tools are audited.
+A remote [Model Context Protocol](https://modelcontextprotocol.io) endpoint exposing the project's prompts, datasets, and review queues as tools for agent IDEs — the same tool registry (`packages/server/src/mcp-tools.ts`) the local stdio server (`apps/mcp`) serves, over Streamable HTTP. Each project is its own MCP resource, so clients connect per-project. RBAC is per-tool (not per-method — every call is a POST): a tool's mutating flag maps to a `read`/`write` permission, and write tools are audited.
+
+Two auth paths resolve to the same per-project authorization:
+
+- **API-key Basic** (`pk-mt-…:sk-mt-…`, self-host / headless) — the key must belong to the `{projectId}` in the URL; the tool's permission is checked against the key's `read`/`write` scope.
+- **OAuth 2.1 bearer** (memoturn cloud, IDE click-through) — the Better Auth `mcp()` plugin issues the token; it resolves to a user, who is then authorized against `{projectId}` (org membership → role). Any member may run read tools; only non-`VIEWER` roles may run write tools. Clients discover the flow via the two `.well-known` documents below; an unauthenticated request returns `401` with `WWW-Authenticate: Bearer resource_metadata="…"`.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET / POST / DELETE` | `/v1/mcp/{projectId}` | Streamable-HTTP MCP endpoint scoped to `{projectId}`. `401` (with `WWW-Authenticate: Basic`) when the key is missing/invalid or scoped to a different project. |
+| `GET / POST / DELETE` | `/v1/mcp/{projectId}` | Streamable-HTTP MCP endpoint scoped to `{projectId}`. `401` (advertising `Bearer` + `Basic`) when auth is missing/invalid or the caller isn't authorized for the project. |
+| GET | `/.well-known/oauth-authorization-server` | OAuth authorization-server metadata (Better Auth `mcp()` plugin). |
+| GET | `/.well-known/oauth-protected-resource` | OAuth protected-resource metadata. |
+
+> Behind Caddy (single-VM prod), the two `.well-known/oauth-*` paths are routed to the API (they're served at the domain root, not the console) — see `infra/Caddyfile`. The OAuth authorize flow bounces unauthenticated users to the console sign-in page (`MCP_LOGIN_PAGE`, default `<first AUTH_TRUSTED_ORIGINS>/login`).

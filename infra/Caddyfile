@@ -16,6 +16,12 @@
 		reverse_proxy api:3001
 	}
 
+	# OAuth discovery for remote MCP clients — served by the API at the domain root (not the
+	# console), so route these two well-known paths straight to the API with the path intact.
+	handle /.well-known/oauth-authorization-server /.well-known/oauth-protected-resource {
+		reverse_proxy api:3001
+	}
+
 	handle {
 		reverse_proxy console:3000
 	}

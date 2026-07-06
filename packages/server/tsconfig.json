@@ -3,7 +3,13 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "lib": ["ES2022", "DOM"]
+    "lib": ["ES2022", "DOM"],
+    // Consumed as source (package exports "./src/index.ts"), so emitted .d.ts files are never
+    // used. Disabling declaration emit avoids TS4023 on the `auth` export, whose inferred type
+    // references better-auth's non-exported MCPOptions (from the mcp() plugin) — unnameable in
+    // a declaration file, but harmless since we never emit one for consumers.
+    "declaration": false,
+    "declarationMap": false
   },
   "include": ["src/**/*"]
 }
