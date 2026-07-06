@@ -155,7 +155,7 @@ function checkCrons(): CheckResult {
 
 /** 5. Every MCP tool name must be listed in apps/mcp/README.md. */
 function checkMcpTools(): CheckResult {
-  const tools = read("apps/mcp/src/tools.ts");
+  const tools = read("packages/server/src/mcp-tools.ts");
   const readme = read("apps/mcp/README.md");
   const names = [...tools.matchAll(/name:\s*"([a-z_]+)"/g)].map((m) => m[1]!);
   const findings: Finding[] = [];
@@ -164,7 +164,7 @@ function checkMcpTools(): CheckResult {
       findings.push({ doc: "apps/mcp/README.md", line: 0, message: `MCP tool \`${name}\` is not documented` });
     }
   }
-  return { name: "MCP tools (apps/mcp/src/tools.ts → apps/mcp/README.md)", findings };
+  return { name: "MCP tools (packages/server/src/mcp-tools.ts → apps/mcp/README.md)", findings };
 }
 
 /** 6. Every agent + skill must be listed in the .claude/README roster. */

@@ -63,45 +63,48 @@ model Project {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
   slug           String
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  apiKeys     ApiKey[]
-  prompts     Prompt[]
-  datasets    Dataset[]
-  evaluators  Evaluator[]
-  scoreConfigs ScoreConfig[]
-  providers   ProviderConnection[]
-  auditLogs   AuditLog[]
-  reviewQueues ReviewQueue[]
-  retention   RetentionPolicy?
-  webhooks    Webhook[]
-  widgets     Widget[]
-  comments    Comment[]
-  savedViews  SavedView[]
-  modelPrices ModelPrice[]
+  apiKeys         ApiKey[]
+  prompts         Prompt[]
+  datasets        Dataset[]
+  evaluators      Evaluator[]
+  scoreConfigs    ScoreConfig[]
+  providers       ProviderConnection[]
+  auditLogs       AuditLog[]
+  reviewQueues    ReviewQueue[]
+  retention       RetentionPolicy?
+  webhooks        Webhook[]
+  widgets         Widget[]
+  comments        Comment[]
+  savedViews      SavedView[]
+  modelPrices     ModelPrice[]
   scheduledExport ScheduledExport?
-  automations Automation[]
-  analyticsSink AnalyticsSink?
-  maskingPolicy MaskingPolicy?
+  automations     Automation[]
+  analyticsSink   AnalyticsSink?
+  maskingPolicy   MaskingPolicy?
 
   @@unique([organizationId, slug])
 }
 
 // ── Auth (Better Auth managed: User / Session / Account / Verification) ───────────
 model User {
-  id            String       @id
-  name          String
-  email         String       @unique
-  emailVerified Boolean      @default(false)
-  image         String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  id                String             @id
+  name              String
+  email             String             @unique
+  emailVerified     Boolean            @default(false)
+  image             String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
   sessions          Session[]
   accounts          Account[]
   members           Member[]
   invitations       Invitation[]
-  ssoProviders       SsoProvider[]
+  ssoProviders      SsoProvider[]
+  oauthApplications OauthApplication[]
+  oauthAccessTokens OauthAccessToken[]
+  oauthConsents     OauthConsent[]
 
   @@map("user")
 }
@@ -168,21 +171,75 @@ model SsoProvider {
   @@map("ssoProvider")
 }
 
+// ── MCP OAuth (Better Auth mcp() plugin, built on the OIDC provider) ──────────────
+// Registered OAuth clients (dynamic client registration), their access/refresh tokens,
+// and per-user consent. Powers the remote MCP endpoint's OAuth flow (memoturn cloud).
+// clientId is the public OAuth client_id string (not a row id); Better Auth resolves the
+// client<->token link itself, so it's an indexed scalar rather than a Prisma relation.
+model OauthApplication {
+  id           String   @id @default(cuid())
+  name         String?
+  icon         String?
+  metadata     String?
+  clientId     String?  @unique
+  clientSecret String?
+  redirectUrls String?
+  type         String?
+  disabled     Boolean? @default(false)
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("oauthApplication")
+}
+
+model OauthAccessToken {
+  id                    String    @id @default(cuid())
+  accessToken           String?   @unique
+  refreshToken          String?   @unique
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  clientId              String?
+  userId                String?
+  user                  User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scopes                String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([clientId])
+  @@map("oauthAccessToken")
+}
+
+model OauthConsent {
+  id           String   @id @default(cuid())
+  clientId     String?
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scopes       String?
+  consentGiven Boolean? @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([clientId])
+  @@map("oauthConsent")
+}
+
 // API keys are project scoped. The secret is hashed; the public key and a
 // short hint are stored for display + lookup. Validation result is cached in Redis.
 model ApiKey {
-  id            String   @id @default(cuid())
-  projectId     String
-  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  publicKey     String   @unique
-  secretHash    String
-  secretHint    String // last 4 chars, for display
-  name          String?
+  id                 String    @id @default(cuid())
+  projectId          String
+  project            Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  publicKey          String    @unique
+  secretHash         String
+  secretHint         String // last 4 chars, for display
+  name               String?
   expiresAt          DateTime? // null = never expires
   rateLimitPerMinute Int? // per-key override; null = project/global default
-  scopes             String[] @default(["read", "write", "ingest"]) // coarse access scopes
-  createdAt     DateTime @default(now())
-  lastUsedAt    DateTime?
+  scopes             String[]  @default(["read", "write", "ingest"]) // coarse access scopes
+  createdAt          DateTime  @default(now())
+  lastUsedAt         DateTime?
 
   @@index([projectId])
 }
@@ -321,12 +378,12 @@ model ScoreConfig {
 
 // Encrypted provider credentials for playground + LLM-as-judge.
 model ProviderConnection {
-  id            String   @id @default(cuid())
-  projectId     String
-  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  provider      String // openai | anthropic | ...
-  encryptedKey  String
-  createdAt     DateTime @default(now())
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  provider     String // openai | anthropic | ...
+  encryptedKey String
+  createdAt    DateTime @default(now())
 
   @@unique([projectId, provider])
 }
@@ -373,17 +430,17 @@ model RetentionPolicy {
 // Outbound webhook / automation: POSTs to `url` when `event` fires. For score.created,
 // an optional `threshold` only fires when score.value < threshold (low-score alerts).
 model Webhook {
-  id        String   @id @default(cuid())
-  projectId String
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  url       String
-  event     String   @default("score.created")
-  threshold Float?
-  enabled   Boolean  @default(true)
+  id            String    @id @default(cuid())
+  projectId     String
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  url           String
+  event         String    @default("score.created")
+  threshold     Float?
+  enabled       Boolean   @default(true)
   secret        String    @default("")
-  lastStatus    Int?                  // HTTP status of the most recent delivery attempt (null = never fired)
+  lastStatus    Int? // HTTP status of the most recent delivery attempt (null = never fired)
   lastError     String    @default("") // error message of the last failed attempt
-  lastAttemptAt DateTime?             // when the most recent delivery was attempted
+  lastAttemptAt DateTime? // when the most recent delivery was attempted
   failureCount  Int       @default(0) // consecutive failures since the last success
   createdAt     DateTime  @default(now())
 

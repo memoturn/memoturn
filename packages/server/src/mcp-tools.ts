@@ -1,27 +1,22 @@
-import {
-  addDatasetItems,
-  addReviewItems,
-  createDataset,
-  createPromptVersion,
-  createReviewQueue,
-  getDatasetDetail,
-  getPromptDetail,
-  listDatasets,
-  listPrompts,
-  listReviewItems,
-  listReviewQueues,
-  resolvePrompt,
-  submitReviewScore,
-} from "@memoturn/server";
+import { addDatasetItems, createDataset, getDatasetDetail, listDatasets } from "./datasets.js";
+import { createPromptVersion, getPromptDetail, listPrompts, resolvePrompt } from "./prompts.js";
+import { addReviewItems, createReviewQueue, listReviewItems, listReviewQueues, submitReviewScore } from "./review.js";
 
 /**
  * MCP tool definitions exposing memoturn prompts, datasets, and review queues to
  * agent IDEs. Schemas are plain JSON Schema (no zod coupling) so the definition is
  * stable across MCP SDK versions; each handler is given the resolved projectId.
+ *
+ * Shared by the local stdio server (`apps/mcp`) and the remote Streamable-HTTP route
+ * (`apps/api`). The `write` flag drives RBAC/scope checks in the HTTP transport
+ * (read tools need the `read` scope, write tools the `write` scope) — the stdio
+ * server ignores it (a project API key pair already grants full access).
  */
 export interface ToolDef {
   name: string;
   description: string;
+  /** Mutating tool — requires the `write` scope over HTTP; read-only when omitted. */
+  write?: boolean;
   inputSchema: {
     type: "object";
     properties: Record<string, unknown>;
@@ -75,6 +70,7 @@ export const tools: ToolDef[] = [
     name: "create_prompt_version",
     description:
       "Create a new version of a prompt (creating the prompt if it does not exist). Content is a string for text prompts or an array of chat messages for chat prompts.",
+    write: true,
     inputSchema: {
       type: "object",
       properties: {
@@ -125,6 +121,7 @@ export const tools: ToolDef[] = [
   {
     name: "create_dataset",
     description: "Create a dataset (idempotent on name).",
+    write: true,
     inputSchema: {
       type: "object",
       properties: {
@@ -144,6 +141,7 @@ export const tools: ToolDef[] = [
     name: "add_dataset_items",
     description:
       "Append items to a dataset. Each item has an input, an optional expectedOutput, and optional metadata.",
+    write: true,
     inputSchema: {
       type: "object",
       properties: {
@@ -181,6 +179,7 @@ export const tools: ToolDef[] = [
   {
     name: "create_review_queue",
     description: "Create a review queue bound to a score name and data type.",
+    write: true,
     inputSchema: {
       type: "object",
       properties: {
@@ -203,6 +202,7 @@ export const tools: ToolDef[] = [
   {
     name: "add_review_items",
     description: "Enqueue traces into a review queue by trace id.",
+    write: true,
     inputSchema: {
       type: "object",
       properties: {
@@ -241,6 +241,7 @@ export const tools: ToolDef[] = [
     name: "submit_review_score",
     description:
       "Submit a score for a review item. Use value for numeric/boolean scores (boolean: 1/0) or stringValue for categorical.",
+    write: true,
     inputSchema: {
       type: "object",
       properties: {

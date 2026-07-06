@@ -57,6 +57,7 @@ defaults match `infra/docker-compose.dev.yml`.
 | `AUTH_BASE_URL` | `http://localhost:3001` | Better Auth base URL |
 | `AUTH_TRUSTED_ORIGINS` | `http://localhost:3000` | **Required in production** — comma-separated console origins for CORS + auth. |
 | `ENCRYPTION_KEY` | dev placeholder | **Required in production** — AES-256-GCM key for provider API keys stored at rest. Independent of `BETTER_AUTH_SECRET`. Rotating this invalidates all stored provider keys (they must be re-entered in Settings → Providers). |
+| `MCP_LOGIN_PAGE` | `<first AUTH_TRUSTED_ORIGINS>/login` | Console sign-in page the remote-MCP OAuth flow (Better Auth `mcp()` plugin) redirects unauthenticated users to. Override only if the console login lives elsewhere. |
 
 ## Security
 

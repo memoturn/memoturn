@@ -67,6 +67,8 @@ import {
   listUserProjects,
   listWebhooks,
   listWidgets,
+  mcpAuthorizationServerMetadata,
+  mcpProtectedResourceMetadata,
   otlpToEvents,
   recordAudit,
   recordRun,
@@ -91,6 +93,7 @@ import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
+import { handleMcp } from "./mcp.js";
 import { type AuthVars, denyIfReadOnly, requireAuth } from "./middleware/auth.js";
 import { rateLimit } from "./middleware/ratelimit.js";
 
@@ -124,12 +127,24 @@ const largeBodyLimit = bodyLimit({ maxSize: LARGE_BODY_BYTES });
 const defaultBodyLimit = bodyLimit({ maxSize: DEFAULT_BODY_BYTES });
 app.use("/v1/*", (c, next) => {
   const p = c.req.path;
-  const isLarge = p === "/v1/ingest" || p.startsWith("/v1/otel") || p.startsWith("/v1/media");
+  const isLarge =
+    p === "/v1/ingest" || p.startsWith("/v1/otel") || p.startsWith("/v1/media") || p.startsWith("/v1/mcp");
   return (isLarge ? largeBodyLimit : defaultBodyLimit)(c, next);
 });
 
 // ── Better Auth: dashboard auth routes (email/password, sessions) ────────────────
 app.on(["GET", "POST"], "/auth/*", (c) => auth.handler(c.req.raw));
+
+// ── Remote MCP: per-project Streamable-HTTP endpoint (own API-key auth, see mcp.ts) ─
+// Not guarded by requireAuth — the method-based scope gate can't tell read tools from
+// writes (every call is a POST), so auth + per-tool RBAC live inside handleMcp.
+app.all("/v1/mcp/:projectId", handleMcp);
+
+// OAuth discovery for remote MCP clients (memoturn cloud). MCP clients probe these at the
+// domain root; the mcp() plugin serves them under /auth/.well-known/* and these root mounts
+// proxy to it. Behind Caddy, route `/.well-known/oauth-*` to the API (see infra/Caddyfile).
+app.get("/.well-known/oauth-authorization-server", (c) => mcpAuthorizationServerMetadata(c.req.raw));
+app.get("/.well-known/oauth-protected-resource", (c) => mcpProtectedResourceMetadata(c.req.raw));
 
 // ── Security scheme + auth on everything under /v1 (except health) ──────────────
 app.openAPIRegistry.registerComponent("securitySchemes", "apiKey", {

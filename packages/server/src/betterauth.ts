@@ -2,6 +2,7 @@ import { sso } from "@better-auth/sso";
 import { prisma } from "@memoturn/db";
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
+import { mcp, oAuthDiscoveryMetadata, oAuthProtectedResourceMetadata } from "better-auth/plugins";
 import { createAccessControl } from "better-auth/plugins/access";
 import { haveIBeenPwned } from "better-auth/plugins/haveibeenpwned";
 import { organization } from "better-auth/plugins/organization";
@@ -47,6 +48,17 @@ export const auth = betterAuth({
   plugins: [
     // Reject passwords found in known breaches at signup/change (k-anonymity HIBP check).
     haveIBeenPwned(),
+    // OAuth 2.1 authorization for remote MCP clients (memoturn cloud). Turns this Better Auth
+    // instance into the OAuth server that agent IDEs discover + sign into for the remote MCP
+    // endpoint (apps/api /v1/mcp/:projectId). `loginPage` is where the authorize flow bounces
+    // unauthenticated users — the console's sign-in page. Composes with sso() so enterprise
+    // users can complete the flow via their own IdP. Adds oauthApplication/oauthAccessToken/
+    // oauthConsent tables (see schema.prisma).
+    mcp({
+      loginPage:
+        process.env.MCP_LOGIN_PAGE ??
+        `${(process.env.AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000").split(",")[0]}/login`,
+    }),
     // Let customers sign into memoturn with their own IdP (OIDC/SAML), mapped by email domain.
     sso(),
     organization({
@@ -83,3 +95,12 @@ export const auth = betterAuth({
 });
 
 export type AuthSession = typeof auth.$Infer.Session;
+
+/**
+ * OAuth discovery documents for remote MCP clients, bound to this auth instance. The
+ * mcp() plugin also serves these under /auth/.well-known/*, but MCP clients probe them at
+ * the domain root — the API mounts these at `/.well-known/oauth-*` (see apps/api). Each
+ * returns a Fetch handler `(Request) => Promise<Response>`.
+ */
+export const mcpAuthorizationServerMetadata = oAuthDiscoveryMetadata(auth);
+export const mcpProtectedResourceMetadata = oAuthProtectedResourceMetadata(auth);
