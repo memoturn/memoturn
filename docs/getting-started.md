@@ -52,6 +52,23 @@ cd sdks/python
 MEMOTURN_PUBLIC_KEY=pk-mt-dev MEMOTURN_SECRET_KEY=sk-mt-dev uv run examples/quickstart.py
 ```
 
+## Fill the dashboards with demo data
+
+One trace makes for an empty dashboard. To exercise the metrics, trace list, and sessions
+views with realistic volume, seed ~30 days of backdated demo telemetry (requires `bun run dev`
+running — data flows through the real ingest pipeline):
+
+```bash
+bun run seed:demo                                  # 30 days × ~1000 traces/day
+bun run seed:demo -- --days 7 --traces-per-day 100 # smaller/faster
+bun run seed:demo -- --dry-run                     # generate + validate only, send nothing
+bun run seed:demo -- --wipe                        # delete previous demo rows first
+```
+
+The run is deterministic (`--seed`): re-running on the same day replaces the same rows
+instead of duplicating them. On a later day the seeded window shifts forward, so pass
+`--wipe` to clear the previous run's rows first.
+
 ## Common commands
 
 ```bash
