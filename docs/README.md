@@ -33,7 +33,7 @@ Bun-native.
 More: [evaluators](./images/evaluators.png) · [review queues](./images/review.png) ·
 [prompts](./images/prompts.png) · [datasets](./images/datasets.png) ·
 [sessions](./images/sessions.png) · [settings](./images/settings.png). Regenerate with
-`bun run screenshots` (requires `bun run dev` + seeded data).
+`bun run screenshots` (requires `bun run dev` + seeded data — `bun run seed:demo` fills 30 days of demo telemetry).
 
 ## At a glance
 
