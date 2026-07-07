@@ -138,6 +138,7 @@ interface Laid extends ObservationDetail {
   depth: number;
   offsetPct: number;
   widthPct: number;
+  startOffsetMs: number;
 }
 
 /** Compute waterfall layout: depth from parent chain, bar offset/width from times. */
@@ -156,50 +157,49 @@ function layout(observations: ObservationDetail[]): Laid[] {
   };
 
   const starts = observations.map((o) => ms(o.start_time) ?? 0);
-  const ends = observations.map((o, i) => ms(o.end_time) ?? starts[i]! + Number(o.latency_ms));
+  // end_time can be coarser than latency_ms (second precision), so trust whichever runs longer
+  const ends = observations.map((o, i) => Math.max(ms(o.end_time) ?? 0, starts[i]! + Number(o.latency_ms)));
   const traceStart = Math.min(...starts);
   const total = Math.max(1, Math.max(...ends) - traceStart);
 
   return observations
-    .map((o, i) => ({
-      ...o,
-      depth: depthOf(o),
-      offsetPct: ((starts[i]! - traceStart) / total) * 100,
-      widthPct: Math.max(1.5, (Number(o.latency_ms) / total) * 100),
-    }))
+    .map((o, i) => {
+      const offsetPct = Math.min(((starts[i]! - traceStart) / total) * 100, 98.5);
+      const widthPct = Math.max(1.5, Math.min((Number(o.latency_ms) / total) * 100, 100 - offsetPct));
+      return { ...o, depth: depthOf(o), offsetPct, widthPct, startOffsetMs: starts[i]! - traceStart };
+    })
     .sort((a, b) => (ms(a.start_time) ?? 0) - (ms(b.start_time) ?? 0));
 }
 
+/** Bar hues match the KindBadge tones (blue = generation, emerald = span, amber = event). */
 function barColor(type: string): string {
-  if (type === "GENERATION") return "bg-primary";
+  if (type === "GENERATION") return "bg-blue-500";
   if (type === "SPAN") return "bg-emerald-500";
   return "bg-amber-500";
 }
 
+const WATERFALL_COLS = "grid-cols-[320px_1fr_5.5rem]";
+
 function WaterfallRow({ obs }: { obs: Laid }) {
+  const label = `${obs.name || obs.id.slice(0, 8)}${obs.model ? ` · ${obs.model}` : ""}`;
   return (
-    <div className="grid grid-cols-[280px_1fr] items-center border-b last:border-b-0 hover:bg-muted/50">
+    <div className={`grid ${WATERFALL_COLS} items-center border-b last:border-b-0 hover:bg-muted/50`}>
       <div
-        className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-2"
-        style={{ paddingLeft: `${obs.depth * 16}px` }}
+        className="overflow-hidden text-ellipsis whitespace-nowrap py-2 pr-3"
+        style={{ paddingLeft: `${12 + obs.depth * 16}px` }}
+        title={label}
       >
         <KindBadge tone={toneForKind(obs.type)}>{obs.type.toLowerCase()}</KindBadge>{" "}
         <span className="font-medium">{obs.name || obs.id.slice(0, 8)}</span>
         {obs.model && <span className="text-muted-foreground"> · {obs.model}</span>}
       </div>
-      <div className="relative mr-3 h-7">
+      <div className="relative mr-4 h-7" title={`+${Math.round(obs.startOffsetMs)} ms → ${obs.latency_ms} ms`}>
         <div
-          className={`absolute top-[9px] h-2.5 min-w-[3px] rounded-[3px] ${barColor(obs.type)}`}
+          className={`absolute top-1/2 h-2.5 min-w-[3px] -translate-y-1/2 rounded-[3px] ${barColor(obs.type)}`}
           style={{ left: `${obs.offsetPct}%`, width: `${obs.widthPct}%` }}
-          title={`${obs.latency_ms} ms`}
         />
-        <span
-          className="pointer-events-none absolute top-1.5 translate-x-1.5 text-[11px] tabular-nums text-muted-foreground"
-          style={{ left: `min(${obs.offsetPct}%, 80%)` }}
-        >
-          {obs.latency_ms} ms
-        </span>
       </div>
+      <span className="py-2 pr-3 text-right text-xs tabular-nums text-muted-foreground">{obs.latency_ms} ms</span>
     </div>
   );
 }
@@ -210,8 +210,8 @@ const GRAPH_COLOR: Record<string, string> = {
   SPAN: "text-emerald-500",
   EVENT: "text-amber-500",
 };
-const NODE_W = 172;
-const NODE_H = 34;
+const NODE_W = 176;
+const NODE_H = 44;
 const HGAP = 48;
 const VGAP = 14;
 
@@ -261,43 +261,58 @@ function AgentGraph({ observations }: { observations: ObservationDetail[] }) {
 
   return (
     <div className="overflow-x-auto py-2">
-      <svg width={width} height={height} role="img" aria-label="Agent run graph">
+      <svg width={width + 3} height={height + 3} role="img" aria-label="Agent run graph">
         <title>Agent run graph</title>
-        {edges.map((e, i) => {
-          const x1 = e.from.x + NODE_W;
-          const y1 = e.from.y + NODE_H / 2;
-          const x2 = e.to.x;
-          const y2 = e.to.y + NODE_H / 2;
-          const mx = (x1 + x2) / 2;
-          return (
-            <path
-              key={i}
-              d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`}
-              fill="none"
-              stroke="var(--border)"
-              strokeWidth={1.5}
-            />
-          );
-        })}
-        {observations.map((o) => {
-          const p = pos.get(o.id);
-          if (!p) return null;
-          const label = o.name || o.id.slice(0, 8);
-          return (
-            <g
-              key={o.id}
-              transform={`translate(${p.x}, ${p.y})`}
-              className={GRAPH_COLOR[o.type] ?? "text-muted-foreground"}
-            >
-              <title>{`${o.type} · ${o.name || o.id}${o.model ? ` · ${o.model}` : ""} · ${o.latency_ms} ms`}</title>
-              <rect width={NODE_W} height={NODE_H} rx={0} fill="var(--card)" stroke="currentColor" strokeWidth={1.5} />
-              <circle cx={14} cy={NODE_H / 2} r={4} fill="currentColor" />
-              <text x={26} y={NODE_H / 2 + 4} fill="var(--foreground)" fontSize={12}>
-                {label.length > 20 ? `${label.slice(0, 19)}…` : label}
-              </text>
-            </g>
-          );
-        })}
+        <g transform="translate(1.5, 1.5)">
+          {edges.map((e, i) => {
+            const x1 = e.from.x + NODE_W;
+            const y1 = e.from.y + NODE_H / 2;
+            const x2 = e.to.x;
+            const y2 = e.to.y + NODE_H / 2;
+            const mx = (x1 + x2) / 2;
+            return (
+              <path
+                key={i}
+                d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`}
+                fill="none"
+                stroke="var(--border)"
+                strokeWidth={1.5}
+              />
+            );
+          })}
+          {observations.map((o) => {
+            const p = pos.get(o.id);
+            if (!p) return null;
+            const label = o.name || o.id.slice(0, 8);
+            const meta = [o.model, `${o.latency_ms} ms`].filter(Boolean).join(" · ");
+            return (
+              <g
+                key={o.id}
+                transform={`translate(${p.x}, ${p.y})`}
+                className={GRAPH_COLOR[o.type] ?? "text-muted-foreground"}
+              >
+                <title>{`${o.type} · ${o.name || o.id}${o.model ? ` · ${o.model}` : ""} · ${o.latency_ms} ms`}</title>
+                <rect
+                  width={NODE_W}
+                  height={NODE_H}
+                  rx={0}
+                  fill="currentColor"
+                  fillOpacity={0.06}
+                  stroke="currentColor"
+                  strokeOpacity={0.4}
+                  strokeWidth={1.5}
+                />
+                <circle cx={14} cy={17} r={4} fill="currentColor" />
+                <text x={26} y={21} fill="var(--foreground)" fontSize={12} fontWeight={500}>
+                  {label.length > 22 ? `${label.slice(0, 21)}…` : label}
+                </text>
+                <text x={26} y={35} fill="var(--muted-foreground)" fontSize={10}>
+                  {meta.length > 28 ? `${meta.slice(0, 27)}…` : meta}
+                </text>
+              </g>
+            );
+          })}
+        </g>
       </svg>
     </div>
   );
@@ -324,9 +339,24 @@ function ObservationDetailItem({ obs }: { obs: ObservationDetail }) {
       <AccordionContent className="space-y-3">
         <MediaPreview raw={obs.input} />
         <MediaPreview raw={obs.output} />
-        {obs.input && <PayloadView raw={obs.input} />}
-        {obs.output && <PayloadView raw={obs.output} />}
-        {obs.status_message && <pre className={PRE_CLASS}>{obs.status_message}</pre>}
+        {obs.input && (
+          <div className="space-y-1">
+            <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Input</div>
+            <PayloadView raw={obs.input} />
+          </div>
+        )}
+        {obs.output && (
+          <div className="space-y-1">
+            <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Output</div>
+            <PayloadView raw={obs.output} />
+          </div>
+        )}
+        {obs.status_message && (
+          <div className="space-y-1">
+            <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Status</div>
+            <pre className={PRE_CLASS}>{obs.status_message}</pre>
+          </div>
+        )}
       </AccordionContent>
     </AccordionItem>
   );
@@ -415,7 +445,7 @@ function TraceDetailPage() {
         <CardContent className="space-y-4">
           <dl className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-2.5 text-sm">
             <dt className="text-muted-foreground">Timestamp</dt>
-            <dd className="tabular-nums">{trace.timestamp}</dd>
+            <dd className="tabular-nums">{trace.timestamp.replace("T", " ").replace("Z", " UTC")}</dd>
             {trace.user_id && (
               <>
                 <dt className="text-muted-foreground">User</dt>
@@ -462,8 +492,8 @@ function TraceDetailPage() {
                 >
                   <KindBadge tone={toneForSource(s.source)}>{s.source.toLowerCase()}</KindBadge>
                   <span className="text-muted-foreground">{s.name}</span>
-                  <span className="font-medium">{s.value != null ? s.value : s.string_value || "—"}</span>
-                  {s.comment && <span className="text-muted-foreground">{s.comment}</span>}
+                  <span className="font-medium tabular-nums">{s.value != null ? s.value : s.string_value || "—"}</span>
+                  {s.comment && <span className="max-w-[48ch] truncate text-muted-foreground">{s.comment}</span>}
                 </div>
               ))}
             </div>
@@ -490,10 +520,13 @@ function TraceDetailPage() {
                   <EmptyState title="No observations." />
                 </div>
               ) : (
-                <div className="border-t">
-                  <div className="grid grid-cols-[280px_1fr] border-b bg-muted/30 py-1.5 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+                <div className="overflow-x-auto border-t">
+                  <div
+                    className={`grid ${WATERFALL_COLS} border-b bg-muted/30 py-1.5 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase`}
+                  >
                     <span className="px-3">Observation</span>
-                    <span>Duration</span>
+                    <span>Timeline</span>
+                    <span className="pr-3 text-right">Duration</span>
                   </div>
                   {layout(trace.observations).map((obs) => (
                     <WaterfallRow key={obs.id} obs={obs} />
