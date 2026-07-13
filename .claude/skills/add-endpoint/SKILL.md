@@ -10,7 +10,7 @@ memoturn threads **one** Zod contract through four layers so types can't drift. 
 ## Read endpoint
 
 1. **Contract** — `packages/contracts/src/index.ts`: add the Zod schema and export both it and its `z.infer` type.
-2. **Server** — `packages/server/src/<domain>.ts`: implement the query; its return type is the inferred contract type. Reuse the domain file's existing ClickHouse query helpers (see the `clickhouse-query` skill).
+2. **Server** — `packages/server/src/<domain>.ts`: implement the query; its return type is the inferred contract type. Telemetry reads go through a `TelemetryStore` method from `@memoturn/telemetry` (see the `doris-query` skill for adding one); Postgres reads use Prisma.
 3. **Route** — `apps/api/src/app.ts`: `app.openapi(createRoute({ method, path, responses: { 200: { ...schema: C.<schema> } } }), handler)`. Add `app.use("/v1/…", requireAuth)`.
 4. **Console** — `apps/console/src/lib/api.ts`: add the method; types come from the contracts re-export. No new console interfaces.
 

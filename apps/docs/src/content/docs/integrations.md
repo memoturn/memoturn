@@ -4,7 +4,7 @@ description: Ingest telemetry from OpenTelemetry, OpenAI, LangChain, LiteLLM, or
 ---
 
 memoturn ingests from any source that can speak its batched `/v1/ingest` API or OpenTelemetry.
-All paths funnel through the same pipeline → ClickHouse.
+All paths funnel through the same pipeline → Doris.
 
 ## OpenTelemetry (universal)
 

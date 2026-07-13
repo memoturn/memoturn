@@ -101,7 +101,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET / POST | `/v1/score-configs` | List / create-update a score config. |
 | DELETE | `/v1/score-configs/{id}` | Delete a score config. |
 | PATCH | `/v1/scores/{id}` | Correct a score's `value`/`stringValue`/`comment` (inserts a replacement row; audited). |
-| DELETE | `/v1/scores/{id}` | Hard-delete a score (ClickHouse lightweight DELETE, project-scoped). |
+| DELETE | `/v1/scores/{id}` | Hard-delete a score (Doris `DELETE`, project-scoped). |
 | GET / POST | `/v1/saved-views` | List / save a table view (named set of filters). |
 | DELETE | `/v1/saved-views/{id}` | Delete a saved view. |
 | GET / POST | `/v1/comments` | List comments on an object (trace/observation/session/prompt) / add one. |
@@ -127,7 +127,7 @@ guard against DNS rebinding. Webhook deliveries carry `X-Memoturn-Signature: sha
 
 Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/observation
 input/output are offloaded to blob storage at ingest time and replaced with a
-`memoturn-media://<key>` reference, so large payloads never bloat ClickHouse; the console fetches
+`memoturn-media://<key>` reference, so large payloads never bloat Doris; the console fetches
 them back through the `GET` route. Both routes require auth and are project-scoped.
 
 | Method | Path | Description |

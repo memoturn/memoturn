@@ -8,7 +8,7 @@ Each symptom lists the usual cause first.
 ### `bun run infra:up` fails with "port is already allocated"
 
 Dev infra intentionally uses **non-default host ports** to avoid clashing with other local
-services: Postgres **5433**, Redis **6380** (ClickHouse 8123, MinIO 9000/9001). If one is still
+services: Postgres **5433**, Redis **6380** (Doris 9030/8030, MinIO 9000/9001). If one is still
 taken, another container or process on your machine holds it — find it with
 `docker ps --format '{{.Names}}\t{{.Ports}}'` (or `lsof -i :5433`) and stop it, or edit the
 host-side port mapping in `infra/docker-compose.dev.yml` **and** the matching URL in `.env`.
@@ -17,7 +17,8 @@ Don't "fix" the ports back to 5432/6379 — the offsets are deliberate.
 ### `bun run infra:wait` never becomes healthy
 
 Docker isn't running, or a container is crash-looping. `bun run infra:logs` shows which one.
-A ClickHouse container that loops after an unclean shutdown usually recovers on
+The Doris FE + BE containers want ~4 GB of Docker memory — raise Docker's memory limit if
+they get OOM-killed. A container that loops after an unclean shutdown usually recovers on
 `bun run infra:down && bun run infra:up` (volumes persist — no data loss).
 
 ### `db:migrate` (or another script) fails with "The datasource.url property is required"
@@ -34,7 +35,7 @@ bun run db:migrate
 
 ### `/v1/ingest` returns 207 but nothing appears in the console
 
-A 207 means the API accepted the batch and enqueued it — **the worker does the ClickHouse
+A 207 means the API accepted the batch and enqueued it — **the worker does the Doris
 write**. Check, in order:
 
 1. Is the worker running? (`bun run dev` starts it; its health endpoint is
@@ -87,10 +88,11 @@ must set a trusted one (see `AUTH_TRUSTED_ORIGINS`).
 The generated Prisma client is stale. Regenerate with `bun run db:generate` (also runs on
 `postinstall`), then re-run `bun run typecheck`.
 
-### ClickHouse counts come back as strings
+### Doris counts come back as strings
 
-`count()` / `sum()` return strings in JSONEachRow responses — coerce with `Number(...)` before
-arithmetic. The contracts already declare them as `number`; the console coerces.
+`COUNT` / `SUM` / BIGINT values can surface as strings from the mysql2 client — wrap them in
+`Number(...)` inside the store method in `packages/telemetry`, so consumers only ever see
+contract-shaped numbers.
 
 Still stuck? [Open an issue](https://github.com/memoturn/memoturn/issues) with the output of the
 failing command and `bun run infra:logs`.

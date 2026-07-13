@@ -23,12 +23,13 @@ exporter](/integrations/).
 ## Track spend by model & feature
 
 Token costs compound silently — a model upgrade or a longer system prompt can double the
-bill before anyone notices. Memoturn rolls cost, tokens, and latency (p50/p95) up in
-ClickHouse, sliced by day and by model, with custom dashboard widgets for the breakdowns
-your team watches.
+bill before anyone notices. Memoturn aggregates cost, tokens, and latency (p50/p95) on the
+fly in Apache Doris, sliced by day and by model, with custom dashboard widgets for the
+breakdowns your team watches.
 
-**How Memoturn does it:** the [architecture](/architecture/) stores telemetry in ClickHouse
-rollups; custom per-project model prices are configurable for private or fine-tuned models.
+**How Memoturn does it:** the [architecture](/architecture/) stores telemetry in Doris and
+aggregates it at query time; custom per-project model prices are configurable for private or
+fine-tuned models.
 
 ## Catch regressions before users do
 

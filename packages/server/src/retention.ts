@@ -1,9 +1,9 @@
 import { prisma } from "@memoturn/db";
-import { clickhouse } from "@memoturn/db/clickhouse";
+import { telemetry } from "@memoturn/telemetry";
 
 /**
- * Data retention — delete telemetry older than a per-project cutoff. Uses ClickHouse
- * lightweight DELETEs on traces/observations/scores. days=0 means keep forever.
+ * Data retention — delete telemetry older than a per-project cutoff via the telemetry
+ * store. days=0 means keep forever.
  */
 export async function getRetention(projectId: string) {
   const p = await prisma.retentionPolicy.findUnique({ where: { projectId } });
@@ -28,33 +28,9 @@ export interface RetentionResult {
 /** Apply retention for one project. Returns how many traces were removed. */
 export async function applyRetention(projectId: string, days: number): Promise<RetentionResult> {
   if (days <= 0) return { projectId, days, deletedTraces: 0 };
-  const ch = clickhouse();
-  // Parameterized cutoff (no string interpolation): now() - toIntervalDay({days:UInt32}).
-  const cutoff = "now() - toIntervalDay({days:UInt32})";
-  const params = { p: projectId, days: Math.floor(days) };
-
-  const before = await ch
-    .query({
-      query: `SELECT count() AS c FROM traces FINAL WHERE project_id = {p:String} AND timestamp < ${cutoff}`,
-      query_params: params,
-      format: "JSONEachRow",
-    })
-    .then((r) => r.json<{ c: string }>())
-    .then((rows) => Number(rows[0]?.c ?? 0));
-
-  await ch.command({
-    query: `DELETE FROM traces WHERE project_id = {p:String} AND timestamp < ${cutoff}`,
-    query_params: params,
-  });
-  await ch.command({
-    query: `DELETE FROM observations WHERE project_id = {p:String} AND start_time < ${cutoff}`,
-    query_params: params,
-  });
-  await ch.command({
-    query: `DELETE FROM scores WHERE project_id = {p:String} AND timestamp < ${cutoff}`,
-    query_params: params,
-  });
-
+  const store = telemetry();
+  const before = await store.countTracesOlderThan(projectId, days);
+  await store.deleteOlderThan(projectId, days);
   return { projectId, days, deletedTraces: before };
 }
 

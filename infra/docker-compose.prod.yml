@@ -45,22 +45,75 @@ services:
       timeout: 5s
       retries: 10
 
-  clickhouse:
-    image: clickhouse/clickhouse-server:24.8-alpine
+  # Apache Doris (OLAP). FE = query/metadata, BE = storage; the BE self-registers with
+  # the FE via stable IPs on the dedicated subnet. Not exposed on the host network.
+  doris-fe:
+    image: apache/doris:fe-4.1.2
     restart: unless-stopped
     environment:
-      CLICKHOUSE_USER: memoturn
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env}
-      CLICKHOUSE_DB: memoturn
-    ulimits:
-      nofile: { soft: 262144, hard: 262144 }
+      FE_SERVERS: fe1:172.28.82.2:9010
+      FE_ID: 1
+      # Works around a JDK 17.0.12 cgroup-v2 detection NPE (CgroupInfo.getMountPoint)
+      # that crash-loops the FE on some hosts (e.g. GitHub Actions runners).
+      JAVA_TOOL_OPTIONS: "-XX:-UseContainerSupport"
     volumes:
-      - chdata:/var/lib/clickhouse
+      - dorisfemeta:/opt/apache-doris/fe/doris-meta
+    networks:
+      default: {}
+      doris:
+        ipv4_address: 172.28.82.2
     healthcheck:
-      test: ["CMD-SHELL", "clickhouse-client --user $$CLICKHOUSE_USER --password $$CLICKHOUSE_PASSWORD --query 'SELECT 1'"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8030/api/bootstrap || exit 1"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 60
+      start_period: 30s
+
+  doris-be:
+    image: apache/doris:be-4.1.2
+    restart: unless-stopped
+    depends_on:
+      doris-fe:
+        condition: service_healthy
+    environment:
+      FE_SERVERS: fe1:172.28.82.2:9010
+      BE_ADDR: 172.28.82.3:9050
+      # Works around a JDK 17.0.12 cgroup-v2 detection NPE (CgroupInfo.getMountPoint)
+      # that crash-loops the JVM sidecars on some hosts (e.g. GitHub Actions runners).
+      JAVA_TOOL_OPTIONS: "-XX:-UseContainerSupport"
+    ulimits:
+      nofile: { soft: 655350, hard: 655350 }
+    volumes:
+      - dorisbedata:/opt/apache-doris/be/storage
+    networks:
+      default: {}
+      doris:
+        ipv4_address: 172.28.82.3
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8040/api/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  # One-shot: sets the Doris root password (the image boots with root/empty). Idempotent —
+  # if the password is already set, the first probe succeeds and it exits.
+  doris-setup:
+    image: curlimages/curl:latest
+    depends_on:
+      doris-fe:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      if curl -sf -u root:${DORIS_PASSWORD:?set DORIS_PASSWORD in .env} -H 'Content-Type: application/json'
+        -d '{\"stmt\":\"SELECT 1\"}' http://doris-fe:8030/api/query/default_cluster/information_schema >/dev/null; then
+        echo 'doris root password already set'; exit 0;
+      fi;
+      curl -sf -u root: -H 'Content-Type: application/json'
+        -d \"{\\\"stmt\\\":\\\"SET PASSWORD FOR 'root' = PASSWORD('${DORIS_PASSWORD}')\\\"}\"
+        http://doris-fe:8030/api/query/default_cluster/information_schema &&
+      echo 'doris root password set';
+      "
 
   redis:
     image: valkey/valkey:8-alpine
@@ -100,9 +153,9 @@ services:
       mc mb --ignore-existing local/${BLOB_BUCKET:-memoturn};
       "
 
-  # One-shot schema migration. Runs Prisma (Postgres) then the ClickHouse DDL, reading
-  # connection config from the injected env. Calls the ClickHouse script directly rather than
-  # `bun run db:clickhouse` to bypass that script's hardcoded `--env-file=../../.env` (no such
+  # One-shot schema migration. Runs Prisma (Postgres) then the Doris DDL, reading
+  # connection config from the injected env. Calls the telemetry script directly rather than
+  # `bun run db:telemetry` to bypass that script's hardcoded `--env-file=../../.env` (no such
   # file in the image). api/worker wait for this to complete successfully before starting.
   migrate:
     build:
@@ -111,15 +164,19 @@ services:
     restart: "no"
     depends_on:
       postgres: { condition: service_healthy }
-      clickhouse: { condition: service_healthy }
+      doris-fe: { condition: service_healthy }
+      doris-be: { condition: service_healthy }
+      doris-setup: { condition: service_completed_successfully }
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:?}@postgres:5432/memoturn?schema=public
-      CLICKHOUSE_URL: http://clickhouse:8123
-      CLICKHOUSE_USER: memoturn
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?}
-      CLICKHOUSE_DB: memoturn
-    command: ["sh", "-c", "bun --filter @memoturn/db migrate && bun packages/db/src/migrate-clickhouse.ts"]
+      DORIS_HOST: doris-fe
+      DORIS_PORT: "9030"
+      DORIS_HTTP_PORT: "8030"
+      DORIS_USER: root
+      DORIS_PASSWORD: ${DORIS_PASSWORD:?}
+      DORIS_DB: memoturn
+    command: ["sh", "-c", "bun --filter @memoturn/db migrate && bun packages/telemetry/src/migrate.ts"]
 
   # Public API (Hono on Bun): /v1 ingest + OTel receiver + read API + /auth + OpenAPI.
   # No host port — reached only through Caddy at https://DOMAIN/api.
@@ -131,17 +188,20 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       postgres: { condition: service_healthy }
-      clickhouse: { condition: service_healthy }
+      doris-fe: { condition: service_healthy }
+      doris-be: { condition: service_healthy }
       redis: { condition: service_healthy }
       minio: { condition: service_healthy }
     environment:
       NODE_ENV: production
       API_PORT: "3001"
       DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:?}@postgres:5432/memoturn?schema=public
-      CLICKHOUSE_URL: http://clickhouse:8123
-      CLICKHOUSE_USER: memoturn
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?}
-      CLICKHOUSE_DB: memoturn
+      DORIS_HOST: doris-fe
+      DORIS_PORT: "9030"
+      DORIS_HTTP_PORT: "8030"
+      DORIS_USER: root
+      DORIS_PASSWORD: ${DORIS_PASSWORD:?}
+      DORIS_DB: memoturn
       REDIS_URL: redis://redis:6379
       BLOB_ENDPOINT: http://minio:9000
       BLOB_REGION: us-east-1
@@ -169,16 +229,19 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       postgres: { condition: service_healthy }
-      clickhouse: { condition: service_healthy }
+      doris-fe: { condition: service_healthy }
+      doris-be: { condition: service_healthy }
       redis: { condition: service_healthy }
       minio: { condition: service_healthy }
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:?}@postgres:5432/memoturn?schema=public
-      CLICKHOUSE_URL: http://clickhouse:8123
-      CLICKHOUSE_USER: memoturn
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?}
-      CLICKHOUSE_DB: memoturn
+      DORIS_HOST: doris-fe
+      DORIS_PORT: "9030"
+      DORIS_HTTP_PORT: "8030"
+      DORIS_USER: root
+      DORIS_PASSWORD: ${DORIS_PASSWORD:?}
+      DORIS_DB: memoturn
       REDIS_URL: redis://redis:6379
       BLOB_ENDPOINT: http://minio:9000
       BLOB_REGION: us-east-1
@@ -204,8 +267,15 @@ services:
 
 volumes:
   pgdata:
-  chdata:
+  dorisfemeta:
+  dorisbedata:
   redisdata:
   miniodata:
   caddy_data:
   caddy_config:
+
+networks:
+  doris:
+    ipam:
+      config:
+        - subnet: 172.28.82.0/24

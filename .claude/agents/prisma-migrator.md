@@ -23,7 +23,7 @@ You make Postgres schema changes in memoturn. The Prisma 7 setup is **driver-ada
 
 - Migrations under `packages/db/prisma/migrations/` are immutable once created — never hand-edit them (a hook blocks this). To change course, edit the schema and create a new migration.
 - Dev Postgres is on host port **5433** (not 5432) — that's already in `.env`; don't "fix" it.
-- If the new model is also telemetry (high-volume, queried analytically), it likely belongs in ClickHouse instead — flag that rather than adding a Postgres table.
+- If the new model is also telemetry (high-volume, queried analytically), it likely belongs in Doris (via packages/telemetry) instead — flag that rather than adding a Postgres table.
 
 ## Output
 

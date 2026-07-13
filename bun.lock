@@ -9,6 +9,7 @@
         "@memoturn/db": "workspace:*",
         "@memoturn/sdk": "workspace:*",
         "@memoturn/server": "workspace:*",
+        "@memoturn/telemetry": "workspace:*",
         "@types/node": "^26.0.1",
         "lefthook": "^2.1.9",
         "playwright": "^1.61.1",
@@ -147,6 +148,7 @@
         "@memoturn/core": "workspace:*",
         "@memoturn/db": "workspace:*",
         "@memoturn/server": "workspace:*",
+        "@memoturn/telemetry": "workspace:*",
         "bullmq": "^5.79.1",
       },
       "devDependencies": {
@@ -181,7 +183,6 @@
       "version": "0.1.0",
       "dependencies": {
         "@aws-sdk/client-s3": "^3.1075.0",
-        "@clickhouse/client": "^1.22.0",
         "@memoturn/core": "workspace:*",
         "@prisma/adapter-pg": "^7.8.0",
         "@prisma/client": "^7.8.0",
@@ -217,9 +218,23 @@
         "@memoturn/core": "workspace:*",
         "@memoturn/db": "workspace:*",
         "@memoturn/llm": "workspace:*",
+        "@memoturn/telemetry": "workspace:*",
         "better-auth": "^1.6.20",
       },
       "devDependencies": {
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.9",
+      },
+    },
+    "packages/telemetry": {
+      "name": "@memoturn/telemetry",
+      "version": "0.1.0",
+      "dependencies": {
+        "@memoturn/contracts": "workspace:*",
+        "mysql2": "^3.15.3",
+      },
+      "devDependencies": {
+        "@types/node": "^26.0.1",
         "typescript": "^6.0.3",
         "vitest": "^4.1.9",
       },
@@ -491,10 +506,6 @@
 
     "@clack/prompts": ["@clack/prompts@1.7.0", "", { "dependencies": { "@clack/core": "1.4.3", "fast-string-width": "^3.0.2", "fast-wrap-ansi": "^0.2.0", "sisteransi": "^1.0.5" } }, "sha512-y7/yvZ2TPAnR9+jnc00klvNNLkJiXFFrQA/hlLCcxA9a2A4zQIOimyFQ9XfwYKiGD1fb5GY8vbKIIgO8d5Tb2A=="],
 
-    "@clickhouse/client": ["@clickhouse/client@1.22.0", "", { "dependencies": { "@clickhouse/client-common": "1.22.0" } }, "sha512-iQAAM4VT9fO7mYVOkGB/Ul9Xxuf0atKn+GFceZqfE8xFakV8KOAQxR3tfNrXFMlJ8T+Q3gbrpfLFyj7/TbOwyA=="],
-
-    "@clickhouse/client-common": ["@clickhouse/client-common@1.22.0", "", {}, "sha512-MQgXRhoYXut6GhRrTJlub42bnPX7+5Vm+5gHNR0zZXU5+EwZKsBgMXiWXPOerAmQd3weGKm8hzoeZJCfU3Cw2w=="],
-
     "@cloudflare/kv-asset-handler": ["@cloudflare/kv-asset-handler@0.5.0", "", {}, "sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg=="],
 
     "@cloudflare/unenv-preset": ["@cloudflare/unenv-preset@2.16.1", "", { "peerDependencies": { "unenv": "2.0.0-rc.24", "workerd": ">1.20260305.0 <2.0.0-0" }, "optionalPeers": ["workerd"] }, "sha512-ECxObrMfyTl5bhQf/lZCXwo5G6xX9IAUo+nDMKK4SZ8m4Jvvxp52vilxyySSWh2YTZz8+HQ07qGH/2rEom1vDw=="],
@@ -724,6 +735,8 @@
     "@memoturn/sdk": ["@memoturn/sdk@workspace:sdks/js"],
 
     "@memoturn/server": ["@memoturn/server@workspace:packages/server"],
+
+    "@memoturn/telemetry": ["@memoturn/telemetry@workspace:packages/telemetry"],
 
     "@memoturn/tsconfig": ["@memoturn/tsconfig@workspace:packages/tsconfig"],
 

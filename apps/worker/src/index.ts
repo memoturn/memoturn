@@ -7,7 +7,7 @@ import { logJson, snapshot } from "./metrics.js";
 import { processIngest } from "./processors/ingest.js";
 
 /**
- * memoturn worker — consumes BullMQ queues and writes telemetry to ClickHouse.
+ * memoturn worker — consumes BullMQ queues and writes telemetry to the Doris store.
  * Runs the ingest processor (+ online evaluations) and daily maintenance crons
  * (retention sweep + scheduled blob exports).
  */

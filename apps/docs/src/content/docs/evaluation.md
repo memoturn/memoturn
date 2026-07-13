@@ -3,12 +3,12 @@ title: Evaluation
 description: Offline, online, and human evaluation modes that all write scores onto your traces.
 ---
 
-memoturn supports three evaluation modes; all write **scores** into ClickHouse, surfaced on the
+memoturn supports three evaluation modes; all write **scores** into Doris, surfaced on the
 trace alongside `API` feedback scores.
 
 ```
 Offline:  Dataset + items ──► Experiment run ──► Evaluator ─────┐
-Online:   Incoming trace ──► sampled? ──yes──► Evaluator ───────┼──► scores (ClickHouse)
+Online:   Incoming trace ──► sampled? ──yes──► Evaluator ───────┼──► scores (Doris)
 Human:    Review queue ──► Reviewer scores ─────────────────────┘            │
                                                                              ▼
                                                                     shown on the trace

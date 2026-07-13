@@ -5,7 +5,7 @@ import { z } from "zod";
  *
  * A client POSTs a batch of envelopes to `/v1/ingest`. Each envelope carries its
  * own `id` (for idempotency/dedup) and `timestamp` (the event_ts used to merge
- * late/partial updates in ClickHouse — newest wins). The `body` shape is selected
+ * late/partial updates in the telemetry store — newest wins). The `body` shape is selected
  * by the envelope `type`.
  *
  * This file is the single source of truth shared by the SDK, the web API, and the

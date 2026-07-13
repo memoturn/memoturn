@@ -1,6 +1,6 @@
 # Evaluation
 
-memoturn supports three evaluation modes; all write **scores** into ClickHouse, surfaced
+memoturn supports three evaluation modes; all write **scores** into Doris, surfaced
 on the trace alongside `API` feedback scores.
 
 ```mermaid
@@ -14,7 +14,7 @@ flowchart TD
   subgraph human[Human]
     q[Review queue] --> rev[Reviewer scores]
   end
-  ev1 --> score[(scores in ClickHouse)]
+  ev1 --> score[(scores in Doris)]
   ev2 --> score
   rev --> score
   score --> trace[Shown on the trace]

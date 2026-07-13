@@ -3,7 +3,7 @@ name: memoturn
 description: |
   memoturn — open-source LLM observability, evals, metrics, prompts, and playground.
   Deploys the stateless API (Hono/Bun), the BullMQ worker, and the console SPA. Postgres,
-  ClickHouse, Redis, and an S3-compatible blob store are expected to be provided externally
+  Apache Doris, Redis, and an S3-compatible blob store are expected to be provided externally
   (managed services or in-cluster operators) and wired in via values.
 type: application
 version: 0.1.0

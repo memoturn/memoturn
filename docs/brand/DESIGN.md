@@ -314,7 +314,7 @@ The signature component. Concentric / topo: outer ring (r 54 to 40), middle ring
 The strategic line from PRODUCT.md carries through here verbatim. Every anti-reference in PRODUCT.md is repeated as a Don't. Every visual rule in this DESIGN.md is repeated as a Do. The voice is that of a design director: forceful, exact.
 
 ### Do:
-- **Do** lead with mechanism. Name the store (ClickHouse, Postgres, Redis, blob), the transport (OTLP, MCP, webhooks), the package (`apps/api`, `apps/worker`, `packages/core`). Specificity is what the Multi-tool Builder trusts.
+- **Do** lead with mechanism. Name the store (Doris, Postgres, Redis, blob), the transport (OTLP, MCP, webhooks), the package (`apps/api`, `apps/worker`, `packages/core`). Specificity is what the Multi-tool Builder trusts.
 - **Do** hold the page substrate pure white (`#ffffff`). The neutrals (foam, sand) carry the warmth.
 - **Do** use the lagoon (`gradient-lagoon`) and atoll (`gradient-atoll`) gradients only as the brand mark fill and the inverted band substrate. They are load-bearing, not decorative.
 - **Do** keep headlines tight: line-height 1.02 to 1.05, letter-spacing -0.025em to -0.02em. The tight set is the brand voice.

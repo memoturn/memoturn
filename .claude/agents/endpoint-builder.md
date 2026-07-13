@@ -11,7 +11,7 @@ You add and modify `/v1` endpoints in memoturn, which keeps types honest by thre
 ## The four layers (always in this order)
 
 1. **Contract** — `packages/contracts/src/index.ts`: add/extend the Zod schema and export both the schema and its `z.infer` type. This is the single source of truth for the shape.
-2. **Server logic** — `packages/server/src/<domain>.ts`: implement the query/mutation; its return type **is** the inferred contract type. Reuse the existing ClickHouse query helpers and parameter-building patterns already in the domain file (see the clickhouse-query skill: parameterized `{name:Type}`, `FINAL` on ReplacingMergeTree reads, `Number(...)` to coerce string counts).
+2. **Server logic** — `packages/server/src/<domain>.ts`: implement the query/mutation; its return type **is** the inferred contract type. Telemetry reads go through a `TelemetryStore` method from `@memoturn/telemetry` — add one there if needed (see the doris-query skill: `?` parameterization, merge-on-write so no FINAL, numeric normalization at the store boundary).
 3. **API route** — `apps/api/src/app.ts`: add the route with `app.openapi(createRoute({...}))`, putting the contract schema (imported as `C`) in `responses`. Guard reads and writes with the `app.use("/v1/…", requireAuth)` middleware.
 4. **Console client** — `apps/console/src/lib/api.ts`: add the method; response types come from contracts via the re-export — do **not** declare new console interfaces.
 

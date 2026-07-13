@@ -23,7 +23,7 @@ erDiagram
 ```
 
 Relational metadata (workspaces, projects, prompts, datasets, …) lives in **Postgres**;
-high-volume **Trace / Observation / Score** telemetry lives in **ClickHouse** and is
+high-volume **Trace / Observation / Score** telemetry lives in **Apache Doris** and is
 linked by `trace_id` / `project_id`.
 
 ## Tenancy
@@ -64,9 +64,10 @@ Cost is computed by the worker from the model + token usage using the registry i
 
 ## Metrics
 
-Generations are rolled up daily (per project, environment, model) into cost, tokens,
-counts, and latency quantiles (p50/p95/p99) via a ClickHouse materialized view. The
-dashboard and `GET /v1/metrics` read from this rollup.
+Cost, tokens, counts, and latency percentiles (p50/p95/p99, via `PERCENTILE_APPROX`) are
+aggregated on the fly from the `observations` table in Doris — per project, environment,
+and model, grouped by day. The dashboard and `GET /v1/metrics` run these aggregations
+directly; there is no precomputed rollup to drift out of date.
 
 ## Prompt management
 
@@ -114,7 +115,7 @@ options, or boolean) so manual and automated scores stay consistent across a pro
 ## PII masking
 
 An optional per-project **masking policy** redacts trace input/output at ingest using
-built-in and custom patterns, so sensitive data never lands in ClickHouse or the blob log.
+built-in and custom patterns, so sensitive data never lands in Doris or the blob log.
 
 ## Audit log & retention
 

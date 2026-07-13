@@ -1,15 +1,15 @@
 import type { EvaluatorAnalytics } from "@memoturn/contracts";
 import { isoNow, newId } from "@memoturn/core";
 import { prisma } from "@memoturn/db";
-import { clickhouse } from "@memoturn/db/clickhouse";
 import { generate, type Provider } from "@memoturn/llm";
+import { telemetry } from "@memoturn/telemetry";
 import { submitBatch } from "./ingest.js";
 import { resolveProviderKey } from "./providers.js";
 
 /**
  * LLM-as-judge evaluators. An evaluator is a judge prompt + model; running it scores a
  * trace's input/output and writes the score back through the ingest pipeline
- * (source=EVAL), so it lands in ClickHouse alongside API/annotation scores.
+ * (source=EVAL), so it lands in the telemetry store alongside API/annotation scores.
  */
 export interface CreateEvaluatorInput {
   name: string;
@@ -65,63 +65,14 @@ export async function listOnlineEvaluators(projectId: string) {
 }
 
 /**
- * Score trends for EVAL-sourced scores (evaluator output) over the last `days`.
- * Reads `scores FINAL` (ReplacingMergeTree de-dup) and returns a per-evaluator
- * summary plus a daily trend. ClickHouse count()/avg() come back as strings in
- * JSONEachRow, so coerce with Number().
+ * Score trends for EVAL-sourced scores (evaluator output) over the last `days`:
+ * a per-evaluator summary plus a daily trend, from the telemetry store.
  */
 export async function getEvaluatorAnalytics(projectId: string, days = 30): Promise<EvaluatorAnalytics> {
-  const ch = clickhouse();
-
-  const summaryRs = await ch.query({
-    query: `
-      SELECT
-        name,
-        count() AS count,
-        avg(value) AS avgValue
-      FROM scores FINAL
-      WHERE project_id = {projectId:String}
-        AND source = 'EVAL'
-        AND timestamp >= now() - toIntervalDay({days:UInt32})
-        AND value IS NOT NULL
-      GROUP BY name
-      ORDER BY count DESC
-    `,
-    query_params: { projectId, days },
-    format: "JSONEachRow",
-  });
-  const summaryRows = await summaryRs.json<{ name: string; count: string; avgValue: string }>();
-
-  const trendRs = await ch.query({
-    query: `
-      SELECT
-        toString(toDate(timestamp)) AS date,
-        name,
-        count() AS count,
-        avg(value) AS avgValue
-      FROM scores FINAL
-      WHERE project_id = {projectId:String}
-        AND source = 'EVAL'
-        AND timestamp >= now() - toIntervalDay({days:UInt32})
-        AND value IS NOT NULL
-      GROUP BY date, name
-      ORDER BY date ASC, name ASC
-    `,
-    query_params: { projectId, days },
-    format: "JSONEachRow",
-  });
-  const trendRows = await trendRs.json<{ date: string; name: string; count: string; avgValue: string }>();
-
-  return {
-    days,
-    summary: summaryRows.map((r) => ({ name: r.name, count: Number(r.count), avgValue: Number(r.avgValue) })),
-    trend: trendRows.map((r) => ({
-      date: r.date,
-      name: r.name,
-      count: Number(r.count),
-      avgValue: Number(r.avgValue),
-    })),
-  };
+  const store = telemetry();
+  const summary = await store.evaluatorScoreSummary(projectId, days);
+  const trend = await store.evaluatorScoreTrend(projectId, days);
+  return { days, summary, trend };
 }
 
 export interface RunEvaluatorInput {
@@ -167,7 +118,7 @@ export async function runEvaluator(projectId: string, name: string, input: RunEv
   // mock provider can't actually judge — synthesize a deterministic score for testing.
   const judged = ev.provider === "mock" ? { score: 1, reasoning: result.content } : parseJudge(result.content);
 
-  // Write the score back through the ingest pipeline (lands in ClickHouse, source=EVAL).
+  // Write the score back through the ingest pipeline (lands in the telemetry store, source=EVAL).
   await submitBatch(projectId, {
     batch: [
       {

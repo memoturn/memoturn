@@ -12,14 +12,16 @@ defaults match `infra/docker-compose.dev.yml`.
 | --- | --- | --- |
 | `DATABASE_URL` | `postgresql://memoturn:memoturn@localhost:5433/memoturn?schema=public` | Host port is **5433** in dev to avoid clashing with other local Postgres |
 
-## ClickHouse (OLAP)
+## Apache Doris (OLAP)
 
-| Var | Default |
-| --- | --- |
-| `CLICKHOUSE_URL` | `http://localhost:8123` |
-| `CLICKHOUSE_USER` | `memoturn` |
-| `CLICKHOUSE_PASSWORD` | `memoturn` |
-| `CLICKHOUSE_DB` | `memoturn` |
+| Var | Default | Notes |
+| --- | --- | --- |
+| `DORIS_HOST` | `localhost` | Doris FE host |
+| `DORIS_PORT` | `9030` | FE MySQL-protocol port |
+| `DORIS_HTTP_PORT` | `8030` | FE HTTP port |
+| `DORIS_USER` | `root` | |
+| `DORIS_PASSWORD` | empty | Empty in dev; **required in production** (the prod compose files include a one-shot `doris-setup` service that sets the root password) |
+| `DORIS_DB` | `memoturn` | |
 
 ## Redis / Valkey
 

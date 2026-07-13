@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { getBlobBytes, putBlobObject } from "@memoturn/db/blob";
 
 /**
- * Large-payload offload. The ClickHouse schema documents that oversized input/output is
+ * Large-payload offload. The telemetry schema documents that oversized input/output is
  * kept in blob storage with only a reference inline — but nothing implemented it, so big
- * payloads were written to ClickHouse verbatim (insert failures, memory pressure). This
+ * payloads were written to the store verbatim (insert failures, memory pressure). This
  * offloads any input/output field over a soft threshold to blob (project-scoped key) and
  * replaces it with a small marker. The full value stays replayable from the raw batch and
  * the offloaded copy. Runs AFTER masking so redacted PII is never stored in the clear.

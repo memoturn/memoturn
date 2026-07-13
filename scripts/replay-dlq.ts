@@ -4,7 +4,7 @@
  * Ingest batches that exhaust their BullMQ retries are moved to the `ingest-dlq` queue
  * (with their original blob key) instead of being discarded. The raw batch still lives in
  * blob storage — the replayable source of truth — so a DLQ'd batch can be re-processed once
- * the underlying cause (e.g. a ClickHouse outage) is resolved.
+ * the underlying cause (e.g. a Doris outage) is resolved.
  *
  *   bun run dlq            # inspect: counts + the most recent dead-lettered batches
  *   bun run dlq --replay   # re-enqueue every DLQ batch onto the ingest queue, then clear it

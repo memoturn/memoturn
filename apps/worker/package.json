@@ -15,6 +15,7 @@
     "@memoturn/core": "workspace:*",
     "@memoturn/db": "workspace:*",
     "@memoturn/server": "workspace:*",
+    "@memoturn/telemetry": "workspace:*",
     "bullmq": "^5.79.1"
   },
   "devDependencies": {

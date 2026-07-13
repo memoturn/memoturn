@@ -25,7 +25,7 @@ export function inc(name: string, labels?: Labels, by = 1): void {
   counters.set(k, (counters.get(k) ?? 0) + by);
 }
 
-/** Record one ClickHouse insert latency sample (ms). */
+/** Record one telemetry-store insert latency sample (ms). */
 export function observeInsert(ms: number): void {
   insertCount += 1;
   insertMsTotal += ms;
@@ -35,7 +35,7 @@ export function observeInsert(ms: number): void {
 export function snapshot(): Record<string, unknown> {
   return {
     counters: Object.fromEntries(counters),
-    clickhouse_insert: {
+    telemetry_insert: {
       count: insertCount,
       avgMs: insertCount ? Math.round(insertMsTotal / insertCount) : 0,
     },

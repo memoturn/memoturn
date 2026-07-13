@@ -17,9 +17,10 @@ serviceAccount:
   annotations: {}
 
 # ── Datastores + secrets ─────────────────────────────────────────────────────────
-# memoturn does NOT ship Postgres/ClickHouse/Redis/blob — point these at managed
-# services or in-cluster operators. Provide values here (a Secret + ConfigMap are
-# rendered) or set existingSecret to a Secret you manage holding the same keys.
+# memoturn does NOT ship Postgres/Doris/Redis/blob — point these at managed
+# services or in-cluster operators (e.g. the doris-operator). Provide values here (a
+# Secret + ConfigMap are rendered) or set existingSecret to a Secret you manage
+# holding the same keys.
 config:
   existingSecret: ""
 
@@ -28,9 +29,11 @@ config:
   redisUrl: "" # redis://host:6379
   betterAuthSecret: "" # REQUIRED: signing secret for Better Auth sessions
   encryptionKey: "" # REQUIRED: 32-byte key for encrypting stored provider keys
-  clickhouse:
-    url: "" # http://host:8123
-    user: memoturn
+  doris:
+    host: "" # Doris FE hostname (MySQL protocol)
+    port: 9030
+    httpPort: 8030
+    user: root
     password: ""
     db: memoturn
   blob:
@@ -51,7 +54,7 @@ extraEnv: []
 #   value: "600"
 extraEnvFrom: []
 
-# Run `db:migrate` (Prisma) + `db:clickhouse` as a pre-install/upgrade Job.
+# Run `db:migrate` (Prisma) + the Doris DDL as a pre-install/upgrade Job.
 migrations:
   enabled: true
   backoffLimit: 3

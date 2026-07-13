@@ -7,11 +7,11 @@ import { app } from "./app.js";
  * HTTP-level tests against the Hono app via `app.request(...)` — they exercise the real
  * route surface, auth middleware, and scope gate the way a client would. The unauthenticated
  * + health checks run everywhere; the authenticated suite needs the datastores (API-key
- * auth caches in Redis, reads hit ClickHouse) and is skipped otherwise, mirroring the
+ * auth caches in Redis, reads hit Doris) and is skipped otherwise, mirroring the
  * worker integration test. CI sets the env + service containers.
  */
 const HAS_INFRA = Boolean(
-  process.env.DATABASE_URL && process.env.CLICKHOUSE_URL && process.env.REDIS_URL && process.env.BLOB_ENDPOINT,
+  process.env.DATABASE_URL && process.env.DORIS_HOST && process.env.REDIS_URL && process.env.BLOB_ENDPOINT,
 );
 
 const basic = (pk: string, sk: string) => `Basic ${Buffer.from(`${pk}:${sk}`).toString("base64")}`;

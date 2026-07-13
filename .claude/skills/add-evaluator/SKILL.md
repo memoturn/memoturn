@@ -5,7 +5,7 @@ description: How to add or change an evaluator in memoturn — LLM-as-judge conf
 
 # Add / change an evaluator
 
-Evaluators are LLM-as-judge scorers. They run two ways: **offline** (on demand via `POST /v1/evaluators/{name}/run`) and **online** (automatically on a sampled fraction of incoming traces, in the worker). Both end by writing a score **back through the ingest pipeline** so it lands in ClickHouse like any other score.
+Evaluators are LLM-as-judge scorers. They run two ways: **offline** (on demand via `POST /v1/evaluators/{name}/run`) and **online** (automatically on a sampled fraction of incoming traces, in the worker). Both end by writing a score **back through the ingest pipeline** so it lands in the telemetry store like any other score.
 
 ## Where things live
 
@@ -20,7 +20,7 @@ Evaluators are LLM-as-judge scorers. They run two ways: **offline** (on demand v
 
 ## How a score is written
 
-`runEvaluator` calls the provider gateway (`generate`, with the system prompt forcing strict JSON `{"score", "reasoning"}`), then writes the result via `submitBatch(projectId, { batch: [{ type: "score-create", body: { ..., source: "EVAL", dataType: "NUMERIC" } }] })`. Don't insert into ClickHouse directly — go through `submitBatch` so the score replays like any ingest event. The `mock` provider synthesizes a deterministic `score: 1` for tests.
+`runEvaluator` calls the provider gateway (`generate`, with the system prompt forcing strict JSON `{"score", "reasoning"}`), then writes the result via `submitBatch(projectId, { batch: [{ type: "score-create", body: { ..., source: "EVAL", dataType: "NUMERIC" } }] })`. Don't insert into the telemetry store directly — go through `submitBatch` so the score replays like any ingest event. The `mock` provider synthesizes a deterministic `score: 1` for tests.
 
 ## Verify
 

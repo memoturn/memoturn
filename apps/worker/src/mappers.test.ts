@@ -1,5 +1,5 @@
 import type { IngestEvent } from "@memoturn/core";
-import { clickhouse } from "@memoturn/db/clickhouse";
+import { telemetry } from "@memoturn/telemetry";
 import { describe, expect, it } from "vitest";
 import { mapEvents } from "./mappers.js";
 
@@ -53,43 +53,28 @@ describe("mapEvents", () => {
     expect(o.total_tokens).toBe(2000);
     expect(o.total_cost).toBeCloseTo(0.018); // 1M in @ $3 + 1M out @ $15 per MTok
     expect(o.provider).toBe("anthropic");
+    expect(o.latency_ms).toBe(1000); // endTime − startTime, computed by the mapper
   });
 });
 
-// Integration: full round-trip through ClickHouse. Skipped if CH isn't reachable.
-const chReachable = await clickhouse()
-  .query({ query: "SELECT 1" })
-  .then(() => true)
-  .catch(() => false);
+// Integration: full round-trip through the telemetry store. Skipped if it isn't reachable.
+const storeReachable = await telemetry().ping();
 
-describe.skipIf(!chReachable)("ingest → ClickHouse round-trip", () => {
+describe.skipIf(!storeReachable)("ingest → telemetry store round-trip", () => {
   it("inserts mapped rows and reads them back", async () => {
-    const ch = clickhouse();
+    const store = telemetry();
     const traceId = `it-${Date.now()}`;
     const { traces, observations } = mapEvents(PROJECT, sampleBatch(traceId));
-    await ch.insert({ table: "traces", values: traces, format: "JSONEachRow" });
-    await ch.insert({ table: "observations", values: observations, format: "JSONEachRow" });
+    await store.insertRows("traces", traces);
+    await store.insertRows("observations", observations);
 
-    const rows = await ch
-      .query({
-        query: `SELECT total_tokens, round(total_cost, 4) AS cost FROM observations FINAL WHERE project_id = {p:String} AND trace_id = {t:String}`,
-        query_params: { p: PROJECT, t: traceId },
-        format: "JSONEachRow",
-      })
-      .then((r) => r.json<{ total_tokens: number; cost: number }>());
-
+    const rows = await store.listObservationsByTrace(PROJECT, traceId);
     expect(rows).toHaveLength(1);
-    expect(Number(rows[0]!.total_tokens)).toBe(2000);
-    expect(Number(rows[0]!.cost)).toBeCloseTo(0.018);
+    expect(rows[0]!.total_tokens).toBe(2000);
+    expect(rows[0]!.total_cost).toBeCloseTo(0.018, 4);
+    expect(rows[0]!.latency_ms).toBe(1000);
 
-    // cleanup
-    await ch.command({
-      query: `DELETE FROM traces WHERE project_id = {p:String} AND id = {t:String}`,
-      query_params: { p: PROJECT, t: traceId },
-    });
-    await ch.command({
-      query: `DELETE FROM observations WHERE project_id = {p:String} AND trace_id = {t:String}`,
-      query_params: { p: PROJECT, t: traceId },
-    });
+    // cleanup (removes the trace, its observations, and any scores)
+    await store.deleteTraces(PROJECT, [traceId]);
   });
 });

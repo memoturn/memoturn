@@ -6,8 +6,10 @@ metadata:
     {{- include "memoturn.labels" . | nindent 4 }}
 data:
   NODE_ENV: production
-  CLICKHOUSE_USER: {{ .Values.config.clickhouse.user | quote }}
-  CLICKHOUSE_DB: {{ .Values.config.clickhouse.db | quote }}
+  DORIS_PORT: {{ .Values.config.doris.port | quote }}
+  DORIS_HTTP_PORT: {{ .Values.config.doris.httpPort | quote }}
+  DORIS_USER: {{ .Values.config.doris.user | quote }}
+  DORIS_DB: {{ .Values.config.doris.db | quote }}
   BLOB_REGION: {{ .Values.config.blobRegion | quote }}
   BLOB_BUCKET: {{ .Values.config.blobBucket | quote }}
   BLOB_FORCE_PATH_STYLE: {{ .Values.config.blobForcePathStyle | quote }}

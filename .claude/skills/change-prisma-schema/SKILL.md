@@ -22,6 +22,6 @@ memoturn uses **Prisma 7 driver-adapter style**: the connection URL lives in cod
 
 - Migrations under `packages/db/prisma/migrations/` are **immutable** — never hand-edit (a hook blocks it). Change the schema and create a new migration instead.
 - Dev Postgres is host port **5433** (not 5432) — already in `.env`; don't change it.
-- High-volume, analytically-queried telemetry belongs in **ClickHouse**, not Postgres — if the new model is telemetry, reconsider.
+- High-volume, analytically-queried telemetry belongs in **Doris** (via `packages/telemetry`), not Postgres — if the new model is telemetry, reconsider.
 
 For the full workflow with migration + typecheck, delegate to the **prisma-migrator** agent.

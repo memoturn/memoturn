@@ -1,6 +1,6 @@
 ---
 title: Architecture
-description: How memoturn's async ingest pipeline splits storage across Postgres, ClickHouse, Redis, and blob.
+description: How memoturn's async ingest pipeline splits storage across Postgres, Apache Doris, Redis, and blob.
 ---
 
 memoturn is an async, decoupled, Bun-native system. Ingestion is fire-and-forget: the
@@ -20,9 +20,9 @@ Redis / BullMQ ──────────────┘
    ▼
 apps/worker (Bun + BullMQ)
    ├── fetch raw batch ──► S3 / MinIO
-   └── merge + insert ───► ClickHouse
+   └── merge + insert ───► Apache Doris
 
-apps/console (SPA) ── TanStack Query ──► apps/api ── reads ──► Postgres + ClickHouse
+apps/console (SPA) ── TanStack Query ──► apps/api ── reads ──► Postgres + Doris
 ```
 
 ## Services
@@ -31,14 +31,14 @@ apps/console (SPA) ── TanStack Query ──► apps/api ── reads ──�
 | --- | --- | --- |
 | `apps/api` | Hono on Bun | Public `/v1` REST, OTel receiver, Better Auth, OpenAPI/Scalar |
 | `apps/console` | Vite + TanStack Router SPA | Dashboard (talks to the API via TanStack Query) |
-| `apps/worker` | Bun + BullMQ | Async ingest → ClickHouse, online evaluators, retention cron |
+| `apps/worker` | Bun + BullMQ | Async ingest → Doris, online evaluators, retention cron |
 
 ## Storage tiers
 
 | Store | Tech | Holds |
 | --- | --- | --- |
 | OLTP | PostgreSQL (Prisma 7, pg driver adapter) | Workspaces, projects, users/sessions, API keys, prompts, datasets, evaluators, review queues, provider connections (encrypted), audit log, retention policies |
-| OLAP | ClickHouse | `traces`, `observations`, `scores` (`ReplacingMergeTree`); a daily metrics rollup (`AggregatingMergeTree` + materialized view) |
+| OLAP | Apache Doris | `traces`, `observations`, `scores` (`UNIQUE KEY` merge-on-write tables); dashboard metrics are aggregated on the fly from `observations` |
 | Queue / cache | Redis (Valkey) + BullMQ | Async ingest queue, API-key cache, retention cron |
 | Blob | S3-compatible (MinIO locally) | Raw replayable event log, exports |
 
@@ -51,15 +51,15 @@ apps/console (SPA) ── TanStack Query ──► apps/api ── reads ──�
 5. **API → SDK**: responds `207` with a per-event status.
 6. **Queue → worker**: delivers the job.
 7. **Worker → blob**: fetches the raw batch back.
-8. **Worker → ClickHouse**: merges and inserts traces/observations/scores.
+8. **Worker → Doris**: merges and inserts traces/observations/scores.
 9. **Worker**: runs sampled online evaluators on completed traces.
 
-- The API acks fast; the blob event log is the source of truth, so ClickHouse is
+- The API acks fast; the blob event log is the source of truth, so Doris is
   rebuildable.
-- Merge semantics: ClickHouse `ReplacingMergeTree` keyed on `(project_id, id)` and
-  versioned by `event_ts`, so late/partial/out-of-order events converge (newest wins).
-  Create + update for one observation are merged in the worker when they arrive in the
-  same batch.
+- Merge semantics: Doris `UNIQUE KEY` merge-on-write tables keyed on `(project_id, id)`
+  with `event_ts` as the sequence column, so late/partial/out-of-order events converge
+  (last writer — the newest `event_ts` — wins). Create + update for one observation are
+  merged in the worker when they arrive in the same batch.
 
 ## Packages
 
@@ -67,7 +67,8 @@ apps/console (SPA) ── TanStack Query ──► apps/api ── reads ──�
 | --- | --- |
 | `packages/core` | Zod **ingest** event contracts (SDK ↔ API ↔ worker), model/cost registry |
 | `packages/contracts` | Zod **API response** schemas + inferred types (API doc + console types) |
-| `packages/db` | Prisma client + ClickHouse / blob / queue clients |
+| `packages/db` | Prisma client + blob / queue clients |
+| `packages/telemetry` | `TelemetryStore` interface + Apache Doris implementation (all telemetry SQL) |
 | `packages/server` | Shared server logic: auth, traces, metrics, prompts, datasets, evaluators, review, export, retention, Better Auth |
 | `packages/llm` | Provider gateway (mock / Anthropic / OpenAI via the AI SDK) + API-key encryption |
 | `sdks/js`, `sdks/python` | Client SDKs |

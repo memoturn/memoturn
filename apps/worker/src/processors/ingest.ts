@@ -1,6 +1,5 @@
 import { compileModelPrices, type IngestEvent, ingestRequest } from "@memoturn/core";
 import { getRawBatch } from "@memoturn/db/blob";
-import { clickhouse } from "@memoturn/db/clickhouse";
 import type { IngestJob } from "@memoturn/db/queue";
 import {
   applyMasking,
@@ -15,6 +14,7 @@ import {
   offloadMedia,
   runEvaluator,
 } from "@memoturn/server";
+import { type TelemetryRowMap, type TelemetryTable, telemetry } from "@memoturn/telemetry";
 import type { Job } from "bullmq";
 import { mapEvents } from "../mappers.js";
 import { inc, logJson, observeInsert } from "../metrics.js";
@@ -40,12 +40,12 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   throw lastErr;
 }
 
-/** Insert one ClickHouse table in isolation, recording metrics; throws on failure. */
-async function insertTable(table: string, values: unknown[]): Promise<void> {
+/** Insert one telemetry table in isolation, recording metrics; throws on failure. */
+async function insertTable<T extends TelemetryTable>(table: T, values: TelemetryRowMap[T][]): Promise<void> {
   if (values.length === 0) return;
   const start = Date.now();
   try {
-    await clickhouse().insert({ table, values, format: "JSONEachRow" });
+    await telemetry().insertRows(table, values);
     observeInsert(Date.now() - start);
     inc("ingest_rows_total", { table }, values.length);
   } catch (err) {
@@ -106,11 +106,11 @@ async function runOnlineEvals(projectId: string, batch: IngestEvent[]): Promise<
 
 /**
  * Ingest job processor. Re-reads the raw batch from blob storage (the source of
- * truth), validates it, maps events to ClickHouse rows, and inserts.
+ * truth), validates it, maps events to telemetry rows, and inserts.
  *
  * NOTE (Phase 2 hardening): create + update for one observation are merged when they
- * arrive in the same batch. Cross-batch partial updates currently insert a new
- * ReplacingMergeTree row; a read-merge against the existing row will be added so
+ * arrive in the same batch. Cross-batch partial updates currently insert a new row
+ * (last-writer-wins merge); a read-merge against the existing row will be added so
  * fields set at create time are never lost.
  */
 export async function processIngest(job: Job<IngestJob>): Promise<void> {
@@ -140,8 +140,8 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     }
   }
 
-  // Offload large input/output payloads to blob (AFTER masking) so ClickHouse only stores a
-  // small reference marker — honors the schema's "large payloads live in blob" contract.
+  // Offload large input/output payloads to blob (AFTER masking) so the telemetry store only
+  // keeps a small reference marker — honors the schema's "large payloads live in blob" contract.
   for (const e of parsed.batch) {
     const body = e.body as { input?: unknown; output?: unknown };
     if (body.input !== undefined) body.input = await offloadLargePayload(projectId, body.input);
@@ -152,7 +152,8 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
   const { traces, observations, scores } = mapEvents(projectId, parsed.batch, priceOverrides);
 
   // Insert each table independently so one table's failure is isolated and observable.
-  // Re-insert on retry is safe — ReplacingMergeTree(event_ts) dedupes by entity id.
+  // Re-insert on retry is safe — the store's last-writer-wins merge (event_ts) dedupes
+  // by entity id.
   const results = await Promise.allSettled([
     insertTable("traces", traces),
     insertTable("observations", observations),
@@ -163,7 +164,7 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
   if (failed.length > 0) {
     // Throw so BullMQ retries the whole job (idempotent). DLQ catches terminal failures.
     const reasons = failed.map((f) => (f.reason instanceof Error ? f.reason.message : String(f.reason))).join("; ");
-    throw new Error(`ClickHouse insert failed for ${failed.length} table(s): ${reasons}`);
+    throw new Error(`telemetry insert failed for ${failed.length} table(s): ${reasons}`);
   }
 
   logJson("info", "ingest ok", {
