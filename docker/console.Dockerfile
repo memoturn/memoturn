@@ -14,11 +14,15 @@ COPY apps/api/package.json apps/api/package.json
 COPY apps/worker/package.json apps/worker/package.json
 COPY apps/console/package.json apps/console/package.json
 COPY apps/mcp/package.json apps/mcp/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY apps/docs/package.json apps/docs/package.json
 COPY packages/core/package.json packages/core/package.json
 COPY packages/db/package.json packages/db/package.json
 COPY packages/server/package.json packages/server/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/llm/package.json packages/llm/package.json
+COPY packages/ui/package.json packages/ui/package.json
+COPY packages/tsconfig/package.json packages/tsconfig/package.json
 COPY sdks/js/package.json sdks/js/package.json
 RUN bun install --frozen-lockfile
 

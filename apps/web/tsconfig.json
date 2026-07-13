@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "@memoturn/tsconfig/dashboard.json",
+  "compilerOptions": {
+    "paths": {
+      "#/*": ["./src/*"],
+      "@/*": ["./src/*"]
+    },
+    "types": ["./worker-configuration.d.ts", "node", "vite/client"]
+  },
+  "include": ["**/*.ts", "**/*.tsx"]
+}

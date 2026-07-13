@@ -1,0 +1,82 @@
+---
+title: Use cases
+description: What you do with self-hosted LLM observability — from debugging production traffic to benchmarking models and shipping prompts safely.
+---
+
+import CTA from "../../components/CTA.astro";
+
+Memoturn's primitives — traces, scores, datasets, prompt versions, and automations — are
+general. This page maps them onto concrete workflows, so you can tell in a minute whether
+the platform fits what you're building. Each one runs on infrastructure you own.
+
+## Debug production LLM traffic
+
+When a user reports a bad answer, you need to see exactly what happened: which prompt went
+out, what the model returned, what it cost, and how long each step took. Memoturn renders
+every request as a trace with a waterfall timeline of spans and generations, full
+input/output payloads, and session grouping that ties multi-turn conversations together.
+
+**How Memoturn does it:** the [data model](/concepts/) covers traces, observations, and
+sessions; ingest from the [SDKs](/sdk-typescript/) or any [OpenTelemetry
+exporter](/integrations/).
+
+## Track spend by model & feature
+
+Token costs compound silently — a model upgrade or a longer system prompt can double the
+bill before anyone notices. Memoturn rolls cost, tokens, and latency (p50/p95) up in
+ClickHouse, sliced by day and by model, with custom dashboard widgets for the breakdowns
+your team watches.
+
+**How Memoturn does it:** the [architecture](/architecture/) stores telemetry in ClickHouse
+rollups; custom per-project model prices are configurable for private or fine-tuned models.
+
+## Catch regressions before users do
+
+Prompt tweaks and model swaps change behavior in ways unit tests don't catch. Memoturn's
+online evaluators sample live production traces and score them continuously — LLM-as-judge
+or programmatic — and automations turn a bad score into a Slack message or webhook the
+moment it lands.
+
+**How Memoturn does it:** [evaluation](/evaluation/) covers online evaluators and
+deterministic sampling; automations fire on `score.created` and other platform events.
+
+## Ship prompts like code
+
+Prompts scattered across source code and Slack threads can't be reviewed, rolled back, or
+A/B tested. Memoturn's prompt registry stores immutable versions with deployment channels —
+promote a version to `production`, fetch it from the SDK with `getPrompt`, and roll back
+instantly when something goes wrong.
+
+**How Memoturn does it:** [prompt management](/prompts/) covers versions, channels, and SDK
+resolution; the [playground](/getting-started/) lets you iterate before promoting.
+
+## Benchmark models & prompts
+
+"Is the new model actually better?" deserves data, not vibes. Build a dataset of
+representative inputs, run experiments against candidate prompts or models, score the runs
+with evaluators, and compare them side by side in the experiment matrix before switching.
+
+**How Memoturn does it:** [evaluation](/evaluation/) covers datasets, experiment runs, and
+LLM-as-judge scoring; every experiment item links to the trace it produced.
+
+## Self-host for compliance
+
+Some telemetry can't leave your network — prompts and completions routinely contain
+customer data. Memoturn is Apache-2.0 and self-hostable end to end, with PII masking at
+ingest, audit logs, retention policies, and scheduled exports, so you get vendor-grade
+observability without shipping data to a vendor.
+
+**How Memoturn does it:** [deployment](/deployment/) covers docker compose and Helm;
+[configuration](/configuration/) covers masking, retention, and rate limits.
+
+<CTA
+	kicker="open source · Apache-2.0"
+	title="Observe it on infrastructure you own."
+	primary={{ href: "/getting-started/", text: "Get started" }}
+	secondary={{ href: "https://github.com/memoturn/memoturn", text: "View on GitHub" }}
+>
+	<div>
+		Trace your first LLM call in minutes with `bun run setup`, or deploy the full stack
+		with docker compose. No proprietary cloud required.
+	</div>
+</CTA>

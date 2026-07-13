@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/styles/tokens.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "aliases": {
+    "components": "@memoturn/ui/components",
+    "ui": "@memoturn/ui/components",
+    "utils": "@memoturn/ui/lib/utils",
+    "lib": "@memoturn/ui/lib",
+    "hooks": "@memoturn/ui/hooks"
+  },
+  "iconLibrary": "lucide"
+}

@@ -1,0 +1,72 @@
+---
+title: Memoturn
+description: Open-source LLM observability, evals, metrics, prompt management, playground, and datasets — self-hostable and OpenTelemetry-native.
+template: splash
+hero:
+  tagline: Trace every LLM call, track cost and latency, run offline, online, and human evals, and ship versioned prompts with deployment channels — on infrastructure you own.
+  actions:
+    - text: Get started
+      link: /getting-started/
+      icon: right-arrow
+      variant: primary
+    - text: See use cases
+      link: /use-cases/
+      icon: right-arrow
+      variant: minimal
+    - text: View on GitHub
+      link: https://github.com/memoturn/memoturn
+      icon: external
+      variant: minimal
+---
+
+import HeroCard from "../../components/HeroCard.astro";
+import LinkChip from "../../components/LinkChip.astro";
+import ChipRow from "../../components/ChipRow.astro";
+import CTA from "../../components/CTA.astro";
+import LiveTicker from "../../components/LiveTicker.astro";
+
+<LiveTicker />
+
+<HeroCard
+	kicker="run it"
+	title="One command, full platform"
+	href="/getting-started/"
+	code="bun run setup && bun run dev"
+	lang="bash"
+>
+	Memoturn is an open-source AI engineering platform: traces with a waterfall timeline,
+	cost/token/latency metrics over ClickHouse, offline, online, and human evaluation, a
+	versioned prompt registry, a multi-provider playground, and datasets — all behind one
+	console you self-host.
+</HeroCard>
+
+Built on an async ingest pipeline — the API acks your batch, a worker maps it into
+ClickHouse — with Postgres for metadata, blob storage for the replayable raw event log, and
+Redis for the queue. Ingest from the TypeScript or Python SDK, the OpenAI and LangChain
+wrappers, or any OpenTelemetry exporter. Read the [architecture overview](/architecture/)
+for the full data path.
+
+<ChipRow>
+	<LinkChip kicker="observe" title="OpenTelemetry-native" href="/integrations/">
+		OTLP/JSON with GenAI semantic conventions — no proprietary agent required.
+	</LinkChip>
+	<LinkChip kicker="evaluate" title="Evals, three ways" href="/evaluation/">
+		Offline experiments, online evaluators over live traffic, and human review queues.
+	</LinkChip>
+	<LinkChip kicker="connect" title="MCP server" href="/mcp/">
+		Prompts, datasets, and review queues as tools inside Claude Code, Cursor, and other agent IDEs.
+	</LinkChip>
+</ChipRow>
+
+<CTA
+	kicker="open source · Apache-2.0"
+	title="See every LLM call, on infrastructure you own."
+	primary={{ href: "https://github.com/memoturn/memoturn", text: "Get the source" }}
+	secondary={{ href: "/getting-started/", text: "Getting started" }}
+>
+	<div>
+		Traces, evals, metrics, and prompt management — no proprietary cloud required, and no
+		telemetry leaving your network. Run it locally with `bun run setup`, or deploy with
+		docker compose. See [Deployment](/deployment/) for the path.
+	</div>
+</CTA>

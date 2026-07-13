@@ -1,0 +1,348 @@
+/* NOTE: top-level Tailwind v4 directives (@import "tailwindcss", @plugin,
+ * @source, @custom-variant) live in the consumer app's entry CSS — when
+ * this file is @import-ed with a layer modifier (as docs does), Tailwind
+ * forbids those directives from being nested. This file owns brand vars
+ * + semantic tokens + @theme. */
+
+@theme inline {
+	/* Map Tailwind font tokens to stacks (avoid self-referential var(--font-sans) in theme). */
+	--font-sans: var(--font-sans-stack);
+	--font-heading: var(--font-heading-stack);
+	--font-mono: var(--font-mono-stack);
+	--font-serif: var(--font-heading-stack);
+	--font-display: var(--font-heading-stack);
+
+	--radius-sm: calc(var(--radius) * 0.6);
+	--radius-md: calc(var(--radius) * 0.8);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) * 1.4);
+	--radius-2xl: calc(var(--radius) * 1.8);
+	--radius-3xl: calc(var(--radius) * 2.2);
+	--radius-4xl: calc(var(--radius) * 2.6);
+
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
+	--color-popover: var(--popover);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-secondary: var(--secondary);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-destructive: var(--destructive);
+	--color-destructive-foreground: var(--destructive-foreground);
+	--color-success: var(--success);
+	--color-success-foreground: var(--success-foreground);
+	--color-warning: var(--warning);
+	--color-warning-foreground: var(--warning-foreground);
+	--color-border: var(--border);
+	--color-input: var(--input);
+	--color-ring: var(--ring);
+
+	--color-chart-1: var(--chart-1);
+	--color-chart-2: var(--chart-2);
+	--color-chart-3: var(--chart-3);
+	--color-chart-4: var(--chart-4);
+	--color-chart-5: var(--chart-5);
+
+	--color-sidebar: var(--sidebar);
+	--color-sidebar-foreground: var(--sidebar-foreground);
+	--color-sidebar-primary: var(--sidebar-primary);
+	--color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+	--color-sidebar-accent: var(--sidebar-accent);
+	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+	--color-sidebar-border: var(--sidebar-border);
+	--color-sidebar-ring: var(--sidebar-ring);
+
+	--color-surface: var(--surface);
+	--color-surface-foreground: var(--surface-foreground);
+
+	--color-code: var(--code);
+	--color-code-foreground: var(--code-foreground);
+	--color-code-highlight: var(--code-highlight);
+	--color-code-number: var(--code-number);
+
+	--color-selection: var(--selection);
+	--color-selection-foreground: var(--selection-foreground);
+
+	--color-overlay: var(--overlay);
+	--color-overlay-strong: var(--overlay-strong);
+	--color-overlay-subtle: var(--overlay-subtle);
+
+	/* Brand colors stay addressable for hero/CTA decoration: bg-lagoon, text-palm, etc. */
+	--color-sea-ink: var(--sea-ink);
+	--color-sea-ink-soft: var(--sea-ink-soft);
+	--color-lagoon: var(--lagoon);
+	--color-lagoon-deep: var(--lagoon-deep);
+	--color-palm: var(--palm);
+	--color-sand: var(--sand);
+	--color-foam: var(--foam);
+	--color-accent-warm: var(--accent-warm);
+
+	--ease-tide: cubic-bezier(0.16, 1, 0.3, 1);
+	--ease-swell: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+:root {
+	/* Native form controls (checkboxes, range, progress) pick up brand teal */
+	accent-color: var(--primary);
+
+	/* Brand palette — addressable as `bg-lagoon`, `text-sea-ink`, etc. for hero/CTA only.
+	 * Structural surfaces (background, card, popover, etc.) are pure shadcn neutrals below. */
+	--sea-ink: #173a40;
+	--sea-ink-soft: #416166;
+	--lagoon: #4fb8b2;
+	--lagoon-deep: #328f97;
+	--palm: #2f6a4a;
+	--sand: #e7f0e8;
+	--foam: #f3faf5;
+	--accent-warm: #e89456;
+
+	/* Brand decoration — used by Hero / CTA / atoll-band only, NOT component primitives */
+	--gradient-lagoon: linear-gradient(135deg, var(--lagoon) 0%, var(--lagoon-deep) 100%);
+	--gradient-atoll: linear-gradient(135deg, var(--lagoon-deep) 0%, var(--palm) 100%);
+	--on-gradient-fg: #f6fefb;
+	--on-gradient-fg-soft: rgba(246, 254, 251, 0.85);
+	--on-gradient-border: rgba(246, 254, 251, 0.4);
+	--on-gradient-button-bg: rgba(246, 254, 251, 0.12);
+
+	/* Hairline rules — structural lines inside cards, tables, ledger grids.
+	 * Distinct from `--border` which is for component containment.
+	 * `--rule` is the stronger 16% line; `--rule-faint` is the 5% grid backdrop. */
+	--rule: color-mix(in oklab, var(--sea-ink) 16%, transparent);
+	--rule-faint: color-mix(in oklab, var(--sea-ink) 5%, transparent);
+	--pattern-topo: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 240'%3E%3Cg fill='none' stroke='%23328f97' stroke-width='1'%3E%3Ccircle cx='120' cy='120' r='30'/%3E%3Ccircle cx='120' cy='120' r='58'/%3E%3Ccircle cx='120' cy='120' r='86'/%3E%3Ccircle cx='120' cy='120' r='118'/%3E%3Ccircle cx='120' cy='120' r='154'/%3E%3C/g%3E%3C/svg%3E");
+	/* Light-stroke variant for use on dark / atoll-gradient grounds. Foam-light strokes;
+	 * use with mix-blend-mode: screen + low opacity (≤0.16) so it reads as topographic
+	 * depth, not a decorative pattern. Pairs with `bg-(image:--gradient-atoll)`. */
+	--pattern-topo-light: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 240'%3E%3Cg fill='none' stroke='%23f6fefb' stroke-width='1'%3E%3Ccircle cx='120' cy='120' r='30'/%3E%3Ccircle cx='120' cy='120' r='58'/%3E%3Ccircle cx='120' cy='120' r='86'/%3E%3Ccircle cx='120' cy='120' r='118'/%3E%3Ccircle cx='120' cy='120' r='154'/%3E%3C/g%3E%3C/svg%3E");
+	--brand-dot: var(--gradient-lagoon);
+
+	/* Fonts */
+	--font-sans-stack: "Manrope", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+		"Segoe UI Symbol", "Noto Color Emoji";
+	--font-heading-stack: "Inter Tight", "Manrope", ui-sans-serif, system-ui, sans-serif;
+	/* JetBrains Mono is loaded by every app (not just a fallback) so code and
+	 * data surfaces render the brand mono everywhere. */
+	--font-mono-stack: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+	--font-sans: var(--font-sans-stack);
+	--font-heading: var(--font-heading-stack);
+	--font-mono: var(--font-mono-stack);
+	--font-serif: var(--font-heading-stack);
+	--font-display: var(--font-heading-stack);
+
+	/* ~6px — light rounding; scales --radius-sm … --radius-4xl proportionally */
+	--radius: 0.375rem;
+
+	/* shadcn neutral defaults — pure white surfaces with neutral grayscale text. */
+	--background: oklch(1 0 0);
+	--foreground: oklch(0.145 0 0);
+	--card: oklch(1 0 0);
+	--card-foreground: oklch(0.145 0 0);
+	--popover: oklch(1 0 0);
+	--popover-foreground: oklch(0.145 0 0);
+	/* Brand: lagoon-deep is the action color. Everything else is neutral. */
+	--primary: var(--lagoon-deep);
+	--primary-foreground: oklch(0.985 0 0);
+	--secondary: oklch(0.97 0 0);
+	--secondary-foreground: oklch(0.205 0 0);
+	--muted: oklch(0.97 0 0);
+	--muted-foreground: oklch(0.556 0 0);
+	--accent: oklch(0.97 0 0);
+	--accent-foreground: oklch(0.205 0 0);
+	--destructive: oklch(0.577 0.245 27.325);
+	--destructive-foreground: oklch(0.97 0.01 17);
+	--success: oklch(0.94 0.035 155);
+	--success-foreground: oklch(0.3 0.09 155);
+	--warning: oklch(0.965 0.055 95);
+	--warning-foreground: oklch(0.33 0.09 95);
+	--border: oklch(0.922 0 0);
+	--input: oklch(0.922 0 0);
+	/* Brand-colored focus ring — keyboard focus is one of the few places brand identity
+	 * is louder than shadcn's neutral default. Maps to lagoon-deep in light, lagoon in dark. */
+	--ring: var(--primary);
+
+	/* Charts — brand-sequenced (the one place brand color stays in structural tokens). */
+	--chart-1: var(--lagoon-deep);
+	--chart-2: var(--palm);
+	--chart-3: var(--lagoon);
+	--chart-4: var(--accent-warm);
+	--chart-5: var(--sea-ink-soft);
+
+	--sidebar: oklch(0.985 0 0);
+	--sidebar-foreground: oklch(0.145 0 0);
+	--sidebar-primary: var(--primary);
+	--sidebar-primary-foreground: var(--primary-foreground);
+	--sidebar-accent: oklch(0.97 0 0);
+	--sidebar-accent-foreground: oklch(0.205 0 0);
+	--sidebar-border: oklch(0.922 0 0);
+	--sidebar-ring: oklch(0.708 0 0);
+
+	--surface: oklch(0.98 0 0);
+	--surface-foreground: var(--foreground);
+
+	--code: var(--surface);
+	--code-foreground: var(--surface-foreground);
+	--code-highlight: oklch(0.96 0 0);
+	--code-number: oklch(0.56 0 0);
+
+	--selection: var(--primary);
+	--selection-foreground: var(--primary-foreground);
+
+	--overlay: oklch(0 0 0 / 48%);
+	--overlay-strong: oklch(0 0 0 / 78%);
+	--overlay-subtle: oklch(0 0 0 / 38%);
+	/* Legacy alias for older composites */
+	--overlay-backdrop: var(--overlay);
+
+	/* Motion — preserved for .rise-in / .shimmer keyframes */
+	--ease-tide: cubic-bezier(0.16, 1, 0.3, 1);
+	--ease-swell: cubic-bezier(0.4, 0, 0.2, 1);
+	--duration-rise: 700ms;
+	--duration-swell: 180ms;
+}
+
+:root[data-theme="dark"],
+.dark {
+	--background: oklch(0.145 0 0);
+	--foreground: oklch(0.985 0 0);
+	--card: oklch(0.205 0 0);
+	--card-foreground: oklch(0.985 0 0);
+	--popover: oklch(0.205 0 0);
+	--popover-foreground: oklch(0.985 0 0);
+	/* Brand: lagoon (lighter mint) reads better as primary on dark backdrops. */
+	--primary: var(--lagoon);
+	--primary-foreground: oklch(0.205 0 0);
+	--secondary: oklch(0.269 0 0);
+	--secondary-foreground: oklch(0.985 0 0);
+	--muted: oklch(0.269 0 0);
+	--muted-foreground: oklch(0.708 0 0);
+	--accent: oklch(0.371 0 0);
+	--accent-foreground: oklch(0.985 0 0);
+	--destructive: oklch(0.704 0.191 22.216);
+	--destructive-foreground: oklch(0.97 0.01 17);
+	--success: oklch(0.32 0.07 155);
+	--success-foreground: oklch(0.92 0.05 155);
+	--warning: oklch(0.36 0.08 95);
+	--warning-foreground: oklch(0.96 0.055 95);
+	--border: oklch(1 0 0 / 10%);
+	--input: oklch(1 0 0 / 15%);
+	--ring: var(--primary);
+
+	--chart-1: var(--lagoon);
+	--chart-2: var(--palm);
+	--chart-3: var(--lagoon-deep);
+	--chart-4: var(--accent-warm);
+	--chart-5: var(--sea-ink-soft);
+
+	--sidebar: oklch(0.205 0 0);
+	--sidebar-foreground: oklch(0.985 0 0);
+	--sidebar-primary: var(--primary);
+	--sidebar-primary-foreground: var(--primary-foreground);
+	--sidebar-accent: oklch(0.269 0 0);
+	--sidebar-accent-foreground: oklch(0.985 0 0);
+	--sidebar-border: oklch(1 0 0 / 6%);
+	--sidebar-ring: oklch(0.439 0 0);
+
+	--surface: oklch(0.2 0 0);
+	--surface-foreground: oklch(0.708 0 0);
+
+	--code: var(--surface);
+	--code-foreground: var(--surface-foreground);
+	--code-highlight: oklch(0.27 0 0);
+	--code-number: oklch(0.72 0 0);
+
+	--selection: var(--primary);
+	--selection-foreground: var(--primary-foreground);
+
+	--overlay: oklch(0 0 0 / 52%);
+	--overlay-strong: oklch(0 0 0 / 82%);
+	--overlay-subtle: oklch(0 0 0 / 42%);
+	--overlay-backdrop: var(--overlay);
+
+	/* Hairline rules in dark mode — flip from sea-ink to foam-light tint. */
+	--rule: color-mix(in oklab, var(--on-gradient-fg) 14%, transparent);
+	--rule-faint: color-mix(in oklab, var(--on-gradient-fg) 6%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--background: oklch(0.145 0 0);
+		--foreground: oklch(0.985 0 0);
+		--card: oklch(0.205 0 0);
+		--card-foreground: oklch(0.985 0 0);
+		--popover: oklch(0.205 0 0);
+		--popover-foreground: oklch(0.985 0 0);
+		--primary: var(--lagoon);
+		--primary-foreground: oklch(0.205 0 0);
+		--secondary: oklch(0.269 0 0);
+		--secondary-foreground: oklch(0.985 0 0);
+		--muted: oklch(0.269 0 0);
+		--muted-foreground: oklch(0.708 0 0);
+		--accent: oklch(0.371 0 0);
+		--accent-foreground: oklch(0.985 0 0);
+		--destructive: oklch(0.704 0.191 22.216);
+		--destructive-foreground: oklch(0.97 0.01 17);
+		--success: oklch(0.32 0.07 155);
+		--success-foreground: oklch(0.92 0.05 155);
+		--warning: oklch(0.36 0.08 95);
+		--warning-foreground: oklch(0.96 0.055 95);
+		--border: oklch(1 0 0 / 10%);
+		--input: oklch(1 0 0 / 15%);
+		--ring: var(--primary);
+
+		--chart-1: var(--lagoon);
+		--chart-2: var(--palm);
+		--chart-3: var(--lagoon-deep);
+		--chart-4: var(--accent-warm);
+		--chart-5: var(--sea-ink-soft);
+
+		--sidebar: oklch(0.205 0 0);
+		--sidebar-foreground: oklch(0.985 0 0);
+		--sidebar-primary: var(--primary);
+		--sidebar-primary-foreground: var(--primary-foreground);
+		--sidebar-accent: oklch(0.269 0 0);
+		--sidebar-accent-foreground: oklch(0.985 0 0);
+		--sidebar-border: oklch(1 0 0 / 6%);
+		--sidebar-ring: oklch(0.439 0 0);
+
+		--surface: oklch(0.2 0 0);
+		--surface-foreground: oklch(0.708 0 0);
+
+		--code: var(--surface);
+		--code-foreground: var(--surface-foreground);
+		--code-highlight: oklch(0.27 0 0);
+		--code-number: oklch(0.72 0 0);
+
+		--selection: var(--primary);
+		--selection-foreground: var(--primary-foreground);
+
+		--overlay: oklch(0 0 0 / 52%);
+		--overlay-strong: oklch(0 0 0 / 82%);
+		--overlay-subtle: oklch(0 0 0 / 42%);
+		--overlay-backdrop: var(--overlay);
+
+		--rule: color-mix(in oklab, var(--on-gradient-fg) 14%, transparent);
+		--rule-faint: color-mix(in oklab, var(--on-gradient-fg) 6%, transparent);
+	}
+}
+
+@layer base {
+	*,
+	::before,
+	::after {
+		border-color: var(--border);
+	}
+	::selection {
+		background-color: var(--selection);
+		color: var(--selection-foreground);
+	}
+	html {
+		overscroll-behavior-y: none;
+	}
+}

@@ -1,0 +1,24 @@
+/**
+ * Memoturn marketing site — TanStack Start on Workers, canonical at
+ * memoturn.ai. Static/SSR-light: no API service binding (the runtime is
+ * self-hosted; the site only links out to docs + GitHub).
+ *
+ * Wrangler config reference:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "memoturn-web",
+  "compatibility_date": "2026-04-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "./src/server.ts",
+  "observability": { "enabled": true },
+  "upload_source_maps": true,
+  "routes": [{ "pattern": "memoturn.ai", "custom_domain": true }],
+  "env": {
+    "staging": {
+      "name": "memoturn-web-staging",
+      "routes": [{ "pattern": "staging.memoturn.ai", "custom_domain": true }]
+    }
+  }
+}

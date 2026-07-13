@@ -29,7 +29,10 @@
     "ALLOW_PRIVATE_WEBHOOK_TARGETS",
     "ALLOW_SEED",
     "SEED_ADMIN_EMAIL",
-    "SEED_ADMIN_PASSWORD"
+    "SEED_ADMIN_PASSWORD",
+    "CF_ENV",
+    "VITE_PUBLIC_DOCS_URL",
+    "MEMOTURN_DOCS_URL"
   ],
   "tasks": {
     "build": {
@@ -48,6 +51,14 @@
       "dependsOn": ["^build"]
     },
     "clean": {
+      "cache": false
+    },
+    "deploy": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "deploy:staging": {
+      "dependsOn": ["build"],
       "cache": false
     },
     "generate": {

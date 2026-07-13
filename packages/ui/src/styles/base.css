@@ -1,0 +1,270 @@
+* {
+	box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+	min-height: 100%;
+}
+
+body {
+	margin: 0;
+	color: var(--foreground);
+	font-family: var(--font-sans);
+	background-color: var(--background);
+	overflow-x: hidden;
+	line-height: 1.6;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	font-synthesis-weight: none;
+	text-rendering: optimizeLegibility;
+	font-feature-settings: "cv11", "ss01", "ss03";
+}
+
+/* Scrollbar — subtle by default, brand teal on hover/active. WebKit scrollbars
+ * are notoriously over-styled in default OS rendering on macOS Sequoia and
+ * Windows; a custom thin track keeps the dashboard feeling intentional. */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: color-mix(in oklab, var(--foreground) 18%, transparent) transparent;
+}
+
+::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background: color-mix(in oklab, var(--foreground) 14%, transparent);
+	border-radius: var(--radius-lg);
+	border: 2px solid transparent;
+	background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: color-mix(in oklab, var(--primary) 50%, var(--foreground));
+	background-clip: padding-box;
+	border: 2px solid transparent;
+}
+
+::-webkit-scrollbar-corner {
+	background: transparent;
+}
+
+/* Anchor defaults live in @layer base so Tailwind utilities (which are in
+ * @layer utilities, higher priority) can override them. :where() also drops
+ * specificity to 0 so any class wins inside the same layer. Together this
+ * means a Button rendered as <a> via asChild correctly takes
+ * bg-primary/text-primary-foreground without these defaults intruding. */
+@layer base {
+	:where(a) {
+		color: var(--primary);
+		text-decoration-color: color-mix(in oklab, var(--primary) 50%, transparent);
+		text-decoration-thickness: 1px;
+		text-underline-offset: 2px;
+		transition:
+			color var(--duration-swell, 180ms) var(--ease-swell, ease),
+			text-decoration-color var(--duration-swell, 180ms) var(--ease-swell, ease);
+	}
+
+	:where(a:hover) {
+		color: color-mix(in oklab, var(--primary) 80%, var(--foreground));
+	}
+
+	:where(a:focus-visible) {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+		border-radius: calc(var(--radius) * 0.35);
+	}
+}
+
+/* Inline code ticks in body copy — neutral muted bg with brand-tinted text so
+ * `like.this` reads as code without becoming a chip. */
+code {
+	font-family: var(--font-mono, ui-monospace, monospace);
+	font-size: 0.875em;
+	font-weight: 500;
+	line-height: 1.5;
+	background: var(--muted);
+	color: var(--primary);
+	border-radius: calc(var(--radius) * 0.4);
+	padding: 0.1em 0.4em;
+}
+
+pre code {
+	border: 0;
+	background: transparent;
+	padding: 0;
+	border-radius: 0;
+	font-size: inherit;
+	color: inherit;
+}
+
+/* Fluid full-width container. Stretches with the viewport, soft cap at 1800px
+ * so content on giant monitors stays scannable. Inner reading surfaces (auth
+ * forms, hero titles, CTA descriptions) compose their own narrower max-widths
+ * via `mx-auto max-w-*` on the inner element. */
+.page-wrap {
+	width: 100%;
+	max-width: 1800px;
+	margin-inline: auto;
+	padding-inline: clamp(1rem, 3vw, 3rem);
+}
+
+.display-title {
+	font-family: var(--font-heading);
+	font-weight: 700;
+	letter-spacing: -0.02em;
+	line-height: 1.05;
+}
+
+/* Kicker — small uppercase tracked label that sits above a heading or marks a section.
+ * Used as the "PROJECT", "DEV'S ORG", "INSTALL RULE" type labels across the app.
+ * Composes with margin/color utilities (e.g., `class="kicker mb-2 text-primary"`).
+ * Default color lives in @layer base so any Tailwind text-* utility wins; the bare
+ * `kicker` class still renders as muted-foreground when no override is supplied. */
+@layer base {
+	.kicker {
+		font-size: 0.75rem;
+		font-weight: 700;
+		line-height: 1.45;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+	}
+}
+
+a {
+	transition:
+		background-color var(--duration-swell, 180ms) var(--ease-swell, ease),
+		color var(--duration-swell, 180ms) var(--ease-swell, ease),
+		border-color var(--duration-swell, 180ms) var(--ease-swell, ease);
+}
+
+.nav-link {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	text-decoration: none;
+	color: var(--muted-foreground);
+}
+
+.nav-link::after {
+	content: "";
+	position: absolute;
+	left: 0;
+	bottom: -6px;
+	width: 100%;
+	height: 2px;
+	transform: scaleX(0);
+	transform-origin: left;
+	background: var(--primary);
+	transition: transform 170ms ease;
+}
+
+.nav-link:hover,
+.nav-link.is-active {
+	color: var(--foreground);
+}
+
+.nav-link:hover::after,
+.nav-link.is-active::after {
+	transform: scaleX(1);
+}
+
+@media (max-width: 640px) {
+	.nav-link::after {
+		bottom: -4px;
+	}
+}
+
+.site-footer {
+	border-top: 1px solid var(--border);
+	background: var(--background);
+}
+
+.rise-in {
+	animation: rise-in var(--duration-rise, 700ms) var(--ease-tide, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+
+@keyframes rise-in {
+	from {
+		opacity: 0;
+		transform: translateY(12px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+/*
+ * .atoll-band — decorative topographic strip. Compose with other
+ * surfaces; the pattern sits at low opacity (0.06) so it never
+ * fights foreground content. Used on hero halos, footer bands,
+ * CTA backdrops.
+ */
+.atoll-band {
+	position: relative;
+	isolation: isolate;
+}
+
+.atoll-band::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background-image: var(--pattern-topo);
+	background-size: 240px 240px;
+	background-position: center;
+	opacity: 0.06;
+	pointer-events: none;
+	z-index: -1;
+	mask-image: radial-gradient(circle at 50% 50%, black 0%, transparent 80%);
+}
+
+/*
+ * .shimmer — left-to-right brand-tinted gradient sweep. Used by
+ * Skeleton primitive while data is loading.
+ */
+.shimmer {
+	position: relative;
+	overflow: hidden;
+}
+
+.shimmer::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(
+		90deg,
+		transparent 0%,
+		color-mix(in oklab, var(--lagoon) 18%, transparent) 50%,
+		transparent 100%
+	);
+	animation: shimmer-sweep 1.6s var(--ease-swell, ease) infinite;
+}
+
+@keyframes shimmer-sweep {
+	from {
+		transform: translateX(-100%);
+	}
+	to {
+		transform: translateX(100%);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.rise-in,
+	.shimmer::after {
+		animation: none;
+	}
+	.rise-in {
+		opacity: 1;
+		transform: none;
+	}
+}

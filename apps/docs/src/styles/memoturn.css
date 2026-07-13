@@ -1,0 +1,418 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap");
+
+/* Shared semantic tokens + brand palette (same source as dashboard @memoturn/ui). */
+@import "@memoturn/ui/styles/tokens.css";
+
+/*
+ * Docs marketing + radius scale: Tailwind expands @theme in tokens.css for the app,
+ * but docs import tokens standalone, so mirror --radius-* here so cards, scrollbars,
+ * and prose resolve real corner radii.
+ */
+:root {
+	--radius-sm: calc(var(--radius) * 0.6);
+	--radius-md: calc(var(--radius) * 0.8);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) * 1.4);
+	--radius-2xl: calc(var(--radius) * 1.8);
+	--radius-3xl: calc(var(--radius) * 2.2);
+	--radius-4xl: calc(var(--radius) * 2.6);
+
+	--kicker: var(--muted-foreground);
+
+	/* Ledger-led tokens: flat ink-on-sand surfaces with hairline rules.
+	 * No frosted gradients, no triple-stack shadows, no decorative blurs. */
+	--docs-line: var(--rule, color-mix(in oklab, var(--sea-ink) 16%, transparent));
+	--docs-line-faint: var(--rule-faint, color-mix(in oklab, var(--sea-ink) 5%, transparent));
+	--docs-panel-bg: color-mix(in oklab, var(--background) 96%, var(--sand) 4%);
+	--docs-chip-bg: color-mix(in oklab, var(--background) 92%, var(--sand) 8%);
+	--docs-chip-line: var(--docs-line);
+	--docs-link-bg-hover: var(--accent);
+
+	/* Solid nav background, sand-tinted in light / card-tinted in dark.
+	 * Differentiates header chrome from the body without a hairline. */
+	--docs-nav-bg: var(--docs-panel-bg);
+}
+
+:root[data-theme="dark"],
+.dark {
+	--docs-line: var(--rule, color-mix(in oklab, var(--on-gradient-fg) 14%, transparent));
+	--docs-line-faint: var(--rule-faint, color-mix(in oklab, var(--on-gradient-fg) 6%, transparent));
+	--docs-panel-bg: color-mix(in oklab, var(--card) 88%, var(--background) 12%);
+	--docs-chip-bg: color-mix(in oklab, var(--card) 82%, var(--background) 18%);
+	--docs-chip-line: var(--docs-line);
+	--docs-link-bg-hover: var(--accent);
+	--docs-nav-bg: var(--docs-panel-bg);
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--docs-line: var(--rule, color-mix(in oklab, var(--on-gradient-fg) 14%, transparent));
+		--docs-line-faint: var(--rule-faint, color-mix(in oklab, var(--on-gradient-fg) 6%, transparent));
+		--docs-panel-bg: color-mix(in oklab, var(--card) 88%, var(--background) 12%);
+		--docs-chip-bg: color-mix(in oklab, var(--card) 82%, var(--background) 18%);
+		--docs-chip-line: var(--docs-line);
+		--docs-link-bg-hover: var(--accent);
+		--docs-nav-bg: var(--docs-panel-bg);
+	}
+}
+
+/* Starlight → design system semantic mapping */
+:root {
+	/* Wider main reading column. Starlight defaults to 45rem; the docs lean on
+	 * wide code blocks, config tables, and multi-column callouts, so give the
+	 * prose more room. The sidebar/ToC rails are fixed-width, so this widens the
+	 * center column (and the overall page) without crowding the chrome. */
+	--sl-content-width: 56rem;
+
+	--sl-color-accent: var(--primary);
+	--sl-color-accent-low: color-mix(in oklab, var(--primary) 18%, transparent);
+	--sl-color-accent-high: color-mix(in oklab, var(--primary) 92%, var(--foreground));
+	--sl-color-bg: var(--background);
+	--sl-color-bg-nav: var(--docs-nav-bg);
+	--sl-color-bg-sidebar: var(--docs-nav-bg);
+	--sl-color-text: var(--foreground);
+	--sl-color-text-accent: var(--primary);
+	--sl-color-hairline: var(--border);
+	--sl-color-hairline-light: color-mix(in oklab, var(--border) 70%, var(--muted));
+	--sl-font: var(--font-sans-stack);
+	--sl-font-system-mono: var(--font-mono-stack);
+
+	/* Starlight gray ramp: gray-1 = strongest text … gray-7 = inset / wash.
+	 * Starlight uses `--sl-color-white` as a contrast token (highest-contrast
+	 * text), not as a literal light surface; map to --foreground so light-mode
+	 * nav text doesn't render white-on-light. */
+	--sl-color-white: var(--foreground);
+	--sl-color-gray-1: var(--foreground);
+	--sl-color-gray-2: color-mix(in oklab, var(--foreground) 82%, var(--muted-foreground));
+	--sl-color-gray-3: var(--muted-foreground);
+	--sl-color-gray-4: color-mix(in oklab, var(--muted-foreground) 55%, var(--muted));
+	--sl-color-gray-5: var(--muted);
+	--sl-color-gray-6: var(--secondary);
+	--sl-color-gray-7: var(--card);
+
+	--sl-color-text-invert: var(--primary-foreground);
+	--sl-color-bg-inline-code: var(--muted);
+	/* Starlight expects shadow vars; pass through to none so flat-by-default holds. */
+	--sl-shadow-sm: none;
+	--sl-shadow-md: none;
+	--sl-shadow-lg: none;
+}
+
+:root[data-theme="dark"],
+.dark {
+	--kicker: var(--muted-foreground);
+	--sl-color-accent: var(--primary);
+	--sl-color-accent-low: color-mix(in oklab, var(--primary) 22%, transparent);
+	--sl-color-accent-high: color-mix(in oklab, var(--primary) 88%, var(--foreground));
+	--sl-color-bg: var(--background);
+	--sl-color-bg-nav: var(--docs-nav-bg);
+	--sl-color-bg-sidebar: var(--docs-nav-bg);
+	--sl-color-text: var(--foreground);
+	--sl-color-text-accent: var(--primary);
+
+	--sl-color-white: var(--foreground);
+	--sl-color-gray-1: var(--foreground);
+	--sl-color-gray-2: color-mix(in oklab, var(--foreground) 88%, var(--muted-foreground));
+	--sl-color-gray-3: var(--muted-foreground);
+	--sl-color-gray-4: color-mix(in oklab, var(--muted-foreground) 55%, var(--muted));
+	--sl-color-gray-5: color-mix(in oklab, var(--muted) 65%, var(--border));
+	--sl-color-gray-6: var(--muted);
+	--sl-color-gray-7: var(--card);
+
+	--sl-color-hairline-light: color-mix(in oklab, var(--border) 80%, transparent);
+	--sl-color-text-invert: var(--primary-foreground);
+	--sl-color-bg-inline-code: color-mix(in oklab, var(--muted) 88%, transparent);
+	--sl-shadow-sm: none;
+	--sl-shadow-md: none;
+	--sl-shadow-lg: none;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--sl-color-accent: var(--primary);
+		--sl-color-accent-low: color-mix(in oklab, var(--primary) 22%, transparent);
+		--sl-color-accent-high: color-mix(in oklab, var(--primary) 88%, var(--foreground));
+		--sl-color-bg: var(--background);
+		--sl-color-bg-nav: var(--docs-nav-bg);
+		--sl-color-bg-sidebar: var(--docs-nav-bg);
+		--sl-color-text: var(--foreground);
+		--sl-color-text-accent: var(--primary);
+		--sl-color-white: var(--foreground);
+		--sl-color-gray-1: var(--foreground);
+		--sl-color-gray-2: color-mix(in oklab, var(--foreground) 88%, var(--muted-foreground));
+		--sl-color-gray-3: var(--muted-foreground);
+		--sl-color-gray-4: color-mix(in oklab, var(--muted-foreground) 55%, var(--muted));
+		--sl-color-gray-5: color-mix(in oklab, var(--muted) 65%, var(--border));
+		--sl-color-gray-6: var(--muted);
+		--sl-color-gray-7: var(--card);
+		--sl-color-hairline-light: color-mix(in oklab, var(--border) 80%, transparent);
+		--sl-color-bg-inline-code: color-mix(in oklab, var(--muted) 88%, transparent);
+		--sl-shadow-sm: none;
+		--sl-shadow-md: none;
+		--sl-shadow-lg: none;
+	}
+}
+
+/* Display headings: match dashboard / ui heading stack */
+.sl-markdown-content :is(h1, h2, h3) {
+	font-family: var(--font-heading-stack);
+	letter-spacing: -0.015em;
+	font-weight: 700;
+}
+
+.sl-markdown-content :is(p, li) {
+	line-height: 1.65;
+}
+
+.sl-markdown-content :is(td, th) {
+	line-height: 1.55;
+}
+
+.sl-markdown-content :is(h4, h5, h6) {
+	font-family: var(--font-heading-stack);
+	line-height: 1.35;
+	letter-spacing: -0.01em;
+}
+
+/* Scrollbars: match dashboard @memoturn/ui base.css */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: color-mix(in oklab, var(--foreground) 18%, transparent) transparent;
+}
+
+::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background: color-mix(in oklab, var(--foreground) 14%, transparent);
+	border-radius: var(--radius-lg);
+	border: 2px solid transparent;
+	background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: color-mix(in oklab, var(--primary) 50%, var(--foreground));
+	background-clip: padding-box;
+	border: 2px solid transparent;
+}
+
+::-webkit-scrollbar-corner {
+	background: transparent;
+}
+
+/* Body: flat ground; no radial-gradient wash. */
+body {
+	margin: 0;
+	color: var(--foreground);
+	font-family: var(--font-sans);
+	line-height: 1.6;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	font-synthesis-weight: none;
+	text-rendering: optimizeLegibility;
+	font-feature-settings: "cv11", "ss01", "ss03";
+	background-color: var(--background);
+}
+
+/* Prose inline code: match @memoturn/ui base.css */
+.sl-markdown-content :not(pre) > code,
+.sl-markdown-content p code,
+.sl-markdown-content li code,
+.sl-markdown-content td code {
+	font-family: var(--font-mono-stack);
+	font-size: 0.875em;
+	font-weight: 500;
+	line-height: 1.5;
+	background: var(--muted);
+	color: var(--primary);
+	border-radius: calc(var(--radius) * 0.4);
+	padding: 0.1em 0.4em;
+}
+
+.sl-markdown-content a {
+	color: var(--primary);
+	text-decoration-color: color-mix(in oklab, var(--primary) 50%, transparent);
+	text-decoration-thickness: 1px;
+	text-underline-offset: 2px;
+	transition:
+		color 180ms var(--ease-swell, ease),
+		text-decoration-color 180ms var(--ease-swell, ease);
+}
+
+.sl-markdown-content a:hover {
+	color: color-mix(in oklab, var(--primary) 80%, var(--foreground));
+}
+
+.sl-markdown-content a:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 3px;
+	border-radius: var(--radius-sm);
+}
+
+/* Header: match the app shell — page-white surface anchored by a hairline
+ * bottom border, so docs.memoturn.ai and the dashboard read as the same
+ * product. The sidebar keeps its sand tint (--docs-nav-bg via
+ * --sl-color-bg-sidebar) so the side rail still reads as chrome.
+ *
+ * NOTE: Starlight renders a nested .header — <header class="header"> wraps
+ * <div class="header">. The tag-qualified selector keeps the border on the
+ * outer page-frame slot only; otherwise the inner content row paints a
+ * second short rule under the logo + search. */
+header.header {
+	background: var(--background);
+	border-bottom: 1px solid var(--border);
+	box-shadow: none;
+}
+
+header.header > .header {
+	border-bottom: 0;
+}
+
+.site-title {
+	gap: 0.5rem;
+}
+
+.site-title img {
+	height: 1.375rem;
+	width: auto;
+}
+
+.site-title span {
+	font-family: var(--font-heading-stack);
+	font-weight: 700;
+	font-size: 1.0625rem;
+	letter-spacing: -0.025em;
+	color: var(--foreground);
+}
+
+.site-title:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 4px;
+	border-radius: var(--radius-md);
+}
+
+html[data-has-hero] site-search button[data-open-modal]:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 3px;
+}
+
+.social-icons a:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 3px;
+	border-radius: var(--radius-md);
+}
+
+/* Splash: cap markdown content so HeroCard / ChipRow / CTA share one
+ * column width on ultra-wide. Keyed off Starlight's [data-has-hero]
+ * attribute (set by the splash template) so the cap survives content
+ * refactors. No padding-inline here; components have their own. */
+html[data-has-hero] .sl-markdown-content {
+	width: 100%;
+	max-width: 56rem;
+	margin-inline: auto;
+	box-sizing: border-box;
+}
+
+/* Branded Starlight hero / pagination primary buttons */
+.sl-link-button.primary {
+	background: var(--primary);
+	color: var(--primary-foreground);
+	border: 0;
+	box-shadow: var(--docs-shadow-md);
+	transition:
+		transform 180ms ease,
+		background-color 180ms ease;
+}
+.sl-link-button.primary:hover {
+	background: color-mix(in oklab, var(--primary) 88%, var(--foreground));
+	transform: translateY(-1px);
+}
+.sl-link-button.minimal {
+	color: var(--foreground);
+}
+
+.sl-link-button.primary:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 3px;
+}
+
+/* Search trigger: match the design-system Input vocabulary.
+ * Starlight defaults use --sl-color-black + gray-5 which don't route through
+ * brand tokens; override with --input border + transparent bg + --ring hover
+ * so the search button reads as a flat hairline pill, same as a dashboard
+ * <Input>. */
+@media (min-width: 50rem) {
+	site-search button[data-open-modal] {
+		border: 1px solid var(--input);
+		border-radius: var(--radius-md);
+		background-color: transparent;
+		color: var(--muted-foreground);
+		height: 2.25rem;
+		padding-inline-start: 0.75rem;
+		padding-inline-end: 0.5rem;
+		transition:
+			border-color 180ms var(--ease-swell, ease),
+			color 180ms var(--ease-swell, ease);
+	}
+	site-search button[data-open-modal]:hover {
+		border-color: color-mix(in oklab, var(--ring) 40%, transparent);
+		color: var(--foreground);
+	}
+}
+
+site-search button[data-open-modal] > kbd {
+	background-color: transparent;
+	border: 1px solid var(--border);
+	color: var(--muted-foreground);
+	font-family: var(--font-mono-stack);
+	font-size: var(--sl-text-2xs);
+	padding-inline: 0.375rem;
+	border-radius: var(--radius-sm);
+}
+site-search button[data-open-modal] > kbd kbd {
+	border: 0;
+	padding: 0;
+	background: transparent;
+	color: inherit;
+}
+
+/* Starlight footer (edit link, pagination) */
+.meta a:focus-visible,
+.pagination-links a:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 3px;
+	border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	html {
+		scroll-behavior: smooth;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.m-feature-card,
+	.m-cta__action,
+	.memoturn-hero__action,
+	.m-feature-card__chev,
+	.sl-link-button.primary {
+		transition-duration: 0.01ms !important;
+	}
+
+	a.m-feature-card:hover,
+	.m-cta__action:hover,
+	.memoturn-hero__action:hover,
+	.sl-link-button.primary:hover {
+		transform: none !important;
+	}
+
+	a.m-feature-card:hover .m-feature-card__chev {
+		transform: none !important;
+	}
+}
