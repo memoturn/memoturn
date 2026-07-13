@@ -73,23 +73,18 @@ services:
       start_period: 30s
 
   # One-shot: sets the Doris root password (the image boots with root/empty). Idempotent —
-  # if the password is already set, the first probe succeeds and it exits.
+  # if the password is already set, the first probe succeeds and it exits. Logic lives in
+  # infra/doris-setup.sh (mounted) to avoid YAML/shell quoting hazards.
   doris-setup:
     image: curlimages/curl:latest
     depends_on:
       doris-fe:
         condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      if curl -sf -u root:${DORIS_PASSWORD:?set DORIS_PASSWORD in .env} -H 'Content-Type: application/json'
-        -d '{\"stmt\":\"SELECT 1\"}' http://doris-fe:8030/api/query/default_cluster/information_schema >/dev/null; then
-        echo 'doris root password already set'; exit 0;
-      fi;
-      curl -sf -u root: -H 'Content-Type: application/json'
-        -d \"{\\\"stmt\\\":\\\"SET PASSWORD FOR 'root' = PASSWORD('${DORIS_PASSWORD}')\\\"}\"
-        http://doris-fe:8030/api/query/default_cluster/information_schema &&
-      echo 'doris root password set';
-      "
+    environment:
+      DORIS_PASSWORD: ${DORIS_PASSWORD:?set DORIS_PASSWORD in .env}
+    volumes:
+      - ./doris-setup.sh:/doris-setup.sh:ro
+    entrypoint: ["/bin/sh", "/doris-setup.sh"]
 
   redis:
     image: valkey/valkey:8-alpine
