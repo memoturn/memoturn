@@ -6,12 +6,24 @@ import type { ObservationRow, ScoreWriteRow, TraceRow } from "@memoturn/telemetr
  * the same entity (e.g. generation-create then generation-update) are merged in
  * timestamp order; the store's last-writer-wins merge then keeps the row with the
  * highest event_ts.
+ *
+ * Events are PATCHES: fields an event leaves unset keep their previous value. Within
+ * a batch that happens via body accumulation; across batches the caller passes the
+ * entities' currently stored rows as `bases`, and unset fields fall back to them —
+ * without a base, a later partial update would materialize defaults and overwrite
+ * the fields set at create time.
  */
 
-const json = (v: unknown): string => (v === undefined ? "" : typeof v === "string" ? v : JSON.stringify(v));
-const meta = (v: unknown): string => (v === undefined ? "{}" : JSON.stringify(v));
+const json = (v: unknown): string => (typeof v === "string" ? v : JSON.stringify(v));
+const meta = (v: unknown): string => JSON.stringify(v);
 
 export type { ObservationRow, ScoreWriteRow, TraceRow };
+
+/** Currently stored rows for entities referenced by this batch (read-merge bases). */
+export interface RowBases {
+  traces?: Map<string, TraceRow>;
+  observations?: Map<string, ObservationRow>;
+}
 
 export interface MappedRows {
   traces: TraceRow[];
@@ -34,7 +46,12 @@ function assign<T extends object>(acc: Partial<T>, patch: Record<string, unknown
   }
 }
 
-export function mapEvents(projectId: string, events: IngestEvent[], priceOverrides: ModelPrice[] = []): MappedRows {
+export function mapEvents(
+  projectId: string,
+  events: IngestEvent[],
+  priceOverrides: ModelPrice[] = [],
+  bases: RowBases = {},
+): MappedRows {
   // Sort by event timestamp so later updates override earlier creates.
   const ordered = [...events].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
@@ -81,59 +98,77 @@ export function mapEvents(projectId: string, events: IngestEvent[], priceOverrid
 
   const traces: TraceRow[] = [...traceAcc.values()].map(({ body, event_ts }) => {
     const b = body as Record<string, any>;
+    const base = bases.traces?.get(b.id);
     return {
       id: b.id,
       project_id: projectId,
-      timestamp: b.timestamp ?? event_ts,
-      name: b.name ?? "",
-      user_id: b.userId ?? "",
-      session_id: b.sessionId ?? "",
-      release: b.release ?? "",
-      version: b.version ?? "",
-      environment: b.environment ?? "default",
-      public: b.public ? 1 : 0,
-      tags: b.tags ?? [],
-      metadata: meta(b.metadata),
-      input: json(b.input),
-      output: json(b.output),
+      timestamp: b.timestamp ?? base?.timestamp ?? event_ts,
+      name: b.name ?? base?.name ?? "",
+      user_id: b.userId ?? base?.user_id ?? "",
+      session_id: b.sessionId ?? base?.session_id ?? "",
+      release: b.release ?? base?.release ?? "",
+      version: b.version ?? base?.version ?? "",
+      environment: b.environment ?? base?.environment ?? "default",
+      public: b.public !== undefined ? (b.public ? 1 : 0) : (base?.public ?? 0),
+      tags: b.tags ?? base?.tags ?? [],
+      metadata: b.metadata !== undefined ? meta(b.metadata) : (base?.metadata ?? "{}"),
+      input: b.input !== undefined ? json(b.input) : (base?.input ?? ""),
+      output: b.output !== undefined ? json(b.output) : (base?.output ?? ""),
       event_ts,
     };
   });
 
   const observations: ObservationRow[] = [...obsAcc.values()].map(({ body, type, event_ts }) => {
     const b = body as Record<string, any>;
-    const promptTokens = clampTokens(b.usage?.promptTokens);
-    const completionTokens = clampTokens(b.usage?.completionTokens);
-    const totalTokens = clampTokens(b.usage?.totalTokens ?? promptTokens + completionTokens);
-    const cost = computeCost(b.model, promptTokens, completionTokens, priceOverrides);
-    const startTime: string = b.startTime ?? event_ts;
-    const endTime: string | null = b.endTime ?? null;
+    const base = bases.observations?.get(b.id);
+    const model: string = b.model ?? base?.model ?? "";
+    // Usage patches at object granularity: when the batch carries usage, recompute
+    // tokens + cost against the (possibly inherited) model; otherwise keep the base's.
+    let promptTokens: number;
+    let completionTokens: number;
+    let totalTokens: number;
+    let cost: { inputCost: number; outputCost: number; totalCost: number };
+    if (b.usage !== undefined || !base) {
+      promptTokens = clampTokens(b.usage?.promptTokens);
+      completionTokens = clampTokens(b.usage?.completionTokens);
+      totalTokens = clampTokens(b.usage?.totalTokens ?? promptTokens + completionTokens);
+      const c = computeCost(model, promptTokens, completionTokens, priceOverrides);
+      cost = { inputCost: c.inputCost, outputCost: c.outputCost, totalCost: c.totalCost };
+    } else {
+      promptTokens = base.prompt_tokens;
+      completionTokens = base.completion_tokens;
+      totalTokens = base.total_tokens;
+      cost = { inputCost: base.input_cost, outputCost: base.output_cost, totalCost: base.total_cost };
+    }
+    const startTime: string = b.startTime ?? base?.start_time ?? event_ts;
+    const endTime: string | null = b.endTime ?? base?.end_time ?? null;
     return {
       id: b.id,
-      trace_id: b.traceId,
+      trace_id: b.traceId ?? base?.trace_id,
       project_id: projectId,
       type,
-      parent_observation_id: b.parentObservationId ?? "",
-      name: b.name ?? "",
+      parent_observation_id: b.parentObservationId ?? base?.parent_observation_id ?? "",
+      name: b.name ?? base?.name ?? "",
       start_time: startTime,
       end_time: endTime,
-      environment: b.environment ?? "default",
-      level: b.level ?? "DEFAULT",
-      status_message: b.statusMessage ?? "",
-      model: b.model ?? "",
-      provider: b.provider ?? providerForModel(b.model, priceOverrides),
-      model_parameters: meta(b.modelParameters),
+      environment: b.environment ?? base?.environment ?? "default",
+      level: b.level ?? base?.level ?? "DEFAULT",
+      status_message: b.statusMessage ?? base?.status_message ?? "",
+      model,
+      provider:
+        b.provider ?? (b.model !== undefined || !base ? providerForModel(model, priceOverrides) : base.provider),
+      model_parameters: b.modelParameters !== undefined ? meta(b.modelParameters) : (base?.model_parameters ?? "{}"),
       prompt_tokens: promptTokens,
       completion_tokens: completionTokens,
       total_tokens: totalTokens,
       input_cost: cost.inputCost,
       output_cost: cost.outputCost,
       total_cost: cost.totalCost,
-      prompt_id: b.promptId ?? "",
-      prompt_version: b.promptVersion ?? "",
-      input: json(b.input),
-      output: json(b.output),
-      metadata: meta(b.metadata),
+      prompt_id: b.promptId ?? base?.prompt_id ?? "",
+      prompt_version: b.promptVersion ?? base?.prompt_version ?? "",
+      input: b.input !== undefined ? json(b.input) : (base?.input ?? ""),
+      output: b.output !== undefined ? json(b.output) : (base?.output ?? ""),
+      metadata: b.metadata !== undefined ? meta(b.metadata) : (base?.metadata ?? "{}"),
       latency_ms: endTime ? Math.max(0, Date.parse(endTime) - Date.parse(startTime)) : 0,
       event_ts,
     };

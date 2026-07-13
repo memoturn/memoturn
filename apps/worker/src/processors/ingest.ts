@@ -108,10 +108,10 @@ async function runOnlineEvals(projectId: string, batch: IngestEvent[]): Promise<
  * Ingest job processor. Re-reads the raw batch from blob storage (the source of
  * truth), validates it, maps events to telemetry rows, and inserts.
  *
- * NOTE (Phase 2 hardening): create + update for one observation are merged when they
- * arrive in the same batch. Cross-batch partial updates currently insert a new row
- * (last-writer-wins merge); a read-merge against the existing row will be added so
- * fields set at create time are never lost.
+ * Cross-batch partial updates are handled by a READ-MERGE: the currently stored rows
+ * for every trace/observation id in the batch are fetched and passed to the mapper
+ * as bases, so fields a later event leaves unset keep their stored value instead of
+ * being overwritten with defaults (events are patches).
  */
 export async function processIngest(job: Job<IngestJob>): Promise<void> {
   const { projectId, blobKey } = job.data;
@@ -149,7 +149,29 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
   }
 
   const priceOverrides = compileModelPrices(await loadProjectPriceOverrides(projectId));
-  const { traces, observations, scores } = mapEvents(projectId, parsed.batch, priceOverrides);
+
+  // Read-merge bases: existing rows for every entity id this batch touches.
+  const traceIds = [
+    ...new Set(parsed.batch.filter((e) => e.type === "trace-create").map((e) => (e.body as { id: string }).id)),
+  ];
+  const observationIds = [
+    ...new Set(
+      parsed.batch
+        .filter((e) => e.type !== "trace-create" && e.type !== "score-create")
+        .map((e) => (e.body as { id: string }).id),
+    ),
+  ];
+  const store = telemetry();
+  const [traceBases, observationBases] = await Promise.all([
+    store.getTraceRowsByIds(projectId, traceIds),
+    store.getObservationRowsByIds(projectId, observationIds),
+  ]);
+  const bases = {
+    traces: new Map(traceBases.map((r) => [r.id, r])),
+    observations: new Map(observationBases.map((r) => [r.id, r])),
+  };
+
+  const { traces, observations, scores } = mapEvents(projectId, parsed.batch, priceOverrides, bases);
 
   // Insert each table independently so one table's failure is isolated and observable.
   // Re-insert on retry is safe — the store's last-writer-wins merge (event_ts) dedupes

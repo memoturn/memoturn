@@ -17,12 +17,14 @@ import type {
   ExportObservationRow,
   ExportTraceRow,
   FullScoreRow,
+  ObservationRow,
   ProjectRowCounts,
   TelemetryRowMap,
   TelemetryTable,
   TraceFilters,
   TraceHeader,
   TraceIO,
+  TraceRow,
   TraceScore,
 } from "../types.js";
 import { closeDorisPool, dorisPool } from "./client.js";
@@ -38,6 +40,10 @@ import { buildInserts, parseTags, toDorisDateTime } from "./serialize.js";
  */
 
 const ISO_FMT = "'%Y-%m-%dT%H:%i:%sZ'";
+// Millisecond-preserving variant for write-shaped row reads: event_ts is the LWW
+// sequence value, so read-merge bases must not truncate it. %f is microseconds;
+// JS Date parsing truncates the extra digits harmlessly.
+const ISO_MS_FMT = "'%Y-%m-%dT%H:%i:%s.%fZ'";
 
 /** ISO timestamp for "now minus N days" as a Doris DATETIME literal. */
 function cutoffDaysAgo(days: number): string {
@@ -452,6 +458,64 @@ export class DorisTelemetryStore implements TelemetryStore {
       [projectId, cutoffDaysAgo(days)],
     );
     return Number(rows[0]?.c ?? 0);
+  }
+
+  async getTraceRowsByIds(projectId: string, traceIds: string[]): Promise<TraceRow[]> {
+    if (traceIds.length === 0) return [];
+    const rows = await this.query<TraceRow & { tags: unknown }>(
+      `
+      SELECT
+        project_id, id,
+        DATE_FORMAT(\`timestamp\`, ${ISO_MS_FMT}) AS \`timestamp\`,
+        name, user_id, session_id, \`release\`, version, environment, \`public\`,
+        CAST(tags AS JSON) AS tags,
+        COALESCE(metadata, '{}') AS metadata,
+        COALESCE(input, '') AS input,
+        COALESCE(output, '') AS output,
+        DATE_FORMAT(event_ts, ${ISO_MS_FMT}) AS event_ts
+      FROM traces
+      WHERE project_id = ? AND id IN (?)
+      `,
+      [projectId, traceIds],
+    );
+    return rows.map((r) => ({ ...r, tags: parseTags(r.tags), public: Number(r.public) }));
+  }
+
+  async getObservationRowsByIds(projectId: string, observationIds: string[]): Promise<ObservationRow[]> {
+    if (observationIds.length === 0) return [];
+    const rows = await this.query<ObservationRow>(
+      `
+      SELECT
+        project_id, trace_id, id, type, parent_observation_id, name,
+        DATE_FORMAT(start_time, ${ISO_MS_FMT}) AS start_time,
+        IF(end_time IS NULL, NULL, DATE_FORMAT(end_time, ${ISO_MS_FMT})) AS end_time,
+        environment, level,
+        COALESCE(status_message, '') AS status_message,
+        model, provider,
+        COALESCE(model_parameters, '{}') AS model_parameters,
+        prompt_tokens, completion_tokens, total_tokens,
+        input_cost, output_cost, total_cost,
+        prompt_id, prompt_version,
+        COALESCE(input, '') AS input,
+        COALESCE(output, '') AS output,
+        COALESCE(metadata, '{}') AS metadata,
+        latency_ms,
+        DATE_FORMAT(event_ts, ${ISO_MS_FMT}) AS event_ts
+      FROM observations
+      WHERE project_id = ? AND id IN (?)
+      `,
+      [projectId, observationIds],
+    );
+    return rows.map((r) => ({
+      ...r,
+      prompt_tokens: Number(r.prompt_tokens),
+      completion_tokens: Number(r.completion_tokens),
+      total_tokens: Number(r.total_tokens),
+      input_cost: Number(r.input_cost),
+      output_cost: Number(r.output_cost),
+      total_cost: Number(r.total_cost),
+      latency_ms: Number(r.latency_ms),
+    }));
   }
 
   async countProjectRows(projectId: string): Promise<ProjectRowCounts> {

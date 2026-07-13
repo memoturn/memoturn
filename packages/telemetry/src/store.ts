@@ -15,12 +15,14 @@ import type {
   ExportFilters,
   ExportTraceRow,
   FullScoreRow,
+  ObservationRow,
   ProjectRowCounts,
   TelemetryRowMap,
   TelemetryTable,
   TraceFilters,
   TraceHeader,
   TraceIO,
+  TraceRow,
   TraceScore,
 } from "./types.js";
 
@@ -57,6 +59,13 @@ export interface TelemetryStore {
   exportTraces(projectId: string, filters?: ExportFilters): Promise<ExportTraceRow[]>;
   countTracesOlderThan(projectId: string, days: number): Promise<number>;
   countProjectRows(projectId: string): Promise<ProjectRowCounts>;
+  /**
+   * Full write-shaped rows for a set of entity ids — the read-merge bases for
+   * cross-batch partial updates (ingest events are patches: fields a new event
+   * leaves unset must keep their previously stored value).
+   */
+  getTraceRowsByIds(projectId: string, traceIds: string[]): Promise<TraceRow[]>;
+  getObservationRowsByIds(projectId: string, observationIds: string[]): Promise<ObservationRow[]>;
 
   // ── Writes ─────────────────────────────────────────────────────────────────────
   /**

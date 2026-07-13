@@ -87,4 +87,58 @@ describe.skipIf(!HAS_INFRA)("ingest pipeline (blob → worker → telemetry stor
     expect(trace.scores[0]?.name).toBe("quality");
     expect(trace.scores[0]?.value).toBe(0.8);
   });
+
+  it("preserves create-time fields when the update arrives in a LATER batch (read-merge)", async () => {
+    const traceId = newId();
+    const obsId = newId();
+    const t0 = iso(new Date(Date.now() - 5000));
+
+    // Batch 1: create with full state, still open (no endTime/usage/output).
+    const blobKey1 = await putRawBatch(projectId, newId(), {
+      batch: [
+        { id: newId(), type: "trace-create", timestamp: t0, body: { id: traceId, name: "rm-trace", userId: "u-rm" } },
+        {
+          id: newId(),
+          type: "generation-create",
+          timestamp: t0,
+          body: { id: obsId, traceId, name: "rm-gen", model: "gpt-4o-mini", startTime: t0 },
+        },
+      ],
+    });
+    await processIngest({ data: { projectId, batchId: newId(), blobKey: blobKey1 } } as Job<IngestJob>);
+    await getTraceWithRetry(projectId, traceId); // wait until batch 1 is queryable
+
+    // Batch 2: partial updates only — output for the trace, end/usage for the generation.
+    const t1 = iso();
+    const blobKey2 = await putRawBatch(projectId, newId(), {
+      batch: [
+        { id: newId(), type: "trace-create", timestamp: t1, body: { id: traceId, output: "late-answer" } },
+        {
+          id: newId(),
+          type: "generation-update",
+          timestamp: t1,
+          body: { id: obsId, traceId, endTime: t1, output: "pong", usage: { promptTokens: 10, completionTokens: 20 } },
+        },
+      ],
+    });
+    await processIngest({ data: { projectId, batchId: newId(), blobKey: blobKey2 } } as Job<IngestJob>);
+
+    // The merged view must have batch-1 fields AND batch-2 fields.
+    let trace = await getTraceWithRetry(projectId, traceId);
+    for (let i = 0; i < 10 && trace && trace.output !== "late-answer"; i++) {
+      await new Promise((r) => setTimeout(r, 300));
+      trace = await getTraceWithRetry(projectId, traceId);
+    }
+    expect(trace).toBeTruthy();
+    if (!trace) return;
+    expect(trace.name).toBe("rm-trace"); // from batch 1
+    expect(trace.user_id).toBe("u-rm"); // from batch 1
+    expect(trace.output).toBe("late-answer"); // from batch 2
+    const obs = trace.observations[0];
+    expect(obs?.name).toBe("rm-gen"); // from batch 1
+    expect(obs?.model).toBe("gpt-4o-mini"); // from batch 1
+    expect(Number(obs?.total_tokens)).toBe(30); // from batch 2
+    expect(obs?.end_time).toBeTruthy(); // from batch 2
+    expect(Number(obs?.latency_ms)).toBeGreaterThan(0); // spans both batches
+  });
 });

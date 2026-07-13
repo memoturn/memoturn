@@ -169,6 +169,25 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     await store.deleteScore(P, "sc-eval");
   });
 
+  it("returns write-shaped rows for read-merge bases (ms-precision event_ts)", async () => {
+    const [t] = await store.getTraceRowsByIds(P, ["t1", "missing"]);
+    expect(t?.id).toBe("t1");
+    expect(t?.public).toBe(0);
+    expect(t?.tags).toEqual(["alpha", 'tricky "quoted", comma']);
+    // event_ts round-trips as a parseable timestamp with sub-second precision intact.
+    expect(new Date(t!.event_ts).getTime()).toBe(new Date(iso()).getTime());
+
+    const obs = await store.getObservationRowsByIds(P, ["o1", "o2"]);
+    expect(obs).toHaveLength(2);
+    const gen = obs.find((o) => o.id === "o1")!;
+    expect(gen.trace_id).toBe("t1");
+    expect(gen.model).toBe("gpt-x");
+    expect(gen.prompt_tokens).toBe(100);
+    expect(gen.total_cost).toBeCloseTo(0.003, 6);
+    expect(gen.end_time).not.toBeNull();
+    expect(obs.find((o) => o.id === "o2")!.end_time).toBeNull();
+  });
+
   it("exports traces with nested observations and counts project rows", async () => {
     const exported = await store.exportTraces(P, {});
     expect(exported).toHaveLength(1);
