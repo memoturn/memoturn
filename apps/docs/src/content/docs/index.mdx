@@ -35,13 +35,13 @@ import LiveTicker from "../../components/LiveTicker.astro";
 	lang="bash"
 >
 	Memoturn is an open-source AI engineering platform: traces with a waterfall timeline,
-	cost/token/latency metrics over ClickHouse, offline, online, and human evaluation, a
+	cost/token/latency metrics over Apache Doris, offline, online, and human evaluation, a
 	versioned prompt registry, a multi-provider playground, and datasets — all behind one
 	console you self-host.
 </HeroCard>
 
 Built on an async ingest pipeline — the API acks your batch, a worker maps it into
-ClickHouse — with Postgres for metadata, blob storage for the replayable raw event log, and
+Apache Doris — with Postgres for metadata, blob storage for the replayable raw event log, and
 Redis for the queue. Ingest from the TypeScript or Python SDK, the OpenAI and LangChain
 wrappers, or any OpenTelemetry exporter. Read the [architecture overview](/architecture/)
 for the full data path.

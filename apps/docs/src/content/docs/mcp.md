@@ -42,7 +42,7 @@ same `pk-mt-…` / `sk-mt-…` keys the SDK uses):
 - `MEMOTURN_PUBLIC_KEY`
 - `MEMOTURN_SECRET_KEY`
 
-It also needs the datastore connection env (`DATABASE_URL`, `REDIS_URL`, `CLICKHOUSE_URL`, …)
+It also needs the datastore connection env (`DATABASE_URL`, `REDIS_URL`, `DORIS_HOST`, …)
 since it queries them directly.
 
 ### Run
@@ -66,7 +66,7 @@ The server speaks stdio. Point your IDE's MCP config at it, e.g.:
         "MEMOTURN_SECRET_KEY": "sk-mt-…",
         "DATABASE_URL": "postgresql://…",
         "REDIS_URL": "redis://…",
-        "CLICKHOUSE_URL": "http://…"
+        "DORIS_HOST": "…"
       }
     }
   }

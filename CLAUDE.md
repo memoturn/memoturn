@@ -7,19 +7,19 @@ memoturn is an open-source AI engineering platform (LLM observability, evals, me
 ## Commands
 
 ```bash
-bun run setup        # one-time: install + infra up + wait-healthy + Prisma migrate + ClickHouse migrate + seed
+bun run setup        # one-time: install + infra up + wait-healthy + Prisma migrate + Doris migrate + seed
 bun run dev          # turbo: api (:3001) + worker + console (:3000), all with --watch (public sites excluded)
 bun run dev:site     # marketing site (:3003) + docs site (:4321)
 bun run quickstart   # emit a sample trace via the SDK, then open http://localhost:3000
 
 bun run lint         # Biome check (format + lint + import order); `bun run format` to auto-fix
 bun run typecheck    # turbo: tsc --noEmit across packages
-bun run test         # turbo: vitest (core + server + worker have real tests)
+bun run test         # turbo: vitest (core + server + worker + telemetry have real tests)
 bun run build        # turbo build (respects ^build dependency order)
 
-bun run infra:up / infra:down / infra:logs   # docker compose for PG/ClickHouse/Redis/MinIO
+bun run infra:up / infra:down / infra:logs   # docker compose for PG/Doris/Redis/MinIO
 bun run db:migrate   # prisma migrate deploy
-bun run db:clickhouse # apply ClickHouse migrations (infra/clickhouse)
+bun run db:telemetry # apply Doris migrations (infra/doris; schema_migrations ledger)
 bun run seed         # seed organization/project/dev API key
 bun run seed:demo    # seed ~30 days of realistic demo telemetry via /v1/ingest (--days, --traces-per-day, --wipe, --dry-run); needs dev api+worker running
 bun run dlq          # inspect the ingest dead-letter queue; `--replay` re-enqueues failed batches from blob
@@ -35,7 +35,7 @@ Dev credentials: console login `admin@memoturn.dev` / `memoturn-dev-123`; SDK AP
 
 ## Architecture
 
-The defining pattern is an **async, decoupled ingest pipeline** that splits storage by access pattern: relational metadata in **Postgres** (Prisma 7), high-volume telemetry in **ClickHouse**, raw replayable event log in **blob** (S3/MinIO), jobs in **Redis/BullMQ**.
+The defining pattern is an **async, decoupled ingest pipeline** that splits storage by access pattern: relational metadata in **Postgres** (Prisma 7), high-volume telemetry in **Apache Doris**, raw replayable event log in **blob** (S3/MinIO), jobs in **Redis/BullMQ**.
 
 ```
 SDK / OTel / LangChain / OpenAI
@@ -43,18 +43,18 @@ SDK / OTel / LangChain / OpenAI
    ▼
 apps/api (Hono/Bun) ─ validate ─ write raw batch to blob ─ enqueue BullMQ job ─ 207 ack
    ▼
-apps/worker (Bun) ─ re-read batch from blob ─ map ─ insert into ClickHouse
+apps/worker (Bun) ─ re-read batch from blob ─ map ─ insert into Doris
    │                                         └─ run sampled online evaluators (best-effort)
    ▼
 apps/console (SPA) ── TanStack Query ──► apps/api
 ```
 
-Key consequence: the API **never writes telemetry synchronously**. It persists the raw batch to blob (the source of truth for replay) and acks 207; the worker does all ClickHouse work. Don't add direct ClickHouse writes in the request path.
+Key consequence: the API **never writes telemetry synchronously**. It persists the raw batch to blob (the source of truth for replay) and acks 207; the worker does all telemetry-store work. Don't add direct Doris writes in the request path.
 
 ### Workspaces
 
 - **`apps/api`** — Hono + `@hono/zod-openapi`. `src/app.ts` is the entire route surface; **handlers are thin** — they call into `@memoturn/server`. Same app is served by `server.bun.ts` (primary) and `server.node.ts`. Auth resolution in `src/middleware/auth.ts`. Global hardening middleware (applied at the top of `app.ts`): `secureHeaders` (X-Frame-Options/DENY, no-referrer, etc.), CORS scoped to `AUTH_TRUSTED_ORIGINS`, and request body-size limits (1 MB default, 12 MB for `/v1/ingest`, `/v1/otel/*`, and `/v1/media`).
-- **`apps/worker`** — BullMQ consumers. `processors/ingest.ts` (merge → ClickHouse + online evals), plus daily maintenance crons (retention sweep `0 3 * * *`, scheduled blob exports `0 4 * * *`) and a health/metrics HTTP endpoint (`WORKER_PORT`, default 3002). `mappers.ts` converts ingest events → ClickHouse rows (has the only worker tests). Key hardening details: jobs that exhaust retries land in a **dead-letter queue** (`ingest-dlq`) for inspection/replay; each ClickHouse table (`traces`, `observations`, `scores`) is inserted **independently** so one table failure doesn't discard the others; large input/output payloads (> 256 KB) are **offloaded to blob** with a marker reference before insert; all log output is **structured JSON** (`logJson`); counters (`ingest_events_total`, `ingest_errors_total`, `ingest_rows_total`, `evaluator_runs_total`) plus ClickHouse insert latency and `dlqDepth` are exposed in the `/metrics` JSON; retention and export crons are guarded by a **Redis lock** (`withLock`) to prevent concurrent runs across multiple worker replicas. Per-event token counts are clamped to `MAX_EVENT_TOKENS` (10 M) in `packages/core/src/models.ts` to prevent runaway cost inflation.
+- **`apps/worker`** — BullMQ consumers. `processors/ingest.ts` (merge → telemetry store + online evals), plus daily maintenance crons (retention sweep `0 3 * * *`, scheduled blob exports `0 4 * * *`) and a health/metrics HTTP endpoint (`WORKER_PORT`, default 3002). `mappers.ts` converts ingest events → engine-neutral telemetry rows, including the computed `latency_ms` (has the only worker tests). Key hardening details: jobs that exhaust retries land in a **dead-letter queue** (`ingest-dlq`) for inspection/replay; each telemetry table (`traces`, `observations`, `scores`) is inserted **independently** so one table failure doesn't discard the others; large input/output payloads (> 256 KB) are **offloaded to blob** with a marker reference before insert; all log output is **structured JSON** (`logJson`); counters (`ingest_events_total`, `ingest_errors_total`, `ingest_rows_total`, `evaluator_runs_total`) plus `telemetry_insert` latency and `dlqDepth` are exposed in the `/metrics` JSON; retention and export crons are guarded by a **Redis lock** (`withLock`) to prevent concurrent runs across multiple worker replicas. Per-event token counts are clamped to `MAX_EVENT_TOKENS` (10 M) in `packages/core/src/models.ts` to prevent runaway cost inflation.
 - **`apps/console`** — Vite + TanStack Router (file-based routes in `src/routes/`) + TanStack Query. `routeTree.gen.ts` is **generated** (`tsr generate`, runs in build/typecheck) — never edit it; it's gitignored from Biome.
 - **`apps/web`** — public marketing site (memoturn.ai). TanStack Start (React SSR) + Vite + Tailwind 4, deployed as a Cloudflare Worker (`wrangler.jsonc`; staging via `CF_ENV=staging`). Dev port **3003**. The whole landing page is `src/routes/index.tsx`; shared design system from `@memoturn/ui`.
 - **`apps/docs`** — public docs site (docs.memoturn.ai). Astro + Starlight, static-assets Cloudflare Worker. Dev port **4321**. Content in `src/content/docs/` mirrors the hand-written `docs/*.md` (which stay the source of truth — update both when product facts change).
@@ -64,7 +64,8 @@ Key consequence: the API **never writes telemetry synchronously**. It persists t
 - **`packages/contracts`** — Zod **API response** schemas + inferred TS types, shared by API and console to kill type drift (imported as `C` in `app.ts`).
 - **`packages/ui`** — shared design system for the public sites (`apps/web`, `apps/docs`): shadcn primitives + composites (`BrandMark` logo, `CodeBlock`, `ThemeToggle`) on Tailwind 4, brand tokens in `src/styles/tokens.css` (lagoon teal `#4fb8b2 → #328f97`). The console does **not** use it (it has its own shadcn setup). Brand/design specs live in `docs/brand/`.
 - **`packages/tsconfig`** — shared TS configs for the public-site workspaces only (`base`/`library`/`dashboard`/`docs`).
-- **`packages/db`** — Prisma client singleton (`index.ts`, Prisma 7 driver-adapter style — connection URL lives in code + `prisma.config.ts`, not the schema), plus `clickhouse.ts`, `blob.ts`, `queue.ts` (subpath exports: `@memoturn/db/queue`, `/clickhouse`, `/blob`). API-key hashing helpers live here too.
+- **`packages/telemetry`** — the **analytical-store seam**: the `TelemetryStore` interface (`src/store.ts`, ~20 domain methods typed against `@memoturn/contracts`) and its **Apache Doris** implementation (`src/doris/`, mysql2 against the FE). All telemetry SQL lives here — packages/server and the worker call store methods, never hand-written engine SQL. Tables are UNIQUE KEY **merge-on-write** with sequence column `event_ts` (last-writer-wins: re-inserting an id with a newer event_ts overwrites; that's what makes ingest retries and score corrections idempotent). `src/migrate.ts` applies `infra/doris/*.sql` tracked in a `schema_migrations` ledger. `conformance.test.ts` is the behavioral contract any future engine must pass. Gotcha: never insert ARRAY columns via `CAST('[…]' AS ARRAY<STRING>)` — Doris's string→array parser corrupts values with quotes/commas; use array constructors with per-element placeholders (see `doris/serialize.ts`).
+- **`packages/db`** — Prisma client singleton (`index.ts`, Prisma 7 driver-adapter style — connection URL lives in code + `prisma.config.ts`, not the schema), plus `blob.ts`, `queue.ts` (subpath exports: `@memoturn/db/queue`, `/blob`). API-key hashing helpers live here too.
 - **`packages/llm`** — provider gateway (mock / Anthropic / OpenAI) for the playground + LLM evaluators, plus `crypto.ts` for encrypting stored provider keys.
 - **`sdks/js`** (`@memoturn/sdk`) and **`sdks/python`** (`memoturn`).
 
@@ -98,12 +99,12 @@ Same as above, plus: call `denyIfReadOnly(c)` first and `recordAudit(projectId, 
 
 ## Conventions & gotchas
 
-- **Dev infra uses non-default host ports** to avoid clashes: Postgres **5433**, Redis **6380** (ClickHouse 8123, MinIO standard). The `.env` reflects this — don't "fix" them to 5432/6379.
+- **Dev infra uses non-default host ports** to avoid clashes: Postgres **5433**, Redis **6380** (Doris FE 9030 MySQL + 8030 HTTP, MinIO standard). The `.env` reflects this — don't "fix" them to 5432/6379.
 - **Biome** is the only formatter/linter: 2-space indent, double quotes, semicolons, line width 120. Run `bun run format` before committing. Generated files (`routeTree.gen.ts`) and Prisma migrations are excluded.
 - **Git hooks (lefthook)**: pre-commit runs Biome on staged files; pre-push runs `typecheck` + `rbac:check` (every mutating `/v1` route must `denyIfReadOnly` + declare a `403`) + `docs:check` (doc/code coupling). Keep `typecheck` + `build` green.
 - **Online eval failures never fail ingestion** — they're wrapped best-effort in the worker. Sampling is deterministic (FNV hash of `traceId:evaluatorName`), not random.
 - **Local curl testing under zsh**: zsh does not word-split unquoted vars, so `A='-u pk:sk'; curl $A ...` silently 401s. Use literal flags: `curl -u pk-mt-dev:sk-mt-dev http://localhost:3001/v1/metrics`. For scripted verification prefer `bun --filter @memoturn/api start` (stable) over `dev` (`--watch`), and allow a few seconds after boot for cold connections.
-- **ClickHouse counts** (`count()`, `sum()`) come back as **strings** in JSONEachRow — coerce with `Number(...)` (contract types declare them as `number`; the console already coerces).
-- **ClickHouse is self-managed OSS only** (ClickHouse Inc. owns Langfuse, a direct competitor): deployments run the Apache 2.0 `clickhouse-server` image (or Altinity), never ClickHouse Cloud. Keep the interface to plain `CLICKHOUSE_URL` + credentials, telemetry queries consolidated in `packages/server` + `apps/worker/src/mappers.ts`, and don't deepen reliance on CH-specific features beyond current usage (ReplacingMergeTree, `FINAL`) — the blob event log must stay a viable replay path into another store.
+- **Numeric coercion lives in the telemetry store**: Doris returns `COUNT`/`SUM`/BIGINT values that mysql2 may surface as strings, so every store method `Number(...)`-normalizes before returning — methods return contract-shaped values, and the console's residual defensive coercion is harmless. Don't re-introduce raw engine rows into packages/server.
+- **Engine policy — Apache Doris only, behind the seam** (context: ClickHouse Inc. acquired Langfuse, memoturn's direct competitor, so the store moved to the ASF-governed engine). All engine SQL stays inside `packages/telemetry`; if it ever has to change again, a new engine implements `TelemetryStore` + passes `conformance.test.ts`, and the blob raw-event log is the replay path for data. Don't scatter Doris SQL into packages/server or the worker.
 - **`start` vs `dev` env**: the `dev` scripts load `--env-file=../../.env`; the `start` scripts don't (Docker injects env). When running a `start` script locally, export the env first: `set -a; . ./.env; set +a`.
 - Commits: conventional-ish (`feat(scope): …`, `fix(scope): …`, `chore: …`).

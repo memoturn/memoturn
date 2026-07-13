@@ -71,7 +71,7 @@ compliance, not product features.
 | **Evaluator template library** | M | Prebuilt judges (hallucination, relevance, toxicity, …) + evaluator versioning so score drift is attributable. |
 | **Trace → dataset / fine-tuning** | M | One-click trace→dataset-item; export datasets as fine-tuning JSONL (OpenAI/Anthropic formats). |
 | **Inter-rater agreement** | M | Agreement metrics on review queues; keyboard-driven review UI. |
-| **Session/user cost rollups** | S | "Cost per user" breakdowns — columns already in ClickHouse. |
+| **Session/user cost rollups** | S | "Cost per user" breakdowns — columns already in Doris. |
 | **Playground model comparison** | M | Side-by-side multi-model runs (reuse the experiment comparison-matrix UI). |
 | **Parquet export** | S | Alongside JSONL/CSV for BI/notebook use. |
 | **Webhook retries** | S | Retry with backoff + delivery-log UI on top of existing delivery tracking. |

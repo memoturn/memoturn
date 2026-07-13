@@ -30,17 +30,17 @@ You implement memoturn changes **test-first** with a strict red → green → re
 
 ## Unit vs. infra-dependent tests
 
-- **Default to pure unit tests** — no Postgres/ClickHouse/Redis needed. CI and a clean checkout must pass without infra.
-- For tests that genuinely need ClickHouse (or other infra), guard them with the established skip pattern so they're skipped when infra is down instead of failing:
+- **Default to pure unit tests** — no Postgres/Doris/Redis needed. CI and a clean checkout must pass without infra.
+- For tests that genuinely need the telemetry store (or other infra), guard them with the established skip pattern so they're skipped when infra is down instead of failing:
   ```ts
-  const chReachable = await clickhouse().query({ query: "SELECT 1" }).then(() => true).catch(() => false);
+  const storeReachable = await telemetry().ping();
   describe.skipIf(!chReachable)("… round-trip", () => { /* insert + read back with FINAL */ });
   ```
   Keep the deterministic-data assertions (cost, mapping) as plain unit tests that always run.
 
 ## Repo-specific gotchas that belong in assertions
 
-- **ClickHouse counts/sums come back as strings** — coerce with `Number(...)` in both code and test (`expect(Number(rows[0]!.total_tokens)).toBe(...)`).
+- **Telemetry store methods return normalized numbers** — assert on them directly; only coerce with `Number(...)` when a test queries an engine raw.
 - **Read ReplacingMergeTree with `FINAL`** in integration queries, or you'll assert against un-merged duplicates.
 - **Deterministic sampling/cost** — the FNV sampler and `computeCost` are pure; test exact values (e.g. a `claude-sonnet-4-6` generation → a known `total_cost`), don't approximate loosely.
 - The contract↔server type match is enforced by **`bun run typecheck`**, not a runtime test — run it as part of "done".

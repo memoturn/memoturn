@@ -12,7 +12,7 @@ flowchart LR
   api[apps/api · Hono/Bun]
   worker[apps/worker · BullMQ]
   pg[(Postgres)]
-  ch[(ClickHouse)]
+  ch[(Apache Doris)]
   redis[(Redis / BullMQ)]
   blob[(S3 / MinIO)]
 
@@ -34,14 +34,14 @@ flowchart LR
 | --- | --- | --- |
 | `apps/api` | Hono on Bun | Public `/v1` REST, OTel receiver, Better Auth, OpenAPI/Scalar |
 | `apps/console` | Vite + TanStack Router SPA | Dashboard (talks to the API via TanStack Query) |
-| `apps/worker` | Bun + BullMQ | Async ingest → ClickHouse, online evaluators, retention cron |
+| `apps/worker` | Bun + BullMQ | Async ingest → Doris, online evaluators, retention cron |
 
 ## Storage tiers
 
 | Store | Tech | Holds |
 | --- | --- | --- |
 | OLTP | PostgreSQL (Prisma 7, pg driver adapter) | Workspaces, projects, users/sessions, API keys, prompts, datasets, evaluators, review queues, provider connections (encrypted), audit log, retention policies |
-| OLAP | ClickHouse | `traces`, `observations`, `scores` (`ReplacingMergeTree`); a daily metrics rollup (`AggregatingMergeTree` + materialized view) |
+| OLAP | Apache Doris | `traces`, `observations`, `scores` (`UNIQUE KEY` merge-on-write tables); dashboard metrics are aggregated on the fly from `observations` |
 | Queue / cache | Redis (Valkey) + BullMQ | Async ingest queue, API-key cache, retention cron |
 | Blob | S3-compatible (MinIO locally) | Raw replayable event log, exports |
 
@@ -54,7 +54,7 @@ sequenceDiagram
   participant Blob as S3/MinIO
   participant Q as Redis/BullMQ
   participant W as apps/worker
-  participant CH as ClickHouse
+  participant CH as Apache Doris
 
   SDK->>API: POST /v1/ingest (batch, Basic auth)
   API->>API: validate (zod)
@@ -67,12 +67,12 @@ sequenceDiagram
   W->>W: run sampled online evaluators on completed traces
 ```
 
-- The API acks fast; the blob event log is the source of truth, so ClickHouse is
+- The API acks fast; the blob event log is the source of truth, so Doris is
   rebuildable.
-- Merge semantics: ClickHouse `ReplacingMergeTree` keyed on `(project_id, id)` and
-  versioned by `event_ts`, so late/partial/out-of-order events converge (newest wins).
-  Create + update for one observation are merged in the worker when they arrive in the
-  same batch.
+- Merge semantics: Doris `UNIQUE KEY` merge-on-write tables keyed on `(project_id, id)`
+  with `event_ts` as the sequence column, so late/partial/out-of-order events converge
+  (last writer — the newest `event_ts` — wins). Create + update for one observation are
+  merged in the worker when they arrive in the same batch.
 
 ## Packages
 
@@ -80,7 +80,8 @@ sequenceDiagram
 | --- | --- |
 | `packages/core` | Zod **ingest** event contracts (SDK ↔ API ↔ worker), model/cost registry |
 | `packages/contracts` | Zod **API response** schemas + inferred types (API doc + console types) |
-| `packages/db` | Prisma client + ClickHouse / blob / queue clients |
+| `packages/db` | Prisma client + blob / queue clients |
+| `packages/telemetry` | `TelemetryStore` interface + Apache Doris implementation (all telemetry SQL) |
 | `packages/server` | Shared server logic: auth, traces, metrics, prompts, datasets, evaluators, review, export, retention, Better Auth |
 | `packages/llm` | Provider gateway (mock / Anthropic / OpenAI via the AI SDK) + API-key encryption |
 | `sdks/js`, `sdks/python` | Client SDKs |

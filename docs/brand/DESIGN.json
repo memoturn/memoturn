@@ -258,7 +258,7 @@
       "kind": "card",
       "refersTo": "card",
       "description": "Ledger card. Eyebrow, title, body, dashed-rule tag row. Hairline rules instead of shadows.",
-      "html": "<article class=\"ds-card\">\n  <span class=\"ds-card-eyebrow\">Real-time</span>\n  <h3 class=\"ds-card-title\">Every call, traced live</h3>\n  <p class=\"ds-card-body\">The worker maps each batch into ClickHouse the moment it lands. No sampling gaps, no lost payloads, replayable from blob.</p>\n  <div class=\"ds-card-tags\">\n    <span class=\"ds-tag\">ClickHouse</span>\n    <span class=\"ds-tag\">OTLP</span>\n  </div>\n</article>",
+      "html": "<article class=\"ds-card\">\n  <span class=\"ds-card-eyebrow\">Real-time</span>\n  <h3 class=\"ds-card-title\">Every call, traced live</h3>\n  <p class=\"ds-card-body\">The worker maps each batch into Doris the moment it lands. No sampling gaps, no lost payloads, replayable from blob.</p>\n  <div class=\"ds-card-tags\">\n    <span class=\"ds-tag\">Doris</span>\n    <span class=\"ds-tag\">OTLP</span>\n  </div>\n</article>",
       "css": ".ds-card { padding: 32px 28px 36px; background: #ffffff; border-top: 1px solid rgba(23, 58, 64, 0.16); border-right: 1px solid rgba(23, 58, 64, 0.16); border-bottom: 1px solid rgba(23, 58, 64, 0.16); border-left: 1px solid rgba(23, 58, 64, 0.16); border-radius: 6px; display: flex; flex-direction: column; gap: 14px; transition: background-color 180ms cubic-bezier(0.4, 0, 0.2, 1); max-width: 360px; }\n.ds-card:hover { background: #f3faf5; }\n.ds-card-eyebrow { font-family: \"JetBrains Mono\", ui-monospace, monospace; font-weight: 500; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #328f97; margin: 0; }\n.ds-card-title { font-family: \"Inter Tight\", \"Manrope\", ui-sans-serif, sans-serif; font-weight: 700; font-size: 22px; line-height: 1.05; letter-spacing: -0.02em; color: #173a40; margin: 0; }\n.ds-card-body { font-family: \"Manrope\", ui-sans-serif, sans-serif; font-weight: 400; font-size: 14.5px; line-height: 1.6; color: #416166; margin: 0; }\n.ds-card-tags { margin-top: auto; padding-top: 18px; border-top: 1px dashed rgba(23, 58, 64, 0.16); display: flex; gap: 6px; flex-wrap: wrap; }\n.ds-tag { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px; background: rgba(50, 143, 151, 0.10); color: #328f97; font-family: \"JetBrains Mono\", ui-monospace, monospace; font-weight: 500; font-size: 11px; letter-spacing: 0.02em; }"
     },
     {
@@ -361,7 +361,7 @@
       }
     ],
     "dos": [
-      "Do lead with mechanism. Name the store (ClickHouse, Postgres, Redis, blob), the transport (OTLP, MCP, webhooks), the package (apps/api, apps/worker, packages/core). Specificity is what the Multi-tool Builder trusts.",
+      "Do lead with mechanism. Name the store (Doris, Postgres, Redis, blob), the transport (OTLP, MCP, webhooks), the package (apps/api, apps/worker, packages/core). Specificity is what the Multi-tool Builder trusts.",
       "Do hold the page substrate pure white (#ffffff). The neutrals (foam, sand) carry the warmth.",
       "Do use the lagoon (gradient-lagoon) and atoll (gradient-atoll) gradients only as the brand mark fill and the inverted band substrate. They are load-bearing, not decorative.",
       "Do keep headlines tight: line-height 1.02 to 1.05, letter-spacing -0.025em to -0.02em. The tight set is the brand voice.",

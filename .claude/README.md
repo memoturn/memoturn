@@ -11,7 +11,7 @@ Delegated subagents for multi-file work that benefits from its own context. Invo
 | `doc-sync-auditor` | sonnet · cyan | Sweep docs vs. code, run `docs:check`, fix stale docs (incl. the hand-checked `app.ts` → `docs/api.md` tables). |
 | `endpoint-builder` | sonnet · blue | Add/change a `/v1` endpoint across contracts → server → API route → console client, with the read-only guard + audit. |
 | `prisma-migrator` | sonnet · green | Change `schema.prisma`: the `Project` reverse-relation rule, migrate with env loading, regenerate, typecheck. |
-| `ingest-syncer` | opus · purple | Change an ingest event shape, keeping `events.ts` ↔ `mappers.ts` ↔ ClickHouse SQL ↔ tests aligned. |
+| `ingest-syncer` | opus · purple | Change an ingest event shape, keeping `events.ts` ↔ `mappers.ts` ↔ Doris SQL ↔ tests aligned. |
 | `rbac-auditor` | sonnet · red | Run `rbac:check` and fix confirmed gaps (mutating routes missing `denyIfReadOnly` + `403`). |
 | `tdd-engineer` | sonnet · yellow | Build/change logic test-first (red → green → refactor) in core/server/worker. |
 
@@ -24,7 +24,7 @@ Knowledge-first recipes loaded on demand, usable in the main thread or by the ag
 | `add-endpoint` | The 4-layer endpoint recipe + the `app.openapi` contract type-check as the drift guard. |
 | `change-prisma-schema` | Prisma 7 driver-adapter workflow, `Project` reverse relation, migrate/generate/typecheck. |
 | `ingest-event-change` | The files that move together for an ingest shape change; ReplacingMergeTree `event_ts`. |
-| `clickhouse-query` | Parameterized queries, `FINAL`, `Number(...)` string-count coercion, `project_id`-first sort keys. |
+| `doris-query` | TelemetryStore methods, `?` parameterization, merge-on-write (no FINAL), boundary `Number(...)` normalization, `project_id`-first keys. |
 | `console-feature` | apps/console: file-based routes, the typed `api.ts` client, TanStack Query + cache invalidation. |
 | `add-evaluator` | LLM-as-judge config, online vs offline, deterministic FNV sampling, never-fail-ingest, `EVAL` write-back. |
 | `model-registry` | The USD-per-1M-token cost registry, first-match-wins ordering, per-project overrides. |

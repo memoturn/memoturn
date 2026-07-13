@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - [Bun](https://bun.sh) ≥ 1.3 (package manager + runtime)
-- Docker (Postgres, ClickHouse, Redis/Valkey, MinIO)
+- Docker (Postgres, Apache Doris, Redis/Valkey, MinIO) — give Docker ~4 GB of memory; the Doris FE + BE want it
 - [uv](https://docs.astral.sh/uv/) — only if you work on the Python SDK
 
 ## Install & run
@@ -12,7 +12,7 @@
 git clone git@github.com:memoturn/memoturn.git
 cd memoturn
 cp .env.example .env
-bun run setup     # install + start infra + wait healthy + migrate + clickhouse + seed
+bun run setup     # install + start infra + wait healthy + migrate + telemetry DDL + seed
 bun run dev       # api (:3001) + worker + console (:3000)
 ```
 
@@ -20,9 +20,9 @@ bun run dev       # api (:3001) + worker + console (:3000)
 
 1. `bun install` (also regenerates the Prisma client + installs git hooks)
 2. `bun run infra:up` — start the dependency containers
-3. `bun run infra:wait` — block until Postgres/Redis/ClickHouse/MinIO are reachable
+3. `bun run infra:wait` — block until Postgres/Redis/Doris/MinIO are reachable
 4. `bun run db:migrate` — apply Prisma (Postgres) migrations
-5. `bun run db:clickhouse` — apply the ClickHouse DDL
+5. `bun run db:telemetry` — apply the Doris DDL (`infra/doris/*.sql`; each file applies at most once)
 6. `bun run seed` — create a default workspace/project, a dev API key, a login user, and a sample prompt
 
 ## What you get
@@ -62,12 +62,13 @@ running — data flows through the real ingest pipeline):
 bun run seed:demo                                  # 30 days × ~1000 traces/day
 bun run seed:demo -- --days 7 --traces-per-day 100 # smaller/faster
 bun run seed:demo -- --dry-run                     # generate + validate only, send nothing
-bun run seed:demo -- --wipe                        # delete previous demo rows first
+bun run seed:demo -- --wipe                        # wipe the project's telemetry first
 ```
 
 The run is deterministic (`--seed`): re-running on the same day replaces the same rows
 instead of duplicating them. On a later day the seeded window shifts forward, so pass
-`--wipe` to clear the previous run's rows first.
+`--wipe` to start clean — note that it deletes **all** of the project's telemetry (not
+just previously seeded rows) before seeding.
 
 ## Common commands
 

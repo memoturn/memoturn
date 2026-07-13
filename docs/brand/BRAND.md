@@ -6,7 +6,7 @@ If you're touching UI, this doc tells you what's deliberate vs incidental, what 
 
 ## Voice
 
-Memoturn is an **open-source, self-hostable AI engineering platform — LLM observability, evals, and prompt management.** The voice is technical and direct — we explain what the product does in concrete terms ("self-hostable", "OpenTelemetry-native", "nothing leaves your network") and we name the primitives and backends it runs on ("traces", "evaluators", "the prompt registry", "ClickHouse, Postgres, Redis").
+Memoturn is an **open-source, self-hostable AI engineering platform — LLM observability, evals, and prompt management.** The voice is technical and direct — we explain what the product does in concrete terms ("self-hostable", "OpenTelemetry-native", "nothing leaves your network") and we name the primitives and backends it runs on ("traces", "evaluators", "the prompt registry", "Doris, Postgres, Redis").
 
 We are not whimsical, but we are not cold either. The "island" metaphor in the brand (lagoon, palm, sand, foam, atoll) is intentional — it gives a developer-infrastructure product a warmer, more human aesthetic than the usual blue-and-grey enterprise template. We lean into it without becoming silly.
 
@@ -14,14 +14,14 @@ We are not whimsical, but we are not cold either. The "island" metaphor in the b
 
 - Lead with what works ("See every LLM call, on infrastructure you own").
 - Use plain English over jargon when possible — a kicker like "every call, traced" beats "comprehensive telemetry capture across the request lifecycle".
-- Reference the primitives, protocols, and backends by name (trace, score, evaluator, prompt channel, OTel, MCP, ClickHouse).
+- Reference the primitives, protocols, and backends by name (trace, score, evaluator, prompt channel, OTel, MCP, Doris).
 - Keep marketing copy concise — one strong sentence beats a paragraph.
 
 **Don't**
 
 - Use emoji or whimsical metaphors in product UI ("🌊 Surfing the data!"). The metaphor is in the palette and motion, not the copy.
 - Use generic AI-product phrases like "supercharge", "leverage", "unlock the power of".
-- Hide what's actually happening — "Mapping batch into ClickHouse…" is better than "Working on your request…".
+- Hide what's actually happening — "Mapping batch into Doris…" is better than "Working on your request…".
 
 ## Palette
 

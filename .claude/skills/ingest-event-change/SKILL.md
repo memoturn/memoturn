@@ -1,6 +1,6 @@
 ---
 name: ingest-event-change
-description: How to change the shape of an ingest event in memoturn — the files that must move together (events.ts wire contract, worker mappers, ClickHouse columns, tests) and the ReplacingMergeTree semantics. Use when editing packages/core/src/events.ts or any field flowing SDK → API → worker → ClickHouse.
+description: How to change the shape of an ingest event in memoturn — the files that must move together (events.ts wire contract, worker mappers, telemetry row types + Doris columns, tests) and the merge-on-write semantics. Use when editing packages/core/src/events.ts or any field flowing SDK → API → worker → Doris.
 ---
 
 # Change an ingest event shape
@@ -10,8 +10,8 @@ description: How to change the shape of an ingest event in memoturn — the file
 ## Files that move together
 
 1. **Wire contract** — `packages/core/src/events.ts` (Zod schemas). Change the shape here first.
-2. **Worker mappers** — `apps/worker/src/mappers.ts` (events → ClickHouse rows; trace-create + updates merge by timestamp; cost from the model registry). Map every new/changed field.
-3. **ClickHouse schema** — new numbered migration under `infra/clickhouse/*.sql` for any column change; apply with `bun run db:clickhouse`. Tables are `ReplacingMergeTree(event_ts)` (late/partial events merge deterministically; sort key leads with `project_id`). Add columns — don't rename in place.
+2. **Worker mappers** — `apps/worker/src/mappers.ts` (events → engine-neutral telemetry rows; trace-create + updates merge by timestamp; cost from the model registry). Map every new/changed field, and add it to the row types in `packages/telemetry/src/types.ts` + the column specs in `packages/telemetry/src/doris/serialize.ts`.
+3. **Doris schema** — new numbered migration under `infra/doris/*.sql` for any column change; apply with `bun run db:telemetry` (shipped migration files are immutable — the `schema_migrations` ledger applies each file once). Tables are UNIQUE KEY merge-on-write with sequence column `event_ts` (late/partial events merge deterministically; keys lead with `project_id`). Add columns — don't rename in place.
 4. **Tests** — `packages/core/src/events.test.ts` (schema + cost) and `apps/worker/src/mappers.test.ts` (merge + cost vs model registry).
 
 ## Verify
@@ -24,7 +24,7 @@ bun run typecheck
 
 ## Gotchas
 
-- ClickHouse counts come back as **strings** in JSONEachRow — coerce with `Number(...)`.
+- Numeric normalization happens inside `packages/telemetry` store methods (`Number(...)` at the boundary) — consumers get contract-shaped numbers.
 - Online eval failures must **never** fail ingestion (best-effort in the worker) — don't change that.
 - The SDKs (`sdks/js`, `sdks/python`) emit these events; a breaking change needs SDK + docs updates too.
 
