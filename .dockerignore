@@ -13,6 +13,11 @@
 **/.turbo
 **/*.log
 
+# Public-site build caches (apps/web, apps/docs) — not needed in platform images
+**/.astro
+**/.wrangler
+**/.tanstack
+
 # Local tooling / editor state
 .vscode
 .idea
