@@ -42,6 +42,8 @@ bun run dev       # api (:3001) + worker + console (:3000)
 | OpenAPI document | http://localhost:3001/openapi.json |
 | Dev API key (SDKs) | `pk-mt-dev` / `sk-mt-dev` |
 
+![The memoturn dashboard — traces, generations, tokens, and cost over the last 30 days](../../assets/screenshots/dashboard.png)
+
 ## Emit your first trace
 
 <Tabs syncKey="sdk">
@@ -64,6 +66,8 @@ MEMOTURN_PUBLIC_KEY=pk-mt-dev MEMOTURN_SECRET_KEY=sk-mt-dev uv run examples/quic
 
 Open http://localhost:3000/traces and click the trace to see the waterfall timeline and
 its scores.
+
+![Trace detail — observations on a waterfall timeline, with scores and payloads](../../assets/screenshots/trace-detail.png)
 
 ## Fill the dashboards with demo data
 

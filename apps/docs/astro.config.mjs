@@ -1,12 +1,16 @@
 // @ts-check
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
+import remarkGfm from "remark-gfm";
 
 const SITE = process.env.MEMOTURN_DOCS_URL ?? "https://docs.memoturn.ai";
 
 // https://astro.build/config
 export default defineConfig({
   site: SITE,
+  // Astro 6's MDX pipeline doesn't apply GFM to .mdx pages the way .md gets it —
+  // without this, markdown tables in .mdx render as literal pipes.
+  markdown: { remarkPlugins: [remarkGfm] },
   integrations: [
     starlight({
       title: "Memoturn",
@@ -58,6 +62,7 @@ export default defineConfig({
           items: [
             { label: "REST API", slug: "api" },
             { label: "Configuration", slug: "configuration" },
+            { label: "Troubleshooting", slug: "troubleshooting" },
           ],
         },
         { label: "Deployment", slug: "deployment" },

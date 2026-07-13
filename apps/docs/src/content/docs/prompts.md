@@ -44,4 +44,10 @@ and CHAT (message list) prompts.
 The **Prompts** page lists prompts with their channels and latest version; the detail view shows
 every version, which channels point at it, and the content + config.
 
+![Prompts — versioned registry with deployment channels](../../assets/screenshots/prompts.png)
+
+Iterate on a prompt in the **Playground** before promoting it — every run is recorded as a trace:
+
+![Playground — multi-provider, streaming, recorded as traces](../../assets/screenshots/playground.png)
+
 See the API: [`/v1/prompts`](/api/#prompts).
