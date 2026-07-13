@@ -22,6 +22,12 @@ const tryRead = (rel: string): string | null => {
   }
 };
 
+// The public docs site (apps/docs) restates the same facts — every content page
+// is checked, discovered dynamically so new pages can't dodge the checker.
+const SITE_DOC_FILES = readdirSync(join(ROOT, "apps/docs/src/content/docs"))
+  .filter((f) => f.endsWith(".md") || f.endsWith(".mdx"))
+  .map((f) => `apps/docs/src/content/docs/${f}`);
+
 // Every prose surface that hand-restates code facts.
 const DOC_FILES = [
   "CLAUDE.md",
@@ -40,6 +46,7 @@ const DOC_FILES = [
   "docs/sdk-typescript.md",
   "docs/sdk-python.md",
   "docs/roadmap.md",
+  ...SITE_DOC_FILES,
 ];
 
 interface Finding {

@@ -24,9 +24,11 @@ export const Route = createRootRoute({
       { property: "og:description", content: DESCRIPTION },
       { property: "og:type", content: "website" },
       { property: "og:url", content: "https://memoturn.ai" },
-      // TODO: add a designed 1200×630 og-image.png to public/ and restore
-      // og:image + twitter:image + summary_large_image.
-      { name: "twitter:card", content: "summary" },
+      { property: "og:image", content: "https://memoturn.ai/og-image.png" },
+      { property: "og:image:width", content: "1200" },
+      { property: "og:image:height", content: "630" },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:image", content: "https://memoturn.ai/og-image.png" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
