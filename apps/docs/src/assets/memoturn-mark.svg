@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Memoturn">
+	<title>Memoturn</title>
+	<defs>
+		<linearGradient id="memoturn-mark-grad" x1="0" y1="0" x2="1" y2="1">
+			<stop offset="0%" stop-color="#4fb8b2" />
+			<stop offset="100%" stop-color="#328f97" />
+		</linearGradient>
+	</defs>
+	<g fill="url(#memoturn-mark-grad)">
+		<path fill-rule="evenodd" d="M 64 10 a 54 54 0 1 0 0 108 a 54 54 0 1 0 0 -108 M 64 24 a 40 40 0 1 1 0 80 a 40 40 0 1 1 0 -80" />
+		<path fill-rule="evenodd" d="M 64 34 a 30 30 0 1 0 0 60 a 30 30 0 1 0 0 -60 M 64 48 a 16 16 0 1 1 0 32 a 16 16 0 1 1 0 -32" />
+		<circle cx="64" cy="64" r="8" />
+	</g>
+</svg>

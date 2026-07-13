@@ -1,0 +1,72 @@
+---
+title: Memoturn
+description: A self-hostable, durable runtime for AI agents.
+template: splash
+hero:
+  tagline: Persistent, per-task AI agents that survive crashes, cost nothing when idle, and execute code in sandboxes with zero ambient authority — on infrastructure you run anywhere Docker runs.
+  actions:
+    - text: Read the quickstart
+      link: /quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: See use cases
+      link: /use-cases/
+      icon: right-arrow
+      variant: minimal
+    - text: View on GitHub
+      link: https://github.com/memoturn/memoturn
+      icon: external
+      variant: minimal
+---
+
+import HeroCard from "../../components/HeroCard.astro";
+import LinkChip from "../../components/LinkChip.astro";
+import ChipRow from "../../components/ChipRow.astro";
+import CTA from "../../components/CTA.astro";
+import LiveTicker from "../../components/LiveTicker.astro";
+
+<LiveTicker />
+
+<HeroCard
+	kicker="run it"
+	title="One command, durable agents"
+	href="/quickstart/"
+	code="make dev   # uv run memoturn"
+	lang="bash"
+>
+	Memoturn is an open-source, Docker-based runtime for durable AI agents. Agent actors run
+	in-process, each with its own SQLite store; idle actors hibernate to disk and rehydrate
+	on demand. Useful at Tier 0 with just a durable filesystem and chat — and it climbs from
+	there.
+</HeroCard>
+
+Built on FastAPI with a pluggable `Provider`, `Sandbox`, and `Durability` interface — ships with
+Anthropic (Claude), Docker, and a SQLite checkpoint engine, and swaps in OpenAI, Ollama, or a
+gVisor-isolated sandbox without touching the core. Read the [architecture overview](/architecture/)
+for the full request path.
+
+<ChipRow>
+	<LinkChip kicker="connect" title="MCP, both ways" href="/mcp/">
+		Mount external MCP tools; expose every agent as an MCP server.
+	</LinkChip>
+	<LinkChip kicker="federate" title="A2A protocol" href="/a2a/">
+		Discover and message agents across frameworks, in both directions.
+	</LinkChip>
+	<LinkChip kicker="operate" title="Enterprise-ready" href="/enterprise/">
+		Open-core: SSO, SCIM, audit, and usage-metered billing on top of the Apache-2.0 runtime.
+	</LinkChip>
+</ChipRow>
+
+<CTA
+	kicker="open source · Apache-2.0"
+	title="Run persistent AI agents on infrastructure you own."
+	primary={{ href: "https://github.com/memoturn/memoturn", text: "Get the source" }}
+	secondary={{ href: "/quickstart/", text: "Quickstart" }}
+>
+	<div>
+		Durable agent actors, sandboxed code execution with zero ambient authority, and a
+		crash-safe checkpoint engine — no proprietary cloud required. Deploy with `docker
+		compose` on a single host, or Helm on Kubernetes for production. See
+		[Deployment](/deployment/) for the path.
+	</div>
+</CTA>

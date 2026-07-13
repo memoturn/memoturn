@@ -8,7 +8,8 @@ memoturn is an open-source AI engineering platform (LLM observability, evals, me
 
 ```bash
 bun run setup        # one-time: install + infra up + wait-healthy + Prisma migrate + ClickHouse migrate + seed
-bun run dev          # turbo: api (:3001) + worker + console (:3000), all with --watch
+bun run dev          # turbo: api (:3001) + worker + console (:3000), all with --watch (public sites excluded)
+bun run dev:site     # marketing site (:3003) + docs site (:4321)
 bun run quickstart   # emit a sample trace via the SDK, then open http://localhost:3000
 
 bun run lint         # Biome check (format + lint + import order); `bun run format` to auto-fix
@@ -22,6 +23,7 @@ bun run db:clickhouse # apply ClickHouse migrations (infra/clickhouse)
 bun run seed         # seed organization/project/dev API key
 bun run seed:demo    # seed ~30 days of realistic demo telemetry via /v1/ingest (--days, --traces-per-day, --wipe, --dry-run); needs dev api+worker running
 bun run dlq          # inspect the ingest dead-letter queue; `--replay` re-enqueues failed batches from blob
+bun run deploy:site  # wrangler deploy of memoturn.ai + docs.memoturn.ai (Cloudflare Workers; per-app deploy:staging for staging)
 ```
 
 Per-package: `bun --filter @memoturn/<name> <script>` (e.g. `bun --filter @memoturn/worker test`).
@@ -54,10 +56,14 @@ Key consequence: the API **never writes telemetry synchronously**. It persists t
 - **`apps/api`** — Hono + `@hono/zod-openapi`. `src/app.ts` is the entire route surface; **handlers are thin** — they call into `@memoturn/server`. Same app is served by `server.bun.ts` (primary) and `server.node.ts`. Auth resolution in `src/middleware/auth.ts`. Global hardening middleware (applied at the top of `app.ts`): `secureHeaders` (X-Frame-Options/DENY, no-referrer, etc.), CORS scoped to `AUTH_TRUSTED_ORIGINS`, and request body-size limits (1 MB default, 12 MB for `/v1/ingest`, `/v1/otel/*`, and `/v1/media`).
 - **`apps/worker`** — BullMQ consumers. `processors/ingest.ts` (merge → ClickHouse + online evals), plus daily maintenance crons (retention sweep `0 3 * * *`, scheduled blob exports `0 4 * * *`) and a health/metrics HTTP endpoint (`WORKER_PORT`, default 3002). `mappers.ts` converts ingest events → ClickHouse rows (has the only worker tests). Key hardening details: jobs that exhaust retries land in a **dead-letter queue** (`ingest-dlq`) for inspection/replay; each ClickHouse table (`traces`, `observations`, `scores`) is inserted **independently** so one table failure doesn't discard the others; large input/output payloads (> 256 KB) are **offloaded to blob** with a marker reference before insert; all log output is **structured JSON** (`logJson`); counters (`ingest_events_total`, `ingest_errors_total`, `ingest_rows_total`, `evaluator_runs_total`) plus ClickHouse insert latency and `dlqDepth` are exposed in the `/metrics` JSON; retention and export crons are guarded by a **Redis lock** (`withLock`) to prevent concurrent runs across multiple worker replicas. Per-event token counts are clamped to `MAX_EVENT_TOKENS` (10 M) in `packages/core/src/models.ts` to prevent runaway cost inflation.
 - **`apps/console`** — Vite + TanStack Router (file-based routes in `src/routes/`) + TanStack Query. `routeTree.gen.ts` is **generated** (`tsr generate`, runs in build/typecheck) — never edit it; it's gitignored from Biome.
+- **`apps/web`** — public marketing site (memoturn.ai). TanStack Start (React SSR) + Vite + Tailwind 4, deployed as a Cloudflare Worker (`wrangler.jsonc`; staging via `CF_ENV=staging`). Dev port **3003**. The whole landing page is `src/routes/index.tsx`; shared design system from `@memoturn/ui`.
+- **`apps/docs`** — public docs site (docs.memoturn.ai). Astro + Starlight, static-assets Cloudflare Worker. Dev port **4321**. Content in `src/content/docs/` mirrors the hand-written `docs/*.md` (which stay the source of truth — update both when product facts change).
 - **`apps/mcp`** — stdio MCP server exposing prompts/datasets/review queues as tools for agent IDEs. Scoped to one project via a `MEMOTURN_PUBLIC_KEY`/`MEMOTURN_SECRET_KEY` pair (resolved through `@memoturn/server`). The tool registry lives in **`packages/server/src/mcp-tools.ts`** (plain JSON Schema, no zod coupling) and is shared with the remote HTTP endpoint; `index.ts` wires the low-level `Server` to stdio. **All logging goes to stderr** — stdout is the JSON-RPC channel. The same registry is also served over **Streamable HTTP** by the API at `/v1/mcp/:projectId` (per-project resource; own API-key Basic auth + per-tool RBAC in `apps/api/src/mcp.ts`, via `@hono/mcp`) — don't add a `requireAuth` guard there, its method-based scope gate can't distinguish read tools from writes (every call is a POST).
 - **`packages/server`** — all business logic, one file per domain (`traces`, `metrics`, `prompts`, `datasets`, `evaluators`, `review`, `export`, `playground`, `retention`, `webhooks`, `audit`, `auth`, `betterauth`, `ingest`, `otel`, `providers`). Shared by the API and (for some) the worker.
 - **`packages/core`** — wire contracts. `src/events.ts` holds the Zod ingest event schemas (shared by SDK, API, worker — **change ingest shapes here**); `models.ts` is the model/cost registry; `ids.ts` ID helpers; queue name constants.
 - **`packages/contracts`** — Zod **API response** schemas + inferred TS types, shared by API and console to kill type drift (imported as `C` in `app.ts`).
+- **`packages/ui`** — shared design system for the public sites (`apps/web`, `apps/docs`): shadcn primitives + composites (`BrandMark` logo, `CodeBlock`, `ThemeToggle`) on Tailwind 4, brand tokens in `src/styles/tokens.css` (lagoon teal `#4fb8b2 → #328f97`). The console does **not** use it (it has its own shadcn setup). Brand/design specs live in `docs/brand/`.
+- **`packages/tsconfig`** — shared TS configs for the public-site workspaces only (`base`/`library`/`dashboard`/`docs`).
 - **`packages/db`** — Prisma client singleton (`index.ts`, Prisma 7 driver-adapter style — connection URL lives in code + `prisma.config.ts`, not the schema), plus `clickhouse.ts`, `blob.ts`, `queue.ts` (subpath exports: `@memoturn/db/queue`, `/clickhouse`, `/blob`). API-key hashing helpers live here too.
 - **`packages/llm`** — provider gateway (mock / Anthropic / OpenAI) for the playground + LLM evaluators, plus `crypto.ts` for encrypting stored provider keys.
 - **`sdks/js`** (`@memoturn/sdk`) and **`sdks/python`** (`memoturn`).

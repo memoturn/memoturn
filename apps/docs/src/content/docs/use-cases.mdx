@@ -1,0 +1,93 @@
+---
+title: Use cases
+description: What you build with a self-hostable, durable, sandboxed agent runtime — from long-running workers to multi-tenant platforms.
+---
+
+import CTA from "../../components/CTA.astro";
+
+Memoturn's primitives — durable agent actors, an execution sandbox, crash-safe
+fibers, and long-term memory — are general. This page maps them onto concrete
+workflows, so you can tell in a minute whether the runtime fits what you're
+building. Each one runs on infrastructure you own, anywhere Docker runs.
+
+## Long-running autonomous workers
+
+Agents that run for hours or days — deep research, large refactors and
+migrations, continuous monitoring — can't afford to lose everything when a
+process dies. Memoturn checkpoints work as it happens, so a worker resumes from
+where it stopped rather than starting the task over. Idle workers cost nothing:
+the actor hibernates to disk and rehydrates on demand.
+
+**How Memoturn does it:** [durable execution / fibers](/fibers/) memoize a task
+at each checkpoint; [agent actors](/agents/) hibernate when idle and rehydrate on
+the next turn.
+
+## Code-interpreter & data agents
+
+When an agent writes and runs its own Python — to analyze data, generate charts,
+or transform files — you don't want that code touching your host. Memoturn runs
+it in an ephemeral sandbox with zero ambient authority: the code reaches the host
+only through capabilities you grant explicitly, nothing is inherited. Start with
+a subprocess locally and climb to Docker or gVisor isolation as the trust
+requirement grows.
+
+**How Memoturn does it:** the [execution ladder](/execution-ladder/) is additive;
+[sandboxing](/sandboxing/) runs untrusted code behind Docker, gVisor, or
+subprocess backends with capability-scoped access to the host.
+
+## Multi-tenant agent platforms
+
+Building a product or internal platform where every customer or team gets their
+own agents means isolation and ownership are not optional. Memoturn carries
+`tenant_id` through every storage and routing path, and assigns each agent to a
+single owning replica by consistent hash, with leases in Postgres — so a given
+agent has exactly one writer even as you scale replicas out.
+
+**How Memoturn does it:** [scaling out](/scaling/) covers consistent-hash
+ownership, leases, and the owner-proxy that routes a request to the replica that
+owns the agent.
+
+## Memory-centric assistants
+
+Assistants that get better the longer you use them need memory that outlives a
+single session — and, when something looks wrong, the ability to see what the
+agent actually knew at the time. Memoturn keeps long-term semantic memory with
+pluggable embedders and vector backends, and history compaction extracts
+memories before old turns are dropped, so context is summarized rather than lost.
+
+**How Memoturn does it:** [memory](/memory/) stores long-term semantic recall;
+[sessions & turns](/sessions/) track the turn history that compaction draws from.
+
+## Tool & agent hubs
+
+Real systems are heterogeneous: some capabilities live behind MCP servers, others
+are agents in another framework. Memoturn sits in the middle — mount external MCP
+servers and remote A2A agents as tools your agents call mid-turn, and expose your
+own agents as MCP servers and A2A endpoints others can discover. Interop runs in
+both directions.
+
+**How Memoturn does it:** [MCP](/mcp/) mounts and serves Model Context Protocol
+tools; [A2A](/a2a/) discovers and messages agents across frameworks.
+
+## Self-hosted & air-gapped agents
+
+Some workloads can't send data to a hosted agent service — regulatory, security,
+or cost reasons. Memoturn is Apache-2.0 and runs fully offline against a local
+Ollama model, so nothing leaves your network and there's no per-idle-minute bill.
+Swap the model provider without forking the runtime.
+
+**How Memoturn does it:** [providers](/providers/) are pluggable (Anthropic,
+OpenAI, Ollama, Bedrock, Vertex); [deployment](/deployment/) covers running the
+whole stack on infrastructure you control.
+
+<CTA
+	kicker="open source · Apache-2.0"
+	title="Build it on infrastructure you own."
+	primary={{ href: "/quickstart/", text: "Read the quickstart" }}
+	secondary={{ href: "https://github.com/memoturn/memoturn", text: "View on GitHub" }}
+>
+	<div>
+		Spin up a durable, sandboxed agent with `docker compose` on a single host, or
+		Helm on Kubernetes for production. No proprietary cloud required.
+	</div>
+</CTA>

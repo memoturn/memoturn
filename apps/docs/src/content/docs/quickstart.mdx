@@ -1,0 +1,75 @@
+---
+title: Quickstart
+description: Run a durable AI agent on your own machine in under three minutes.
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+Memoturn is a self-hostable, durable runtime for AI agents. Every option below serves a
+web UI at [http://localhost:8080/ui](http://localhost:8080/ui) and a WebSocket chat at `/v1/agents/<name>/ws`.
+
+## 1. Pick how you run it
+
+<Tabs syncKey="runtime">
+<TabItem label="Claude (fastest)">
+
+```bash
+export ANTHROPIC_API_KEY=...    # or set it in .env
+make dev                        # uv run memoturn
+```
+
+The control plane comes up on [http://localhost:8080](http://localhost:8080). Open `/ui` to chat, or attach a
+terminal client (next step).
+
+</TabItem>
+<TabItem label="Fully offline (Ollama)">
+
+No cloud, no API key — runs against a local [Ollama](https://ollama.com/download):
+
+```bash
+make dev-ollama                 # pulls a model on first run, then serves
+```
+
+Override the model with `MEMOTURN_MODEL=...` (default `llama3.1`). Add
+`MEMOTURN_MEMORY_EMBEDDER=ollama` for semantic recall too.
+
+</TabItem>
+<TabItem label="Prod-shaped (docker compose)">
+
+Control plane + Postgres + MinIO + Valkey (the shared rate-limit store) on a single host:
+
+```bash
+cp .env.example .env            # set ANTHROPIC_API_KEY
+make up                         # docker compose up --build
+```
+
+For Kubernetes — the production target — see [Deployment](/deployment/).
+
+</TabItem>
+</Tabs>
+
+## 2. Talk to an agent
+
+Attach the bundled WebSocket REPL to a named agent. The agent is created on first
+contact and its state is durable — it survives restarts.
+
+```bash
+uv run python clients/cli.py --agent demo
+```
+
+Or open the web UI at [http://localhost:8080/ui](http://localhost:8080/ui) and chat there.
+
+## 3. What you just got
+
+A single `demo` agent backed by its own SQLite store, with a durable filesystem and chat.
+From here the [execution ladder](/architecture/) is additive — the same agent climbs to
+sandboxed Python, browser, and full-OS as your task needs it, with **zero ambient
+authority** at every rung.
+
+## Next steps
+
+- [Architecture](/architecture/) — topology, primitives, and the request path.
+- [MCP](/mcp/) — mount external tools, and expose your agents as MCP servers.
+- [A2A](/a2a/) — let other frameworks discover and message your agents.
+- [Operations](/operations/) — auth, scaling, backup, and hardening for production.
+- [Enterprise Edition](/enterprise/) — SSO, SCIM, audit, and usage-metered billing on top of the Apache-2.0 core.

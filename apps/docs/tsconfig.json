@@ -1,0 +1,5 @@
+{
+  "extends": ["@memoturn/tsconfig/docs.json", "astro/tsconfigs/strict"],
+  "include": [".astro/types.d.ts", "**/*"],
+  "exclude": ["dist"]
+}

@@ -1,0 +1,52 @@
+---
+authored_by: pointer
+author_date: 2026-05-02
+source: "stardust/impeccable contract bridge"
+strength: pointer
+canonical: PRODUCT.md, DESIGN.md, DESIGN.json
+---
+
+# Memoturn — Design Personality (pointer)
+
+> **This file is a pointer.** The canonical design personality and visual system live in [PRODUCT.md](PRODUCT.md) and [DESIGN.md](DESIGN.md) (with the machine-readable extensions in [DESIGN.json](DESIGN.json)). Every `/impeccable` command reads those files. This pointer exists so legacy tooling that expects `.impeccable.md` (the stardust skill family, in particular) finds an artifact at the project root and does not silently re-synthesize a fresh weak personality.
+>
+> If you migrated from `.impeccable.md` to `PRODUCT.md` and a stardust skill auto-renamed it back, that's the loader behavior; the canonical content remains in `PRODUCT.md` regardless of which filename is on disk.
+
+## Quick reference (canonical: see PRODUCT.md / DESIGN.md)
+
+**Register:** `brand`. The marketing surface is the primary register; the dashboard product surface is secondary, but voice rules extend into it (see PRODUCT.md "Voice on product surfaces").
+
+**Three-word personality:** hot, precise, real-time.
+
+**CTA hierarchy:** primary CTA is `/projects/new`, secondary is GitHub (`github.com/memoturn/memoturn`).
+
+**Anti-references (any of these = redesign with different structure):**
+1. Generic SaaS gradient-hero (Cursor.com, Vercel-style).
+2. AI-product neon-purple-on-black (OpenAI, Replit-style).
+3. Developer-tool brutalist-monospace (HN-aesthetic).
+4. Enterprise-AI navy-and-rounded (IBM watsonx, Azure-AI-Foundry-style).
+5. AI-agent orchestrator glow (mem0.ai-style; the saturating family in agent-memory / agent-platform). Memoturn's nearest neighbor by category, so the largest visual distance.
+
+**Six strategic principles:**
+1. Lead with mechanism, not metaphor.
+2. Conversion is the test.
+3. Find the sixth lane.
+4. Latency is the demo.
+5. Restraint is the visual gesture.
+6. The product surface is part of the brand.
+
+**Visual essentials (canonical: DESIGN.md):**
+- One radius (6px). One heading face (Inter Tight 700). One body face (Manrope 400). One mono stack (JetBrains Mono).
+- Four named button shapes: filled-sea-ink primary (light), on-dark primary (foam-light fill on atoll/lagoon gradients), ghost-on-dark, quiet-link.
+- Lagoon → Atoll gradient is the only gradient. Load-bearing on the brand mark + closing band.
+- Hairline rules + tonal layering carry depth. Surface shadows are forbidden.
+- Em-dashes spaced (` — `) in headlines + CTAs are a documented brand exception to the shared no-em-dash law.
+- Inline `<svg>` + `<use>` for the brand mark; never `<img src="logo.svg">` and never `mask-image: url(...)`.
+
+**Accessibility floor:** WCAG 2.2 AA + `prefers-reduced-motion` honored on the 8s tide rotation.
+
+## Why this file exists
+
+The stardust pipeline (in `.claude/skills/stardust/`) was authored before `/impeccable` introduced the PRODUCT.md / DESIGN.md split. Stardust's brand skill checks for `.impeccable.md` at the project root to decide whether to synthesize a weak design-personality fallback. This pointer satisfies the existence check; downstream skills that read its content find the same rules echoed in the canonical PRODUCT.md / DESIGN.md, with this file naming the canonical sources in its frontmatter.
+
+To update the design personality, edit `PRODUCT.md` (strategic) or `DESIGN.md` (visual). Do not edit this pointer; re-running `/impeccable teach` or `/impeccable document` regenerates the canonical files but leaves this pointer untouched.

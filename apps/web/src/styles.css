@@ -1,0 +1,25 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap");
+@import "tailwindcss";
+@import "tw-animate-css";
+@plugin "@tailwindcss/typography";
+@import "@memoturn/ui/styles/tokens.css";
+@import "@memoturn/ui/styles/base.css";
+
+@source "../../../packages/ui/src/components/**/*.{ts,tsx}";
+@source "../../../packages/ui/src/composite/**/*.{ts,tsx}";
+
+@custom-variant dark (&:is([data-theme="dark"] *, .dark *));
+
+@layer base {
+	/* Short pages: avoid a "floating" footer; anchor targets clear sticky header */
+	#main {
+		min-height: 42dvh;
+		scroll-margin-top: 1.25rem;
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	html {
+		scroll-behavior: smooth;
+	}
+}

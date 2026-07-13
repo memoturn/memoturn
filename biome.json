@@ -11,7 +11,14 @@
       "!packages/db/prisma/migrations",
       "!.claude",
       "!apps/console/src/components/ui",
-      "!apps/console/src/index.css"
+      "!apps/console/src/index.css",
+      "!**/.astro",
+      "!**/.wrangler",
+      "!**/.tanstack",
+      "!**/worker-configuration.d.ts",
+      "!packages/ui/src/styles",
+      "!apps/docs/src/styles/memoturn.css",
+      "!apps/web/src/styles.css"
     ]
   },
   "formatter": {
@@ -47,5 +54,35 @@
   },
   "javascript": {
     "formatter": { "quoteStyle": "double", "semicolons": "always" }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["**/*.astro"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnusedVariables": "off",
+            "noUnusedImports": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/ui/src/components/**"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useSemanticElements": "off",
+            "useFocusableInteractive": "off",
+            "useAriaPropsForRole": "off",
+            "useKeyWithClickEvents": "off",
+            "noRedundantRoles": "off"
+          },
+          "suspicious": {
+            "noDocumentCookie": "off"
+          }
+        }
+      }
+    }
+  ]
 }
