@@ -18,9 +18,11 @@ export default defineConfig({
       social: [{ icon: "github", label: "GitHub", href: "https://github.com/memoturn/memoturn" }],
       head: [
         { tag: "meta", attrs: { property: "og:type", content: "website" } },
-        // TODO: add a designed 1200×630 og-image.png to public/ and restore
-        // og:image + twitter:image + summary_large_image.
-        { tag: "meta", attrs: { name: "twitter:card", content: "summary" } },
+        { tag: "meta", attrs: { property: "og:image", content: `${SITE}/og-image.png` } },
+        { tag: "meta", attrs: { property: "og:image:width", content: "1200" } },
+        { tag: "meta", attrs: { property: "og:image:height", content: "630" } },
+        { tag: "meta", attrs: { name: "twitter:card", content: "summary_large_image" } },
+        { tag: "meta", attrs: { name: "twitter:image", content: `${SITE}/og-image.png` } },
       ],
       components: {
         Hero: "./src/components/Hero.astro",
