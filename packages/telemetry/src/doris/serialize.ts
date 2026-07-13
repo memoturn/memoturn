@@ -5,7 +5,9 @@ import type { ObservationRow, ScoreWriteRow, TelemetryRowMap, TelemetryTable, Tr
  *
  * Timestamps: rows carry ISO-8601 UTC strings; Doris DATETIME(3) wants
  * 'YYYY-MM-DD HH:MM:SS.mmm' (sessions are pinned to UTC by the client).
- * Arrays: `tags` is bound as a JSON string and CAST to ARRAY<STRING> in SQL.
+ * Arrays: `tags` is written as an array constructor with one placeholder per element —
+ * CAST('["…"]' AS ARRAY<STRING>) is NOT safe, its parser corrupts values containing
+ * escaped quotes and commas.
  */
 
 /** ISO-8601 → Doris DATETIME(3) literal ('YYYY-MM-DD HH:MM:SS.mmm', UTC). */
@@ -34,77 +36,83 @@ export function parseTags(value: unknown): string[] {
 
 /**
  * Per-table column serialization: column order, the SQL placeholder for each column
- * (tags needs a CAST), and the bound value extracted from the row.
+ * (may depend on the row — arrays bind one placeholder per element), and the bound
+ * value(s) extracted from the row.
  */
 interface ColumnSpec<Row> {
   name: string;
-  placeholder?: string; // defaults to "?"
-  value: (row: Row) => unknown;
+  placeholder?: (row: Row) => string; // defaults to "?"
+  /** Bound values for this column — exactly as many as the placeholder has "?" marks. */
+  values: (row: Row) => unknown[];
 }
 
 const traceColumns: ColumnSpec<TraceRow>[] = [
-  { name: "project_id", value: (r) => r.project_id },
-  { name: "id", value: (r) => r.id },
-  { name: "`timestamp`", value: (r) => toDorisDateTime(r.timestamp) },
-  { name: "name", value: (r) => r.name },
-  { name: "user_id", value: (r) => r.user_id },
-  { name: "session_id", value: (r) => r.session_id },
-  { name: "`release`", value: (r) => r.release },
-  { name: "version", value: (r) => r.version },
-  { name: "environment", value: (r) => r.environment },
-  { name: "`public`", value: (r) => r.public },
-  { name: "tags", placeholder: "CAST(? AS ARRAY<STRING>)", value: (r) => JSON.stringify(r.tags ?? []) },
-  { name: "metadata", value: (r) => r.metadata },
-  { name: "input", value: (r) => r.input },
-  { name: "output", value: (r) => r.output },
-  { name: "event_ts", value: (r) => toDorisDateTime(r.event_ts) },
+  { name: "project_id", values: (r) => [r.project_id] },
+  { name: "id", values: (r) => [r.id] },
+  { name: "`timestamp`", values: (r) => [toDorisDateTime(r.timestamp)] },
+  { name: "name", values: (r) => [r.name] },
+  { name: "user_id", values: (r) => [r.user_id] },
+  { name: "session_id", values: (r) => [r.session_id] },
+  { name: "`release`", values: (r) => [r.release] },
+  { name: "version", values: (r) => [r.version] },
+  { name: "environment", values: (r) => [r.environment] },
+  { name: "`public`", values: (r) => [r.public] },
+  {
+    name: "tags",
+    placeholder: (r) => (r.tags?.length ? `[${r.tags.map(() => "?").join(", ")}]` : "[]"),
+    values: (r) => r.tags ?? [],
+  },
+  { name: "metadata", values: (r) => [r.metadata] },
+  { name: "input", values: (r) => [r.input] },
+  { name: "output", values: (r) => [r.output] },
+  { name: "event_ts", values: (r) => [toDorisDateTime(r.event_ts)] },
 ];
 
 const observationColumns: ColumnSpec<ObservationRow>[] = [
-  { name: "project_id", value: (r) => r.project_id },
-  { name: "trace_id", value: (r) => r.trace_id },
-  { name: "id", value: (r) => r.id },
-  { name: "type", value: (r) => r.type },
-  { name: "parent_observation_id", value: (r) => r.parent_observation_id },
-  { name: "name", value: (r) => r.name },
-  { name: "start_time", value: (r) => toDorisDateTime(r.start_time) },
-  { name: "end_time", value: (r) => (r.end_time === null ? null : toDorisDateTime(r.end_time)) },
-  { name: "environment", value: (r) => r.environment },
-  { name: "level", value: (r) => r.level },
-  { name: "status_message", value: (r) => r.status_message },
-  { name: "model", value: (r) => r.model },
-  { name: "provider", value: (r) => r.provider },
-  { name: "model_parameters", value: (r) => r.model_parameters },
-  { name: "prompt_tokens", value: (r) => r.prompt_tokens },
-  { name: "completion_tokens", value: (r) => r.completion_tokens },
-  { name: "total_tokens", value: (r) => r.total_tokens },
-  { name: "input_cost", value: (r) => r.input_cost },
-  { name: "output_cost", value: (r) => r.output_cost },
-  { name: "total_cost", value: (r) => r.total_cost },
-  { name: "prompt_id", value: (r) => r.prompt_id },
-  { name: "prompt_version", value: (r) => r.prompt_version },
-  { name: "input", value: (r) => r.input },
-  { name: "output", value: (r) => r.output },
-  { name: "metadata", value: (r) => r.metadata },
-  { name: "latency_ms", value: (r) => r.latency_ms },
-  { name: "event_ts", value: (r) => toDorisDateTime(r.event_ts) },
+  { name: "project_id", values: (r) => [r.project_id] },
+  { name: "trace_id", values: (r) => [r.trace_id] },
+  { name: "id", values: (r) => [r.id] },
+  { name: "type", values: (r) => [r.type] },
+  { name: "parent_observation_id", values: (r) => [r.parent_observation_id] },
+  { name: "name", values: (r) => [r.name] },
+  { name: "start_time", values: (r) => [toDorisDateTime(r.start_time)] },
+  { name: "end_time", values: (r) => [r.end_time === null ? null : toDorisDateTime(r.end_time)] },
+  { name: "environment", values: (r) => [r.environment] },
+  { name: "level", values: (r) => [r.level] },
+  { name: "status_message", values: (r) => [r.status_message] },
+  { name: "model", values: (r) => [r.model] },
+  { name: "provider", values: (r) => [r.provider] },
+  { name: "model_parameters", values: (r) => [r.model_parameters] },
+  { name: "prompt_tokens", values: (r) => [r.prompt_tokens] },
+  { name: "completion_tokens", values: (r) => [r.completion_tokens] },
+  { name: "total_tokens", values: (r) => [r.total_tokens] },
+  { name: "input_cost", values: (r) => [r.input_cost] },
+  { name: "output_cost", values: (r) => [r.output_cost] },
+  { name: "total_cost", values: (r) => [r.total_cost] },
+  { name: "prompt_id", values: (r) => [r.prompt_id] },
+  { name: "prompt_version", values: (r) => [r.prompt_version] },
+  { name: "input", values: (r) => [r.input] },
+  { name: "output", values: (r) => [r.output] },
+  { name: "metadata", values: (r) => [r.metadata] },
+  { name: "latency_ms", values: (r) => [r.latency_ms] },
+  { name: "event_ts", values: (r) => [toDorisDateTime(r.event_ts)] },
 ];
 
 const scoreColumns: ColumnSpec<ScoreWriteRow>[] = [
-  { name: "project_id", value: (r) => r.project_id },
-  { name: "id", value: (r) => r.id },
-  { name: "trace_id", value: (r) => r.trace_id },
-  { name: "observation_id", value: (r) => r.observation_id },
-  { name: "name", value: (r) => r.name },
-  { name: "`timestamp`", value: (r) => toDorisDateTime(r.timestamp) },
-  { name: "environment", value: (r) => r.environment },
-  { name: "source", value: (r) => r.source },
-  { name: "data_type", value: (r) => r.data_type },
-  { name: "`value`", value: (r) => r.value },
-  { name: "string_value", value: (r) => r.string_value },
-  { name: "`comment`", value: (r) => r.comment },
-  { name: "config_id", value: (r) => r.config_id },
-  { name: "event_ts", value: (r) => toDorisDateTime(r.event_ts) },
+  { name: "project_id", values: (r) => [r.project_id] },
+  { name: "id", values: (r) => [r.id] },
+  { name: "trace_id", values: (r) => [r.trace_id] },
+  { name: "observation_id", values: (r) => [r.observation_id] },
+  { name: "name", values: (r) => [r.name] },
+  { name: "`timestamp`", values: (r) => [toDorisDateTime(r.timestamp)] },
+  { name: "environment", values: (r) => [r.environment] },
+  { name: "source", values: (r) => [r.source] },
+  { name: "data_type", values: (r) => [r.data_type] },
+  { name: "`value`", values: (r) => [r.value] },
+  { name: "string_value", values: (r) => [r.string_value] },
+  { name: "`comment`", values: (r) => [r.comment] },
+  { name: "config_id", values: (r) => [r.config_id] },
+  { name: "event_ts", values: (r) => [toDorisDateTime(r.event_ts)] },
 ];
 
 const COLUMNS: { [T in TelemetryTable]: ColumnSpec<TelemetryRowMap[T]>[] } = {
@@ -128,7 +136,6 @@ const MAX_STATEMENT_BYTES = 4 * 1024 * 1024;
 export function buildInserts<T extends TelemetryTable>(table: T, rows: TelemetryRowMap[T][]): InsertStatement[] {
   const specs = COLUMNS[table] as ColumnSpec<TelemetryRowMap[T]>[];
   const columnList = specs.map((c) => c.name).join(", ");
-  const rowTemplate = `(${specs.map((c) => c.placeholder ?? "?").join(", ")})`;
   const prefix = `INSERT INTO ${table} (${columnList}) VALUES `;
 
   const statements: InsertStatement[] = [];
@@ -145,10 +152,11 @@ export function buildInserts<T extends TelemetryTable>(table: T, rows: Telemetry
   };
 
   for (const row of rows) {
-    const values = specs.map((c) => c.value(row));
+    const tuple = `(${specs.map((c) => (c.placeholder ? c.placeholder(row) : "?")).join(", ")})`;
+    const values = specs.flatMap((c) => c.values(row));
     const rowBytes = values.reduce<number>((s, v) => s + (typeof v === "string" ? v.length : 8), 0);
     if (tuples.length > 0 && bytes + rowBytes > MAX_STATEMENT_BYTES) flush();
-    tuples.push(rowTemplate);
+    tuples.push(tuple);
     params.push(...values);
     bytes += rowBytes;
   }

@@ -20,13 +20,6 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U memoturn" --health-interval 5s
           --health-timeout 5s --health-retries 10
-      clickhouse:
-        image: clickhouse/clickhouse-server:24.8-alpine
-        env:
-          CLICKHOUSE_USER: memoturn
-          CLICKHOUSE_PASSWORD: memoturn
-          CLICKHOUSE_DB: memoturn
-        ports: ["8123:8123"]
       redis:
         image: valkey/valkey:8-alpine
         ports: ["6379:6379"]
@@ -44,10 +37,12 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://memoturn:memoturn@localhost:5432/memoturn?schema=public
-      CLICKHOUSE_URL: http://localhost:8123
-      CLICKHOUSE_USER: memoturn
-      CLICKHOUSE_PASSWORD: memoturn
-      CLICKHOUSE_DB: memoturn
+      DORIS_HOST: localhost
+      DORIS_PORT: "9030"
+      DORIS_HTTP_PORT: "8030"
+      DORIS_USER: root
+      DORIS_PASSWORD: ""
+      DORIS_DB: memoturn
       REDIS_URL: redis://localhost:6379
       BLOB_ENDPOINT: http://localhost:9000
       BLOB_REGION: us-east-1
@@ -70,9 +65,13 @@ jobs:
       # + declare a 403 (or be marked `// rbac-exempt`). Hard gate.
       - name: RBAC guard check
         run: bun run rbac:check
+      # Doris FE+BE need static IPs to register with each other, which GitHub service
+      # containers can't provide — reuse the repo's dev compose definitions instead.
+      - name: Start Doris (FE + BE)
+        run: docker compose -f infra/docker-compose.dev.yml up -d --wait doris-fe doris-be
       - run: bun --filter @memoturn/db generate
       - run: bun --filter @memoturn/db migrate
-      - run: bun run db:clickhouse
+      - run: bun run db:telemetry
       # Wait for MinIO before the integration test writes a blob (services start
       # concurrently and bitnami/minio doesn't expose a health-cmd we can wire here).
       - name: Wait for MinIO
