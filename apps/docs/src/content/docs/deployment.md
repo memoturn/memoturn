@@ -36,6 +36,11 @@ stays on the internal network. A one-shot `doris-setup` service sets the Doris r
 (`DORIS_PASSWORD` is required in production), and a one-shot `migrate` service runs the Prisma +
 Doris migrations before the API/worker start.
 
+> **Never expose Doris ports without a root password.** While root's password is empty, the FE
+> HTTP query API (8030) accepts *any* credentials — anyone who can reach it can run SQL. The
+> bundled prod compose keeps Doris internal-only and always sets a password; the dev compose
+> binds 9030/8030 to loopback because dev runs password-less.
+
 **Prerequisites:** a VM with Docker, a DNS A/AAAA record pointing at it, and ports 80+443 open.
 
 ```bash

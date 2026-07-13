@@ -73,10 +73,10 @@ services:
       start_period: 30s
 
   # One-shot: sets the Doris root password (the image boots with root/empty). Idempotent —
-  # if the password is already set, the first probe succeeds and it exits. Logic lives in
-  # infra/doris-setup.sh (mounted) to avoid YAML/shell quoting hazards.
+  # if the password already authenticates, it exits untouched. Logic lives in
+  # infra/doris-setup.sh (mounted); reuses the FE image for its mysql client.
   doris-setup:
-    image: curlimages/curl:latest
+    image: apache/doris:fe-4.1.2
     depends_on:
       doris-fe:
         condition: service_healthy

@@ -34,6 +34,9 @@ ENV VITE_API_BASE=$VITE_API_BASE
 RUN bun --filter @memoturn/console build
 
 FROM build AS runner
+# vite preview re-bundles its config into node_modules/.vite-temp at startup —
+# pre-create it writable for the non-root runtime user.
+RUN mkdir -p apps/console/node_modules/.vite-temp && chown -R bun:bun apps/console/node_modules/.vite-temp
 # Drop root for the runtime process (the oven/bun image ships a non-root `bun` user).
 USER bun
 EXPOSE 3000

@@ -1,27 +1,25 @@
 #!/bin/sh
 # One-shot Doris root-password bootstrap (the image boots with root/empty).
-# Idempotent: if the target password already authenticates, exits 0 untouched.
-# Runs via the FE HTTP query API so a plain curl image suffices (no mysql client).
+# Uses the MySQL protocol, whose auth semantics are strict and unambiguous —
+# the FE HTTP API's basic-auth behaves inconsistently (e.g. while the password
+# is empty it accepts arbitrary credentials), so it is not used here.
+# Runs inside the FE image, which ships a mysql client.
+#
 # NOTE: DORIS_PASSWORD must not contain single quotes or backslashes.
 set -eu
 
-FE_QUERY_URL="http://doris-fe:8030/api/query/default_cluster/information_schema"
+FE_HOST="${FE_HOST:-doris-fe}"
 
-if curl -sf -u "root:${DORIS_PASSWORD}" -H 'Content-Type: application/json' \
-    -d '{"stmt":"SELECT 1"}' "$FE_QUERY_URL" >/dev/null 2>&1; then
+if mysql -h "$FE_HOST" -P 9030 -uroot -p"${DORIS_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; then
   echo "doris root password already set"
   exit 0
 fi
 
-response=$(curl -sf -u root: -H 'Content-Type: application/json' \
-  -d "{\"stmt\":\"SET PASSWORD FOR 'root' = PASSWORD('${DORIS_PASSWORD}')\"}" "$FE_QUERY_URL")
+# Empty-password login only succeeds while no password has been set.
+if mysql -h "$FE_HOST" -P 9030 -uroot -e "SET PASSWORD FOR 'root' = PASSWORD('${DORIS_PASSWORD}')" 2>/dev/null; then
+  echo "doris root password set"
+  exit 0
+fi
 
-case "$response" in
-  *'"code": 0'*|*'"code":0'*)
-    echo "doris root password set"
-    ;;
-  *)
-    echo "failed to set doris root password: $response" >&2
-    exit 1
-    ;;
-esac
+echo "doris root has a password that does not match DORIS_PASSWORD — refusing to guess" >&2
+exit 1

@@ -33,8 +33,10 @@ services:
       # that crash-loops the FE on some hosts (e.g. GitHub Actions runners).
       JAVA_TOOL_OPTIONS: "-XX:-UseContainerSupport"
     ports:
-      - "9030:9030"   # MySQL protocol (queries + DDL)
-      - "8030:8030"   # HTTP (health, admin)
+      # Loopback-only: dev Doris has no password, and with an empty root password
+      # the FE HTTP API accepts any credentials.
+      - "127.0.0.1:9030:9030"   # MySQL protocol (queries + DDL)
+      - "127.0.0.1:8030:8030"   # HTTP (health, admin)
     volumes:
       - dorisfemeta:/opt/apache-doris/fe/doris-meta
     networks:
