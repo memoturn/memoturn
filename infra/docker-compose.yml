@@ -29,6 +29,9 @@ services:
     environment:
       FE_SERVERS: fe1:172.28.81.2:9010
       FE_ID: 1
+      # Works around a JDK 17.0.12 cgroup-v2 detection NPE (CgroupInfo.getMountPoint)
+      # that crash-loops the FE on some hosts (e.g. GitHub Actions runners).
+      JAVA_TOOL_OPTIONS: "-XX:-UseContainerSupport"
     volumes:
       - dorisfemeta:/opt/apache-doris/fe/doris-meta
     networks:
@@ -51,6 +54,9 @@ services:
     environment:
       FE_SERVERS: fe1:172.28.81.2:9010
       BE_ADDR: 172.28.81.3:9050
+      # Works around a JDK 17.0.12 cgroup-v2 detection NPE (CgroupInfo.getMountPoint)
+      # that crash-loops the JVM sidecars on some hosts (e.g. GitHub Actions runners).
+      JAVA_TOOL_OPTIONS: "-XX:-UseContainerSupport"
     ulimits:
       nofile: { soft: 655350, hard: 655350 }
     volumes:
