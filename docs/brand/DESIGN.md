@@ -1,6 +1,6 @@
 ---
 name: Memoturn
-description: Real-time AI memory for coding agents
+description: Open-source LLM observability, evals, and prompt management
 colors:
   lagoon-deep: "#328f97"
   lagoon: "#4fb8b2"
@@ -141,7 +141,7 @@ components:
 
 **Creative North Star: "The Live Substrate"**
 
-Memoturn is a real-time memory substrate, and the visual system says so before any copy is read. The wedge is the live capture (Durable Objects fanning turns out the moment they land); the design system is built to feel that way: tight headlines that read as terminal output, hairline rules that read as ledger structure, a slow tide rotation on the brand mark that registers more like a horizon shift than a UI animation. Restraint carries it. One radius, two type faces (plus mono for code), three button shapes, a single load-bearing gradient. The discipline is the brand.
+Memoturn is a live telemetry substrate, and the visual system says so before any copy is read. The wedge is the live capture (every LLM call traced and scored the moment it lands); the design system is built to feel that way: tight headlines that read as terminal output, hairline rules that read as ledger structure, a slow tide rotation on the brand mark that registers more like a horizon shift than a UI animation. Restraint carries it. One radius, two type faces (plus mono for code), three button shapes, a single load-bearing gradient. The discipline is the brand.
 
 Memoturn deliberately rejects every standard AI-coding-tool aesthetic: no generic SaaS gradient-hero (Cursor, Vercel), no neon-purple-on-black (OpenAI, Replit), no monospace-brutalist (HN-aesthetic), no enterprise-AI navy-and-rounded (IBM watsonx, Azure-AI-Foundry), and no AI-agent orchestrator glow (mem0.ai-style: glassmorphic tiles on charcoal, pulsing cyan/teal accent borders, agent avatars with glow halos, "AI inbox" three-column layouts). The brand's job is to find a sixth lane. Anywhere a design move pulls toward one of those five families, redesign with different structure (not a tweak). Memoturn is the closest neighbor by category to the orchestrator-glow family, so the visual distance from it has to be the largest. The category-reflex check, run at both first and second order, must come back ambiguous.
 
@@ -314,7 +314,7 @@ The signature component. Concentric / topo: outer ring (r 54 to 40), middle ring
 The strategic line from PRODUCT.md carries through here verbatim. Every anti-reference in PRODUCT.md is repeated as a Don't. Every visual rule in this DESIGN.md is repeated as a Do. The voice is that of a design director: forceful, exact.
 
 ### Do:
-- **Do** lead with mechanism. Name the binding (Workers, Durable Objects, Vectorize, Hyperdrive, Workers AI), the transport (WebSockets, MCP), the package (`apps/api`, `apps/ingest`, `wrangler.toml`). Specificity is what the Multi-tool Builder trusts.
+- **Do** lead with mechanism. Name the store (ClickHouse, Postgres, Redis, blob), the transport (OTLP, MCP, webhooks), the package (`apps/api`, `apps/worker`, `packages/core`). Specificity is what the Multi-tool Builder trusts.
 - **Do** hold the page substrate pure white (`#ffffff`). The neutrals (foam, sand) carry the warmth.
 - **Do** use the lagoon (`gradient-lagoon`) and atoll (`gradient-atoll`) gradients only as the brand mark fill and the inverted band substrate. They are load-bearing, not decorative.
 - **Do** keep headlines tight: line-height 1.02 to 1.05, letter-spacing -0.025em to -0.02em. The tight set is the brand voice.
@@ -350,7 +350,7 @@ The strategic line from PRODUCT.md carries through here verbatim. Every anti-ref
 ### Concrete anti-pattern tests
 - If a card has a colored 3px border on its left edge, the layout is wrong. Remove the stripe; use a full hairline border or a tint instead.
 - If two consecutive sections feel the same, increase `section-y` on one or change ground tone (page → foam → sand).
-- If a hero shows a drop-shadowed product screenshot, redesign without the screenshot. The wedge ("real-time AI memory your coding agents share") carries the hero by typography alone.
+- If a hero shows a drop-shadowed product screenshot, redesign without the screenshot. The wedge ("see every LLM call, on infrastructure you own") carries the hero by typography alone.
 - If a feature card grid has the same visual weight in every cell, the content is not earning the grid. Either tighten to two cells, or vary the content density per cell.
 - If a button's shadow is wider than 4px or extends below 4px down, it is not a Memoturn button. The single permitted shadow is 0 1px 2px rgba(0, 0, 0, 0.06).
 - If a heading is set above letter-spacing -0.015em, it is too loose. The brand voice requires the tight set.

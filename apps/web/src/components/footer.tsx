@@ -22,7 +22,7 @@ export default function Footer() {
             <span>Memoturn</span>
           </Link>
           <span className="text-[13px] leading-relaxed text-muted-foreground">
-            © {year} Memoturn. A self-hostable, durable runtime for AI agents.
+            © {year} Memoturn. Open-source LLM observability, evals, and prompt management.
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-4 border-t border-border pt-[18px]">

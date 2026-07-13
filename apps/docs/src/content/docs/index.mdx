@@ -1,12 +1,12 @@
 ---
 title: Memoturn
-description: A self-hostable, durable runtime for AI agents.
+description: Open-source LLM observability, evals, metrics, prompt management, playground, and datasets — self-hostable and OpenTelemetry-native.
 template: splash
 hero:
-  tagline: Persistent, per-task AI agents that survive crashes, cost nothing when idle, and execute code in sandboxes with zero ambient authority — on infrastructure you run anywhere Docker runs.
+  tagline: Trace every LLM call, track cost and latency, run offline, online, and human evals, and ship versioned prompts with deployment channels — on infrastructure you own.
   actions:
-    - text: Read the quickstart
-      link: /quickstart/
+    - text: Get started
+      link: /getting-started/
       icon: right-arrow
       variant: primary
     - text: See use cases
@@ -29,44 +29,44 @@ import LiveTicker from "../../components/LiveTicker.astro";
 
 <HeroCard
 	kicker="run it"
-	title="One command, durable agents"
-	href="/quickstart/"
-	code="make dev   # uv run memoturn"
+	title="One command, full platform"
+	href="/getting-started/"
+	code="bun run setup && bun run dev"
 	lang="bash"
 >
-	Memoturn is an open-source, Docker-based runtime for durable AI agents. Agent actors run
-	in-process, each with its own SQLite store; idle actors hibernate to disk and rehydrate
-	on demand. Useful at Tier 0 with just a durable filesystem and chat — and it climbs from
-	there.
+	Memoturn is an open-source AI engineering platform: traces with a waterfall timeline,
+	cost/token/latency metrics over ClickHouse, offline, online, and human evaluation, a
+	versioned prompt registry, a multi-provider playground, and datasets — all behind one
+	console you self-host.
 </HeroCard>
 
-Built on FastAPI with a pluggable `Provider`, `Sandbox`, and `Durability` interface — ships with
-Anthropic (Claude), Docker, and a SQLite checkpoint engine, and swaps in OpenAI, Ollama, or a
-gVisor-isolated sandbox without touching the core. Read the [architecture overview](/architecture/)
-for the full request path.
+Built on an async ingest pipeline — the API acks your batch, a worker maps it into
+ClickHouse — with Postgres for metadata, blob storage for the replayable raw event log, and
+Redis for the queue. Ingest from the TypeScript or Python SDK, the OpenAI and LangChain
+wrappers, or any OpenTelemetry exporter. Read the [architecture overview](/architecture/)
+for the full data path.
 
 <ChipRow>
-	<LinkChip kicker="connect" title="MCP, both ways" href="/mcp/">
-		Mount external MCP tools; expose every agent as an MCP server.
+	<LinkChip kicker="observe" title="OpenTelemetry-native" href="/integrations/">
+		OTLP/JSON with GenAI semantic conventions — no proprietary agent required.
 	</LinkChip>
-	<LinkChip kicker="federate" title="A2A protocol" href="/a2a/">
-		Discover and message agents across frameworks, in both directions.
+	<LinkChip kicker="evaluate" title="Evals, three ways" href="/evaluation/">
+		Offline experiments, online evaluators over live traffic, and human review queues.
 	</LinkChip>
-	<LinkChip kicker="operate" title="Enterprise-ready" href="/enterprise/">
-		Open-core: SSO, SCIM, audit, and usage-metered billing on top of the Apache-2.0 runtime.
+	<LinkChip kicker="connect" title="MCP server" href="/mcp/">
+		Prompts, datasets, and review queues as tools inside Claude Code, Cursor, and other agent IDEs.
 	</LinkChip>
 </ChipRow>
 
 <CTA
 	kicker="open source · Apache-2.0"
-	title="Run persistent AI agents on infrastructure you own."
+	title="See every LLM call, on infrastructure you own."
 	primary={{ href: "https://github.com/memoturn/memoturn", text: "Get the source" }}
-	secondary={{ href: "/quickstart/", text: "Quickstart" }}
+	secondary={{ href: "/getting-started/", text: "Getting started" }}
 >
 	<div>
-		Durable agent actors, sandboxed code execution with zero ambient authority, and a
-		crash-safe checkpoint engine — no proprietary cloud required. Deploy with `docker
-		compose` on a single host, or Helm on Kubernetes for production. See
-		[Deployment](/deployment/) for the path.
+		Traces, evals, metrics, and prompt management — no proprietary cloud required, and no
+		telemetry leaving your network. Run it locally with `bun run setup`, or deploy with
+		docker compose. See [Deployment](/deployment/) for the path.
 	</div>
 </CTA>

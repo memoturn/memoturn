@@ -1,27 +1,27 @@
 # Memoturn Brand
 
-This document is the source of truth for how Memoturn looks and feels — the visual language behind the admin console, docs site, and marketing surfaces. The shared design system lives at [packages/ui](packages/ui), and tokens at [packages/ui/src/styles/tokens.css](packages/ui/src/styles/tokens.css).
+This document is the source of truth for how Memoturn looks and feels — the visual language behind the public sites (marketing + docs) and, over time, the console. The shared design system lives at [packages/ui](../../packages/ui), and tokens at [packages/ui/src/styles/tokens.css](../../packages/ui/src/styles/tokens.css).
 
 If you're touching UI, this doc tells you what's deliberate vs incidental, what to keep vs what to push further, and how to extend the system without breaking it.
 
 ## Voice
 
-Memoturn is a **self-hostable, durable runtime for AI agents.** The voice is technical and direct — we explain what the product does in concrete terms ("durable", "self-hostable", "zero ambient authority") and we name the primitives and backends it runs ("agent actors", "the sandbox", "Claude, OpenAI, Ollama").
+Memoturn is an **open-source, self-hostable AI engineering platform — LLM observability, evals, and prompt management.** The voice is technical and direct — we explain what the product does in concrete terms ("self-hostable", "OpenTelemetry-native", "nothing leaves your network") and we name the primitives and backends it runs on ("traces", "evaluators", "the prompt registry", "ClickHouse, Postgres, Redis").
 
 We are not whimsical, but we are not cold either. The "island" metaphor in the brand (lagoon, palm, sand, foam, atoll) is intentional — it gives a developer-infrastructure product a warmer, more human aesthetic than the usual blue-and-grey enterprise template. We lean into it without becoming silly.
 
 **Do**
 
-- Lead with what works ("Durable AI agents, on infrastructure you own").
-- Use plain English over jargon when possible — a kicker like "hibernates when idle" beats "evicts idle actors from the registry".
-- Reference the primitives, protocols, and backends by name (agent actor, fiber, sandbox, MCP, A2A, Docker).
+- Lead with what works ("See every LLM call, on infrastructure you own").
+- Use plain English over jargon when possible — a kicker like "every call, traced" beats "comprehensive telemetry capture across the request lifecycle".
+- Reference the primitives, protocols, and backends by name (trace, score, evaluator, prompt channel, OTel, MCP, ClickHouse).
 - Keep marketing copy concise — one strong sentence beats a paragraph.
 
 **Don't**
 
 - Use emoji or whimsical metaphors in product UI ("🌊 Surfing the data!"). The metaphor is in the palette and motion, not the copy.
 - Use generic AI-product phrases like "supercharge", "leverage", "unlock the power of".
-- Hide what's actually happening — "Rehydrating agent…" is better than "Working on your request…".
+- Hide what's actually happening — "Mapping batch into ClickHouse…" is better than "Working on your request…".
 
 ## Palette
 

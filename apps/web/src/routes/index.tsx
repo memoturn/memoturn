@@ -8,32 +8,32 @@ export const Route = createFileRoute("/")({
   component: Landing,
 });
 
-const QUICKSTART_URL = `${DOCS_PUBLIC_URL}/quickstart/`;
+const GETTING_STARTED_URL = `${DOCS_PUBLIC_URL}/getting-started/`;
 const USE_CASES_URL = `${DOCS_PUBLIC_URL}/use-cases/`;
 
-// Pluggable backends — the runtime ships interfaces, not lock-in.
-const BACKENDS = ["Claude", "OpenAI", "Ollama", "Bedrock", "Docker", "gVisor"];
+// Ingestion surfaces — bring telemetry from any of these, no lock-in.
+const BACKENDS = ["OpenTelemetry", "OpenAI", "Anthropic", "LangChain", "LiteLLM", "MCP"];
 
 // The canonical three-leg grid. DESIGN.md permits the identical-card-grid
 // exception only at a count of three; everything else lives in the ledger.
 const FEATURES = [
   {
-    eyebrow: "durable",
-    title: "Agents that survive crashes",
-    body: "Each agent is an in-process actor with its own SQLite store. Idle actors hibernate to disk and rehydrate on demand — durable state, zero cost when nothing's happening.",
-    tags: ["actor", "SQLite", "hibernation"],
+    eyebrow: "observability",
+    title: "Every call, traced",
+    body: "Traces, spans, generations, and scores with a waterfall timeline and sessions. Ingest from the SDKs, the OpenAI and LangChain wrappers, or any OpenTelemetry exporter — OTLP/JSON with GenAI semantic conventions.",
+    tags: ["traces", "waterfall", "OTel"],
   },
   {
-    eyebrow: "sandboxed",
-    title: "Run code, not risk",
-    body: "Untrusted Python executes in ephemeral sandboxes — Docker, gVisor, or subprocess — with zero ambient authority. Capabilities are granted explicitly, nothing is inherited.",
-    tags: ["Docker", "gVisor", "capability RPC"],
+    eyebrow: "evaluation",
+    title: "Evals, three ways",
+    body: "Offline experiments over datasets, online evaluators sampling production traces, and human review queues with assignment. Every score lands in ClickHouse and shows up on the trace it came from.",
+    tags: ["offline", "online", "human review"],
   },
   {
-    eyebrow: "interoperable",
-    title: "MCP and A2A, both ways",
-    body: "Every agent is an MCP server other tools can call, and an A2A agent other frameworks can discover. Mount external MCP tools and remote A2A agents as tools your agents call mid-turn.",
-    tags: ["MCP", "A2A", "tools"],
+    eyebrow: "prompts",
+    title: "Prompts with deploy channels",
+    body: "A versioned prompt registry with production, latest, and custom channels. Fetch with getPrompt, compile variables, and iterate in a multi-provider streaming playground — every run recorded as a trace.",
+    tags: ["versioned", "channels", "playground"],
   },
 ];
 
@@ -41,34 +41,34 @@ const FEATURES = [
 // second card grid (no four-up / six-up grids per DESIGN.md).
 const CAPABILITIES = [
   {
-    label: "durability engine",
-    body: "A SQLite checkpoint engine behind a `Durability` interface makes execution crash-safe — a fiber resumes from its last checkpoint, not from scratch. The engine is swappable behind the interface.",
-    tags: ["checkpoint", "fibers", "crash-safe"],
+    label: "metrics & dashboards",
+    body: "Cost, tokens, and latency (p50/p95) over a ClickHouse rollup, sliced by day and by model — plus custom widgets and saved views for the questions your team actually asks.",
+    tags: ["cost", "tokens", "p95"],
   },
   {
-    label: "workspace VFS",
-    body: "A virtual filesystem per agent: SQLite for metadata, MinIO or any S3-compatible store for blobs. Durable, portable, and inspectable — the agent's working memory on disk.",
-    tags: ["SQLite", "S3 / MinIO", "blobs"],
+    label: "datasets & experiments",
+    body: "Dataset items and experiment runs that link every item to the trace it produced. Benchmark prompts and models side by side in a comparison matrix before anything ships.",
+    tags: ["datasets", "experiments"],
   },
   {
-    label: "execution ladder",
-    body: "Additive by design: an agent is useful at Tier 0 with just a durable filesystem and chat, and climbs to sandboxed code, browser, and full-OS only as the task needs it.",
-    tags: ["Tier 0", "additive", "escalate"],
+    label: "playground",
+    body: "Multi-provider — mock, Anthropic, OpenAI — with streaming, structured output, and tool calling. Every playground run is recorded as a trace, so exploration feeds observability.",
+    tags: ["streaming", "multi-provider"],
   },
   {
-    label: "pluggable everywhere",
-    body: "`Provider`, `Sandbox`, and `Durability` are interfaces. Ships with Anthropic, Docker, and SQLite-checkpoint implementations; swap in OpenAI, Ollama, Bedrock, or a gVisor-isolated sandbox without forking.",
-    tags: ["Provider", "Sandbox", "interfaces"],
+    label: "MCP server",
+    body: "Prompts, datasets, and review queues exposed as tools inside agent IDEs like Claude Code and Cursor — as a local stdio server or over Streamable HTTP per project, with per-tool RBAC.",
+    tags: ["MCP", "agent IDEs"],
   },
   {
-    label: "enterprise-ready",
-    body: "Multi-tenant from day one, OpenTelemetry traces and metrics, API-key/JWT auth with RBAC, and a default-deny network posture. docker-compose on a single host, or the Helm chart on Kubernetes for elastic scale-out.",
-    tags: ["OTel", "multi-tenant", "Helm"],
+    label: "platform",
+    body: "Organizations and projects on Better Auth with RBAC and read-only viewers, SSO (OIDC/SAML), API-key management, per-project rate limits, PII masking at ingest, audit logs, retention policies, and scheduled NDJSON exports.",
+    tags: ["RBAC", "SSO", "PII masking"],
   },
   {
-    label: "open core",
-    body: "Apache-2.0 at the core. A self-hostable Enterprise Edition adds OIDC SSO, SCIM provisioning, audit export, and usage-metered billing for running Memoturn as a multi-tenant platform — still on infrastructure you own.",
-    tags: ["SSO/SCIM", "audit", "metered billing"],
+    label: "automations",
+    body: "Trigger→action rules on platform events — score.created, trace.created, eval.completed — firing webhooks or Slack messages, plus PostHog export and per-project custom model prices.",
+    tags: ["webhooks", "Slack", "PostHog"],
   },
 ];
 
@@ -76,34 +76,34 @@ const CAPABILITIES = [
 // card grid — DESIGN.md spends the identical-card-grid exception on FEATURES.
 const USE_CASES = [
   {
-    label: "Long-running autonomous workers",
-    body: "Agents that run for hours or days — research, migrations, monitoring — and resume from their last checkpoint after a crash or restart, not from scratch.",
-    tags: ["fibers", "checkpoints", "hibernation"],
+    label: "Debug production LLM traffic",
+    body: "Follow a request through every span and generation on the waterfall timeline, with full input/output payloads and session grouping across turns.",
+    tags: ["traces", "sessions"],
   },
   {
-    label: "Code-interpreter & data agents",
-    body: "Let an agent write and run its own Python over your data, in an ephemeral sandbox with zero ambient authority — without handing it your machine.",
-    tags: ["sandbox", "gVisor", "capability RPC"],
+    label: "Track spend by model & feature",
+    body: "Cost, token, and latency rollups per day and per model out of ClickHouse — know what each feature costs before the invoice tells you.",
+    tags: ["cost", "ClickHouse"],
   },
   {
-    label: "Multi-tenant agent platforms",
-    body: "Run agents for every customer or team from one deployment — each tenant isolated, each agent owned by a single replica via consistent-hash leases.",
-    tags: ["multi-tenant", "scale-out", "leases"],
+    label: "Catch regressions before users do",
+    body: "Online evaluators sample live production traces and score them continuously; automations turn a bad score into a Slack alert or webhook.",
+    tags: ["online evals", "alerts"],
   },
   {
-    label: "Memory-centric assistants",
-    body: "Assistants that remember across sessions and can recall exactly what they knew at any past turn, with history compaction that extracts memories before dropping turns.",
-    tags: ["memory", "as-of-turn", "sessions"],
+    label: "Ship prompts like code",
+    body: "Versioned, immutable prompt registry with deployment channels — promote to production, roll back instantly, fetch from the SDK with getPrompt.",
+    tags: ["channels", "rollback"],
   },
   {
-    label: "Tool & agent hubs",
-    body: "Mount external MCP servers and remote A2A agents as tools, and expose your own agents the same way — interop in both directions, mid-turn.",
-    tags: ["MCP", "A2A", "interop"],
+    label: "Benchmark models & prompts",
+    body: "Run experiments over datasets, score them with LLM-as-judge evaluators, and compare runs side by side before switching models.",
+    tags: ["experiments", "LLM-as-judge"],
   },
   {
-    label: "Self-hosted & air-gapped agents",
-    body: "Run fully offline against local Ollama on infrastructure you own — no proprietary cloud, no per-idle-minute bill, nothing leaving your network.",
-    tags: ["self-hosted", "Ollama", "offline"],
+    label: "Self-host for compliance",
+    body: "PII masking at ingest, audit logs, retention policies, and scheduled exports — with every byte of telemetry staying on your infrastructure.",
+    tags: ["PII", "audit", "retention"],
   },
 ];
 
@@ -136,17 +136,17 @@ function Landing() {
             id="hero-heading"
             className="display-title max-w-[22ch] text-balance text-[clamp(2.75rem,7vw,5.5rem)] font-bold leading-[1.02] tracking-[-0.025em] text-sea-ink dark:text-foreground"
           >
-            Durable AI agents, on infrastructure you own.
+            See every LLM call, on infrastructure you own.
           </h1>
           <p className="mt-7 max-w-[56ch] text-pretty text-base leading-[1.55] text-sea-ink-soft dark:text-muted-foreground sm:text-lg">
-            Memoturn runs persistent, per-task agents that survive crashes, cost nothing when idle, and execute code in
-            sandboxes with zero ambient authority — a self-hostable, Docker-based runtime you run anywhere. No
-            proprietary cloud required.
+            Memoturn is an open-source AI engineering platform — tracing, cost and latency metrics, offline, online, and
+            human evals, versioned prompts with deploy channels, a playground, and datasets. OpenTelemetry-native,
+            self-hostable, and nothing leaves your network.
           </p>
           <div className="mt-9 flex flex-wrap items-center gap-3">
             <Button asChild size="lg">
-              <a href={QUICKSTART_URL} className="no-underline">
-                Read the quickstart
+              <a href={GETTING_STARTED_URL} className="no-underline">
+                Read the getting-started guide
               </a>
             </Button>
             <Button asChild variant="ghost" size="lg" className="group text-muted-foreground hover:text-foreground">
@@ -164,27 +164,27 @@ function Landing() {
             </div>
             <div className="inline-flex items-center gap-1.5">
               <span aria-hidden className="size-1 rounded-full bg-primary/70" />
-              <dt className="sr-only">Runtime</dt>
-              <dd>Docker-based</dd>
+              <dt className="sr-only">Telemetry</dt>
+              <dd>OpenTelemetry-native</dd>
             </div>
             <div className="inline-flex items-center gap-1.5">
               <span aria-hidden className="size-1 rounded-full bg-primary/70" />
-              <dt className="sr-only">Protocols</dt>
-              <dd>MCP + A2A</dd>
+              <dt className="sr-only">SDKs</dt>
+              <dd>TS + Python SDKs</dd>
             </div>
             <div className="inline-flex items-center gap-1.5">
               <span aria-hidden className="size-1 rounded-full bg-primary/70" />
-              <dt className="sr-only">Sandbox</dt>
-              <dd>zero ambient authority</dd>
+              <dt className="sr-only">Analytics store</dt>
+              <dd>ClickHouse-backed</dd>
             </div>
           </dl>
         </div>
       </section>
 
-      <section aria-label="Pluggable backends" className="border-y border-border/60 bg-background">
+      <section aria-label="Ingestion sources" className="border-y border-border/60 bg-background">
         <div className="page-wrap max-w-6xl! py-6">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-            <span className="kicker">swap in</span>
+            <span className="kicker">works with</span>
             <ul className="m-0 flex list-none flex-wrap items-center gap-x-5 gap-y-2 p-0">
               {BACKENDS.map((name, idx) => (
                 <li key={name} className="inline-flex items-center gap-x-5">
@@ -197,7 +197,7 @@ function Landing() {
               <span aria-hidden className="text-primary">
                 ↳{" "}
               </span>
-              pluggable interfaces
+              OTLP · GenAI semconv
             </span>
           </div>
         </div>
@@ -212,13 +212,14 @@ function Landing() {
                 id="why-heading"
                 className="display-title max-w-[32ch] text-balance text-[clamp(1.75rem,3.8vw,2.75rem)] font-bold leading-[1.08] tracking-tight text-sea-ink dark:text-foreground"
               >
-                Today's agents are ephemeral, locked to one device, expensive when idle, and unsafe to let run code.
+                LLM apps ship blind: no cost visibility, silent quality regressions, prompts versioned in a Slack
+                thread.
               </p>
             </div>
             <p className="max-w-[44ch] text-pretty text-[0.9375rem] leading-[1.65] text-sea-ink-soft dark:text-muted-foreground">
-              The durable-agent capabilities that used to require a proprietary cloud — durable actors, hibernation,
-              sandboxed execution, crash-safe fibers — rebuilt on open infrastructure you can run anywhere Docker runs.
-              Useful at Tier 0 alone, and additive from there.
+              The observability stack the LLM SaaS vendors run — traces, eval pipelines, prompt registries — rebuilt on
+              open infrastructure: Postgres, ClickHouse, Redis, S3. One docker compose away, and your telemetry never
+              leaves your network.
             </p>
           </div>
         </div>
@@ -244,11 +245,11 @@ function Landing() {
               id="features-heading"
               className="display-title text-balance text-[clamp(2rem,4vw,3rem)] font-bold leading-[1.05] tracking-tight text-sea-ink dark:text-foreground"
             >
-              A durable runtime, every primitive open.
+              The full AI engineering loop, every piece open.
             </h2>
             <p className="max-w-[56ch] text-[0.9375rem] leading-[1.6] text-sea-ink-soft dark:text-muted-foreground">
-              No proprietary cloud, no black boxes. The actor, the sandbox, the durability engine, and the workspace are
-              all interfaces you can inspect, swap, and self-host.
+              No proprietary cloud, no black boxes. Observe what your app does, evaluate whether it's good, and ship the
+              next prompt — one platform you can inspect, extend, and self-host.
             </p>
           </div>
           <div className="grid border-t border-l border-[--rule] bg-background md:grid-cols-3">
@@ -277,7 +278,7 @@ function Landing() {
             ))}
           </div>
           <div className="mt-10">
-            <p className="kicker mb-4">also in the runtime</p>
+            <p className="kicker mb-4">also on the platform</p>
             <div className="border-t border-x border-[--rule] bg-background">
               {CAPABILITIES.map((c) => (
                 <div
@@ -311,11 +312,11 @@ function Landing() {
               id="use-cases-heading"
               className="display-title text-balance text-[clamp(2rem,4vw,3rem)] font-bold leading-[1.05] tracking-tight text-sea-ink dark:text-foreground"
             >
-              Durable primitives, composed into real workflows.
+              From first trace to shipped prompt, one loop.
             </h2>
             <p className="max-w-[56ch] text-[0.9375rem] leading-[1.6] text-sea-ink-soft dark:text-muted-foreground">
-              The same actor, sandbox, fiber, and memory primitives back a range of agents — from long-running workers
-              to multi-tenant platforms — all on infrastructure you own.
+              The same traces, scores, datasets, and prompt versions back every workflow — from debugging a single
+              request to benchmarking a model swap — all on infrastructure you own.
             </p>
           </div>
           <div className="border-t border-x border-[--rule] bg-background">
@@ -374,11 +375,11 @@ function Landing() {
             id="closing-heading"
             className="display-title mx-auto max-w-[22ch] text-balance text-[clamp(1.875rem,4.5vw,3.5rem)] font-bold leading-[1.05] tracking-tight"
           >
-            Run persistent AI agents on infrastructure you own.
+            Trace your first LLM call in minutes.
           </h2>
           <p className="mx-auto mt-5 max-w-[56ch] text-pretty text-base leading-[1.55] text-(--on-gradient-fg-soft) sm:text-lg">
-            Open source, Apache-2.0. Spin it up with `docker compose` on a single host, or Helm on Kubernetes for
-            production.
+            Open source, Apache-2.0. `bun run setup && bun run dev` locally, or docker compose for production — with
+            Helm on Kubernetes when you outgrow one host.
           </p>
           <div className="mt-9 flex flex-wrap items-center justify-center gap-3.5">
             <Button
@@ -386,7 +387,7 @@ function Landing() {
               size="lg"
               className="bg-(--on-gradient-fg) text-sea-ink hover:bg-(--on-gradient-fg)/90 hover:text-sea-ink"
             >
-              <a href={QUICKSTART_URL} className="no-underline">
+              <a href={GETTING_STARTED_URL} className="no-underline">
                 Get started
               </a>
             </Button>

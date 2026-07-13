@@ -1,95 +1,78 @@
 ---
 title: Roadmap
-description: Tracked work across memory, scale-out, deployment, and the Enterprise Edition — and what's already shipped.
+description: What memoturn has shipped and the prioritized backlog of candidate features.
 ---
 
+A prioritized backlog of candidate features, benchmarked against the broader
+LLM-engineering-platform category. Effort is rough (S = hours, M = a day or two, L = multi-day).
+Items are independent unless noted.
 
-Tracked work and what's already shipped. See [architecture.md](/architecture/) and
-[operations.md](/operations/) for the full picture of what exists today.
+## Shipped
 
-## Enterprise Edition
+Observability (traces / observations / scores, waterfall, sessions, OTel) · metrics & dashboards
+· custom widgets · prompt registry + channels · playground (multi-provider, streaming,
+trace-linked) · datasets & experiments · evaluators (offline + online) · human review queues ·
+scores on traces · webhooks (score alerts) · auth (sessions + API keys) · projects + RBAC +
+project switcher · audit log · data retention · NDJSON export · TypeScript + Python SDKs
+(tracing, OpenAI, LangChain, prompts).
 
-> **Open-core split — done.** The Apache-2.0 core (`memoturn`) and the separately-licensed
-> `memoturn-enterprise` distribution are wired through a runtime plugin seam
-> ([`plugins.py`](../src/memoturn/plugins.py)); a build without the package runs as a pure
-> open-source control plane. See [Enterprise Edition](/enterprise/).
+## Collaboration
 
-> **SSO + SCIM — done.** OIDC bearer verification with per-tenant issuers and console login
-> ([SSO](/sso/)), and SCIM 2.0 user/group provisioning ([SCIM](/scim/)).
+| Feature | Effort | Notes |
+| --- | --- | --- |
+| **Comments** | M | Threaded comments on traces/observations/sessions/prompts. New `Comment` table, `/v1/comments` CRUD, thread UI on the trace page. |
+| **Tags + tag facets** | S | Traces already carry `tags`; add a tag filter on the trace list, a tags column, and tag management. |
+| **Score configs** | M | The `ScoreConfig` model exists but is unused — expose CRUD; enforce allowed names/data-types/categories on score creation; drive the review form from configs. |
+| ~~**Annotation assignments**~~ | Done | Assign review items to a user (`/items/{id}/assign`); "assigned to me only" filter on the review page. |
 
-> **Runtime API keys — done.** Hashed, anti-escalation keys issued at runtime via
-> `/v1/admin/api-keys` ([API keys](/api-keys/)).
+## Evaluation depth
 
-> **Persistent audit trail — done.** `MEMOTURN_AUDIT_PERSIST_ENABLED` persists audit events to a
-> queryable store behind `GET /v1/admin/audit`, with an optional OTel SIEM export.
+| Feature | Effort | Notes |
+| --- | --- | --- |
+| ~~**Experiment comparison view**~~ | Done | `GET /v1/datasets/{name}/comparison` items × runs matrix (output + scores per cell); rendered on the dataset page. |
+| ~~**Generalized automations**~~ | Done | Trigger→action rules (`/v1/automations`): triggers score.created/trace.created/eval.completed, actions webhook + Slack. |
+| ~~**Playground tools + structured output**~~ | Done | Playground modes for JSON-schema structured output (generateObject) and tool calling (surfaces tool calls). |
 
-> **Usage-metered Stripe billing — done.** Four meters (tokens/turns/compute_s/storage), a
-> free/pro/enterprise/suspended plan ladder, self-serve signup + checkout/portal, and an
-> idempotent, retrying Stripe webhook. See [Billing](/billing/).
+## Data platform
 
-## Memory
+| Feature | Effort | Notes |
+| --- | --- | --- |
+| ~~**Custom model definitions**~~ | Done | Per-project model price overrides (`/v1/model-prices`); the worker applies them over the built-in registry at ingest. |
+| ~~**Batch actions**~~ | Done | Multi-select on the trace table → bulk delete / add-to-dataset / enqueue-for-review (`POST /v1/traces/batch`). |
+| ~~**Scheduled blob exports**~~ | Done | Daily worker cron writes per-project traces (NDJSON) to blob (`/v1/scheduled-exports`, plus run-now). |
+| ~~**Saved table views**~~ | Done | Persist named filter sets per table (`/v1/saved-views`), applied from the trace explorer. |
+| ~~**Multimodal media**~~ | Done | Inline base64 data URIs offloaded to blob at ingest (`memoturn-media://`), served via `/v1/media`, rendered in the trace view. |
 
-> **Bounded history retention — done.** `MEMOTURN_MEMORY_HISTORY_RETENTION_DAYS` and/or
-> `MEMOTURN_MEMORY_HISTORY_MAX_PER_TOPIC` (0 = keep forever) bound superseded/forgotten versions:
-> [`MemoryStore`](../src/memoturn/memory/long_term.py) hard-deletes inactive rows older than the
-> window and/or beyond the newest N per `topic_key` (active versions never pruned), clearing the FTS
-> entry + `sqlite_vec` shadow. Runs opportunistically on `remember` and via an admin sweep
-> (`POST /v1/agents/{name}/memories/prune`, and the profile equivalent).
+## Tenancy & enterprise
 
-> **In-region embeddings — done.** `MEMOTURN_MEMORY_EMBEDDER=bedrock` (Titan/Cohere) or `vertex`
-> (text-embedding) keeps semantic-recall embeddings in your cloud/region for data residency, reusing
-> the `Embedder` seam ([`memory/embeddings.py`](../src/memoturn/memory/embeddings.py)); credentials
-> from the cloud default chain. With the Bedrock/Vertex LLM provider + pgvector profiles, a GKE
-> deployment can run fully in-region: inference, embeddings, vectors, and state.
+| Feature | Effort | Notes |
+| --- | --- | --- |
+| ~~**Organizations**~~ | Done | Tenancy via the Better Auth organization plugin (org/member/invitation); projects scoped to an org, role-mapped to our RBAC, console org management. |
+| ~~**SSO**~~ | Done | Better Auth `@better-auth/sso` plugin (OIDC/SAML IdPs mapped by email domain → org); register/manage from the Organizations page. Full IdP sign-in needs a real provider. |
+| ~~**API rate limiting**~~ | Done | Per-project Redis fixed-window limiter on `/v1` (`RATE_LIMIT_PER_MINUTE`), 429 + `X-RateLimit-*`/`Retry-After`. |
+| ~~**Worker health/metrics endpoint**~~ | Done | `node:http` server on the worker (`WORKER_PORT`, default 3002) — `/health` liveness + `/metrics` BullMQ queue depths. |
 
-## Scale-out
+## Integrations & SDKs
 
-> **Done.** Durable object-backed snapshots ([`storage/snapshots.py`](../src/memoturn/storage/snapshots.py))
-> let agent state follow ownership; the cross-replica **ownership lease** (`agent_leases` in the
-> control plane) guarantees a single live writer even during membership churn; and the **lease-aware
-> proxy handoff** makes migration latency-transparent (the new ring owner bridges to the current
-> lease holder until it releases, instead of returning 503). Together these make the fleet safe to
-> autoscale with no client-visible disruption. See
-> [operations.md](/operations/#high-availability--scale-out).
+| Feature | Effort | Notes |
+| --- | --- | --- |
+| ~~**MCP server**~~ | Done | Stdio MCP server (`apps/mcp`) exposing prompts / datasets / review queues as tools for agent IDEs. |
+| ~~**More OTel coverage**~~ | Done | Richer GenAI semconv mapping (model params, log level, session/user, deployment env, newer `gen_ai.*.messages`) + OTLP/protobuf decode (dependency-free) at `/v1/otel/v1/traces`. |
+| ~~**Product-analytics export**~~ | Done | Per-project PostHog sink (`/v1/analytics-sink`); the worker forwards trace.created/score.created to PostHog's capture API. |
 
-## Vector search
+## UX
 
-> **pgvector profile backend — done.** `MEMOTURN_PROFILE_BACKEND=postgres` stores shared profiles in
-> one Postgres + pgvector table ([`memory/pg.py`](../src/memoturn/memory/pg.py)) with Postgres FTS +
-> HNSW cosine search, for profiles that outgrow per-profile SQLite. Because Postgres is the shared
-> store, pg-backed profiles need **no owner-routing or leases** — any replica reads/writes directly.
-> Needs the `postgres` extra + `MEMOTURN_PROFILE_POSTGRES_DSN` (or `postgres_dsn`); set
-> `MEMOTURN_PROFILE_EMBEDDING_DIM` to match your embedding model.
+| Feature | Effort | Notes |
+| --- | --- | --- |
+| ~~**Command-K menu**~~ | Done | ⌘K palette: fuzzy nav + open-trace-by-id. |
+| ~~**Global time-range filter**~~ | Done | Topbar 24h/7d/30d/90d selector shared by dashboard/metrics + traces. |
+| ~~**Agent-graph view**~~ | Done | Timeline/Graph toggle on the trace page; SVG graph layered by parent-chain depth. |
 
-## Deployment
+## Suggested next slices
 
-See [deployment-plan.md](/deployment/) for the cluster choice and decision record. Production
-(untrusted code + compliance + BYOC) targets **Kubernetes (GKE/EKS)** via the Helm chart, the single
-shippable artifact; local dev uses the same chart on kind/k3d. Build items it defines:
+1. ~~**Comments** + **Tags/facets**~~ — done.
+2. ~~**Score configs**~~ — done.
+3. ~~**Batch actions** + **saved table views**~~ — done.
+4. ~~**MCP server**~~ — done.
 
-- **Hardened K8s sandbox backend** — **done** (`MEMOTURN_SANDBOX_BACKEND=k8s`, gVisor exec pods, see
-  [`sandbox/k8s.py`](../src/memoturn/sandbox/k8s.py)), **with the network capability bridge** so
-  in-pod `workspace`/`caps` work (`MEMOTURN_SANDBOX_K8S_BRIDGE_ENABLED=true`; token-multiplexed TCP,
-  see [`sandbox/bridge.py`](../src/memoturn/sandbox/bridge.py)). The **deny-all-except-bridge
-  NetworkPolicy** for the sandbox namespace ships in both the GKE Terraform module and the Helm
-  chart (`sandbox.networkPolicy.enabled`). Follow-up: **dependency support** in pods.
-- **Terraform module** — **GKE done** ([`deploy/terraform/gke`](../deploy/terraform/gke): private GKE
-  + gVisor sandbox pool + Cloud SQL + CMEK GCS + NetworkPolicy + wired Helm release). Follow-up: an
-  **EKS module** (gVisor there needs a custom Bottlerocket+gVisor node AMI, unlike GKE Sandbox).
-- **In-region LLM provider** — **done** (`MEMOTURN_LLM_PROVIDER=bedrock` / `vertex`): Claude via
-  Bedrock/Vertex for data residency, reusing `AnthropicProvider` with an injected client. In-region
-  embeddings are also done — see [Memory](#memory) above.
-- **Shared rate limiter** — **done** (`MEMOTURN_REDIS_URL` → `RedisRateLimiter`): per-tenant
-  limits/quotas enforced across replicas (ElastiCache/Memorystore/any Redis); in-process fallback.
-
-## Pluggable backends
-
-The `Sandbox` and `Durability` interfaces are deliberately shaped to accept backends beyond the
-shipped ones. **On the roadmap — interface targets, not shipped:**
-
-> **Firecracker microVM sandbox.** A `Sandbox` backend running untrusted code in a KVM-isolated
-> Firecracker microVM, alongside the shipped subprocess / Docker / gVisor-on-Kubernetes backends —
-> hardware-grade isolation without a Kubernetes cluster.
-
-> **Temporal-backed durability.** A `Durability` backend that runs fibers as Temporal workflows for
-> distributed durable execution, as an alternative to the shipped SQLite checkpoint engine.
+Larger bets (organizations, multimodal media) are scoped separately when prioritized.

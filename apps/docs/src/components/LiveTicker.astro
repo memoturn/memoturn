@@ -1,11 +1,11 @@
 ---
 const events = [
-  { tool: "agent:demo", action: "actor spawned", detail: "rehydrated from disk" },
-  { tool: "sandbox", action: "code executed", detail: "python · 0 ambient authority" },
-  { tool: "agent:demo", action: "checkpoint saved", detail: "fiber: nightly-report" },
-  { tool: "agent:demo", action: "memory recalled", detail: "semantic · 4 hits" },
-  { tool: "mcp", action: "tool mounted", detail: "filesystem (stdio)" },
-  { tool: "agent:demo", action: "hibernated", detail: "idle · zero cost" },
+  { tool: "ingest", action: "trace received", detail: "12 spans · waterfall ready" },
+  { tool: "evaluator", action: "score written", detail: "llm-judge · 0.92" },
+  { tool: "prompts", action: "version deployed", detail: "channel: production" },
+  { tool: "experiment", action: "run completed", detail: "50 items · scored" },
+  { tool: "automation", action: "alert fired", detail: "score.created → Slack" },
+  { tool: "export", action: "NDJSON scheduled", detail: "traces → blob · daily" },
 ] as const;
 ---
 

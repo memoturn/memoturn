@@ -1,85 +1,92 @@
 ---
 title: Architecture
-description: Topology, primitives, and the request path of the Memoturn agent runtime.
+description: How memoturn's async ingest pipeline splits storage across Postgres, ClickHouse, Redis, and blob.
 ---
 
-Memoturn is a durable runtime for AI agents built on open, self-hostable infrastructure. The
-Apache-2.0 core (`memoturn`) is fully functional on its own; commercial capabilities ship in a
-separate `memoturn-enterprise` distribution the core discovers at runtime — see
-[Open-core & Enterprise Edition](/enterprise/).
+memoturn is an async, decoupled, Bun-native system. Ingestion is fire-and-forget: the
+API persists raw events and acks immediately; a worker does the heavy writes.
 
-## Topology
+```
+SDKs / OTel / LangChain / OpenAI
+   │  POST /v1/ingest  (Basic auth)
+   ▼
+apps/api (Hono on Bun)
+   ├── write raw batch ──► S3 / MinIO      (source of truth)
+   ├── enqueue job ──────► Redis / BullMQ
+   └── ack 207 ──────────► client
+                             │
+Redis / BullMQ ──────────────┘
+   │ deliver job
+   ▼
+apps/worker (Bun + BullMQ)
+   ├── fetch raw batch ──► S3 / MinIO
+   └── merge + insert ───► ClickHouse
 
-Everything runs via `docker compose`:
+apps/console (SPA) ── TanStack Query ──► apps/api ── reads ──► Postgres + ClickHouse
+```
 
-- **control-plane** — a FastAPI/uvicorn process that hosts agent **actors in-process** and serves
-  the HTTP + WebSocket API. Escalates code execution to ephemeral sandbox containers via the Docker
-  socket.
-- **postgres** — control-plane metadata (agent registry, routing, tenants, users). SQLite is used
-  for single-node dev without this.
-- **minio** — S3-compatible blob storage for the Tier 0 workspace.
-- **sandbox containers** — short-lived, spawned per code-execution request (Tiers 1–4).
+## Services
 
-## Core primitives
-
-| Primitive | What it is | Backing tech |
+| Service | Tech | Responsibility |
 | --- | --- | --- |
-| [Agent actor](/agents/) | Addressable entity (`tenant/name → actor`) with a single-writer mailbox | in-process asyncio + per-agent SQLite |
-| [Hibernation](/agents/#hibernation) | Idle actors flush state and evict from memory; rehydrate on next request | idle timer + `data/agents/<tenant>/<name>.db` |
-| [Workspace](/workspace/) | Durable virtual filesystem | SQLite metadata + MinIO blobs |
-| [Sandbox](/sandboxing/) | LLM-generated Python with zero ambient authority | subprocess / Docker / gVisor-on-Kubernetes + capability RPC bridge |
-| [Durability (fibers)](/fibers/) | Crash-safe long-running invocations | SQLite checkpoint engine (pluggable backend) |
-| [Provider](/providers/) | LLM access | Anthropic/Claude (swappable: OpenAI/Ollama/Bedrock/Vertex) |
-| [Memory](/memory/) | Long-term recall + working context | SQLite/FTS + optional embeddings; cross-agent profiles |
+| `apps/api` | Hono on Bun | Public `/v1` REST, OTel receiver, Better Auth, OpenAPI/Scalar |
+| `apps/console` | Vite + TanStack Router SPA | Dashboard (talks to the API via TanStack Query) |
+| `apps/worker` | Bun + BullMQ | Async ingest → ClickHouse, online evaluators, retention cron |
 
-`Provider`, `Sandbox`, and `Durability` are **public interfaces** — community extension points and
-the way enterprises swap in their own backends.
+## Storage tiers
 
-## Cross-cutting
+| Store | Tech | Holds |
+| --- | --- | --- |
+| OLTP | PostgreSQL (Prisma 7, pg driver adapter) | Workspaces, projects, users/sessions, API keys, prompts, datasets, evaluators, review queues, provider connections (encrypted), audit log, retention policies |
+| OLAP | ClickHouse | `traces`, `observations`, `scores` (`ReplacingMergeTree`); a daily metrics rollup (`AggregatingMergeTree` + materialized view) |
+| Queue / cache | Redis (Valkey) + BullMQ | Async ingest queue, API-key cache, retention cron |
+| Blob | S3-compatible (MinIO locally) | Raw replayable event log, exports |
 
-- **Multi-tenancy:** `tenant_id` is carried through routing and storage; per-agent SQLite files are
-  namespaced by tenant. See [Security](/security/#hard-multi-tenancy).
-- **Observability:** [OpenTelemetry](/observability/) spans threaded through turns, fibers, tools,
-  and memory.
-- **Security:** sandboxes start with [no capabilities](/sandboxing/); pluggable auth, RBAC, audit
-  logging, secrets, rate limits, and encryption at rest — see [Security](/security/).
-- **Metering:** the core emits four tenant-attributable usage meters (LLM tokens, agent turns,
-  compute-seconds, storage) through a sink seam — see [Usage metering & billing](/billing/).
-- **Scale-out:** run many replicas with consistent-hash ownership, leases, and transparent
-  owner-proxy — see [Scaling out](/scaling/).
-- **Open-core seam:** the core never imports `memoturn_enterprise`; it discovers optional
-  capabilities (OIDC/SCIM, persistent audit, fine-grained RBAC, metered billing) through a
-  runtime [plugin registry](/enterprise/#the-plugin-seam).
+## Ingestion pipeline
 
-## The agent turn loop
+1. **SDK → API**: `POST /v1/ingest` (batch, Basic auth).
+2. **API** validates the batch (zod).
+3. **API → blob**: writes the raw batch to S3/MinIO — the source of truth.
+4. **API → queue**: enqueues an ingest job on Redis/BullMQ.
+5. **API → SDK**: responds `207` with a per-event status.
+6. **Queue → worker**: delivers the job.
+7. **Worker → blob**: fetches the raw batch back.
+8. **Worker → ClickHouse**: merges and inserts traces/observations/scores.
+9. **Worker**: runs sampled online evaluators on completed traces.
 
-A [turn](/sessions/) streams as `turn_started → text_delta* → (tool_call → tool_result)* →
-turn_completed`, persisting each step before the next model call so a crash leaves a replayable
-history. The harness (`agent/base.py`) is subclassable; override `get_system_prompt`, `get_tools`,
-`max_steps`, and `max_tokens` without replacing the pipeline. See
-[Sessions & turns](/sessions/) for the full lifecycle and [Tools](/tools/) for the action surface.
+- The API acks fast; the blob event log is the source of truth, so ClickHouse is
+  rebuildable.
+- Merge semantics: ClickHouse `ReplacingMergeTree` keyed on `(project_id, id)` and
+  versioned by `event_ts`, so late/partial/out-of-order events converge (newest wins).
+  Create + update for one observation are merged in the worker when they arrive in the
+  same batch.
 
-## What ships today
+## Packages
 
-The runtime is in **alpha** — the capability surface below is built and tested, and APIs may still
-change before a stability commitment. The durable core, the full [execution ladder](/execution-ladder/) (workspace →
-sandboxed Python → dependencies → browser → shell), [long-term memory](/memory/) + sessions,
-[durable fibers](/fibers/), [sub-agents](/agents/#sub-agents), [MCP](/mcp/)/[A2A](/a2a/) interop,
-self-authored [extensions](/extensions/), [scale-out](/scaling/), and the
-[enterprise hardening](/security/) surface (auth, RBAC, audit, rate limits, encryption at rest,
-OpenTelemetry, the [admin console](/quickstart/), and a Helm chart) are all in place. Tracked,
-not-yet-built work lives on the [roadmap](/roadmap/).
+| Package | Purpose |
+| --- | --- |
+| `packages/core` | Zod **ingest** event contracts (SDK ↔ API ↔ worker), model/cost registry |
+| `packages/contracts` | Zod **API response** schemas + inferred types (API doc + console types) |
+| `packages/db` | Prisma client + ClickHouse / blob / queue clients |
+| `packages/server` | Shared server logic: auth, traces, metrics, prompts, datasets, evaluators, review, export, retention, Better Auth |
+| `packages/llm` | Provider gateway (mock / Anthropic / OpenAI via the AI SDK) + API-key encryption |
+| `sdks/js`, `sdks/python` | Client SDKs |
 
-## Dive deeper
+## Type-safety model
 
-- **Concepts** — [Agents & actors](/agents/), [Sessions & turns](/sessions/),
-  [Durable execution](/fibers/), [Workspace](/workspace/), [Memory](/memory/).
-- **Execution** — [The execution ladder](/execution-ladder/), [Sandboxing](/sandboxing/),
-  [Tools](/tools/), [Extensions](/extensions/).
-- **Models & protocols** — [Providers](/providers/), [MCP](/mcp/), [A2A](/a2a/).
-- **Operate** — [Deployment](/deployment/), [Operations](/operations/), [Security](/security/),
-  [Scaling out](/scaling/), [Observability](/observability/).
-- **Editions** — [Open-core & Enterprise Edition](/enterprise/),
-  [Usage metering & billing](/billing/).
-- **Reference** — [Configuration](/configuration/), [REST API](/api-rest/),
-  [WebSocket API](/api-websocket/), [CLI](/cli/).
+- **Ingest contracts** (`packages/core`) are the single source of truth for the
+  SDK → API → worker wire format.
+- **Response contracts** (`packages/contracts`) are zod schemas used by the API's
+  OpenAPI responses *and* inferred into TypeScript types consumed by both the server
+  (return types) and the console (client types). A drift between what the server returns
+  and the contract is a compile error.
+
+## Auth model
+
+- **API keys** (Basic auth, `pk-mt-…` / `sk-mt-…`) — for SDKs and programmatic access;
+  scoped to one project, hashed in Postgres, cached in Redis.
+- **Better Auth session** (cookie) — for the dashboard; resolves the user's role and
+  active project (via the `x-memoturn-project` header / project switcher).
+
+See [Data model](/concepts/) for the entities and [Deployment](/deployment/) for
+scaling.

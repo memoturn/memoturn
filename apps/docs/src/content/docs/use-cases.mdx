@@ -1,93 +1,82 @@
 ---
 title: Use cases
-description: What you build with a self-hostable, durable, sandboxed agent runtime — from long-running workers to multi-tenant platforms.
+description: What you do with self-hosted LLM observability — from debugging production traffic to benchmarking models and shipping prompts safely.
 ---
 
 import CTA from "../../components/CTA.astro";
 
-Memoturn's primitives — durable agent actors, an execution sandbox, crash-safe
-fibers, and long-term memory — are general. This page maps them onto concrete
-workflows, so you can tell in a minute whether the runtime fits what you're
-building. Each one runs on infrastructure you own, anywhere Docker runs.
+Memoturn's primitives — traces, scores, datasets, prompt versions, and automations — are
+general. This page maps them onto concrete workflows, so you can tell in a minute whether
+the platform fits what you're building. Each one runs on infrastructure you own.
 
-## Long-running autonomous workers
+## Debug production LLM traffic
 
-Agents that run for hours or days — deep research, large refactors and
-migrations, continuous monitoring — can't afford to lose everything when a
-process dies. Memoturn checkpoints work as it happens, so a worker resumes from
-where it stopped rather than starting the task over. Idle workers cost nothing:
-the actor hibernates to disk and rehydrates on demand.
+When a user reports a bad answer, you need to see exactly what happened: which prompt went
+out, what the model returned, what it cost, and how long each step took. Memoturn renders
+every request as a trace with a waterfall timeline of spans and generations, full
+input/output payloads, and session grouping that ties multi-turn conversations together.
 
-**How Memoturn does it:** [durable execution / fibers](/fibers/) memoize a task
-at each checkpoint; [agent actors](/agents/) hibernate when idle and rehydrate on
-the next turn.
+**How Memoturn does it:** the [data model](/concepts/) covers traces, observations, and
+sessions; ingest from the [SDKs](/sdk-typescript/) or any [OpenTelemetry
+exporter](/integrations/).
 
-## Code-interpreter & data agents
+## Track spend by model & feature
 
-When an agent writes and runs its own Python — to analyze data, generate charts,
-or transform files — you don't want that code touching your host. Memoturn runs
-it in an ephemeral sandbox with zero ambient authority: the code reaches the host
-only through capabilities you grant explicitly, nothing is inherited. Start with
-a subprocess locally and climb to Docker or gVisor isolation as the trust
-requirement grows.
+Token costs compound silently — a model upgrade or a longer system prompt can double the
+bill before anyone notices. Memoturn rolls cost, tokens, and latency (p50/p95) up in
+ClickHouse, sliced by day and by model, with custom dashboard widgets for the breakdowns
+your team watches.
 
-**How Memoturn does it:** the [execution ladder](/execution-ladder/) is additive;
-[sandboxing](/sandboxing/) runs untrusted code behind Docker, gVisor, or
-subprocess backends with capability-scoped access to the host.
+**How Memoturn does it:** the [architecture](/architecture/) stores telemetry in ClickHouse
+rollups; custom per-project model prices are configurable for private or fine-tuned models.
 
-## Multi-tenant agent platforms
+## Catch regressions before users do
 
-Building a product or internal platform where every customer or team gets their
-own agents means isolation and ownership are not optional. Memoturn carries
-`tenant_id` through every storage and routing path, and assigns each agent to a
-single owning replica by consistent hash, with leases in Postgres — so a given
-agent has exactly one writer even as you scale replicas out.
+Prompt tweaks and model swaps change behavior in ways unit tests don't catch. Memoturn's
+online evaluators sample live production traces and score them continuously — LLM-as-judge
+or programmatic — and automations turn a bad score into a Slack message or webhook the
+moment it lands.
 
-**How Memoturn does it:** [scaling out](/scaling/) covers consistent-hash
-ownership, leases, and the owner-proxy that routes a request to the replica that
-owns the agent.
+**How Memoturn does it:** [evaluation](/evaluation/) covers online evaluators and
+deterministic sampling; automations fire on `score.created` and other platform events.
 
-## Memory-centric assistants
+## Ship prompts like code
 
-Assistants that get better the longer you use them need memory that outlives a
-single session — and, when something looks wrong, the ability to see what the
-agent actually knew at the time. Memoturn keeps long-term semantic memory with
-pluggable embedders and vector backends, and history compaction extracts
-memories before old turns are dropped, so context is summarized rather than lost.
+Prompts scattered across source code and Slack threads can't be reviewed, rolled back, or
+A/B tested. Memoturn's prompt registry stores immutable versions with deployment channels —
+promote a version to `production`, fetch it from the SDK with `getPrompt`, and roll back
+instantly when something goes wrong.
 
-**How Memoturn does it:** [memory](/memory/) stores long-term semantic recall;
-[sessions & turns](/sessions/) track the turn history that compaction draws from.
+**How Memoturn does it:** [prompt management](/prompts/) covers versions, channels, and SDK
+resolution; the [playground](/getting-started/) lets you iterate before promoting.
 
-## Tool & agent hubs
+## Benchmark models & prompts
 
-Real systems are heterogeneous: some capabilities live behind MCP servers, others
-are agents in another framework. Memoturn sits in the middle — mount external MCP
-servers and remote A2A agents as tools your agents call mid-turn, and expose your
-own agents as MCP servers and A2A endpoints others can discover. Interop runs in
-both directions.
+"Is the new model actually better?" deserves data, not vibes. Build a dataset of
+representative inputs, run experiments against candidate prompts or models, score the runs
+with evaluators, and compare them side by side in the experiment matrix before switching.
 
-**How Memoturn does it:** [MCP](/mcp/) mounts and serves Model Context Protocol
-tools; [A2A](/a2a/) discovers and messages agents across frameworks.
+**How Memoturn does it:** [evaluation](/evaluation/) covers datasets, experiment runs, and
+LLM-as-judge scoring; every experiment item links to the trace it produced.
 
-## Self-hosted & air-gapped agents
+## Self-host for compliance
 
-Some workloads can't send data to a hosted agent service — regulatory, security,
-or cost reasons. Memoturn is Apache-2.0 and runs fully offline against a local
-Ollama model, so nothing leaves your network and there's no per-idle-minute bill.
-Swap the model provider without forking the runtime.
+Some telemetry can't leave your network — prompts and completions routinely contain
+customer data. Memoturn is Apache-2.0 and self-hostable end to end, with PII masking at
+ingest, audit logs, retention policies, and scheduled exports, so you get vendor-grade
+observability without shipping data to a vendor.
 
-**How Memoturn does it:** [providers](/providers/) are pluggable (Anthropic,
-OpenAI, Ollama, Bedrock, Vertex); [deployment](/deployment/) covers running the
-whole stack on infrastructure you control.
+**How Memoturn does it:** [deployment](/deployment/) covers docker compose and Helm;
+[configuration](/configuration/) covers masking, retention, and rate limits.
 
 <CTA
 	kicker="open source · Apache-2.0"
-	title="Build it on infrastructure you own."
-	primary={{ href: "/quickstart/", text: "Read the quickstart" }}
+	title="Observe it on infrastructure you own."
+	primary={{ href: "/getting-started/", text: "Get started" }}
 	secondary={{ href: "https://github.com/memoturn/memoturn", text: "View on GitHub" }}
 >
 	<div>
-		Spin up a durable, sandboxed agent with `docker compose` on a single host, or
-		Helm on Kubernetes for production. No proprietary cloud required.
+		Trace your first LLM call in minutes with `bun run setup`, or deploy the full stack
+		with docker compose. No proprietary cloud required.
 	</div>
 </CTA>

@@ -8,9 +8,9 @@ import appCss from "../styles.css?url";
 
 const THEME_INIT_SCRIPT = `(function(){try{var stored=window.localStorage.getItem('theme');var mode=(stored==='light'||stored==='dark'||stored==='auto')?stored:'auto';var prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;var resolved=mode==='auto'?(prefersDark?'dark':'light'):mode;var root=document.documentElement;root.classList.remove('light','dark');root.classList.add(resolved);if(mode==='auto'){root.removeAttribute('data-theme')}else{root.setAttribute('data-theme',mode)}root.style.colorScheme=resolved;}catch(e){}})();`;
 
-const TITLE = "Memoturn — a self-hostable, durable runtime for AI agents";
+const TITLE = "Memoturn — open-source LLM observability, evals & prompt management";
 const DESCRIPTION =
-  "Run persistent, per-task AI agents that survive crashes, cost nothing when idle, and execute code in sandboxes with zero ambient authority. Open source, Docker-based, Apache-2.0.";
+  "Trace every LLM call, track cost, tokens, and latency, run offline, online, and human evals, and ship versioned prompts with deployment channels. Self-hostable, OpenTelemetry-native, Apache-2.0.";
 
 export const Route = createRootRoute({
   head: () => ({

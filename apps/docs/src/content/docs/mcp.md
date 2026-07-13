@@ -1,112 +1,104 @@
 ---
-title: MCP
-description: Model Context Protocol — Memoturn as both an MCP server and client.
+title: MCP server
+description: Expose a project's prompts, datasets, and review queues as MCP tools — stdio for agent IDEs, or the remote Streamable HTTP endpoint.
 ---
 
+memoturn ships a [Model Context Protocol](https://modelcontextprotocol.io) server that exposes a
+project's **prompts**, **datasets**, and **review queues** as tools for agent IDEs (Claude
+Desktop, Cursor, etc.). It talks to the same server logic the REST API uses, so it reads and
+writes the live project.
 
-Memoturn speaks [MCP](https://modelcontextprotocol.io) in both directions, built on the official
-[`mcp` Python SDK](https://github.com/modelcontextprotocol/python-sdk):
+There are two ways to connect, backed by the same tool registry:
 
-- **Client** — external MCP servers (stdio, Streamable HTTP, or legacy SSE) mount as tools your
-  agents can call mid-turn.
-- **Server** — every Memoturn agent is an MCP server that Claude Code, Claude.ai, or any other
-  MCP client can call as a tool.
+- **Local stdio server** (`apps/mcp`) — runs next to your datastores, ideal for self-host.
+- **Remote Streamable HTTP endpoint** — served by the API at `/v1/mcp/{projectId}`, one MCP
+  resource per project.
 
-Install the extra:
+## Tools
 
-```bash
-pip install "memoturn[mcp]"          # or: uv sync --extra mcp
-```
+| Tool | Purpose |
+| --- | --- |
+| `list_prompts` | List prompts (name, folder, versions, channels). |
+| `get_prompt` | Full prompt detail with every version. |
+| `resolve_prompt` | Resolve a channel (default `production`) to compiled content + config. |
+| `create_prompt_version` | Create a new prompt version (and the prompt if new). |
+| `list_datasets` | List datasets with item/run counts. |
+| `get_dataset` | Dataset items + runs. |
+| `create_dataset` | Create a dataset (idempotent on name). |
+| `add_dataset_items` | Append items (input / expectedOutput / metadata). |
+| `list_review_queues` | List review queues with pending/done counts. |
+| `create_review_queue` | Create a queue bound to a score name + data type. |
+| `add_review_items` | Enqueue traces by id. |
+| `list_review_items` | List queue items (default `PENDING`) with trace I/O. |
+| `submit_review_score` | Score a review item (numeric/boolean `value` or categorical `stringValue`). |
 
-## Mounting external MCP servers as tools
+## Local stdio server
 
-Declare servers (JSON list in the env var); each server's tools mount as `mcp__{server}__{tool}`:
+### Auth
 
-```bash
-export MEMOTURN_MCP_SERVERS='[
-  {"name": "files", "command": "npx",
-   "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]},
+The server is scoped to a single project, resolved at startup from a project API key pair (the
+same `pk-mt-…` / `sk-mt-…` keys the SDK uses):
 
-  {"name": "linear", "url": "https://mcp.linear.app/mcp",
-   "headers": {"authorization": "Bearer ..."}},
+- `MEMOTURN_PUBLIC_KEY`
+- `MEMOTURN_SECRET_KEY`
 
-  {"name": "legacy", "url": "https://old.example.com/sse", "transport": "sse"}
-]'
-```
+It also needs the datastore connection env (`DATABASE_URL`, `REDIS_URL`, `CLICKHOUSE_URL`, …)
+since it queries them directly.
 
-The transport is inferred: `command` → stdio subprocess, `url` → Streamable HTTP. Legacy SSE
-servers share the `url` field, so they must say `"transport": "sse"` explicitly.
-
-Semantics:
-
-- Each server has an **independent connection**: one server failing to connect is logged and
-  skipped, not fatal (set `MEMOTURN_MCP_STRICT=true` to abort startup instead).
-- A tool result's `structuredContent` is passed to the model as JSON; otherwise content blocks
-  are flattened to text. A server-side `isError` result surfaces as a tool error result.
-- A server's `tools/list_changed` notification re-lists just that server's tools and updates
-  every agent — live agents in place, hibernated ones on wake.
-- When at least one server is connected, agents also get four discovery tools —
-  `mcp_list_resources`, `mcp_read_resource`, `mcp_list_prompts`, `mcp_get_prompt` — for the
-  servers' MCP resources and prompt templates (resources are not auto-mounted one-tool-each;
-  a server can expose thousands).
-
-## Serving agents over MCP
+### Run
 
 ```bash
-export MEMOTURN_MCP_SERVER_ENABLED=true
+bun --filter @memoturn/mcp start    # stdio; logs to stderr, JSON-RPC on stdout
 ```
 
-Each agent gets a Streamable HTTP MCP endpoint at `/mcp/{agent}/` exposing one tool, `chat`:
+### Configure an agent IDE
 
-| Tool argument | Required | Meaning |
+The server speaks stdio. Point your IDE's MCP config at it, e.g.:
+
+```jsonc
+{
+  "mcpServers": {
+    "memoturn": {
+      "command": "bun",
+      "args": ["run", "/path/to/memoturn/apps/mcp/src/index.ts"],
+      "env": {
+        "MEMOTURN_PUBLIC_KEY": "pk-mt-…",
+        "MEMOTURN_SECRET_KEY": "sk-mt-…",
+        "DATABASE_URL": "postgresql://…",
+        "REDIS_URL": "redis://…",
+        "CLICKHOUSE_URL": "http://…"
+      }
+    }
+  }
+}
+```
+
+## Remote endpoint (Streamable HTTP)
+
+The API serves the same tool registry over Streamable HTTP. Each project is its own MCP
+resource, so clients connect per-project. RBAC is per-tool (not per-method — every call is a
+POST): a tool's mutating flag maps to a `read`/`write` permission, and write tools are audited.
+
+Two auth paths resolve to the same per-project authorization:
+
+- **API-key Basic** (`pk-mt-…:sk-mt-…`, self-host / headless) — the key must belong to the
+  `{projectId}` in the URL; the tool's permission is checked against the key's `read`/`write`
+  scope.
+- **OAuth 2.1 bearer** (memoturn cloud, IDE click-through) — the token resolves to a user, who is
+  then authorized against `{projectId}` (org membership → role). Any member may run read tools;
+  only non-`VIEWER` roles may run write tools. Clients discover the flow via the two
+  `.well-known` documents below; an unauthenticated request returns `401` with
+  `WWW-Authenticate: Bearer resource_metadata="…"`.
+
+| Method | Path | Description |
 | --- | --- | --- |
-| `message` | yes | the message to send to the agent |
-| `session` | no | conversation id; calls sharing a `session` share one durable session (`sess_mcp_{session}`) with full history, compaction, and long-term memory — across hibernation and replica migration |
+| `GET / POST / DELETE` | `/v1/mcp/{projectId}` | Streamable-HTTP MCP endpoint scoped to `{projectId}`. `401` (advertising `Bearer` + `Basic`) when auth is missing/invalid or the caller isn't authorized for the project. |
+| GET | `/.well-known/oauth-authorization-server` | OAuth authorization-server metadata. |
+| GET | `/.well-known/oauth-protected-resource` | OAuth protected-resource metadata. |
 
-Agents are created lazily on first call, exactly like the WebSocket surface. The endpoint uses the
-same authentication (`api_key`/`jwt`), RBAC (`chat` permission), per-tenant rate limits, and audit
-logging as `/v1`; under scale-out, MCP requests owner-route on the agent name like every other
-agent request.
+Behind Caddy (the single-VM production stack), the two `.well-known/oauth-*` paths are routed to
+the API — they're served at the domain root, not the console. The OAuth authorize flow bounces
+unauthenticated users to the console sign-in page (`MCP_LOGIN_PAGE`, default
+`<first AUTH_TRUSTED_ORIGINS>/login`).
 
-Connect from Claude Code:
-
-```bash
-claude mcp add --transport http memoturn-demo http://localhost:8080/mcp/demo/ \
-  --header "x-api-key: ..."
-```
-
-Or with the official SDK client:
-
-```python
-from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
-
-async with streamable_http_client("http://localhost:8080/mcp/demo/") as (read, write, _):
-    async with ClientSession(read, write) as session:
-        await session.initialize()
-        result = await session.call_tool("chat", {"message": "hello", "session": "ctx-1"})
-```
-
-With `MEMOTURN_MCP_SERVER_EXPOSE_RESOURCES=true`, the agent's long-term memories are also served
-as read-only `memory://{agent}/{id}` resources (`resources/list` + `resources/read`).
-
-## Configuration reference
-
-| Setting (env var) | Default | Meaning |
-| --- | --- | --- |
-| `MEMOTURN_MCP_SERVERS` | `[]` | external MCP servers to mount as tools |
-| `MEMOTURN_MCP_STRICT` | `false` | a server that fails to connect aborts startup |
-| `MEMOTURN_MCP_SERVER_ENABLED` | `false` | expose every agent under `/mcp/{agent}` |
-| `MEMOTURN_MCP_SERVER_STATELESS` | `true` | self-contained requests (right for scale-out); `false` keeps MCP sessions in replica memory |
-| `MEMOTURN_MCP_SERVER_EXPOSE_RESOURCES` | `false` | serve agent memories as MCP resources |
-
-Per-server fields in `MEMOTURN_MCP_SERVERS`: `name` (required), and either `command` + `args` +
-`env` (stdio) or `url` + `headers` (remote), with optional explicit `transport`
-(`stdio` | `streamable_http` | `sse`).
-
-## Related
-
-- [Tools](/tools/) — how mounted MCP tools (`mcp__{server}__{tool}`) sit alongside built-ins.
-- [A2A](/a2a/) — the sibling protocol for agent-to-agent messaging.
-- [Security](/security/) — the auth/RBAC the `/mcp` surface shares with `/v1`.
-- [Configuration](/configuration/#mcp) — every MCP setting.
+See the [API reference](/api/) for the full route surface.

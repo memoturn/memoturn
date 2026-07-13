@@ -1,111 +1,124 @@
 ---
 title: Deployment
-description: Kubernetes (Helm) and the dev-to-production path for hosting Memoturn.
+description: Self-host memoturn with Docker Compose (dev and single-VM production) or the Kubernetes Helm chart.
 ---
 
+memoturn is self-hostable with no cloud lock-in. Dev uses Docker Compose; production is the same
+components (managed or self-run).
 
-Decision record + path for hosting Memoturn. Complements [operations](/operations/) (how to run)
-and the [roadmap](/roadmap/). Memoturn ships as **two images**: the Apache-2.0 `memoturn`
-(built from `Dockerfile`; bundles the Postgres/storage/Redis/OIDC/OTel extras) and
-`memoturn-enterprise` (built from `enterprise/Dockerfile`; adds the BSL enterprise package + Stripe
-billing). See `deploy/README.md` for the build commands and the required-backend matrix.
+## Local / dev dependencies
 
-## Decision
+```bash
+bun run infra:up     # Postgres, ClickHouse, Redis/Valkey, MinIO (infra/docker-compose.dev.yml)
+bun run infra:down
+bun run infra:logs
+```
 
-Inputs (product direction):
-- **Delivery:** self-hosted / BYOC (customers deploy in their own cloud) is what ships today. A
-  hosted SaaS tier is a Phase 2 intent (planned in `docs/managed-cloud.md` in the repo, not a live
-  service); the artifact below is chosen so one chart can serve both when that lands.
-- **Sandbox:** agents run **untrusted / customer-supplied code**.
-- **Compliance:** SOC2 / VPC-isolation / data-residency **required now**.
+## Full self-host stack
 
-All three point to **Kubernetes as the single deployment target**, with the **Helm chart
-([`deploy/helm/memoturn`](../deploy/helm/memoturn)) as the one shippable artifact** — it serves
-BYOC installs today and the future hosted tier from one source.
+`infra/docker-compose.yml` builds and runs the API + worker alongside all dependencies:
 
-> **Why not a PaaS (e.g. Render):** no privileged container runtime → the hardened gVisor sandbox
-> can't run (untrusted code is unsafe), and no VPC/compliance controls. A PaaS also can't consume a
-> Helm chart, so it would be a second, diverging artifact. We standardize on Helm-on-managed-K8s;
-> local dev uses the same chart on kind/k3d.
+```bash
+docker compose -f infra/docker-compose.yml up -d --build
+```
 
-### Where to run the Helm chart
+Images are built from `docker/{api,worker,console}.Dockerfile` (all `oven/bun`). The console is a
+static SPA — build it (`bun --filter @memoturn/console build`) and serve the output behind any
+static host / CDN, with a reverse proxy routing `/api/*` to the API and SPA-fallback (rewrite
+unknown paths to `index.html`) for deep links.
 
-| Target | Ops | Untrusted sandbox (gVisor) | Use |
-|---|---|---|---|
-| **GKE** (Standard/Autopilot) | low | **GKE Sandbox = gVisor is first-class** (a `RuntimeClass`) | strong candidate for the future **hosted SaaS** tier |
-| **EKS** | medium | build a Bottlerocket + gVisor node pool yourself | AWS-native; common **BYOC** target |
-| **DOKS / Civo** | low | not turnkey | cheap dev/staging |
-| local **kind/k3d** | n/a | n/a (trusted only) | dev |
+## Single-VM production (Docker Compose + Caddy)
 
-**GKE Sandbox is the single biggest shortcut for the untrusted-code requirement** — gVisor is a
-checkbox/`RuntimeClass` rather than the node-pool build EKS needs. Recommendation: target **GKE for
-the future hosted tier** (free first-cluster management, native gVisor), ship the **same Helm chart for BYOC** on
-whatever K8s the customer runs (EKS/AKS/on-prem). The chart is cloud-agnostic; the snapshot/lease/
-handoff layer works on any S3-compatible store (S3, R2, GCS via the S3 API).
+`infra/docker-compose.prod.yml` is a self-contained, HTTPS-terminated stack for one server: Caddy
+(auto Let's Encrypt) in front of the console + API + worker, plus self-hosted Postgres,
+ClickHouse, Valkey, and MinIO. Caddy is the only published port (80/443); everything else stays
+on the internal network. A one-shot `migrate` service runs the Prisma + ClickHouse migrations
+before the API/worker start.
 
-## Phase 1 — Dev / staging
+**Prerequisites:** a VM with Docker, a DNS A/AAAA record pointing at it, and ports 80+443 open.
 
-`helm install` the chart on **kind/k3d** (local) or a cheap managed cluster (DOKS/Civo). Defaults are
-single-replica with a PVC; `subprocess` sandbox (trusted only). Good for internal envs and demos.
-**Do not** run untrusted code or onboard compliance-bound customers here — those need the gVisor
-sandbox (Phase 2).
+```bash
+cp .env.production.example .env          # set MEMOTURN_DOMAIN, ACME_EMAIL, and the secrets
+openssl rand -base64 48                  # generate each secret (BETTER_AUTH_SECRET, ENCRYPTION_KEY, passwords)
+bun run prod:up                          # docker compose -f infra/docker-compose.prod.yml --env-file .env up -d --build
+```
 
-## Phase 2 — Production (GKE / EKS): BYOC artifact + future SaaS tier
+Companion scripts: `bun run prod:ps` (status), `bun run prod:logs` (tail logs), `bun run prod:down` (stop).
 
-Reference architecture (componentwise):
+The compose file derives `AUTH_BASE_URL=https://DOMAIN/api` and
+`AUTH_TRUSTED_ORIGINS=https://DOMAIN` from `MEMOTURN_DOMAIN`; required secrets use `${VAR:?}` so a
+missing value aborts the command. Caddy routes `/api/*` to the API (prefix stripped, matching the
+dev Vite proxy) and everything else to the console SPA — so the console's default
+`VITE_API_BASE=/api` works unchanged.
 
-| Component | Mapping |
-|---|---|
-| Runtime | Deployment via the Helm chart (`scaleout.enabled=true`); HPA autoscaling; hibernation + snapshots = scale-to-zero economics. `validate_runtime()` **fails fast** if scale-out is enabled without Postgres or a snapshot backend |
-| Per-agent SQLite | `MEMOTURN_SNAPSHOT_BACKEND=s3` → **S3/GCS** (SSE-KMS, versioned); pods diskless (snapshots are source of truth, lease guards single-writer) |
-| Control plane | **RDS/Aurora** or **Cloud SQL** Postgres (Multi-AZ), `MEMOTURN_POSTGRES_DSN` |
-| Shared rate-limit/quota store | **Valkey** (or any Redis-protocol store) via `MEMOTURN_REDIS_URL` — required under scale-out for fleet-wide limits |
-| Large workspace blobs | object storage (existing `S3BlobStore`) |
-| Untrusted sandbox | **gVisor** — GKE Sandbox `RuntimeClass`, or an EKS Bottlerocket+gVisor node pool — via `MEMOTURN_SANDBOX_BACKEND=k8s` |
-| LLM | **Bedrock / Vertex** (in-region Claude) for data residency — see gap #2; or public Anthropic/OpenAI API |
-| Ingress / TLS | ALB/NLB or GCLB + managed certs; **PrivateLink/PSC** for customer-private access; WAF |
-| Inter-replica proxy | owner-proxy over cluster DNS; `MEMOTURN_REPLICA_ADDRESS` = pod IP; shared `MEMOTURN_INTERNAL_TOKEN` |
-| Secrets | Secrets Manager / Secret Manager via **Secrets Store CSI** (the `SecretProvider` reads `/run/secrets/*`) |
-| Encryption | KMS everywhere (object SSE-KMS, DB, disks); `MEMOTURN_BLOB_ENCRYPTION_KEY` from KMS |
-| Compliance | CloudTrail/Audit Logs, GuardDuty/SCC, VPC flow logs; app audit log → CloudWatch/Cloud Logging → SIEM |
-| Observability | OTel → ADOT / OTel Collector → CloudWatch / Cloud Monitoring |
+**First admin:** do **not** run `bun run seed` in production (it seeds the well-known dev key).
+Open `https://DOMAIN/`, sign up the first admin (Better Auth email/password) — the org plugin
+auto-provisions a default project — then mint an SDK API key from Settings. Point the SDK at
+`https://DOMAIN/api`.
 
-### Engineering gaps for Phase 2 (prioritized)
+**Backups:** MinIO holds the replayable raw event log (the source of truth — ClickHouse can be
+rebuilt from it), so it is the highest priority; also `pg_dump` Postgres and
+snapshot/`clickhouse-backup` ClickHouse. All four persist to named volumes (`pgdata`, `chdata`,
+`redisdata`, `miniodata`).
 
-1. **Hardened K8s sandbox — _built_** (`MEMOTURN_SANDBOX_BACKEND=k8s`,
-   [`sandbox/k8s.py`](../src/memoturn/sandbox/k8s.py)): throwaway gVisor-isolated exec pods (no SA
-   token, non-root, read-only rootfs, all caps dropped, seccomp RuntimeDefault, limits, hard
-   deadline), with the **network capability bridge** (`MEMOTURN_SANDBOX_K8S_BRIDGE_ENABLED=true`,
-   [`sandbox/bridge.py`](../src/memoturn/sandbox/bridge.py)) so in-pod `workspace`/`caps` work.
-   The **deny-all-except-bridge NetworkPolicy** for the sandbox namespace ships in both the GKE
-   Terraform module (gap #3) and the Helm chart (`sandbox.networkPolicy.enabled`). Follow-up:
-   in-pod **dependency support**.
-2. **In-region LLM provider — _built_**: `MEMOTURN_LLM_PROVIDER=bedrock` (AWS) or `vertex` (GCP) runs
-   Claude via the Messages API in your cloud/region for data residency, reusing
-   [`AnthropicProvider`](../src/memoturn/providers/anthropic.py) with an injected client. Credentials
-   come from the cloud default chain (IRSA / Workload Identity); extras `[bedrock]` / `[vertex]`.
-3. **Terraform module — _GKE built_** ([`deploy/terraform/gke`](../deploy/terraform/gke)): VPC +
-   private GKE (Workload Identity, Dataplane V2) with a **gVisor sandbox node pool** (scale-to-zero),
-   Cloud SQL (private), a CMEK GCS bucket via S3-interop, the deny-all-except-bridge NetworkPolicy,
-   and the wired Helm release. `terraform validate`-clean. **Follow-up: an EKS module** (note: gVisor
-   on EKS needs a custom Bottlerocket+gVisor node AMI, unlike GKE Sandbox's turnkey RuntimeClass).
-4. **IRSA / Workload Identity** for object-store + secrets access (pod identity; drop static keys).
-5. **Shared rate limiter — _built_** (`MEMOTURN_REDIS_URL`, the `redis` extra): a Redis-protocol
-   store — **Valkey** (BSD-3) or ElastiCache/Memorystore — enforces rate limits and quotas across
-   replicas. `validate_runtime()` warns when scale-out is enabled with limits on but no Redis URL
-   (the in-process limiter is per-replica, so each replica keeps its own counters).
-6. **Compliance wiring** — KMS keys, audit-log shipping, VPC/PrivateLink, pen-test + SOC2 controls
-   mapping.
+**Note:** a single VM has no HA. If volume or uptime needs grow, move to the Helm chart below
+with managed datastores.
 
-### BYOC (self-hosted enterprise)
+## Kubernetes (Helm)
 
-Ship **Helm chart + Terraform module** so a customer installs into their own account/VPC. Same
-artifact as the hosted tier; they bring their own object storage, Postgres, KMS, and LLM access.
+For production, the chart at `infra/helm/memoturn` deploys the stateless API (behind an HPA), the
+worker, and the console; Postgres / ClickHouse / Redis / blob are expected to be external
+(managed services or operators). A pre-install/upgrade hook Job runs the Prisma + ClickHouse
+migrations before pods roll. Published images come from `ghcr.io/memoturn/*`.
 
-## Sequencing
+```bash
+helm install memoturn ./infra/helm/memoturn -f my-values.yaml
+```
 
-1. **Now:** Phase 1 on kind/k3d (or a cheap managed cluster) for dev/demo + trusted partners.
-2. **Before the first untrusted-code / compliance customer:** Terraform (gap #3) + NetworkPolicy,
-   stand up GKE/EKS with `scaleout.enabled` + the gVisor sandbox, cut production over.
-3. **Then:** IRSA (#4) and compliance wiring (#6); the in-region provider (#2) and shared rate
-   limiter (#5) already ship.
+See the
+[chart README](https://github.com/memoturn/memoturn/blob/main/infra/helm/memoturn/README.md) for
+required values (datastore URLs, `betterAuthSecret`, `encryptionKey`) and the ingress /
+autoscaling options.
+
+## Migrations
+
+```bash
+bun run db:migrate      # Prisma (Postgres)
+bun run db:clickhouse   # ClickHouse DDL
+```
+
+Run these on deploy. After a Prisma schema change, the client is regenerated by `postinstall` (or
+`bun run db:generate`).
+
+## Scaling
+
+- **API** is stateless — scale horizontally behind a load balancer.
+- **Worker** scales by process count and `WORKER_CONCURRENCY`; the BullMQ queue distributes
+  ingest jobs. It also serves `/health` + `/metrics` on `WORKER_PORT` (default `3002`) for
+  liveness/observability probes.
+- **ClickHouse** holds the high-volume telemetry; use a managed cluster or the ClickHouse
+  operator in production. **Postgres** stays small (metadata).
+- The raw blob event log is the source of truth — ClickHouse can be rebuilt from it.
+
+## Data retention
+
+Set a per-project max age; a daily worker cron deletes older telemetry:
+
+```bash
+curl -u pk-mt-dev:sk-mt-dev -X POST http://localhost:3001/v1/retention \
+  -H 'content-type: application/json' -d '{"days":90}'      # 0 = keep forever
+curl -u pk-mt-dev:sk-mt-dev -X POST http://localhost:3001/v1/retention/apply   # run now
+```
+
+## Production checklist
+
+- Set a strong `BETTER_AUTH_SECRET` (32+ chars) and a distinct `ENCRYPTION_KEY`.
+- Use managed/persistent Postgres, ClickHouse, Redis, and S3 (rotate the dev credentials).
+- Put the API and console behind TLS; set `AUTH_BASE_URL` / `AUTH_TRUSTED_ORIGINS`.
+- Configure object storage (S3/R2/GCS) for the blob event log + exports.
+- Optionally cap ingest with `RATE_LIMIT_PER_MINUTE` (per-project global limit; `0` disables it).
+- For enterprise tenants, register an SSO provider (OIDC/SAML) per organization from the
+  Organizations page, and configure the PostHog analytics sink / PII masking per project as
+  needed.
+
+See [Configuration](/configuration/) for the full variable reference.
