@@ -24,7 +24,7 @@ services:
   # Apache Doris (OLAP). FE = query/metadata, BE = storage; the BE self-registers with
   # the FE via stable IPs on the dedicated subnet. Not exposed on the host network.
   doris-fe:
-    image: apache/doris:fe-3.1.4
+    image: apache/doris:fe-4.1.2
     restart: unless-stopped
     environment:
       FE_SERVERS: fe1:172.28.81.2:9010
@@ -43,7 +43,7 @@ services:
       start_period: 30s
 
   doris-be:
-    image: apache/doris:be-3.1.4
+    image: apache/doris:be-4.1.2
     restart: unless-stopped
     depends_on:
       doris-fe:

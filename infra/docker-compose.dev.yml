@@ -24,7 +24,7 @@ services:
   # The init scripts self-register the BE with the FE, which needs stable IPs — hence the
   # dedicated subnet. Doris FE+BE want ~4 GB of Docker memory between them.
   doris-fe:
-    image: apache/doris:fe-3.1.4
+    image: apache/doris:fe-4.1.2
     restart: unless-stopped
     environment:
       FE_SERVERS: fe1:172.28.80.2:9010
@@ -46,7 +46,7 @@ services:
       start_period: 30s
 
   doris-be:
-    image: apache/doris:be-3.1.4
+    image: apache/doris:be-4.1.2
     restart: unless-stopped
     depends_on:
       doris-fe:
