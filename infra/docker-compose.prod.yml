@@ -50,6 +50,15 @@ services:
   doris-fe:
     image: apache/doris:fe-4.1.2
     restart: unless-stopped
+    # Fixed-size FE heap (stock fe.conf asks for 8 GB, sized for a dedicated host; this
+    # stack shares one VM with the BE + Postgres + MinIO + the apps). Override via
+    # DORIS_FE_XMX in .env if the host has memory to spare.
+    entrypoint:
+      [
+        "bash",
+        "-c",
+        "sed -i 's/-Xmx8192m/-Xmx${DORIS_FE_XMX:-4096m}/; s/-Xms8192m/-Xms${DORIS_FE_XMX:-4096m}/' /opt/apache-doris/fe/conf/fe.conf; exec bash /usr/local/bin/init_fe.sh",
+      ]
     environment:
       FE_SERVERS: fe1:172.28.82.2:9010
       FE_ID: 1
@@ -59,7 +68,10 @@ services:
     volumes:
       - dorisfemeta:/opt/apache-doris/fe/doris-meta
     networks:
-      default: {}
+      # doris-network only: with a second network attached, the FE can bind its edit-log
+      # port to the wrong interface after a container recreate (priority_networks is only
+      # written to fe.conf on first bootstrap), deadlocking the BDB master election.
+      # Services that dial doris-fe by name join the doris network below.
       doris:
         ipv4_address: 172.28.82.2
     healthcheck:
@@ -72,6 +84,15 @@ services:
   doris-be:
     image: apache/doris:be-4.1.2
     restart: unless-stopped
+    # Cap BE process memory (default is ~90% of system memory, which assumes a dedicated
+    # host and starves the co-located services under sustained ingest — queries then fail
+    # with MEM_ALLOC_FAILED). Override via DORIS_BE_MEM_LIMIT in .env (absolute or %).
+    entrypoint:
+      [
+        "bash",
+        "-c",
+        "grep -q '^mem_limit' /opt/apache-doris/be/conf/be.conf || echo 'mem_limit = ${DORIS_BE_MEM_LIMIT:-40%}' >> /opt/apache-doris/be/conf/be.conf; exec bash /usr/local/bin/entry_point.sh",
+      ]
     depends_on:
       doris-fe:
         condition: service_healthy
@@ -86,7 +107,6 @@ services:
     volumes:
       - dorisbedata:/opt/apache-doris/be/storage
     networks:
-      default: {}
       doris:
         ipv4_address: 172.28.82.3
     healthcheck:
@@ -109,6 +129,8 @@ services:
     volumes:
       - ./doris-setup.sh:/doris-setup.sh:ro
     entrypoint: ["/bin/sh", "/doris-setup.sh"]
+    networks:
+      - doris
 
   redis:
     image: valkey/valkey:8-alpine
@@ -172,6 +194,9 @@ services:
       DORIS_PASSWORD: ${DORIS_PASSWORD:?}
       DORIS_DB: memoturn
     command: ["sh", "-c", "bun --filter @memoturn/db migrate && bun packages/telemetry/src/migrate.ts"]
+    networks:
+      - default
+      - doris
 
   # Public API (Hono on Bun): /v1 ingest + OTel receiver + read API + /auth + OpenAPI.
   # No host port — reached only through Caddy at https://DOMAIN/api.
@@ -215,6 +240,9 @@ services:
       # volume (0 = off) for deployments that need to bound a single project's ingest.
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
       INGEST_EVENTS_PER_MINUTE: ${INGEST_EVENTS_PER_MINUTE:-0}
+    networks:
+      - default
+      - doris
 
   worker:
     build:
@@ -249,6 +277,9 @@ services:
       AUTH_TRUSTED_ORIGINS: https://${MEMOTURN_DOMAIN:?}
       ALLOW_PRIVATE_WEBHOOK_TARGETS: ${ALLOW_PRIVATE_WEBHOOK_TARGETS:-0}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-10}
+    networks:
+      - default
+      - doris
 
   # Console SPA (Vite preview). `--host 0.0.0.0` so Caddy can reach it across the container
   # network (preview binds to localhost by default). Built with VITE_API_BASE=/api (image
