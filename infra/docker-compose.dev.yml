@@ -26,6 +26,15 @@ services:
   doris-fe:
     image: apache/doris:fe-4.1.2
     restart: unless-stopped
+    # Cap the FE heap for dev: the stock fe.conf asks for an 8 GB JVM, but the whole
+    # dev VM is typically 6-8 GB shared with the BE + Postgres + MinIO. Without the cap,
+    # sustained ingest starves the BE's memory watermark and queries fail (MEM_ALLOC_FAILED).
+    entrypoint:
+      [
+        "bash",
+        "-c",
+        "sed -i 's/-Xmx8192m/-Xmx2048m/; s/-Xms8192m/-Xms1024m/' /opt/apache-doris/fe/conf/fe.conf; exec bash /usr/local/bin/init_fe.sh",
+      ]
     environment:
       FE_SERVERS: fe1:172.28.80.2:9010
       FE_ID: 1
@@ -40,7 +49,10 @@ services:
     volumes:
       - dorisfemeta:/opt/apache-doris/fe/doris-meta
     networks:
-      default: {}
+      # doris-network only (host access is via the published ports): with a second
+      # network attached, the FE can bind its edit-log port to the wrong interface
+      # after a container recreate (priority_networks is only written to fe.conf on
+      # first bootstrap), deadlocking the BDB master election.
       doris:
         ipv4_address: 172.28.80.2
     healthcheck:
@@ -53,6 +65,14 @@ services:
   doris-be:
     image: apache/doris:be-4.1.2
     restart: unless-stopped
+    # Cap BE process memory for dev (default is ~90% of system memory, which assumes a
+    # dedicated host). 3G leaves room for the FE + the other dev containers in one VM.
+    entrypoint:
+      [
+        "bash",
+        "-c",
+        "grep -q '^mem_limit' /opt/apache-doris/be/conf/be.conf || echo 'mem_limit = 3G' >> /opt/apache-doris/be/conf/be.conf; exec bash /usr/local/bin/entry_point.sh",
+      ]
     depends_on:
       doris-fe:
         condition: service_healthy
@@ -69,7 +89,6 @@ services:
     volumes:
       - dorisbedata:/opt/apache-doris/be/storage
     networks:
-      default: {}
       doris:
         ipv4_address: 172.28.80.3
     healthcheck:
