@@ -1,6 +1,6 @@
 {
   "name": "@memoturn/sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "memoturn JS/TS SDK — tracing, OpenAI wrapper, LangChain callback, prompt fetch.",
   "license": "Apache-2.0",
   "keywords": [
