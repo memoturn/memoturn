@@ -75,4 +75,10 @@ curl -u pk-mt-dev:sk-mt-dev -X POST http://localhost:3001/v1/review-queues/q1/it
 ```
 
 The console **Review** page shows each pending item's trace input/output with an inline scoring
-form.
+form:
+
+![Review queues — pending items with inline scoring](../../assets/screenshots/review.png)
+
+Evaluator runs and their scores are visible on the **Evaluators** page:
+
+![Evaluators — LLM-as-judge configs and recent runs](../../assets/screenshots/evaluators.png)

@@ -46,6 +46,7 @@ const DOC_FILES = [
   "docs/sdk-typescript.md",
   "docs/sdk-python.md",
   "docs/roadmap.md",
+  "docs/troubleshooting.md",
   ...SITE_DOC_FILES,
 ];
 

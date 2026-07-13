@@ -50,7 +50,9 @@ linked by `trace_id` / `project_id`.
   - **event** — a point-in-time marker
 
   Observations nest via `parentObservationId`, rendered as a **waterfall timeline** in the
-  console's trace detail view.
+  console's trace detail view:
+
+  ![Trace detail — waterfall timeline with scores and payloads](../../assets/screenshots/trace-detail.png)
 - **Score** — a numeric/categorical/boolean measurement attached to a trace (or
   observation). `source` is one of:
   - `API` — sent via SDK/API (e.g. user feedback)

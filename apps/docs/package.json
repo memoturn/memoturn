@@ -22,6 +22,7 @@
   "devDependencies": {
     "@astrojs/check": "^0.9.4",
     "@memoturn/tsconfig": "workspace:*",
+    "remark-gfm": "^4.0.1",
     "typescript": "^6.0.3",
     "wrangler": "^4.85.0"
   }

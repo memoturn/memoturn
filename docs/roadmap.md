@@ -1,75 +1,82 @@
 # Roadmap
 
 A prioritized backlog of candidate features, benchmarked against the broader
-LLM-engineering-platform category. Effort is rough (S = hours, M = a day or two,
-L = multi-day). Items are independent unless noted.
+LLM-engineering-platform category (July 2026 competitive analysis). Effort is rough
+(S = hours, M = a day or two, L = multi-day). Items are independent unless noted.
+
+**Strategy:** close the gaps that lose head-to-head evaluations (alerting, cost
+budgets, provider breadth, dashboards), deepen the two differentiators nobody else
+owns (trustworthy ingest, MCP-native platform), and build the enterprise compliance
+layer as the paid surface — everything else stays Apache-2.0.
 
 ## Shipped
 
 Observability (traces / observations / scores, waterfall, sessions, OTel) · metrics &
 dashboards · custom widgets · prompt registry + channels · playground (multi-provider,
-streaming, trace-linked) · datasets & experiments · evaluators (offline + online) ·
-human review queues · scores on traces · webhooks (score alerts) · auth (sessions +
-API keys) · projects + RBAC + project switcher · audit log · data retention · NDJSON
-export · TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
+streaming, trace-linked, tools + structured output) · datasets & experiments +
+comparison matrix · evaluators (offline + online) · human review queues + assignments ·
+score configs · scores on traces · comments · tags + facets · webhooks + automations
+(Slack) · auth (sessions + API keys) · organizations + SSO + RBAC + project switcher ·
+audit log · data retention · rate limiting · NDJSON/CSV export + scheduled blob
+exports · saved views · batch actions · multimodal media · custom model prices ·
+product-analytics sink (PostHog) · ⌘K palette · global time range · agent-graph view ·
+MCP server (stdio + remote Streamable HTTP with OAuth + per-tool RBAC) ·
+TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 
-## Collaboration
+## Horizon 1 — gap closers (pre-cloud-launch)
 
-| Feature | Effort | Notes |
-| --- | --- | --- |
-| **Comments** | M | Threaded comments on traces/observations/sessions/prompts. New `Comment` table, `/v1/comments` CRUD, thread UI on the trace page. |
-| **Tags + tag facets** | S | Traces already carry `tags`; add a tag filter on the trace list, a tags column, and tag management. |
-| **Score configs** | M | The `ScoreConfig` model exists but is unused — expose CRUD; enforce allowed names/data-types/categories on score creation; drive the review form from configs. |
-| ~~**Annotation assignments**~~ | Done | Assign review items to a user (`/items/{id}/assign`); "assigned to me only" filter on the review page. |
-
-## Evaluation depth
+Items where an evaluation against Langfuse / Braintrust / LangSmith hits a wall today.
 
 | Feature | Effort | Notes |
 | --- | --- | --- |
-| ~~**Experiment comparison view**~~ | Done | `GET /v1/datasets/{name}/comparison` items × runs matrix (output + scores per cell); rendered on the dataset page. |
-| ~~**Generalized automations**~~ | Done | Trigger→action rules (`/v1/automations`): triggers score.created/trace.created/eval.completed, actions webhook + Slack. |
-| ~~**Playground tools + structured output**~~ | Done | Playground modes for JSON-schema structured output (generateObject) and tool calling (surfaces tool calls). |
+| **Alert rules engine** | L | Extend automations (trigger→action) into stateful alerts: error-rate / latency-p95 / cost-per-day / ingest-volume / DLQ-depth triggers evaluated by a worker cron (reuse `withLock`), firing→resolved lifecycle, email + PagerDuty channels alongside webhook/Slack. Weakest area vs. every competitor. |
+| **Cost budgets** | M | Per-project monthly budget with 50/80/100% threshold alerts (via alert engine) and a soft over-budget flag on traces. Builds on existing cost rollups; no hard caps (we're not a gateway). |
+| **Provider breadth** | M | Add Gemini, Bedrock, Azure OpenAI, and a generic OpenAI-compatible base-URL provider (covers vLLM/Ollama/OpenRouter) to `packages/llm`. Pays off 3×: playground, LLM-as-judge evaluators, trace replay. |
+| **Dashboard flexibility** | L | Widget builder v2: score/error-rate metrics, cost-by-user/session breakdowns, per-widget filters (env, model, tags), multiple named dashboards per project. Stop short of a free-form query builder. |
+| **SDK OTel exporter** | M | First-party SDKs speak the native batch protocol; add an OTel exporter/processor helper (span → GenAI semconv → existing OTLP endpoint) so OTel-standardized teams keep first-party DX. Track GenAI + MCP semconv releases (still Development status). |
 
-## Data platform
-
-| Feature | Effort | Notes |
-| --- | --- | --- |
-| ~~**Custom model definitions**~~ | Done | Per-project model price overrides (`/v1/model-prices`); the worker applies them over the built-in registry at ingest. |
-| ~~**Batch actions**~~ | Done | Multi-select on the trace table → bulk delete / add-to-dataset / enqueue-for-review (`POST /v1/traces/batch`). |
-| ~~**Scheduled blob exports**~~ | Done | Daily worker cron writes per-project traces (NDJSON) to blob (`/v1/scheduled-exports`, plus run-now). |
-| ~~**Saved table views**~~ | Done | Persist named filter sets per table (`/v1/saved-views`), applied from the trace explorer. |
-| ~~**Multimodal media**~~ | Done | Inline base64 data URIs offloaded to blob at ingest (`memoturn-media://`), served via `/v1/media`, rendered in the trace view. |
-
-## Tenancy & enterprise
+## Horizon 2 — differentiators (launch wave)
 
 | Feature | Effort | Notes |
 | --- | --- | --- |
-| ~~**Organizations**~~ | Done | Tenancy via the Better Auth organization plugin (org/member/invitation); projects scoped to an org, role-mapped to our RBAC, console org management. |
-| ~~**SSO**~~ | Done | Better Auth `@better-auth/sso` plugin (OIDC/SAML IdPs mapped by email domain → org); register/manage from the Organizations page. Full IdP sign-in needs a real provider. |
-| ~~**API rate limiting**~~ | Done | Per-project Redis fixed-window limiter on `/v1` (`RATE_LIMIT_PER_MINUTE`), 429 + `X-RateLimit-*`/`Retry-After`. |
-| ~~**Worker health/metrics endpoint**~~ | Done | `node:http` server on the worker (`WORKER_PORT`, default 3002) — `/health` liveness + `/metrics` BullMQ queue depths. |
+| **MCP trace-query + eval tools** | M | Add `query_traces` / `get_trace` / `get_metrics` / `list_scores` read tools and a `run_evaluator` write tool to the shared registry — agents debug and evaluate themselves from the IDE. Per-tool RBAC gate already supports the read/write split. |
+| **MCP semconv ingestion** | M | Map `mcp.method.name` / `mcp.session.id` (OTel v1.39+) at ingest; surface MCP tool calls as first-class in the trace view. |
+| **Tool-call analytics** | M | Error rate + latency by tool name across traces — the top agent-debugging question. |
+| **Ingest health console** | M | Productize the CLI-only DLQ: console page with DLQ depth, insert latency, error counters (all already in worker `/metrics`), one-click batch replay, blob replay for a time range. Converts the ingest-trust architecture into a demo. |
+| **Volume-based usage metering** | M | Meter cloud billing by GB ingested, not per-observation — agent workloads emit 40–75 spans per interaction and unit pricing punishes them. Blob-first ingest makes byte-accurate metering cheap. |
+| **Agent-graph v2** | S | Collapse/expand subgraphs, highlight failed paths. |
 
-## Integrations & SDKs
+## Horizon 3 — enterprise & monetization (post-launch)
 
-| Feature | Effort | Notes |
-| --- | --- | --- |
-| ~~**MCP server**~~ | Done | Stdio MCP server (`apps/mcp`) exposing prompts / datasets / review queues as tools for agent IDEs. |
-| ~~**More OTel coverage**~~ | Done | Richer GenAI semconv mapping (model params, log level, session/user, deployment env, newer `gen_ai.*.messages`) + OTLP/protobuf decode (dependency-free) at `/v1/otel/v1/traces`. |
-| ~~**Product-analytics export**~~ | Done | Per-project PostHog sink (`/v1/analytics-sink`); the worker forwards trace.created/score.created to PostHog's capture API. |
-
-## UX
+The paid tier mirrors the line the market accepts (Langfuse's post-MIT gating):
+compliance, not product features.
 
 | Feature | Effort | Notes |
 | --- | --- | --- |
-| ~~**Command-K menu**~~ | Done | ⌘K palette: fuzzy nav + open-trace-by-id. |
-| ~~**Global time-range filter**~~ | Done | Topbar 24h/7d/30d/90d selector shared by dashboard/metrics + traces. |
-| ~~**Agent-graph view**~~ | Done | Timeline/Graph toggle on the trace page; SVG graph layered by parent-chain depth. |
+| **SCIM provisioning** | L | The enterprise half of the existing SSO story (directory sync, deprovisioning). |
+| **Project-level RBAC** | L | Roles are org-level today; per-project role assignment. |
+| **Extended audit retention + export** | M | Audit logs exist; retention tiers and export are the paid part. |
+| **License-key gating (`/ee`)** | M | Same codebase/schema across OSS, enterprise self-host, and cloud; a key unlocks the compliance modules — preserving the friction-free tier switch. |
+| **Runtime guardrails** | L | PII blocking (runtime sibling of the existing ingest masking patterns), prompt-injection detection, content-policy checks as an SDK-callable endpoint. |
+| **Data residency** | L | Region pinning for cloud (EU first). Multi-region HA deferred. |
+
+## Improvements to existing features
+
+| Feature | Effort | Notes |
+| --- | --- | --- |
+| **Prompt A/B experiments** | L | Traffic-split two versions on a channel, auto-compare scores/cost; one-click rollback. Channels infra already supports it. |
+| **Evaluator template library** | M | Prebuilt judges (hallucination, relevance, toxicity, …) + evaluator versioning so score drift is attributable. |
+| **Trace → dataset / fine-tuning** | M | One-click trace→dataset-item; export datasets as fine-tuning JSONL (OpenAI/Anthropic formats). |
+| **Inter-rater agreement** | M | Agreement metrics on review queues; keyboard-driven review UI. |
+| **Session/user cost rollups** | S | "Cost per user" breakdowns — columns already in ClickHouse. |
+| **Playground model comparison** | M | Side-by-side multi-model runs (reuse the experiment comparison-matrix UI). |
+| **Parquet export** | S | Alongside JSONL/CSV for BI/notebook use. |
+| **Webhook retries** | S | Retry with backoff + delivery-log UI on top of existing delivery tracking. |
+| **More SDK integrations** | M | LlamaIndex + Vercel AI SDK (JS), Pydantic AI (Python) — framework breadth is a cited decision factor. |
 
 ## Suggested next slices
 
-1. ~~**Comments** + **Tags/facets**~~ — done.
-2. ~~**Score configs**~~ — done.
-3. ~~**Batch actions** + **saved table views**~~ — done.
-4. ~~**MCP server**~~ — done.
-
-Larger bets (organizations, multimodal media) are scoped separately when prioritized.
+1. **Alert rules engine** + **cost budgets** — the two loudest gaps, one shared foundation.
+2. **Provider breadth** — one gateway change, three features improved.
+3. **MCP trace-query tools** + **ingest health console** — the launch-announcement differentiators.
+4. **Compliance layer** (SCIM, project RBAC, extended audit, `/ee` gating) — scoped when cloud pricing lands.
