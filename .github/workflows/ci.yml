@@ -67,8 +67,22 @@ jobs:
         run: bun run rbac:check
       # Doris FE+BE need static IPs to register with each other, which GitHub service
       # containers can't provide — reuse the repo's dev compose definitions instead.
+      # Explicit polling instead of `up --wait`: compose's waiter treats a dependency
+      # still in `health: starting` as failed within seconds (observed locally + here).
+      # The BE registers with the FE after start; the db:telemetry step retries until
+      # a BE is alive, so FE readiness is the only hard gate.
       - name: Start Doris (FE + BE)
-        run: docker compose -f infra/docker-compose.dev.yml up -d --wait doris-fe doris-be
+        run: |
+          docker compose -f infra/docker-compose.dev.yml up -d --no-deps doris-fe
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8030/api/bootstrap >/dev/null; then echo "FE ready"; break; fi
+            if [ "$i" = 60 ]; then echo "FE not ready after 5m" >&2; exit 1; fi
+            sleep 5
+          done
+          docker compose -f infra/docker-compose.dev.yml up -d --no-deps doris-be
+      - name: Doris logs on failure
+        if: failure()
+        run: docker compose -f infra/docker-compose.dev.yml logs doris-fe doris-be | tail -150
       - run: bun --filter @memoturn/db generate
       - run: bun --filter @memoturn/db migrate
       - run: bun run db:telemetry
