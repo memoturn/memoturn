@@ -1,7 +1,7 @@
 # Full self-host stack — web + worker + all dependencies.
 # Usage: docker compose -f infra/docker-compose.yml --env-file .env up -d --build
 # Datastore credentials are required (no weak defaults): set POSTGRES_PASSWORD,
-# CLICKHOUSE_PASSWORD, BLOB_ACCESS_KEY_ID, BLOB_SECRET_ACCESS_KEY (plus the api/worker
+# DORIS_PASSWORD, BLOB_ACCESS_KEY_ID, BLOB_SECRET_ACCESS_KEY (plus the api/worker
 # secrets BETTER_AUTH_SECRET, ENCRYPTION_KEY, AUTH_TRUSTED_ORIGINS) in .env before `up`.
 name: memoturn
 
@@ -21,22 +21,69 @@ services:
       timeout: 5s
       retries: 10
 
-  clickhouse:
-    image: clickhouse/clickhouse-server:24.8-alpine
+  # Apache Doris (OLAP). FE = query/metadata, BE = storage; the BE self-registers with
+  # the FE via stable IPs on the dedicated subnet. Not exposed on the host network.
+  doris-fe:
+    image: apache/doris:fe-3.1.4
     restart: unless-stopped
     environment:
-      CLICKHOUSE_USER: memoturn
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env}
-      CLICKHOUSE_DB: memoturn
-    ulimits:
-      nofile: { soft: 262144, hard: 262144 }
+      FE_SERVERS: fe1:172.28.81.2:9010
+      FE_ID: 1
     volumes:
-      - chdata:/var/lib/clickhouse
+      - dorisfemeta:/opt/apache-doris/fe/doris-meta
+    networks:
+      default: {}
+      doris:
+        ipv4_address: 172.28.81.2
     healthcheck:
-      test: ["CMD-SHELL", "clickhouse-client --user $$CLICKHOUSE_USER --password $$CLICKHOUSE_PASSWORD --query 'SELECT 1'"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8030/api/bootstrap || exit 1"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 60
+      start_period: 30s
+
+  doris-be:
+    image: apache/doris:be-3.1.4
+    restart: unless-stopped
+    depends_on:
+      doris-fe:
+        condition: service_healthy
+    environment:
+      FE_SERVERS: fe1:172.28.81.2:9010
+      BE_ADDR: 172.28.81.3:9050
+    ulimits:
+      nofile: { soft: 655350, hard: 655350 }
+    volumes:
+      - dorisbedata:/opt/apache-doris/be/storage
+    networks:
+      default: {}
+      doris:
+        ipv4_address: 172.28.81.3
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8040/api/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  # One-shot: sets the Doris root password (the image boots with root/empty). Idempotent —
+  # if the password is already set, the first probe succeeds and it exits.
+  doris-setup:
+    image: curlimages/curl:latest
+    depends_on:
+      doris-fe:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      if curl -sf -u root:${DORIS_PASSWORD:?set DORIS_PASSWORD in .env} -H 'Content-Type: application/json'
+        -d '{\"stmt\":\"SELECT 1\"}' http://doris-fe:8030/api/query/default_cluster/information_schema >/dev/null; then
+        echo 'doris root password already set'; exit 0;
+      fi;
+      curl -sf -u root: -H 'Content-Type: application/json'
+        -d \"{\\\"stmt\\\":\\\"SET PASSWORD FOR 'root' = PASSWORD('${DORIS_PASSWORD}')\\\"}\"
+        http://doris-fe:8030/api/query/default_cluster/information_schema &&
+      echo 'doris root password set';
+      "
 
   redis:
     image: valkey/valkey:8-alpine
@@ -84,17 +131,20 @@ services:
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
-      clickhouse: { condition: service_healthy }
+      doris-fe: { condition: service_healthy }
+      doris-be: { condition: service_healthy }
       redis: { condition: service_healthy }
       minio: { condition: service_healthy }
     environment:
       NODE_ENV: production
       API_PORT: "3001"
       DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/memoturn?schema=public
-      CLICKHOUSE_URL: http://clickhouse:8123
-      CLICKHOUSE_USER: memoturn
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env}
-      CLICKHOUSE_DB: memoturn
+      DORIS_HOST: doris-fe
+      DORIS_PORT: "9030"
+      DORIS_HTTP_PORT: "8030"
+      DORIS_USER: root
+      DORIS_PASSWORD: ${DORIS_PASSWORD:?set DORIS_PASSWORD in .env}
+      DORIS_DB: memoturn
       REDIS_URL: redis://redis:6379
       BLOB_ENDPOINT: http://minio:9000
       BLOB_REGION: us-east-1
@@ -111,16 +161,19 @@ services:
       dockerfile: docker/worker.Dockerfile
     restart: unless-stopped
     depends_on:
-      clickhouse: { condition: service_healthy }
+      doris-fe: { condition: service_healthy }
+      doris-be: { condition: service_healthy }
       redis: { condition: service_healthy }
       minio: { condition: service_healthy }
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/memoturn?schema=public
-      CLICKHOUSE_URL: http://clickhouse:8123
-      CLICKHOUSE_USER: memoturn
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env}
-      CLICKHOUSE_DB: memoturn
+      DORIS_HOST: doris-fe
+      DORIS_PORT: "9030"
+      DORIS_HTTP_PORT: "8030"
+      DORIS_USER: root
+      DORIS_PASSWORD: ${DORIS_PASSWORD:?set DORIS_PASSWORD in .env}
+      DORIS_DB: memoturn
       REDIS_URL: redis://redis:6379
       BLOB_ENDPOINT: http://minio:9000
       BLOB_REGION: us-east-1
@@ -131,6 +184,13 @@ services:
 
 volumes:
   pgdata:
-  chdata:
+  dorisfemeta:
+  dorisbedata:
   redisdata:
   miniodata:
+
+networks:
+  doris:
+    ipam:
+      config:
+        - subnet: 172.28.81.0/24

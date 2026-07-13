@@ -4,7 +4,7 @@ import { getBlobBytes, putBlobBytes } from "@memoturn/db/blob";
 /**
  * Multimodal media: image/audio/file attachments referenced in trace/observation
  * input/output. Inline base64 data URIs are offloaded to blob at ingest time (so they
- * don't bloat ClickHouse) and replaced with a `memoturn-media://<key>` reference; the
+ * don't bloat the telemetry store) and replaced with a `memoturn-media://<key>` reference; the
  * console fetches them back through GET /v1/media/<key>.
  */
 const DATA_URI = /^data:([^;,]+);base64,([\s\S]+)$/;

@@ -9,7 +9,7 @@ import { resolveProviderKey } from "./providers.js";
 /**
  * LLM-as-judge evaluators. An evaluator is a judge prompt + model; running it scores a
  * trace's input/output and writes the score back through the ingest pipeline
- * (source=EVAL), so it lands in ClickHouse alongside API/annotation scores.
+ * (source=EVAL), so it lands in the telemetry store alongside API/annotation scores.
  */
 export interface CreateEvaluatorInput {
   name: string;
@@ -118,7 +118,7 @@ export async function runEvaluator(projectId: string, name: string, input: RunEv
   // mock provider can't actually judge — synthesize a deterministic score for testing.
   const judged = ev.provider === "mock" ? { score: 1, reasoning: result.content } : parseJudge(result.content);
 
-  // Write the score back through the ingest pipeline (lands in ClickHouse, source=EVAL).
+  // Write the score back through the ingest pipeline (lands in the telemetry store, source=EVAL).
   await submitBatch(projectId, {
     batch: [
       {

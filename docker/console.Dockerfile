@@ -18,6 +18,7 @@ COPY apps/web/package.json apps/web/package.json
 COPY apps/docs/package.json apps/docs/package.json
 COPY packages/core/package.json packages/core/package.json
 COPY packages/db/package.json packages/db/package.json
+COPY packages/telemetry/package.json packages/telemetry/package.json
 COPY packages/server/package.json packages/server/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/llm/package.json packages/llm/package.json

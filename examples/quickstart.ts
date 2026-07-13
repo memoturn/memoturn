@@ -1,8 +1,8 @@
 /**
  * Emits a trace with a nested retrieval span and an LLM generation, then a score,
- * exercising the full pipeline: SDK → /v1/ingest → blob → queue → worker → ClickHouse.
+ * exercising the full pipeline: SDK → /v1/ingest → blob → queue → worker → Doris.
  *
- * Prereqs: `pnpm infra:up`, `pnpm db:migrate`, `pnpm db:clickhouse`, `pnpm seed`,
+ * Prereqs: `bun run infra:up`, `bun run db:migrate`, `bun run db:telemetry`, `bun run seed`,
  * and `pnpm dev` (web + worker) running. Then: `pnpm quickstart`.
  */
 import { Memoturn } from "@memoturn/sdk";

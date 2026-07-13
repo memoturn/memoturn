@@ -1,51 +1,99 @@
 /**
- * Applies telemetry-store DDL migrations in filename order. Statements are split on `;`
- * at end-of-line. Idempotent (DDL uses IF NOT EXISTS).
+ * Applies Doris DDL migrations from infra/doris/*.sql in filename order, tracked in a
+ * `schema_migrations` ledger table so each file runs at most once per deployment
+ * (files may contain non-idempotent ALTERs). Statements are split on `;`.
  *
- * Currently applies infra/clickhouse/*.sql via the transitional ClickHouse scaffold;
- * the engine swap points this at infra/doris/*.sql with a _schema_migrations ledger.
+ * Bootstraps the database itself (CREATE DATABASE IF NOT EXISTS) and retries while the
+ * cluster warms up — the FE answers queries before the first BE has registered, and
+ * DDL fails until a BE is alive.
  *
  * Run with: bun run db:telemetry
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ClickHouseTelemetryStore } from "./clickhouse.js";
+import { createDorisPool, dorisConfig } from "./doris/client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "infra", "clickhouse");
+const MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "infra", "doris");
+
+const BOOT_ATTEMPTS = 30;
+const BOOT_DELAY_MS = 3_000;
+
+/** Retry `fn` while the cluster is still warming up (no alive BE yet, FE restarting…). */
+async function withBootRetry<T>(what: string, fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < BOOT_ATTEMPTS; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`  waiting for doris (${what}): ${msg.slice(0, 120)}`);
+      await new Promise((r) => setTimeout(r, BOOT_DELAY_MS));
+    }
+  }
+  throw lastErr;
+}
+
+function splitStatements(sql: string): string[] {
+  // Strip `--` line comments first so comment-led statements aren't dropped,
+  // then split into individual statements on `;`.
+  return sql
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("--"))
+    .join("\n")
+    .split(";")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
 
 async function main() {
-  const store = new ClickHouseTelemetryStore();
+  const { database } = dorisConfig();
+  if (!/^[a-zA-Z0-9_]+$/.test(database)) {
+    throw new Error(`invalid DORIS_DB name: ${database}`);
+  }
+
+  // Bootstrap the database with a database-less connection, then reconnect into it.
+  const bootstrap = createDorisPool({ database: "information_schema" });
+  await withBootRetry("create database", () => bootstrap.query(`CREATE DATABASE IF NOT EXISTS ${database}`));
+  await bootstrap.end();
+
+  const pool = createDorisPool();
+  await withBootRetry("create ledger", () =>
+    pool.query(
+      `CREATE TABLE IF NOT EXISTS schema_migrations (
+         name VARCHAR(255) NOT NULL,
+         applied_at DATETIME NOT NULL
+       )
+       UNIQUE KEY(name)
+       DISTRIBUTED BY HASH(name) BUCKETS 1
+       PROPERTIES ("replication_num" = "1")`,
+    ),
+  );
+
+  const [appliedRows] = await pool.query("SELECT name FROM schema_migrations");
+  const applied = new Set((appliedRows as { name: string }[]).map((r) => r.name));
+
   const files = readdirSync(MIGRATIONS_DIR)
     .filter((f) => f.endsWith(".sql"))
     .sort();
 
-  if (files.length === 0) {
-    console.log("No telemetry migrations found in", MIGRATIONS_DIR);
-    return;
-  }
-
   for (const file of files) {
-    const sql = readFileSync(join(MIGRATIONS_DIR, file), "utf8");
-    // Strip `--` line comments first so comment-led statements aren't dropped,
-    // then split into individual statements on `;`.
-    const statements = sql
-      .split("\n")
-      .filter((line) => !line.trim().startsWith("--"))
-      .join("\n")
-      .split(";")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-
+    if (applied.has(file)) {
+      console.log(`→ ${file} already applied`);
+      continue;
+    }
+    const statements = splitStatements(readFileSync(join(MIGRATIONS_DIR, file), "utf8"));
     console.log(`→ applying ${file} (${statements.length} statements)`);
     for (const statement of statements) {
-      await store.execRaw(statement);
+      await withBootRetry(file, () => pool.query(statement));
     }
+    await pool.query("INSERT INTO schema_migrations (name, applied_at) VALUES (?, NOW())", [file]);
   }
 
   console.log("Telemetry migrations applied.");
-  await store.close();
+  await pool.end();
 }
 
 main().catch((err) => {

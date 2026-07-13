@@ -7,7 +7,7 @@ Components:
   - Console : {{ include "memoturn.fullname" . }}-console (:{{ .Values.console.service.port }})
 {{- end }}
 {{- if .Values.migrations.enabled }}
-  - Migrations ran as a pre-install/upgrade Job (Prisma + ClickHouse DDL).
+  - Migrations ran as a pre-install/upgrade Job (Prisma + Doris DDL).
 {{- end }}
 
 {{- if .Values.ingress.enabled }}

@@ -4,7 +4,7 @@ import { getScoresByTraceIds, getTraceIO } from "./traces.js";
 /**
  * Datasets & experiments. A dataset holds items (input + optional expectedOutput). An
  * experiment "run" links each dataset item to the trace produced by running a task on
- * it; scores attached to those traces (in ClickHouse) are the experiment's results.
+ * it; scores attached to those traces (in the telemetry store) are the experiment's results.
  */
 
 async function findDataset(projectId: string, name: string) {

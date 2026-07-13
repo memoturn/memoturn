@@ -3,7 +3,7 @@ import { redisConnection } from "@memoturn/db/queue";
 
 /**
  * PII masking: redact sensitive substrings from trace/observation input/output at
- * ingest (worker), before ClickHouse. Built-in named patterns + custom regexes are
+ * ingest (worker), before the telemetry store. Built-in named patterns + custom regexes are
  * compiled once per batch; the policy is Redis-cached. The compile/apply helpers are
  * pure so they're unit-testable without infra.
  */

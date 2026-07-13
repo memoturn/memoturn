@@ -16,8 +16,8 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@clickhouse/client": "^1.22.0",
-    "@memoturn/contracts": "workspace:*"
+    "@memoturn/contracts": "workspace:*",
+    "mysql2": "^3.15.3"
   },
   "devDependencies": {
     "@types/node": "^26.0.1",

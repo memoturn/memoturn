@@ -13,7 +13,7 @@ import { processIngest } from "./processors/ingest.js";
  * configured (so the default `bun run test` stays infra-free); CI sets the env +
  * service containers.
  */
-const HAS_INFRA = Boolean(process.env.DATABASE_URL && process.env.CLICKHOUSE_URL && process.env.BLOB_ENDPOINT);
+const HAS_INFRA = Boolean(process.env.DATABASE_URL && process.env.DORIS_HOST && process.env.BLOB_ENDPOINT);
 
 const iso = (d = new Date()) => d.toISOString();
 const newId = () => `it-${Math.random().toString(36).slice(2)}-${Date.now()}`;
@@ -73,7 +73,7 @@ describe.skipIf(!HAS_INFRA)("ingest pipeline (blob → worker → telemetry stor
     await processIngest({ data: { projectId, batchId, blobKey } } as Job<IngestJob>);
 
     const trace = await getTraceWithRetry(projectId, traceId);
-    expect(trace, "trace assembled from ClickHouse").toBeTruthy();
+    expect(trace, "trace assembled from the telemetry store").toBeTruthy();
     if (!trace) return;
 
     expect(trace.name).toBe("itest");

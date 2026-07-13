@@ -1612,7 +1612,7 @@ app.openapi(
   createRoute({
     method: "delete",
     path: "/v1/scores/{id}",
-    summary: "Hard-delete a score (ClickHouse lightweight DELETE scoped to the active project)",
+    summary: "Hard-delete a score (scoped to the active project)",
     tags: ["evaluators"],
     security,
     request: { params: z.object({ id: z.string() }) },

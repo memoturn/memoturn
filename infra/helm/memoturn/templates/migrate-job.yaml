@@ -29,10 +29,11 @@ spec:
         - name: migrate
           image: {{ include "memoturn.image" (list . "api") }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          # Apply Prisma (Postgres) migrations, then ClickHouse DDL.
+          # Apply Prisma (Postgres) migrations, then the Doris DDL (called directly to
+          # bypass the package script's --env-file, which doesn't exist in the image).
           command: ["/bin/sh", "-c"]
           args:
-            - bun run db:migrate && bun run db:clickhouse
+            - bun run db:migrate && bun packages/telemetry/src/migrate.ts
           envFrom:
             {{- include "memoturn.envFrom" . | nindent 12 }}
 {{- end }}

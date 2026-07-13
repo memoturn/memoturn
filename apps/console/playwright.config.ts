@@ -6,7 +6,7 @@ import { defineConfig, devices } from "@playwright/test";
  * the dev org/project/user in globalSetup, then drives the SPA in a browser.
  *
  * Locally it reuses an already-running stack (`bun run dev`); in CI it starts fresh.
- * The full stack (Postgres/ClickHouse/Redis/MinIO) must be reachable — this suite is
+ * The full stack (Postgres/Doris/Redis/MinIO) must be reachable — this suite is
  * not part of the infra-free `bun run test`; run it with `bun --filter @memoturn/console test:e2e`.
  */
 const CI = !!process.env.CI;
