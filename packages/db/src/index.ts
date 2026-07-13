@@ -12,7 +12,6 @@ export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
 export * from "@prisma/client";
-export { clickhouse } from "./clickhouse.js";
 
 // ── API key helpers ──────────────────────────────────────────────────────────────
 // Public key is shown in full; the secret is shown once at creation and stored hashed.

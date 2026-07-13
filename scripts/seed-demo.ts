@@ -1,23 +1,24 @@
 /**
  * Seeds a large volume of realistic demo telemetry spanning multiple past days by
  * POSTing raw backdated batches to /v1/ingest — exercising the real pipeline
- * (blob → queue → worker → ClickHouse, including cost computation).
+ * (blob → queue → worker → telemetry store, including cost computation).
  *
  * Run with: bun run seed:demo [-- --days 30 --traces-per-day 1000 --dry-run ...]
  *
  * Prereqs: `bun run setup` done and `bun run dev` running (api on :3001 + worker).
  *
  * Deterministic & idempotent within a UTC day: entity ids and content derive from --seed,
- * so a same-day re-run replaces the same rows via ReplacingMergeTree instead of duplicating.
- * Timestamps are anchored to "now", and ClickHouse dedups by (project_id, toDate, id) — so a
- * re-run on a LATER day shifts the window and leaves the old rows behind. Pass --wipe to
- * delete all previous demo rows (and rebuild the daily rollup) before seeding.
+ * so a same-day re-run replaces the same rows via the store's last-writer-wins merge
+ * instead of duplicating. Timestamps are anchored to "now", so a re-run on a LATER day
+ * shifts the window and can leave old rows behind. Pass --wipe to delete ALL of the
+ * project's previous telemetry before seeding.
  *
  * SAFETY: refuses to run when NODE_ENV=production, or against a non-localhost
  * --base-url, unless ALLOW_SEED=1 — this floods a project with fake demo data.
  */
 import { parseArgs } from "node:util";
-import { clickhouse } from "@memoturn/db/clickhouse";
+import { prisma } from "@memoturn/db";
+import { telemetry } from "@memoturn/telemetry";
 import { type IngestEvent, ingestRequest } from "../packages/core/src/events";
 
 // ── CLI + guards ─────────────────────────────────────────────────────────────────
@@ -554,27 +555,32 @@ async function runPool(tasks: (() => Promise<void>)[]): Promise<void> {
 
 const WORKER_METRICS_URL = `http://localhost:${process.env.WORKER_PORT ?? 3002}/metrics`;
 
-async function chNumber(query: string): Promise<number> {
-  const rs = await clickhouse().query({ query, format: "JSONEachRow" });
-  const rows = (await rs.json()) as Record<string, string>[];
-  return Number(Object.values(rows[0] ?? {})[0] ?? 0);
+/** Resolve the project the demo data lands in from the ingest key pair (--keys). */
+async function resolveProjectId(): Promise<string> {
+  const publicKey = (flags.keys as string).split(":")[0] ?? "";
+  const key = await prisma.apiKey.findUnique({ where: { publicKey } });
+  if (!key) {
+    console.error(`No API key found for public key "${publicKey}" — run \`bun run seed\` first.`);
+    process.exit(1);
+  }
+  return key.projectId;
 }
 
 /**
- * Waits until this run's rows are queryable in ClickHouse (the ground truth), then prints
- * counts + total cost. Deliberately does NOT wait for the ingest queue to drain: online
- * evaluators fan out one follow-up score job per sampled trace, so at this volume the queue
- * stays busy long after the seeded rows have landed.
+ * Waits until this run's rows are queryable in the telemetry store (the ground truth),
+ * then prints counts + total cost. Counts are project-wide (the demo project), so prior
+ * runs and quickstart traces are included. Deliberately does NOT wait for the ingest
+ * queue to drain: online evaluators fan out one follow-up score job per sampled trace,
+ * so at this volume the queue stays busy long after the seeded rows have landed.
  */
-async function verifyCounts(expected: { traces: number; observations: number; scores: number }): Promise<void> {
+async function verifyCounts(
+  projectId: string,
+  expected: { traces: number; observations: number; scores: number },
+): Promise<void> {
   const deadline = Date.now() + 5 * 60_000;
   let last = { traces: 0, observations: 0, scores: 0 };
   for (;;) {
-    last = {
-      traces: await chNumber("SELECT count() FROM traces FINAL WHERE id LIKE 'demo-trace-%'"),
-      observations: await chNumber("SELECT count() FROM observations FINAL WHERE id LIKE 'demo-obs-%'"),
-      scores: await chNumber("SELECT count() FROM scores FINAL WHERE id LIKE 'demo-score-%'"),
-    };
+    last = await telemetry().countProjectRows(projectId);
     if (last.traces >= expected.traces && last.observations >= expected.observations && last.scores >= expected.scores)
       break;
     if (Date.now() > deadline) {
@@ -583,40 +589,19 @@ async function verifyCounts(expected: { traces: number; observations: number; sc
     }
     await Bun.sleep(2000);
   }
-  const cost = await chNumber("SELECT round(sum(total_cost), 2) FROM observations FINAL WHERE id LIKE 'demo-obs-%'");
-  console.log("\nClickHouse (all demo rows, incl. prior runs):");
+  const byModel = await telemetry().metricsByModel(projectId, 3650);
+  const cost = Math.round(byModel.reduce((s, m) => s + m.total_cost, 0) * 100) / 100;
+  console.log("\nTelemetry store (all project rows, incl. prior runs):");
   console.log(`  traces       : ${last.traces} (this run generated ${expected.traces})`);
   console.log(`  observations : ${last.observations} (this run generated ${expected.observations})`);
   console.log(`  scores       : ${last.scores} (this run generated ${expected.scores})`);
   console.log(`  total cost   : $${cost}`);
 }
 
-/**
- * Deletes all demo rows from a previous run, then rebuilds the observations_daily rollup —
- * aggregate states can't be selectively deleted, and the MV only fires on insert, so stale
- * demo aggregates would otherwise keep haunting the dashboards.
- */
-async function wipeDemoRows(): Promise<void> {
-  console.log("Wiping previous demo rows...");
-  const ch = clickhouse();
-  const sync = { mutations_sync: "1" } as const;
-  await ch.command({ query: "ALTER TABLE traces DELETE WHERE id LIKE 'demo-trace-%'", clickhouse_settings: sync });
-  await ch.command({ query: "ALTER TABLE observations DELETE WHERE id LIKE 'demo-obs-%'", clickhouse_settings: sync });
-  // Online-evaluator writeback scores carry generated ids but reference demo traces — match on trace_id.
-  await ch.command({
-    query: "ALTER TABLE scores DELETE WHERE trace_id LIKE 'demo-trace-%'",
-    clickhouse_settings: sync,
-  });
-  // Keep this SELECT in sync with observations_daily_mv in infra/clickhouse/0001_init.sql.
-  await ch.command({ query: "TRUNCATE TABLE observations_daily" });
-  await ch.command({
-    query: `INSERT INTO observations_daily
-      SELECT project_id, toDate(start_time) AS date, environment, model,
-             countState(toUInt64(1)) AS observations, sumState(total_tokens) AS total_tokens,
-             sumState(total_cost) AS total_cost, quantilesState(0.5, 0.95, 0.99)(latency_ms) AS latency_ms
-      FROM observations FINAL WHERE type = 'GENERATION'
-      GROUP BY project_id, date, environment, model`,
-  });
+/** Deletes ALL of the project's telemetry (traces/observations/scores) before seeding. */
+async function wipeProjectRows(projectId: string): Promise<void> {
+  console.log("Wiping the project's previous telemetry...");
+  await telemetry().deleteProjectData(projectId);
 }
 
 /** One-shot queue health report — informational only, never blocks. */
@@ -643,7 +628,8 @@ async function main() {
     `Seeding ${DAYS} days × ~${TRACES_PER_DAY} traces/day → ${BASE_URL}/v1/ingest` +
       `${DRY_RUN ? " (dry run — nothing sent)" : ""}`,
   );
-  if (WIPE && !DRY_RUN) await wipeDemoRows();
+  const projectId = DRY_RUN ? "" : await resolveProjectId();
+  if (WIPE && !DRY_RUN) await wipeProjectRows(projectId);
   const generated = { traces: 0, observations: 0, scores: 0, events: 0, batches: 0 };
   let perDayMin = Number.POSITIVE_INFINITY;
   let perDayMax = 0;
@@ -683,10 +669,14 @@ async function main() {
   if (stats.eventErrors > 0) console.warn(`  WARNING: ${stats.eventErrors} events rejected by the API`);
 
   if (!NO_VERIFY) {
-    console.log("\nWaiting for the seeded rows to land in ClickHouse...");
-    await verifyCounts({ traces: generated.traces, observations: generated.observations, scores: generated.scores });
+    console.log("\nWaiting for the seeded rows to land in the telemetry store...");
+    await verifyCounts(projectId, {
+      traces: generated.traces,
+      observations: generated.observations,
+      scores: generated.scores,
+    });
     await reportQueueState();
-    await clickhouse().close();
+    await telemetry().close();
   }
   console.log("\nDone. Open http://localhost:3000 — dashboards default to the last 30 days.");
 }

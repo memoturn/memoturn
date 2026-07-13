@@ -1,4 +1,4 @@
-import { clickhouse } from "@memoturn/db/clickhouse";
+import { telemetry } from "@memoturn/telemetry";
 import { addDatasetItems, createDataset } from "./datasets.js";
 import { addReviewItems } from "./review.js";
 import { getTraceIO } from "./traces.js";
@@ -30,20 +30,7 @@ export async function runBatchAction(projectId: string, input: BatchInput) {
   if (ids.length === 0) return { action: input.action, affected: 0 };
 
   if (input.action === "delete") {
-    const ch = clickhouse();
-    const params = { p: projectId, ids };
-    await ch.command({
-      query: "DELETE FROM traces WHERE project_id = {p:String} AND id IN {ids:Array(String)}",
-      query_params: params,
-    });
-    await ch.command({
-      query: "DELETE FROM observations WHERE project_id = {p:String} AND trace_id IN {ids:Array(String)}",
-      query_params: params,
-    });
-    await ch.command({
-      query: "DELETE FROM scores WHERE project_id = {p:String} AND trace_id IN {ids:Array(String)}",
-      query_params: params,
-    });
+    await telemetry().deleteTraces(projectId, ids);
     return { action: "delete", affected: ids.length };
   }
 

@@ -1,5 +1,5 @@
 {
-  "name": "@memoturn/server",
+  "name": "@memoturn/telemetry",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,21 +9,18 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "migrate": "bun --env-file=../../.env src/migrate.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "biome check .",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@memoturn/core": "workspace:*",
-    "@memoturn/db": "workspace:*",
-    "@memoturn/llm": "workspace:*",
-    "@memoturn/telemetry": "workspace:*",
-    "@better-auth/sso": "1.6.20",
-    "better-auth": "^1.6.20",
+    "@clickhouse/client": "^1.22.0",
     "@memoturn/contracts": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^26.0.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   }

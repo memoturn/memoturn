@@ -1,82 +1,22 @@
 import { clampTokens, computeCost, type IngestEvent, type ModelPrice, providerForModel } from "@memoturn/core";
+import type { ObservationRow, ScoreWriteRow, TraceRow } from "@memoturn/telemetry";
 
 /**
- * Maps validated ingest events into ClickHouse row shapes. Multiple events for the
- * same entity (e.g. generation-create then generation-update) are merged in
- * timestamp order; ReplacingMergeTree then keeps the row with the highest event_ts.
+ * Maps validated ingest events into telemetry-store row shapes. Multiple events for
+ * the same entity (e.g. generation-create then generation-update) are merged in
+ * timestamp order; the store's last-writer-wins merge then keeps the row with the
+ * highest event_ts.
  */
 
 const json = (v: unknown): string => (v === undefined ? "" : typeof v === "string" ? v : JSON.stringify(v));
 const meta = (v: unknown): string => (v === undefined ? "{}" : JSON.stringify(v));
 
-export interface TraceRow {
-  id: string;
-  project_id: string;
-  timestamp: string;
-  name: string;
-  user_id: string;
-  session_id: string;
-  release: string;
-  version: string;
-  environment: string;
-  public: number;
-  tags: string[];
-  metadata: string;
-  input: string;
-  output: string;
-  event_ts: string;
-}
-
-export interface ObservationRow {
-  id: string;
-  trace_id: string;
-  project_id: string;
-  type: "SPAN" | "GENERATION" | "EVENT";
-  parent_observation_id: string;
-  name: string;
-  start_time: string;
-  end_time: string | null;
-  environment: string;
-  level: "DEBUG" | "DEFAULT" | "WARNING" | "ERROR";
-  status_message: string;
-  model: string;
-  provider: string;
-  model_parameters: string;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  input_cost: number;
-  output_cost: number;
-  total_cost: number;
-  prompt_id: string;
-  prompt_version: string;
-  input: string;
-  output: string;
-  metadata: string;
-  event_ts: string;
-}
-
-export interface ScoreRow {
-  id: string;
-  project_id: string;
-  trace_id: string;
-  observation_id: string;
-  name: string;
-  timestamp: string;
-  environment: string;
-  source: "API" | "EVAL" | "ANNOTATION";
-  data_type: "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
-  value: number | null;
-  string_value: string;
-  comment: string;
-  config_id: string;
-  event_ts: string;
-}
+export type { ObservationRow, ScoreWriteRow, TraceRow };
 
 export interface MappedRows {
   traces: TraceRow[];
   observations: ObservationRow[];
-  scores: ScoreRow[];
+  scores: ScoreWriteRow[];
 }
 
 const OBS_TYPE: Record<string, "SPAN" | "GENERATION" | "EVENT"> = {
@@ -103,7 +43,7 @@ export function mapEvents(projectId: string, events: IngestEvent[], priceOverrid
     string,
     { body: Record<string, unknown>; type: "SPAN" | "GENERATION" | "EVENT"; event_ts: string }
   >();
-  const scoreRows: ScoreRow[] = [];
+  const scoreRows: ScoreWriteRow[] = [];
 
   for (const event of ordered) {
     if (event.type === "trace-create") {
@@ -166,6 +106,8 @@ export function mapEvents(projectId: string, events: IngestEvent[], priceOverrid
     const completionTokens = clampTokens(b.usage?.completionTokens);
     const totalTokens = clampTokens(b.usage?.totalTokens ?? promptTokens + completionTokens);
     const cost = computeCost(b.model, promptTokens, completionTokens, priceOverrides);
+    const startTime: string = b.startTime ?? event_ts;
+    const endTime: string | null = b.endTime ?? null;
     return {
       id: b.id,
       trace_id: b.traceId,
@@ -173,8 +115,8 @@ export function mapEvents(projectId: string, events: IngestEvent[], priceOverrid
       type,
       parent_observation_id: b.parentObservationId ?? "",
       name: b.name ?? "",
-      start_time: b.startTime ?? event_ts,
-      end_time: b.endTime ?? null,
+      start_time: startTime,
+      end_time: endTime,
       environment: b.environment ?? "default",
       level: b.level ?? "DEFAULT",
       status_message: b.statusMessage ?? "",
@@ -192,6 +134,7 @@ export function mapEvents(projectId: string, events: IngestEvent[], priceOverrid
       input: json(b.input),
       output: json(b.output),
       metadata: meta(b.metadata),
+      latency_ms: endTime ? Math.max(0, Date.parse(endTime) - Date.parse(startTime)) : 0,
       event_ts,
     };
   });

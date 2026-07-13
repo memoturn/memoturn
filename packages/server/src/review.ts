@@ -1,13 +1,13 @@
 import { isoNow, newId } from "@memoturn/core";
 import { prisma } from "@memoturn/db";
-import { clickhouse } from "@memoturn/db/clickhouse";
+import { telemetry } from "@memoturn/telemetry";
 import { submitBatch } from "./ingest.js";
 import { getTraceIO } from "./traces.js";
 
 /**
  * Human annotation / review queues. A queue holds traces to be manually scored;
  * submitting a review writes an ANNOTATION score through the ingest pipeline (into
- * ClickHouse, alongside API + EVAL scores) and marks the item done.
+ * the telemetry store, alongside API + EVAL scores) and marks the item done.
  */
 export interface CreateQueueInput {
   name: string;
@@ -180,22 +180,6 @@ export interface CorrectScoreInput {
   comment?: string;
 }
 
-/** Shape of a full score row as read back from ClickHouse (internal only). */
-interface FullScoreRow {
-  id: string;
-  trace_id: string;
-  observation_id: string;
-  name: string;
-  timestamp: string; // ISO-formatted by formatDateTime
-  environment: string;
-  source: string;
-  data_type: string;
-  value: number | null;
-  string_value: string;
-  comment: string;
-  config_id: string;
-}
-
 /** Shape returned to the API handler after a successful correction. */
 export interface CorrectedScore {
   id: string;
@@ -211,35 +195,18 @@ export interface CorrectedScore {
 
 /**
  * Correct a score by inserting a replacement row with the same id and a newer
- * event_ts. ReplacingMergeTree keeps the row with the highest event_ts, so this
- * effectively overwrites the old values without a DELETE. Returns null when the
- * score does not exist (route handler maps this to 404).
+ * event_ts. The telemetry store's last-writer-wins merge keeps the newest row, so
+ * this effectively overwrites the old values without a DELETE. Returns null when
+ * the score does not exist (route handler maps this to 404).
  */
 export async function correctScore(
   projectId: string,
   scoreId: string,
   updates: CorrectScoreInput,
 ): Promise<CorrectedScore | null> {
-  const ch = clickhouse();
-
-  // Read the existing score (FINAL = de-duplicated view).
-  const rs = await ch.query({
-    query: `
-      SELECT
-        id, trace_id, observation_id, name,
-        formatDateTime(timestamp, '%Y-%m-%dT%H:%i:%SZ') AS timestamp,
-        environment, source, data_type, value, string_value, comment, config_id
-      FROM scores FINAL
-      WHERE project_id = {p:String} AND id = {id:String}
-      LIMIT 1
-    `,
-    query_params: { p: projectId, id: scoreId },
-    format: "JSONEachRow",
-  });
-  const rows = await rs.json<FullScoreRow>();
-  if (rows.length === 0) return null;
-
-  const existing = rows[0]!;
+  const store = telemetry();
+  const existing = await store.getScoreById(projectId, scoreId);
+  if (!existing) return null;
 
   // Merge the caller's patch over the existing fields.
   const newValue = updates.value !== undefined ? updates.value : existing.value;
@@ -247,28 +214,24 @@ export async function correctScore(
   const newComment = updates.comment !== undefined ? updates.comment : existing.comment;
 
   // Insert the correction row — same id/trace_id/name, newer event_ts wins the merge.
-  await ch.insert({
-    table: "scores",
-    values: [
-      {
-        id: existing.id,
-        project_id: projectId,
-        trace_id: existing.trace_id,
-        observation_id: existing.observation_id,
-        name: existing.name,
-        timestamp: existing.timestamp,
-        environment: existing.environment,
-        source: existing.source,
-        data_type: existing.data_type,
-        value: newValue,
-        string_value: newStringValue,
-        comment: newComment,
-        config_id: existing.config_id,
-        event_ts: isoNow(),
-      },
-    ],
-    format: "JSONEachRow",
-  });
+  await store.insertRows("scores", [
+    {
+      id: existing.id,
+      project_id: projectId,
+      trace_id: existing.trace_id,
+      observation_id: existing.observation_id,
+      name: existing.name,
+      timestamp: existing.timestamp,
+      environment: existing.environment,
+      source: existing.source,
+      data_type: existing.data_type,
+      value: newValue,
+      string_value: newStringValue,
+      comment: newComment,
+      config_id: existing.config_id,
+      event_ts: isoNow(),
+    },
+  ]);
 
   return {
     id: existing.id,
@@ -284,14 +247,11 @@ export async function correctScore(
 }
 
 /**
- * Hard-delete a score via a ClickHouse lightweight DELETE. Scoped to project_id
- * to prevent cross-project access. Always returns { deleted: true } — callers
- * that need existence-checking should call correctScore first.
+ * Hard-delete a score. Scoped to project_id to prevent cross-project access.
+ * Always returns { deleted: true } — callers that need existence-checking should
+ * call correctScore first.
  */
 export async function deleteScore(projectId: string, scoreId: string): Promise<{ deleted: boolean }> {
-  await clickhouse().command({
-    query: "DELETE FROM scores WHERE project_id = {p:String} AND id = {id:String}",
-    query_params: { p: projectId, id: scoreId },
-  });
+  await telemetry().deleteScore(projectId, scoreId);
   return { deleted: true };
 }

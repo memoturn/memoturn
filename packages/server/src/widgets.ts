@@ -1,12 +1,13 @@
+import type { WidgetBreakdown, WidgetMetric, WidgetPoint } from "@memoturn/contracts";
 import { prisma } from "@memoturn/db";
-import { clickhouse } from "@memoturn/db/clickhouse";
+import { telemetry } from "@memoturn/telemetry";
 
 /**
- * Custom dashboard widgets — each widget is a saved metric query over the daily rollup
- * (`observations_daily`). `getWidgetData` computes the series; the API inlines it.
+ * Custom dashboard widgets — each widget is a saved metric query computed by the
+ * telemetry store over GENERATION observations. `getWidgetData` computes the series;
+ * the API inlines it.
  */
-export type WidgetMetric = "cost" | "tokens" | "generations" | "latency_p95";
-export type WidgetBreakdown = "by_day" | "by_model";
+export type { WidgetBreakdown, WidgetMetric, WidgetPoint };
 
 export interface CreateWidgetInput {
   title: string;
@@ -15,41 +16,13 @@ export interface CreateWidgetInput {
   days?: number;
 }
 
-const AGG: Record<WidgetMetric, string> = {
-  cost: "sumMerge(total_cost)",
-  tokens: "sumMerge(total_tokens)",
-  generations: "countMerge(observations)",
-  latency_p95: "arrayElement(quantilesMerge(0.95)(latency_ms), 1)",
-};
-
-export interface WidgetPoint {
-  label: string;
-  value: number;
-}
-
 export async function getWidgetData(
   projectId: string,
   metric: WidgetMetric,
   breakdown: WidgetBreakdown,
   days: number,
 ): Promise<WidgetPoint[]> {
-  const agg = AGG[metric] ?? AGG.cost;
-  const groupExpr = breakdown === "by_model" ? "model" : "toString(date)";
-  const order = breakdown === "by_model" ? "value DESC" : "label ASC";
-  const rs = await clickhouse().query({
-    query: `
-      SELECT ${groupExpr} AS label, ${agg} AS value
-      FROM observations_daily
-      WHERE project_id = {projectId:String} AND date >= today() - {days:UInt32}
-      GROUP BY label
-      ORDER BY ${order}
-      LIMIT 100
-    `,
-    query_params: { projectId, days },
-    format: "JSONEachRow",
-  });
-  const rows = await rs.json<{ label: string; value: number }>();
-  return rows.map((r) => ({ label: r.label || "(unknown)", value: Number(r.value) }));
+  return telemetry().widgetSeries(projectId, metric, breakdown, days);
 }
 
 export async function createWidget(projectId: string, input: CreateWidgetInput) {
