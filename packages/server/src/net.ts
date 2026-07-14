@@ -8,8 +8,10 @@ import { isIP } from "node:net";
  * metadata endpoint, other tenants' admin ports).
  *
  * `assertPublicUrl` is called twice: at WRITE time (reject the config with a 400) and
- * again at DISPATCH time (DNS can rebind between the two). Set ALLOW_PRIVATE_WEBHOOK_TARGETS=1
- * to permit http:// and private/loopback ranges for local/self-hosted LAN use.
+ * again at DISPATCH time (DNS can rebind between the two). Strict in EVERY environment —
+ * a self-host that forgets NODE_ENV=production must not silently run with SSRF off.
+ * Set ALLOW_PRIVATE_WEBHOOK_TARGETS=1 (shipped in .env.example for local dev) to permit
+ * http:// and private/loopback ranges for local/self-hosted LAN use.
  */
 export class SsrfError extends Error {
   constructor(message: string) {
@@ -19,8 +21,8 @@ export class SsrfError extends Error {
 }
 
 function allowPrivate(): boolean {
-  // Default-allow in non-production so local dev (localhost webhooks) just works.
-  return process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS === "1" || process.env.NODE_ENV !== "production";
+  // Strict by default everywhere; localhost targets need the explicit opt-in.
+  return process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS === "1";
 }
 
 /** Is an already-parsed IP address in a blocked (private/loopback/link-local/ULA/metadata) range? */
@@ -67,7 +69,9 @@ export async function assertPublicUrl(rawUrl: string): Promise<void> {
 
   const permissive = allowPrivate();
   if (url.protocol !== "https:" && !(url.protocol === "http:" && permissive)) {
-    throw new SsrfError("only https:// URLs are allowed");
+    throw new SsrfError(
+      "only https:// URLs are allowed (set ALLOW_PRIVATE_WEBHOOK_TARGETS=1 for local http:// targets)",
+    );
   }
 
   const host = url.hostname.replace(/^\[|\]$/g, "");
@@ -75,7 +79,10 @@ export async function assertPublicUrl(rawUrl: string): Promise<void> {
 
   // Literal IP in the host — check directly.
   if (isIP(host)) {
-    if (isBlockedIp(host)) throw new SsrfError("URL resolves to a private or reserved address");
+    if (isBlockedIp(host))
+      throw new SsrfError(
+        "URL resolves to a private or reserved address (set ALLOW_PRIVATE_WEBHOOK_TARGETS=1 for LAN targets)",
+      );
     return;
   }
 
@@ -88,7 +95,10 @@ export async function assertPublicUrl(rawUrl: string): Promise<void> {
   }
   if (addrs.length === 0) throw new SsrfError("host did not resolve");
   for (const a of addrs) {
-    if (isBlockedIp(a.address)) throw new SsrfError("URL resolves to a private or reserved address");
+    if (isBlockedIp(a.address))
+      throw new SsrfError(
+        "URL resolves to a private or reserved address (set ALLOW_PRIVATE_WEBHOOK_TARGETS=1 for LAN targets)",
+      );
   }
 }
 
