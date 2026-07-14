@@ -155,7 +155,8 @@ export type IngestRequest = z.infer<typeof ingestRequest>;
 
 /** Per-event result returned in the 207 response. */
 export const ingestResult = z.object({
-  id: z.string(),
+  id: z.string(), // "" when a rejected event had no readable id
+  index: z.number().int().optional(), // position in the submitted batch (set on rejections)
   status: z.union([z.literal(201), z.literal(400)]),
   error: z.string().optional(),
 });

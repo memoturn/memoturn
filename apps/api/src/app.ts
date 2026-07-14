@@ -1,6 +1,6 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import * as C from "@memoturn/contracts";
-import { ingestRequest } from "@memoturn/core";
+import { type IngestEvent, type IngestResult, ingestEvent, ingestRequest, ingestResponse } from "@memoturn/core";
 import {
   addDatasetItems,
   addReviewItems,
@@ -310,6 +310,10 @@ app.openapi(
 );
 
 // ── Ingest ─────────────────────────────────────────────────────────────────────
+// Envelope-only shape check; each event is validated individually in the handler so
+// one bad event yields a per-event 400 in the 207 body instead of failing the batch.
+const ingestEnvelope = z.object({ batch: z.array(z.unknown()).min(1).max(1000) });
+
 app.openapi(
   createRoute({
     method: "post",
@@ -319,14 +323,16 @@ app.openapi(
     security,
     request: {
       body: {
-        content: { "application/json": { schema: z.object({ batch: z.array(z.record(z.string(), z.any())) }) } },
+        // Envelope only — events are validated individually in the handler so a bad
+        // event becomes a per-event 400 in the 207 body, not a whole-batch reject.
+        content: { "application/json": { schema: ingestEnvelope } },
       },
     },
     responses: {
       207: {
-        description: "Per-event status",
+        description: "Per-event status: accepted events under `successes`, rejected events under `errors`",
         content: {
-          "application/json": { schema: z.object({ successes: z.array(z.any()), errors: z.array(z.any()) }) },
+          "application/json": { schema: ingestResponse },
         },
       },
       400: { description: "Invalid batch" },
@@ -336,21 +342,57 @@ app.openapi(
   }),
   async (c) => {
     const json = await c.req.json().catch(() => null);
-    const parsed = ingestRequest.safeParse(json);
-    if (!parsed.success) return c.json({ error: "invalid batch", details: z.flattenError(parsed.error) }, 400);
+    // Envelope first (shape + batch size), then each event individually: one malformed
+    // event must not 400 the whole batch, and the 207 must report REAL per-event results
+    // — the previous handler acked every event unconditionally, hiding rejects in the DLQ.
+    const envelope = ingestEnvelope.safeParse(json);
+    if (!envelope.success) return c.json({ error: "invalid batch", details: z.flattenError(envelope.error) }, 400);
 
     // Event-volume rate limit (separate budget from the per-request limit): a single POST
-    // can carry up to 1000 events, so meter the actual event count.
+    // can carry up to 1000 events, so meter the actual (raw) event count — invalid events
+    // still consume budget.
     const { limit: evLimit, window: evWindow } = ingestRateLimitConfig();
-    const ev = await checkRateLimit(`ingest-events:${c.get("projectId")}`, evLimit, evWindow, parsed.data.batch.length);
+    const ev = await checkRateLimit(
+      `ingest-events:${c.get("projectId")}`,
+      evLimit,
+      evWindow,
+      envelope.data.batch.length,
+    );
     if (!ev.allowed) {
       c.header("Retry-After", String(ev.resetSeconds));
       return c.json({ error: "ingest event rate limit exceeded", limit: ev.limit, retryAfter: ev.resetSeconds }, 429);
     }
 
-    await submitBatch(c.get("projectId"), parsed.data);
-    const successes = parsed.data.batch.map((e) => ({ id: e.id, status: 201 }));
-    return c.json({ successes, errors: [] }, 207);
+    const valid: IngestEvent[] = [];
+    const errors: IngestResult[] = [];
+    envelope.data.batch.forEach((raw, index) => {
+      const parsed = ingestEvent.safeParse(raw);
+      if (parsed.success) {
+        valid.push(parsed.data);
+        return;
+      }
+      const id = typeof (raw as { id?: unknown } | null)?.id === "string" ? (raw as { id: string }).id : "";
+      const issue = parsed.error.issues[0];
+      const error = (issue ? `${issue.path.join(".") || "event"}: ${issue.message}` : "invalid event").slice(0, 500);
+      errors.push({ id, index, status: 400, error });
+    });
+
+    // Only valid events are persisted + enqueued: the blob stays a strictly-valid,
+    // replayable log (the worker and DLQ replay parse it with ingestRequest.parse).
+    if (valid.length > 0) await submitBatch(c.get("projectId"), { batch: valid });
+    if (errors.length > 0) {
+      console.error(
+        JSON.stringify({
+          level: "warn",
+          msg: "ingest events rejected",
+          projectId: c.get("projectId"),
+          rejected: errors.length,
+          firstError: errors[0]?.error,
+        }),
+      );
+    }
+    const successes: IngestResult[] = valid.map((e) => ({ id: e.id, status: 201 }));
+    return c.json({ successes, errors }, 207);
   },
 );
 
