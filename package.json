@@ -33,6 +33,7 @@
     "prod:down": "docker compose -f infra/docker-compose.prod.yml down",
     "prod:logs": "docker compose -f infra/docker-compose.prod.yml logs -f",
     "prod:ps": "docker compose -f infra/docker-compose.prod.yml ps",
+    "prod:backup": "bash scripts/backup.sh",
     "db:generate": "bun --filter @memoturn/db generate",
     "db:migrate": "bun --filter @memoturn/db migrate",
     "db:telemetry": "bun --filter @memoturn/telemetry migrate",
