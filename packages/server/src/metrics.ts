@@ -11,9 +11,11 @@ export type { DailyMetric, MetricsSummary, ModelMetric };
 
 export async function getMetrics(projectId: string, days = 30): Promise<MetricsSummary> {
   const store = telemetry();
-  const byDay = await store.metricsByDay(projectId, days);
-  const byModel = await store.metricsByModel(projectId, days);
-  const totalTraces = await store.countTracesSince(projectId, days);
+  const [byDay, byModel, totalTraces] = await Promise.all([
+    store.metricsByDay(projectId, days),
+    store.metricsByModel(projectId, days),
+    store.countTracesSince(projectId, days),
+  ]);
 
   return {
     total_traces: totalTraces,
