@@ -155,6 +155,13 @@ services:
       BLOB_FORCE_PATH_STYLE: "true"
     ports:
       - "${API_PORT:-3001}:3001"
+    # Probe with bun itself — the oven/bun base image doesn't guarantee curl/wget.
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3001/v1/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   worker:
     build:
@@ -182,6 +189,13 @@ services:
       BLOB_ACCESS_KEY_ID: ${BLOB_ACCESS_KEY_ID:?set BLOB_ACCESS_KEY_ID in .env}
       BLOB_SECRET_ACCESS_KEY: ${BLOB_SECRET_ACCESS_KEY:?set BLOB_SECRET_ACCESS_KEY in .env}
       BLOB_FORCE_PATH_STYLE: "true"
+    # The worker's health server binds 127.0.0.1 by default — in-container probes still reach it.
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
   pgdata:
