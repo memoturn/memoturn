@@ -1,5 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { prisma } from "@memoturn/db";
+import { mapConcurrent } from "./concurrency.js";
 import { isPublicUrl } from "./net.js";
 
 /**
@@ -65,60 +66,90 @@ export interface ScoreEvent {
   source: string;
 }
 
-/** Fire all enabled webhooks for an event. `score.created` honors the `threshold` filter. */
-export async function dispatchWebhooks(projectId: string, event: string, payload: ScoreEvent): Promise<number> {
+/** The row fields dispatch needs (structurally satisfied by the Prisma webhook row). */
+interface DispatchableWebhook {
+  id: string;
+  url: string;
+  threshold: number | null;
+  secret: string | null;
+}
+
+/** Outbound deliveries in flight at once per dispatch call. */
+const DISPATCH_CONCURRENCY = 8;
+
+/** Deliver one payload to one hook; returns whether the receiver 2xx'd. Never throws. */
+async function deliverWebhook(
+  h: DispatchableWebhook,
+  projectId: string,
+  event: string,
+  payload: ScoreEvent,
+): Promise<boolean> {
+  if (event === "score.created" && h.threshold != null && !(payload.value != null && payload.value < h.threshold)) {
+    return false; // below-threshold filter not met
+  }
+  if (!(await isPublicUrl(h.url))) return false; // SSRF re-check at dispatch (DNS rebinding)
+  const body = JSON.stringify({ event, projectId, ...payload });
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const headers = {
+    "content-type": "application/json",
+    "user-agent": "memoturn-webhooks/1",
+    "x-memoturn-timestamp": timestamp,
+    ...(h.secret ? { "x-memoturn-signature": signWebhook(h.secret, timestamp, body) } : {}),
+  };
+
+  // Up to 3 attempts; retry only on 5xx / network errors (4xx is the receiver's choice).
+  let status: number | null = null;
+  let error = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(h.url, { method: "POST", headers, body, signal: AbortSignal.timeout(5_000) });
+      status = res.status;
+      if (res.ok) {
+        error = "";
+        break;
+      }
+      error = `HTTP ${res.status}`;
+      if (res.status < 500) break; // client error — don't retry
+    } catch (e) {
+      status = null;
+      error = e instanceof Error ? e.message : String(e);
+    }
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 250 * 2 ** attempt));
+  }
+
+  const ok = status != null && status >= 200 && status < 300;
+  // Record delivery outcome (best-effort — never throw into ingestion).
+  await prisma.webhook
+    .update({
+      where: { id: h.id },
+      data: {
+        lastStatus: status,
+        lastError: ok ? "" : error,
+        lastAttemptAt: new Date(),
+        failureCount: ok ? 0 : { increment: 1 },
+      },
+    })
+    .catch(() => {});
+  return ok;
+}
+
+/**
+ * Fire all enabled webhooks for a batch of payloads: ONE config lookup for the whole
+ * batch (the per-payload variant was an N+1 on the ingest hot path), deliveries with
+ * bounded concurrency. `score.created` honors the `threshold` filter per payload.
+ */
+export async function dispatchWebhooksBatch(projectId: string, event: string, payloads: ScoreEvent[]): Promise<number> {
+  if (payloads.length === 0) return 0;
   const hooks = await prisma.webhook.findMany({ where: { projectId, event, enabled: true } });
-  let fired = 0;
-  await Promise.all(
-    hooks.map(async (h) => {
-      if (event === "score.created" && h.threshold != null && !(payload.value != null && payload.value < h.threshold)) {
-        return; // below-threshold filter not met
-      }
-      if (!(await isPublicUrl(h.url))) return; // SSRF re-check at dispatch (DNS rebinding)
-      const body = JSON.stringify({ event, projectId, ...payload });
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      const headers = {
-        "content-type": "application/json",
-        "user-agent": "memoturn-webhooks/1",
-        "x-memoturn-timestamp": timestamp,
-        ...(h.secret ? { "x-memoturn-signature": signWebhook(h.secret, timestamp, body) } : {}),
-      };
-
-      // Up to 3 attempts; retry only on 5xx / network errors (4xx is the receiver's choice).
-      let status: number | null = null;
-      let error = "";
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const res = await fetch(h.url, { method: "POST", headers, body, signal: AbortSignal.timeout(5_000) });
-          status = res.status;
-          if (res.ok) {
-            error = "";
-            break;
-          }
-          error = `HTTP ${res.status}`;
-          if (res.status < 500) break; // client error — don't retry
-        } catch (e) {
-          status = null;
-          error = e instanceof Error ? e.message : String(e);
-        }
-        if (attempt < 2) await new Promise((r) => setTimeout(r, 250 * 2 ** attempt));
-      }
-
-      const ok = status != null && status >= 200 && status < 300;
-      if (ok) fired++;
-      // Record delivery outcome (best-effort — never throw into ingestion).
-      await prisma.webhook
-        .update({
-          where: { id: h.id },
-          data: {
-            lastStatus: status,
-            lastError: ok ? "" : error,
-            lastAttemptAt: new Date(),
-            failureCount: ok ? 0 : { increment: 1 },
-          },
-        })
-        .catch(() => {});
-    }),
+  if (hooks.length === 0) return 0;
+  const jobs = hooks.flatMap((h) => payloads.map((payload) => ({ h, payload })));
+  const results = await mapConcurrent(jobs, DISPATCH_CONCURRENCY, ({ h, payload }) =>
+    deliverWebhook(h, projectId, event, payload),
   );
-  return fired;
+  return results.filter(Boolean).length;
+}
+
+/** Fire all enabled webhooks for one event payload. */
+export async function dispatchWebhooks(projectId: string, event: string, payload: ScoreEvent): Promise<number> {
+  return dispatchWebhooksBatch(projectId, event, [payload]);
 }
