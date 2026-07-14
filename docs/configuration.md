@@ -65,7 +65,7 @@ defaults match `infra/docker-compose.dev.yml`.
 
 | Var | Default | Notes |
 | --- | --- | --- |
-| `ALLOW_PRIVATE_WEBHOOK_TARGETS` | unset | Set to `1` to permit `http://` and private/loopback webhook, automation, and analytics-sink URLs. Production blocks them by default to prevent SSRF. Useful for dev/LAN self-hosted targets. |
+| `ALLOW_PRIVATE_WEBHOOK_TARGETS` | unset | Set to `1` to permit `http://` and private/loopback webhook, automation, and analytics-sink URLs. Blocked by default in every environment to prevent SSRF (not just production). Useful for dev/LAN self-hosted targets. |
 
 ## SDK / examples
 

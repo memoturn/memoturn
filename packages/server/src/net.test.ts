@@ -63,3 +63,33 @@ describe("assertPublicUrl (production policy)", () => {
     });
   });
 });
+
+describe("assertPublicUrl (default policy)", () => {
+  const orig = { node: process.env.NODE_ENV, allow: process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS };
+  const withEnv = async (allow: string | undefined, fn: () => Promise<void>): Promise<void> => {
+    process.env.NODE_ENV = "test"; // NOT production — strictness must not depend on it
+    if (allow === undefined) delete process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS;
+    else process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS = allow;
+    try {
+      await fn();
+    } finally {
+      process.env.NODE_ENV = orig.node;
+      if (orig.allow === undefined) delete process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS;
+      else process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS = orig.allow;
+    }
+  };
+
+  it("is strict outside production when the opt-in is unset", async () => {
+    await withEnv(undefined, async () => {
+      await expect(assertPublicUrl("http://localhost:9999/hook")).rejects.toThrow();
+      await expect(assertPublicUrl("https://169.254.169.254/latest/meta-data")).rejects.toThrow();
+    });
+  });
+
+  it("permits http:// and private targets with ALLOW_PRIVATE_WEBHOOK_TARGETS=1", async () => {
+    await withEnv("1", async () => {
+      await expect(assertPublicUrl("http://localhost:9999/hook")).resolves.toBeUndefined();
+      await expect(assertPublicUrl("http://192.168.1.10/hook")).resolves.toBeUndefined();
+    });
+  });
+});
