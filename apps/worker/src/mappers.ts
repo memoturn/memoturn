@@ -7,11 +7,13 @@ import type { ObservationRow, ScoreWriteRow, TraceRow } from "@memoturn/telemetr
  * timestamp order; the store's last-writer-wins merge then keeps the row with the
  * highest event_ts.
  *
- * Events are PATCHES: fields an event leaves unset keep their previous value. Within
- * a batch that happens via body accumulation; across batches the caller passes the
- * entities' currently stored rows as `bases`, and unset fields fall back to them —
- * without a base, a later partial update would materialize defaults and overwrite
- * the fields set at create time.
+ * Update events (and trace-create, which doubles as the trace update) are PATCHES:
+ * fields an event leaves unset keep their previous value. Within a batch that happens
+ * via body accumulation; across batches the caller passes the entities' currently
+ * stored rows as `bases`, and unset fields fall back to them — without a base, a later
+ * partial update would materialize defaults and overwrite the fields set at create
+ * time. Observation *-create events are authoritative full writes: the caller only
+ * fetches an observation base when a *-update targets an id created in a prior batch.
  */
 
 const json = (v: unknown): string => (typeof v === "string" ? v : JSON.stringify(v));
