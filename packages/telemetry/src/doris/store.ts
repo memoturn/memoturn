@@ -50,6 +50,18 @@ function cutoffDaysAgo(days: number): string {
   return toDorisDateTime(new Date(Date.now() - Math.floor(days) * 86_400_000).toISOString());
 }
 
+/**
+ * UTC-midnight-anchored cutoff N days ago as a Doris DATETIME literal. Calendar-aligned
+ * sibling of cutoffDaysAgo for day-bucketed metrics: a plain `start_time >= ?` literal
+ * keeps the first bucket complete AND lets Doris prune partitions — wrapping the column
+ * in DATE(...) would force a full scan.
+ */
+function cutoffMidnightDaysAgo(days: number): string {
+  const d = new Date(Date.now() - Math.floor(days) * 86_400_000);
+  d.setUTCHours(0, 0, 0, 0);
+  return toDorisDateTime(d.toISOString());
+}
+
 export class DorisTelemetryStore implements TelemetryStore {
   private async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
     const [rows] = await dorisPool().query(sql, params);
@@ -65,7 +77,7 @@ export class DorisTelemetryStore implements TelemetryStore {
   async listTraces(projectId: string, filters: TraceFilters = {}): Promise<TraceSummary[]> {
     const { limit = 50, userId, sessionId, environment, search, tag, days } = filters;
     const conds: string[] = ["t.project_id = ?"];
-    const params: unknown[] = [projectId, projectId];
+    const params: unknown[] = [projectId];
     if (userId) {
       conds.push("t.user_id = ?");
       params.push(userId);
@@ -92,9 +104,12 @@ export class DorisTelemetryStore implements TelemetryStore {
     }
     params.push(Math.floor(limit));
 
-    // Observations are pre-aggregated per trace: avoids join fan-out in the aggregates
-    // and grouping by the ARRAY-typed tags column.
-    const rows = await this.query<TraceSummary & { tags: unknown }>(
+    // Two-step (like exportTraces): pick the page of traces first, then aggregate
+    // observations for just those trace ids — an unconditioned subquery would scan
+    // and GROUP BY every observation in the project before the LIMIT applies.
+    const rows = await this.query<
+      Omit<TraceSummary, "observation_count" | "total_cost" | "total_tokens" | "latency_ms"> & { tags: unknown }
+    >(
       `
       SELECT
         t.id AS id,
@@ -103,38 +118,47 @@ export class DorisTelemetryStore implements TelemetryStore {
         t.user_id AS user_id,
         t.session_id AS session_id,
         t.environment AS environment,
-        CAST(t.tags AS JSON) AS tags,
-        COALESCE(o.observation_count, 0) AS observation_count,
-        COALESCE(o.total_cost, 0) AS total_cost,
-        COALESCE(o.total_tokens, 0) AS total_tokens,
-        COALESCE(o.latency_ms, 0) AS latency_ms
+        CAST(t.tags AS JSON) AS tags
       FROM traces t
-      LEFT JOIN (
-        SELECT trace_id,
-               COUNT(id) AS observation_count,
-               SUM(total_cost) AS total_cost,
-               SUM(total_tokens) AS total_tokens,
-               MAX(latency_ms) AS latency_ms
-        FROM observations
-        WHERE project_id = ?
-        GROUP BY trace_id
-      ) o ON o.trace_id = t.id
       WHERE ${conds.join(" AND ")}
       ORDER BY t.\`timestamp\` DESC
       LIMIT ?
       `,
-      // Placeholder order: subquery project_id first, then the WHERE conds (whose first
-      // entry is also project_id), then LIMIT — which is exactly how params was built.
       params,
     );
-    return rows.map((r) => ({
-      ...r,
-      tags: parseTags(r.tags),
-      observation_count: Number(r.observation_count),
-      total_cost: Number(r.total_cost),
-      total_tokens: Number(r.total_tokens),
-      latency_ms: Number(r.latency_ms),
-    }));
+    if (rows.length === 0) return [];
+
+    const aggs = await this.query<{
+      trace_id: string;
+      observation_count: unknown;
+      total_cost: unknown;
+      total_tokens: unknown;
+      latency_ms: unknown;
+    }>(
+      `
+      SELECT trace_id,
+             COUNT(id) AS observation_count,
+             SUM(total_cost) AS total_cost,
+             SUM(total_tokens) AS total_tokens,
+             MAX(latency_ms) AS latency_ms
+      FROM observations
+      WHERE project_id = ? AND trace_id IN (?)
+      GROUP BY trace_id
+      `,
+      [projectId, rows.map((r) => r.id)],
+    );
+    const byTrace = new Map(aggs.map((a) => [a.trace_id, a]));
+    return rows.map((r) => {
+      const a = byTrace.get(r.id);
+      return {
+        ...r,
+        tags: parseTags(r.tags),
+        observation_count: Number(a?.observation_count ?? 0),
+        total_cost: Number(a?.total_cost ?? 0),
+        total_tokens: Number(a?.total_tokens ?? 0),
+        latency_ms: Number(a?.latency_ms ?? 0),
+      };
+    });
   }
 
   async listSessions(projectId: string, limit = 50): Promise<SessionSummary[]> {
@@ -326,11 +350,11 @@ export class DorisTelemetryStore implements TelemetryStore {
         PERCENTILE_APPROX(latency_ms, 0.5) AS p50,
         PERCENTILE_APPROX(latency_ms, 0.95) AS p95
       FROM observations
-      WHERE project_id = ? AND type = 'GENERATION' AND DATE(start_time) >= DATE_SUB(CURRENT_DATE(), INTERVAL ? DAY)
+      WHERE project_id = ? AND type = 'GENERATION' AND start_time >= ?
       GROUP BY DATE_FORMAT(start_time, '%Y-%m-%d')
       ORDER BY date ASC
       `,
-      [projectId, Math.floor(days)],
+      [projectId, cutoffMidnightDaysAgo(days)],
     );
     return rows.map((r) => ({
       date: r.date,
@@ -351,11 +375,12 @@ export class DorisTelemetryStore implements TelemetryStore {
         SUM(total_tokens) AS total_tokens,
         SUM(total_cost) AS total_cost
       FROM observations
-      WHERE project_id = ? AND type = 'GENERATION' AND DATE(start_time) >= DATE_SUB(CURRENT_DATE(), INTERVAL ? DAY)
+      WHERE project_id = ? AND type = 'GENERATION' AND start_time >= ?
       GROUP BY model
       ORDER BY total_cost DESC
+      LIMIT 100
       `,
-      [projectId, Math.floor(days)],
+      [projectId, cutoffMidnightDaysAgo(days)],
     );
     return rows.map((r) => ({
       model: r.model,
@@ -393,12 +418,12 @@ export class DorisTelemetryStore implements TelemetryStore {
       `
       SELECT ${groupExpr} AS label, ${agg} AS value
       FROM observations
-      WHERE project_id = ? AND type = 'GENERATION' AND DATE(start_time) >= DATE_SUB(CURRENT_DATE(), INTERVAL ? DAY)
+      WHERE project_id = ? AND type = 'GENERATION' AND start_time >= ?
       GROUP BY ${groupExpr}
       ORDER BY ${order}
       LIMIT 100
       `,
-      [projectId, Math.floor(days)],
+      [projectId, cutoffMidnightDaysAgo(days)],
     );
     return rows.map((r) => ({ label: r.label || "(unknown)", value: Number(r.value) }));
   }
