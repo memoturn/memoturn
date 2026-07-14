@@ -57,10 +57,14 @@ console SPA — so the console's default `VITE_API_BASE=/api` works unchanged.
 `https://DOMAIN/`, sign up the first admin (Better Auth email/password) — the org plugin auto-provisions
 a default project — then mint an SDK API key from Settings. Point the SDK at `https://DOMAIN/api`.
 
-**Backups:** MinIO holds the replayable raw event log (the source of truth — Doris can be rebuilt
-from it), so it is the highest priority; also `pg_dump` Postgres and use Doris `BACKUP` snapshots
-(or rely on blob replay) for the telemetry tables. All datastores persist to named volumes
-(`pgdata`, `dorisfemeta`, `dorisbedata`, `redisdata`, `miniodata`).
+**Backups:** `bun run prod:backup` (scripts/backup.sh) dumps Postgres (`pg_dump | gzip`) and
+mirrors the blob bucket — the replayable raw event log, the source of truth from which Doris can
+be rebuilt — into `./backups/`, keeping the newest `BACKUP_KEEP` (default 7) of each. Schedule it
+with cron (`0 2 * * * cd /opt/memoturn && bun run prod:backup`) and ship `./backups/` off-host; a
+backup on the same disk is not a backup. Doris itself is not snapshotted — recovery is blob replay
+(add Doris `BACKUP SNAPSHOT` to an S3 repository if you need faster restores). Restore commands
+are documented at the top of the script. All datastores persist to named volumes (`pgdata`,
+`dorisfemeta`, `dorisbedata`, `redisdata`, `miniodata`).
 
 **Note:** a single VM has no HA. If volume or uptime needs grow, move to the Helm chart below with
 managed datastores.
