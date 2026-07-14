@@ -1,4 +1,6 @@
 import { prisma } from "@memoturn/db";
+import { redisConnection } from "@memoturn/db/queue";
+import { mapConcurrent } from "./concurrency.js";
 import { isPublicUrl } from "./net.js";
 
 /**
@@ -48,6 +50,49 @@ function shape(a: AutomationRow) {
   };
 }
 
+// Enabled-automation lists are Redis-cached per project+trigger (same pattern as the
+// masking policy / analytics sink) so batch dispatch on the ingest hot path doesn't
+// hit Postgres per event. Rows carry no secrets, so caching them is safe.
+const CACHE_TTL_SECONDS = 30;
+const cacheKey = (projectId: string, trigger: string) => `memoturn:automations:${projectId}:${trigger}`;
+
+/** The row fields dispatch needs (cached shape). */
+interface DispatchableAutomation {
+  id: string;
+  action: string;
+  target: string;
+  threshold: number | null;
+  filter: string;
+}
+
+async function loadEnabledAutomations(projectId: string, trigger: string): Promise<DispatchableAutomation[]> {
+  try {
+    const raw = await redisConnection().get(cacheKey(projectId, trigger));
+    if (raw) return JSON.parse(raw) as DispatchableAutomation[];
+  } catch {
+    // fall through to DB
+  }
+  const rows = await prisma.automation.findMany({
+    where: { projectId, trigger, enabled: true },
+    select: { id: true, action: true, target: true, threshold: true, filter: true },
+  });
+  try {
+    await redisConnection().set(cacheKey(projectId, trigger), JSON.stringify(rows), "EX", CACHE_TTL_SECONDS);
+  } catch {
+    // best-effort
+  }
+  return rows;
+}
+
+async function bustCache(projectId: string): Promise<void> {
+  // deleteAutomation doesn't know the row's trigger — bust every trigger key.
+  try {
+    await redisConnection().del(...AUTOMATION_TRIGGERS.map((t) => cacheKey(projectId, t)));
+  } catch {
+    // best-effort
+  }
+}
+
 export async function createAutomation(projectId: string, input: CreateAutomationInput) {
   const a = await prisma.automation.create({
     data: {
@@ -60,6 +105,7 @@ export async function createAutomation(projectId: string, input: CreateAutomatio
       filter: input.filter ?? "",
     },
   });
+  await bustCache(projectId);
   return shape(a);
 }
 
@@ -70,6 +116,7 @@ export async function listAutomations(projectId: string) {
 
 export async function deleteAutomation(projectId: string, id: string) {
   await prisma.automation.deleteMany({ where: { projectId, id } });
+  await bustCache(projectId);
   return { deleted: true };
 }
 
@@ -102,31 +149,57 @@ export function automationMatches(
   return true;
 }
 
+/** Outbound deliveries in flight at once per dispatch call. */
+const DISPATCH_CONCURRENCY = 8;
+
+/** Deliver one payload to one automation target. Never throws. */
+async function deliverAutomation(
+  a: DispatchableAutomation,
+  projectId: string,
+  event: string,
+  payload: AutomationEvent,
+): Promise<boolean> {
+  if (!(await isPublicUrl(a.target))) return false; // SSRF re-check at dispatch (DNS rebinding)
+  const body =
+    a.action === "slack"
+      ? JSON.stringify({ text: slackText(event, projectId, payload) })
+      : JSON.stringify({ event, projectId, ...payload });
+  try {
+    await fetch(a.target, {
+      method: "POST",
+      headers: { "content-type": "application/json", "user-agent": "memoturn-automations/1" },
+      body,
+      signal: AbortSignal.timeout(5_000),
+    });
+    return true;
+  } catch {
+    return false; // best-effort; a failing target never breaks ingestion
+  }
+}
+
+/**
+ * Fire all enabled automations for a batch of payloads: ONE (Redis-cached) config
+ * lookup for the whole batch, deliveries with bounded concurrency. Threshold/filter
+ * matching applies per payload.
+ */
+export async function dispatchAutomationsBatch(
+  projectId: string,
+  event: string,
+  payloads: AutomationEvent[],
+): Promise<number> {
+  if (payloads.length === 0) return 0;
+  const automations = await loadEnabledAutomations(projectId, event);
+  if (automations.length === 0) return 0;
+  const jobs = automations.flatMap((a) =>
+    payloads.filter((payload) => automationMatches(a, payload)).map((payload) => ({ a, payload })),
+  );
+  const results = await mapConcurrent(jobs, DISPATCH_CONCURRENCY, ({ a, payload }) =>
+    deliverAutomation(a, projectId, event, payload),
+  );
+  return results.filter(Boolean).length;
+}
+
 /** Fire all enabled automations whose trigger matches the event. Returns count fired. */
 export async function dispatchAutomations(projectId: string, event: string, payload: AutomationEvent): Promise<number> {
-  const automations = await prisma.automation.findMany({ where: { projectId, trigger: event, enabled: true } });
-  let fired = 0;
-  await Promise.all(
-    automations.map(async (a) => {
-      if (!automationMatches(a, payload)) return;
-      if (!(await isPublicUrl(a.target))) return; // SSRF re-check at dispatch (DNS rebinding)
-
-      const body =
-        a.action === "slack"
-          ? JSON.stringify({ text: slackText(event, projectId, payload) })
-          : JSON.stringify({ event, projectId, ...payload });
-      try {
-        await fetch(a.target, {
-          method: "POST",
-          headers: { "content-type": "application/json", "user-agent": "memoturn-automations/1" },
-          body,
-          signal: AbortSignal.timeout(5_000),
-        });
-        fired++;
-      } catch {
-        // best-effort; a failing target never breaks ingestion
-      }
-    }),
-  );
-  return fired;
+  return dispatchAutomationsBatch(projectId, event, [payload]);
 }

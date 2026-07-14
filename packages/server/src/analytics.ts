@@ -110,6 +110,52 @@ async function bustCache(projectId: string) {
   }
 }
 
+export interface AnalyticsEvent {
+  event: string;
+  distinctId: string;
+  properties: Record<string, unknown>;
+}
+
+/** PostHog /batch/ payload cap per request. */
+const BATCH_CHUNK = 500;
+
+/**
+ * Forward a batch of events to the project's analytics sink (best-effort, no-op if
+ * disabled). One sink load + SSRF check + one POST to PostHog's /batch/ endpoint per
+ * chunk — the per-event variant was one HTTP roundtrip per event on the ingest path.
+ * Returns the number of events sent.
+ */
+export async function forwardEvents(projectId: string, events: AnalyticsEvent[]): Promise<number> {
+  if (events.length === 0) return 0;
+  const sink = await loadSink(projectId);
+  if (!sink?.enabled || sink.type !== "posthog" || !sink.apiKey) return 0;
+  const batchUrl = `${sink.host.replace(/\/$/, "")}/batch/`;
+  if (!(await isPublicUrl(batchUrl))) return 0; // SSRF re-check at dispatch
+  let sent = 0;
+  for (let i = 0; i < events.length; i += BATCH_CHUNK) {
+    const chunk = events.slice(i, i + BATCH_CHUNK);
+    try {
+      await fetch(batchUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          api_key: sink.apiKey,
+          batch: chunk.map((e) => ({
+            event: e.event,
+            distinct_id: e.distinctId || `project:${projectId}`,
+            properties: { ...e.properties, memoturn_project: projectId },
+          })),
+        }),
+        signal: AbortSignal.timeout(5_000),
+      });
+      sent += chunk.length;
+    } catch {
+      // best-effort per chunk
+    }
+  }
+  return sent;
+}
+
 /** Forward one event to the project's analytics sink (best-effort, no-op if disabled). */
 export async function forwardEvent(
   projectId: string,
@@ -117,24 +163,5 @@ export async function forwardEvent(
   distinctId: string,
   properties: Record<string, unknown>,
 ): Promise<boolean> {
-  const sink = await loadSink(projectId);
-  if (!sink?.enabled || sink.type !== "posthog" || !sink.apiKey) return false;
-  const captureUrl = `${sink.host.replace(/\/$/, "")}/capture/`;
-  if (!(await isPublicUrl(captureUrl))) return false; // SSRF re-check at dispatch
-  try {
-    await fetch(captureUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        api_key: sink.apiKey,
-        event,
-        distinct_id: distinctId || `project:${projectId}`,
-        properties: { ...properties, memoturn_project: projectId },
-      }),
-      signal: AbortSignal.timeout(5_000),
-    });
-    return true;
-  } catch {
-    return false; // best-effort
-  }
+  return (await forwardEvents(projectId, [{ event, distinctId, properties }])) > 0;
 }

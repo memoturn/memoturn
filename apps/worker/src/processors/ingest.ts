@@ -4,9 +4,9 @@ import type { IngestJob } from "@memoturn/db/queue";
 import {
   applyMasking,
   compileMaskers,
-  dispatchAutomations,
-  dispatchWebhooks,
-  forwardEvent,
+  dispatchAutomationsBatch,
+  dispatchWebhooksBatch,
+  forwardEvents,
   listOnlineEvaluators,
   loadMaskingPolicy,
   loadProjectPriceOverrides,
@@ -79,6 +79,7 @@ async function runOnlineEvals(projectId: string, batch: IngestEvent[]): Promise<
   const evaluators = await listOnlineEvaluators(projectId);
   if (evaluators.length === 0) return;
 
+  const evalCompleted: { traceId: string; name: string }[] = [];
   for (const ev of evaluators) {
     for (const t of completed) {
       const trace = t.body;
@@ -89,7 +90,7 @@ async function runOnlineEvals(projectId: string, batch: IngestEvent[]): Promise<
           runEvaluator(projectId, ev.name, { traceId: trace.id, input: trace.input, output: trace.output }),
         );
         inc("evaluator_runs_total", { evaluator: ev.name, result: "ok" });
-        await dispatchAutomations(projectId, "eval.completed", { traceId: trace.id, name: ev.name });
+        evalCompleted.push({ traceId: trace.id, name: ev.name });
       } catch (err) {
         // Best-effort: never fail ingestion, but COUNT failures so silent eval gaps surface.
         inc("evaluator_runs_total", { evaluator: ev.name, result: "error" });
@@ -101,6 +102,10 @@ async function runOnlineEvals(projectId: string, batch: IngestEvent[]): Promise<
         });
       }
     }
+  }
+  // One batched dispatch for all completed evals (was one config lookup + POST per eval).
+  if (evalCompleted.length > 0) {
+    await dispatchAutomationsBatch(projectId, "eval.completed", evalCompleted).catch(() => {});
   }
 }
 
@@ -208,26 +213,28 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     scores: scores.length,
   });
 
-  // Fire score.created webhooks + automations + analytics for any scores in this batch.
-  for (const s of scores) {
-    const payload = { traceId: s.trace_id, name: s.name, value: s.value, source: s.source };
-    await dispatchWebhooks(projectId, "score.created", payload);
-    await dispatchAutomations(projectId, "score.created", payload);
-    await forwardEvent(projectId, "score.created", s.trace_id, payload);
-  }
-
-  // Fire trace.created automations + analytics for completed traces (those with an output).
-  for (const t of traces) {
-    if (t.output) {
-      await dispatchAutomations(projectId, "trace.created", { traceId: t.id, name: t.name });
-      await forwardEvent(projectId, "trace.created", t.user_id || t.id, {
-        traceId: t.id,
-        name: t.name,
-        environment: t.environment,
-        sessionId: t.session_id,
-      });
-    }
-  }
+  // Fire webhooks + automations + analytics for this batch: one config lookup per
+  // channel (not per row), deliveries in parallel. allSettled preserves the
+  // best-effort contract — dispatch failures never fail ingestion.
+  const scorePayloads = scores.map((s) => ({ traceId: s.trace_id, name: s.name, value: s.value, source: s.source }));
+  const completedTraces = traces.filter((t) => t.output);
+  await Promise.allSettled([
+    dispatchWebhooksBatch(projectId, "score.created", scorePayloads),
+    dispatchAutomationsBatch(projectId, "score.created", scorePayloads),
+    dispatchAutomationsBatch(
+      projectId,
+      "trace.created",
+      completedTraces.map((t) => ({ traceId: t.id, name: t.name })),
+    ),
+    forwardEvents(projectId, [
+      ...scorePayloads.map((p) => ({ event: "score.created", distinctId: p.traceId, properties: { ...p } })),
+      ...completedTraces.map((t) => ({
+        event: "trace.created",
+        distinctId: t.user_id || t.id,
+        properties: { traceId: t.id, name: t.name, environment: t.environment, sessionId: t.session_id },
+      })),
+    ]),
+  ]);
 
   await runOnlineEvals(projectId, parsed.batch);
 }

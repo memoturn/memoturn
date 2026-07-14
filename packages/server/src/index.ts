@@ -6,6 +6,7 @@ export * from "./automations.js";
 export * from "./batch.js";
 export * from "./betterauth.js";
 export * from "./comments.js";
+export * from "./concurrency.js";
 export * from "./datasets.js";
 export * from "./env.js";
 export * from "./evaluators.js";
