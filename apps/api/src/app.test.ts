@@ -107,4 +107,43 @@ describe.skipIf(!HAS_INFRA)("authenticated /v1 routes (infra)", () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it("reports invalid events in the 207 errors array and still accepts the valid ones", async () => {
+    const valid = {
+      id: `${slug}-evt-ok`,
+      type: "trace-create",
+      timestamp: new Date().toISOString(),
+      body: { id: `${slug}-trace-ok`, name: "apitest", environment: "test" },
+    };
+    const invalid = { id: `${slug}-evt-bad`, type: "trace-create", timestamp: "not-a-date", body: {} };
+    const res = await app.request("/v1/ingest", {
+      method: "POST",
+      headers: { authorization: basic(full.publicKey, full.secretKey), "content-type": "application/json" },
+      body: JSON.stringify({ batch: [valid, invalid] }),
+    });
+    expect(res.status).toBe(207);
+    const body = (await res.json()) as {
+      successes: { id: string; status: number }[];
+      errors: { id: string; index?: number; status: number; error?: string }[];
+    };
+    expect(body.successes).toHaveLength(1);
+    expect(body.successes[0]).toMatchObject({ id: valid.id, status: 201 });
+    expect(body.errors).toHaveLength(1);
+    expect(body.errors[0]).toMatchObject({ id: invalid.id, index: 1, status: 400 });
+    expect(body.errors[0]?.error).toBeTruthy();
+  });
+
+  it("returns 207 with no successes for an all-invalid batch", async () => {
+    const res = await app.request("/v1/ingest", {
+      method: "POST",
+      headers: { authorization: basic(full.publicKey, full.secretKey), "content-type": "application/json" },
+      body: JSON.stringify({ batch: [{ type: "nope" }, 42] }),
+    });
+    expect(res.status).toBe(207);
+    const body = (await res.json()) as { successes: unknown[]; errors: { id: string; index?: number }[] };
+    expect(body.successes).toHaveLength(0);
+    expect(body.errors).toHaveLength(2);
+    expect(body.errors[0]?.id).toBe(""); // no readable id on the rejected event
+    expect(body.errors.map((e) => e.index)).toEqual([0, 1]);
+  });
 });

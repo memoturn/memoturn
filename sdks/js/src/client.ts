@@ -77,6 +77,19 @@ export class Memoturn {
       this.buffer.unshift(...batch);
       throw new Error(`memoturn ingest failed: ${res.status} ${await res.text()}`);
     }
+
+    // The 207 body reports per-event results; surface rejected events instead of
+    // silently dropping them (they are NOT retried — a schema reject is permanent).
+    if (res.status === 207) {
+      const body = (await res.json().catch(() => null)) as {
+        errors?: { id: string; index?: number; error?: string }[];
+      } | null;
+      if (body?.errors?.length) {
+        console.warn(
+          `memoturn: ${body.errors.length} event(s) rejected at ingest — first: ${body.errors[0]?.error ?? "invalid event"}`,
+        );
+      }
+    }
   }
 
   /** Flush and stop the background timer. Call before process exit. */
