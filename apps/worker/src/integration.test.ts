@@ -141,4 +141,42 @@ describe.skipIf(!HAS_INFRA)("ingest pipeline (blob → worker → telemetry stor
     expect(obs?.end_time).toBeTruthy(); // from batch 2
     expect(Number(obs?.latency_ms)).toBeGreaterThan(0); // spans both batches
   });
+
+  it("merges same-batch create+update without a stored base (create-only gate)", async () => {
+    const traceId = newId();
+    const obsId = newId();
+    const t0 = iso(new Date(Date.now() - 2000));
+    const t1 = iso();
+
+    // Create and update in the SAME batch: the processor's read-merge gate skips the
+    // observations base SELECT here (nothing is stored yet), and the mapper's body
+    // accumulation alone must produce the merged row.
+    const blobKey = await putRawBatch(projectId, newId(), {
+      batch: [
+        { id: newId(), type: "trace-create", timestamp: t0, body: { id: traceId, name: "sb-trace" } },
+        {
+          id: newId(),
+          type: "generation-create",
+          timestamp: t0,
+          body: { id: obsId, traceId, name: "sb-gen", model: "gpt-4o-mini", startTime: t0 },
+        },
+        {
+          id: newId(),
+          type: "generation-update",
+          timestamp: t1,
+          body: { id: obsId, traceId, endTime: t1, output: "pong", usage: { promptTokens: 5, completionTokens: 5 } },
+        },
+      ],
+    });
+    await processIngest({ data: { projectId, batchId: newId(), blobKey } } as Job<IngestJob>);
+
+    const trace = await getTraceWithRetry(projectId, traceId);
+    expect(trace).toBeTruthy();
+    if (!trace) return;
+    const obs = trace.observations[0];
+    expect(obs?.name).toBe("sb-gen"); // from the create
+    expect(obs?.model).toBe("gpt-4o-mini"); // from the create
+    expect(Number(obs?.total_tokens)).toBe(10); // from the update
+    expect(obs?.end_time).toBeTruthy(); // from the update
+  });
 });

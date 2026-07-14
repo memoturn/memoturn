@@ -109,9 +109,10 @@ async function runOnlineEvals(projectId: string, batch: IngestEvent[]): Promise<
  * truth), validates it, maps events to telemetry rows, and inserts.
  *
  * Cross-batch partial updates are handled by a READ-MERGE: the currently stored rows
- * for every trace/observation id in the batch are fetched and passed to the mapper
- * as bases, so fields a later event leaves unset keep their stored value instead of
- * being overwritten with defaults (events are patches).
+ * for entity ids the batch may be patching are fetched and passed to the mapper as
+ * bases, so fields a later event leaves unset keep their stored value instead of
+ * being overwritten with defaults. Update events are patches; an observation *-create
+ * is authoritative (no base fetched unless a *-update targets the id cross-batch).
  */
 export async function processIngest(job: Job<IngestJob>): Promise<void> {
   const { projectId, blobKey } = job.data;
@@ -150,15 +151,26 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
 
   const priceOverrides = compileModelPrices(await loadProjectPriceOverrides(projectId));
 
-  // Read-merge bases: existing rows for every entity id this batch touches.
+  // Read-merge bases: existing rows for every entity id this batch patches.
+  // Traces always need a base — trace-create doubles as the update event (the SDK's
+  // trace.update() re-emits trace-create with a partial body), so any trace id may be
+  // a cross-batch patch. Observations have distinct *-update events: only ids updated
+  // WITHOUT a same-batch create can have a stored base worth fetching, so create-only
+  // batches (the common SDK flush) skip the observations SELECT entirely.
   const traceIds = [
     ...new Set(parsed.batch.filter((e) => e.type === "trace-create").map((e) => (e.body as { id: string }).id)),
   ];
+  const createdObservationIds = new Set(
+    parsed.batch
+      .filter((e) => e.type === "span-create" || e.type === "generation-create" || e.type === "event-create")
+      .map((e) => (e.body as { id: string }).id),
+  );
   const observationIds = [
     ...new Set(
       parsed.batch
-        .filter((e) => e.type !== "trace-create" && e.type !== "score-create")
-        .map((e) => (e.body as { id: string }).id),
+        .filter((e) => e.type === "span-update" || e.type === "generation-update")
+        .map((e) => (e.body as { id: string }).id)
+        .filter((id) => !createdObservationIds.has(id)),
     ),
   ];
   const store = telemetry();
