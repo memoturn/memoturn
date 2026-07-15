@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Download, Flag, FlaskConical, Plus, RotateCcw, Tag, Trash2 } from "lucide-react";
+import { Database, Download, Flag, FlaskConical, Plus, RotateCcw, Tag, Trash2 } from "lucide-react";
 import { type ReactNode, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -497,6 +497,47 @@ function writePlaygroundSeed(obs: ObservationDetail) {
   }
 }
 
+/** Add this generation's input (+ output as expected) to a dataset — a dropdown of the project's datasets. */
+function AddToDatasetButton({ obs }: { obs: ObservationDetail }) {
+  const readOnly = useIsReadOnly();
+  const { data: datasets } = useQuery({ queryKey: ["datasets"], queryFn: () => api.listDatasets() });
+  const add = useMutation({
+    mutationFn: (name: string) =>
+      api.addDatasetItems(name, [
+        {
+          input: tryParse(obs.input) ?? obs.input,
+          expectedOutput: obs.output ? (tryParse(obs.output) ?? obs.output) : undefined,
+        },
+      ]),
+    onSuccess: (_res, name) => toast.success(`Added to dataset “${name}”`),
+    onError: (e) => toast.error(`Failed to add: ${String(e)}`),
+  });
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" disabled={readOnly}>
+          <Database className="size-3.5" />
+          Add to dataset
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel>Add as a dataset item</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {!datasets || datasets.length === 0 ? (
+          <DropdownMenuItem disabled>No datasets — create one under Datasets</DropdownMenuItem>
+        ) : (
+          datasets.map((d) => (
+            <DropdownMenuItem key={d.name} onSelect={() => add.mutate(d.name)}>
+              {d.name}
+              <span className="ml-auto text-xs text-muted-foreground">{Number(d.items)} items</span>
+            </DropdownMenuItem>
+          ))
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function ObservationDetailItem({
   obs,
   registerRef,
@@ -531,7 +572,8 @@ function ObservationDetailItem({
       </AccordionTrigger>
       <AccordionContent className="space-y-3">
         {obs.type === "GENERATION" && obs.input && (
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            <AddToDatasetButton obs={obs} />
             <Button asChild variant="outline" size="sm">
               <Link to="/playground" onClick={() => writePlaygroundSeed(obs)}>
                 <FlaskConical className="size-3.5" />
