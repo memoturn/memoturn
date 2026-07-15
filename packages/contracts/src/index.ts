@@ -235,6 +235,13 @@ export const embeddingProjection = z.object({
 });
 export type EmbeddingProjection = z.infer<typeof embeddingProjection>;
 
+/** Result of an on-demand projection run (empty run_id when there weren't enough vectors). */
+export const embeddingProjectionRun = z.object({
+  run_id: z.string(),
+  points: z.number(),
+});
+export type EmbeddingProjectionRun = z.infer<typeof embeddingProjectionRun>;
+
 export const scoreRow = z.object({
   name: z.string(),
   source: z.string(),

@@ -293,6 +293,7 @@ export const api = {
   listEvaluatorTemplates: () => get<{ data: EvaluatorTemplate[] }>(`/v1/evaluators/templates`).then((r) => r.data),
   getEmbeddingProjection: (opts: { runId?: string; colorBy?: string; limit?: number } = {}) =>
     get<EmbeddingProjection>(`/v1/embeddings/projection${qs(opts as Record<string, unknown>)}`),
+  runEmbeddingProjection: () => post<{ run_id: string; points: number }>(`/v1/embeddings/projection/run`, {}),
   instantiateEvaluatorTemplate: (body: {
     key: string;
     name?: string;

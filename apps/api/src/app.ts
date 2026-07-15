@@ -94,6 +94,7 @@ import {
   runBatchAction,
   runEvaluator,
   runPlayground,
+  runProjectionForProject,
   runScheduledExport,
   safeServeContentType,
   setAnalyticsSink,
@@ -1618,6 +1619,28 @@ app.openapi(
   async (c) => {
     const { runId, colorBy, limit } = c.req.valid("query");
     return c.json(await getEmbeddingProjection(c.get("projectId"), { runId, colorBy, limit }));
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/embeddings/projection/run",
+    summary: "Recompute the embedding projection now (on-demand, instead of the daily cron)",
+    tags: ["embeddings"],
+    security,
+    responses: {
+      200: { description: "Projection run", content: { "application/json": { schema: C.embeddingProjectionRun } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const projectId = c.get("projectId");
+    const result = await runProjectionForProject(projectId);
+    await recordAudit(projectId, c.get("actor"), "embeddings.projection.run", "projection");
+    return c.json(result ? { run_id: result.runId, points: result.points } : { run_id: "", points: 0 });
   },
 );
 
