@@ -3,7 +3,14 @@ import { Link } from "@tanstack/react-router";
 import { Download, Plus, RotateCcw, Tag, Trash2 } from "lucide-react";
 import { type ReactNode, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { api, fetchOffloadedPayload, type ObservationDetail, type TraceDetail } from "../lib/api";
+import {
+  api,
+  fetchOffloadedPayload,
+  type ObservationDetail,
+  type ScoreConfig,
+  type ScoreRow,
+  type TraceDetail,
+} from "../lib/api";
 import { useIsReadOnly } from "../lib/role";
 import { cn } from "../lib/utils";
 import { CopyButton } from "./copy-button";
@@ -512,6 +519,156 @@ function ObservationDetailItem({
 
 type ScoreDataType = "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
 
+type AnnotationPatch = { value?: number; stringValue?: string };
+
+/** Numeric annotation via a native range slider; submits the value on pointer release. */
+function NumericReviewField({
+  cfg,
+  active,
+  disabled,
+  onSubmit,
+}: {
+  cfg: ScoreConfig;
+  active: ScoreRow | undefined;
+  disabled: boolean;
+  onSubmit: (patch: AnnotationPatch) => void;
+}) {
+  const min = cfg.min ?? 0;
+  const max = cfg.max ?? 1;
+  const step = max - min <= 1 ? 0.01 : 1;
+  const [val, setVal] = useState<number>(active?.value ?? min);
+  return (
+    <div className="flex items-center gap-3">
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={val}
+        disabled={disabled}
+        onChange={(e) => setVal(Number(e.target.value))}
+        onPointerUp={() => onSubmit({ value: val })}
+        onKeyUp={() => onSubmit({ value: val })}
+        className="h-1.5 flex-1 cursor-pointer accent-primary"
+        aria-label={`${cfg.name} score`}
+      />
+      <span className="w-10 text-right text-sm font-medium tabular-nums">{val}</span>
+    </div>
+  );
+}
+
+/** One score-config row: category buttons, pass/fail, or a numeric slider. */
+function ReviewField({
+  cfg,
+  active,
+  disabled,
+  onSubmit,
+}: {
+  cfg: ScoreConfig;
+  active: ScoreRow | undefined;
+  disabled: boolean;
+  onSubmit: (patch: AnnotationPatch) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">{cfg.name}</span>
+        {active && (
+          <span className="text-xs text-muted-foreground">
+            current:{" "}
+            <span className="tabular-nums text-foreground">{active.value ?? (active.string_value || "—")}</span>
+          </span>
+        )}
+      </div>
+      {cfg.dataType === "CATEGORICAL" ? (
+        <div className="flex flex-wrap gap-1.5">
+          {cfg.categories.map((c) => (
+            <Button
+              key={c}
+              variant={active?.string_value === c ? "default" : "outline"}
+              size="sm"
+              disabled={disabled}
+              onClick={() => onSubmit({ stringValue: c })}
+            >
+              {c}
+            </Button>
+          ))}
+        </div>
+      ) : cfg.dataType === "BOOLEAN" ? (
+        <div className="flex gap-1.5">
+          <Button
+            variant={active?.value === 1 ? "default" : "outline"}
+            size="sm"
+            disabled={disabled}
+            onClick={() => onSubmit({ value: 1 })}
+          >
+            Pass
+          </Button>
+          <Button
+            variant={active?.value === 0 ? "default" : "outline"}
+            size="sm"
+            disabled={disabled}
+            onClick={() => onSubmit({ value: 0 })}
+          >
+            Fail
+          </Button>
+        </div>
+      ) : (
+        <NumericReviewField cfg={cfg} active={active} disabled={disabled} onSubmit={onSubmit} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Inline human-review panel: renders the project's score configs as always-visible inputs so a
+ * reviewer can score a trace in one click (vs. the ad-hoc Annotate popover). Each submit writes an
+ * ANNOTATION score through the ingest pipeline; the current value per config is highlighted.
+ * Renders nothing when no score configs are defined.
+ */
+function InlineReview({ traceId, scores }: { traceId: string; scores: ScoreRow[] }) {
+  const qc = useQueryClient();
+  const readOnly = useIsReadOnly();
+  const { data: configs } = useQuery({ queryKey: ["score-configs"], queryFn: () => api.listScoreConfigs() });
+
+  const annotate = useMutation({
+    mutationFn: (b: { name: string; dataType: ScoreDataType } & AnnotationPatch) => api.annotateTrace(traceId, b),
+    onSuccess: () => {
+      toast.success("Review saved");
+      qc.invalidateQueries({ queryKey: ["trace", traceId] });
+      // The score lands asynchronously via ingest — refetch again after a beat.
+      setTimeout(() => qc.invalidateQueries({ queryKey: ["trace", traceId] }), 1500);
+    },
+    onError: (e) => toast.error(`Review failed: ${String(e)}`),
+  });
+
+  if (!configs || configs.length === 0) return null;
+
+  // Latest ANNOTATION score per config name → the "current" value shown as active.
+  const current = new Map<string, ScoreRow>();
+  for (const s of scores) if (s.source === "ANNOTATION") current.set(s.name, s);
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Human review</CardTitle>
+        <CardDescription>One-click scoring from your score configs.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {configs.map((cfg) => (
+          <ReviewField
+            key={cfg.id}
+            cfg={cfg}
+            active={current.get(cfg.name)}
+            disabled={readOnly}
+            onSubmit={(patch) => annotate.mutate({ name: cfg.name, dataType: cfg.dataType, ...patch })}
+          />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
 /** Popover form to add a manual ANNOTATION score to a trace (human feedback). */
 /** Inline tag editor — add/remove tags on a trace (writes through the merge-on-write store). */
 function TagEditor({ traceId, tags }: { traceId: string; tags: string[] }) {
@@ -869,6 +1026,8 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
           {truncatedMarker(trace.output) && <PayloadView raw={trace.output} />}
         </CardContent>
       </Card>
+
+      <InlineReview traceId={trace.id} scores={trace.scores} />
 
       <Card>
         <CardHeader>
