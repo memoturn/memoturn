@@ -67,6 +67,22 @@ function PlaygroundPage() {
     setModel(p === "anthropic" ? "claude-sonnet-4-6" : p === "openai" ? "gpt-4o-mini" : "mock-1");
   }
 
+  // Seed from a trace generation ("Open in Playground"): consume + clear the handoff on mount.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("memoturn.playground.seed");
+      if (!raw) return;
+      localStorage.removeItem("memoturn.playground.seed");
+      const seed = JSON.parse(raw) as { provider?: string; model?: string; system?: string; userMsg?: string };
+      if (seed.provider) setProvider(seed.provider);
+      if (seed.model) setModel(seed.model);
+      if (typeof seed.system === "string" && seed.system) setSystem(seed.system);
+      if (typeof seed.userMsg === "string") setUserMsg(seed.userMsg);
+    } catch {
+      /* ignore malformed seed */
+    }
+  }, []);
+
   async function run() {
     setBusy(true);
     setError(null);
