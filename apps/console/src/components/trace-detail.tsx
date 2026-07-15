@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Download, Plus, RotateCcw, Tag, Trash2 } from "lucide-react";
+import { Download, Flag, Plus, RotateCcw, Tag, Trash2 } from "lucide-react";
 import { type ReactNode, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -29,6 +29,14 @@ import {
 } from "./ui/breadcrumb";
 import { Button } from "./ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -728,6 +736,41 @@ function TagEditor({ traceId, tags }: { traceId: string; tags: string[] }) {
   );
 }
 
+/** Add this trace to a review queue in one click — a dropdown of the project's queues. */
+function FlagForReviewButton({ traceId }: { traceId: string }) {
+  const readOnly = useIsReadOnly();
+  const { data: queues } = useQuery({ queryKey: ["review-queues"], queryFn: () => api.listReviewQueues() });
+  const add = useMutation({
+    mutationFn: (queue: string) => api.addReviewItems(queue, [traceId]),
+    onSuccess: (_res, queue) => toast.success(`Flagged for review in “${queue}”`),
+    onError: (e) => toast.error(`Failed to flag: ${String(e)}`),
+  });
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" disabled={readOnly}>
+          <Flag className="size-3.5" />
+          Flag for review
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel>Add to review queue</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {!queues || queues.length === 0 ? (
+          <DropdownMenuItem disabled>No queues — create one under Review</DropdownMenuItem>
+        ) : (
+          queues.map((q) => (
+            <DropdownMenuItem key={q.name} onSelect={() => add.mutate(q.name)}>
+              {q.name}
+              <span className="ml-auto text-xs text-muted-foreground">{q.pending} pending</span>
+            </DropdownMenuItem>
+          ))
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function AnnotateButton({ traceId }: { traceId: string }) {
   const qc = useQueryClient();
   const readOnly = useIsReadOnly();
@@ -977,6 +1020,7 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
           <Badge variant="secondary" className="font-medium">
             {trace.environment}
           </Badge>
+          <FlagForReviewButton traceId={trace.id} />
           <Button variant="outline" size="sm" disabled={readOnly || replay.isPending} onClick={() => replay.mutate()}>
             <RotateCcw className="size-3.5" />
             {replay.isPending ? "Replaying…" : "Replay"}
