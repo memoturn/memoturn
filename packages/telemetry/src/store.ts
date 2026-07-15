@@ -5,6 +5,7 @@ import type {
   ObservationDetail,
   ScoreRow as ScoreDetail,
   SessionSummary,
+  ToolAnalyticsRow,
   TraceFacets,
   TraceHistogramBucket,
   TraceSummary,
@@ -92,6 +93,8 @@ export interface TelemetryStore {
   evaluatorScoreTrend(projectId: string, days: number): Promise<EvalScoreTrendRow[]>;
   metricsByDay(projectId: string, days: number): Promise<DailyMetric[]>;
   metricsByModel(projectId: string, days: number): Promise<ModelMetric[]>;
+  /** Per-tool-name analytics over SPAN observations: calls, error rate, latency. */
+  toolAnalytics(projectId: string, days: number): Promise<ToolAnalyticsRow[]>;
   /** Aggregate GENERATION metrics over a short trailing window (minutes) — for alert evaluation. */
   metricsWindow(projectId: string, sinceMinutes: number): Promise<WindowMetric>;
   /**

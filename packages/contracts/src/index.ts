@@ -380,6 +380,19 @@ export const metricsSummary = z.object({
 });
 export type MetricsSummary = z.infer<typeof metricsSummary>;
 
+// Per-tool (named SPAN observation) analytics: call volume, error rate, and latency —
+// the top agent-debugging view ("which tool/step is slow or failing").
+export const toolAnalyticsRow = z.object({
+  tool: z.string(),
+  calls: z.number(),
+  errors: z.number(),
+  error_rate: z.number(),
+  p50_latency_ms: z.number(),
+  p95_latency_ms: z.number(),
+  avg_latency_ms: z.number(),
+});
+export type ToolAnalyticsRow = z.infer<typeof toolAnalyticsRow>;
+
 // ── Evaluator analytics ────────────────────────────────────────────────────────
 export const evaluatorScoreSummary = z.object({
   name: z.string(),

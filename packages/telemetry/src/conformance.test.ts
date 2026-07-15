@@ -329,6 +329,22 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
       trace_count: 0,
     });
 
+    // Tool analytics: SPAN observations grouped by name (calls / error rate / latency),
+    // GENERATION rows excluded. Seed under a dedicated trace and clean it up after.
+    const tt = "tool-analytics-t";
+    await store.insertRows("observations", [
+      observation({ id: "tool-1", trace_id: tt, type: "SPAN", name: "search", level: "DEFAULT", latency_ms: 100 }),
+      observation({ id: "tool-2", trace_id: tt, type: "SPAN", name: "search", level: "ERROR", latency_ms: 300 }),
+      observation({ id: "tool-3", trace_id: tt, type: "SPAN", name: "calculator", level: "DEFAULT", latency_ms: 20 }),
+      observation({ id: "tool-4", trace_id: tt, type: "GENERATION", name: "llm", latency_ms: 999 }),
+    ]);
+    const tools = Object.fromEntries((await store.toolAnalytics(P, 7)).map((r) => [r.tool, r]));
+    expect(tools.search).toMatchObject({ calls: 2, errors: 1, error_rate: 0.5 });
+    expect(tools.search!.p95_latency_ms).toBeGreaterThanOrEqual(100);
+    expect(tools.calculator).toMatchObject({ calls: 1, errors: 0, error_rate: 0, avg_latency_ms: 20 });
+    expect(tools.llm).toBeUndefined(); // GENERATION excluded
+    await store.deleteTraces(P, [tt]);
+
     const widget = await store.widgetSeries(P, "tokens", "by_model", 7);
     expect(widget).toHaveLength(1);
     expect(widget[0]!.value).toBe(300);

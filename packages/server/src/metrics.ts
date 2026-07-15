@@ -1,4 +1,4 @@
-import type { DailyMetric, MetricsSummary, ModelMetric } from "@memoturn/contracts";
+import type { DailyMetric, MetricsSummary, ModelMetric, ToolAnalyticsRow } from "@memoturn/contracts";
 import { telemetry } from "@memoturn/telemetry";
 
 /**
@@ -7,7 +7,7 @@ import { telemetry } from "@memoturn/telemetry";
  * return behind the same store methods if a deployment ever needs one.
  */
 
-export type { DailyMetric, MetricsSummary, ModelMetric };
+export type { DailyMetric, MetricsSummary, ModelMetric, ToolAnalyticsRow };
 
 export async function getMetrics(projectId: string, days = 30): Promise<MetricsSummary> {
   const store = telemetry();
@@ -26,4 +26,9 @@ export async function getMetrics(projectId: string, days = 30): Promise<MetricsS
     byDay,
     byModel: byModel.map((m) => ({ ...m, model: m.model || "(unknown)" })),
   };
+}
+
+/** Per-tool (named SPAN) analytics — call volume, error rate, and latency over `days`. */
+export async function getToolAnalytics(projectId: string, days = 30): Promise<ToolAnalyticsRow[]> {
+  return telemetry().toolAnalytics(projectId, days);
 }
