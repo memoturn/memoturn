@@ -124,6 +124,6 @@ curl -u pk-mt-dev:sk-mt-dev -X POST http://localhost:3001/v1/retention/apply   #
 - Configure object storage (S3/R2/GCS) for the blob event log + exports.
 - Optionally cap ingest with `RATE_LIMIT_PER_MINUTE` (per-project global limit; `0` disables it).
 - For enterprise tenants, register an SSO provider (OIDC/SAML) per organization from the
-  Organizations page, and configure the PostHog analytics sink / PII masking per project as needed.
+  Organizations page, and configure the event sink (CDP forwarding) / PII masking per project as needed.
 
 See [Configuration](./configuration.md) for the full variable reference.

@@ -49,7 +49,7 @@ More: [evaluators](./images/evaluators.png) · [review queues](./images/review.p
 | Human annotation / review queues | [evaluation](./evaluation.md) |
 | Auth, organizations, RBAC, SSO, API keys, audit logs, retention | [deployment](./deployment.md), [api](./api.md) |
 | PII masking + per-project rate limiting | [api](./api.md#platform), [configuration](./configuration.md) |
-| Automations, webhooks, analytics export (PostHog) | [api](./api.md#webhooks--automations) |
+| Automations, webhooks, event sink / CDP forwarding | [api](./api.md#webhooks--automations) |
 | Custom model prices, scheduled blob exports | [api](./api.md#platform) |
 | MCP server (prompts / datasets / review queues for agent IDEs) | [apps/mcp](../apps/mcp/README.md) |
 | SDKs (TypeScript + Python) | [TS](./sdk-typescript.md), [Py](./sdk-python.md) |

@@ -150,7 +150,7 @@ them back through the `GET` route. Both routes require auth and are project-scop
 | GET / POST | `/v1/scheduled-exports` | Get / configure the recurring daily NDJSON export of traces to blob storage. |
 | POST | `/v1/scheduled-exports/run` | Run the export now and write the NDJSON to blob storage. |
 | GET / POST | `/v1/masking` | Get / configure the PII redaction policy (built-in + custom patterns) applied to trace input/output at ingest. |
-| GET / POST | `/v1/analytics-sink` | Get / configure forwarding of trace/score events to PostHog. POST `host` URL is SSRF-validated (400 on private/loopback targets). |
+| GET / POST | `/v1/analytics-sink` | Get / configure the event sink — forwarding trace/score events to a product-analytics/CDP endpoint (PostHog-compatible capture API). POST `host` URL is SSRF-validated (400 on private/loopback targets). |
 | GET / POST | `/v1/api-keys` | List project API keys (public key + hint) / mint a new pair (secret returned once). |
 | DELETE | `/v1/api-keys/{id}` | Revoke an API key. |
 | GET | `/v1/health` | Liveness (no auth). |

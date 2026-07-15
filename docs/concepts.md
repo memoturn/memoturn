@@ -110,7 +110,7 @@ options, or boolean) so manual and automated scores stay consistent across a pro
 - **Webhook** — POSTs to a URL on an event (`score.created` supports a low-score threshold).
 - **Automation** — a trigger→action rule: trigger (`score.created` / `trace.created` /
   `eval.completed`) → action (`webhook` or `slack`).
-- **Analytics sink** — optionally forwards trace/score events to PostHog for product analytics.
+- **Event sink** — optionally forwards trace/score events to a product-analytics/CDP endpoint (PostHog-compatible capture API) for funnels/retention.
 
 ## PII masking
 

@@ -227,7 +227,7 @@ function SettingsPage() {
       api.setAnalyticsSink({ enabled: anEnabledValue, host: anHostValue, apiKey: anKey || analytics?.apiKey }),
     onSuccess: () => {
       setAnKey("");
-      toast.success("Analytics sink saved");
+      toast.success("Event sink saved");
       qc.invalidateQueries({ queryKey: ["analytics-sink"] });
     },
     onError: (e) => toast.error(`Failed to save: ${String(e)}`),
@@ -878,10 +878,11 @@ function SettingsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Product analytics (PostHog)</CardTitle>
+              <CardTitle>Event sink (CDP forwarding)</CardTitle>
               <CardDescription>
                 When enabled, the worker forwards <code>trace.created</code> and <code>score.created</code> events to
-                PostHog&apos;s capture API so you can build funnels/retention over LLM usage.
+                your product-analytics/CDP endpoint (PostHog-compatible capture API — also accepted by Segment, Jitsu,
+                and self-hosted PostHog) so you can build funnels/retention over LLM usage.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -912,7 +913,7 @@ function SettingsPage() {
                     id="an-key"
                     type="password"
                     className="w-64"
-                    placeholder={analytics?.apiKey ? "API key (set — leave blank to keep)" : "PostHog project API key"}
+                    placeholder={analytics?.apiKey ? "API key (set — leave blank to keep)" : "Capture API key"}
                     value={anKey}
                     onChange={(e) => setAnKey(e.target.value)}
                   />
