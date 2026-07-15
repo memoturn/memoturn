@@ -98,6 +98,11 @@ model User {
   email             String             @unique
   emailVerified     Boolean            @default(false)
   image             String?
+  twoFactorEnabled  Boolean?           @default(false)
+  role              String?
+  banned            Boolean?           @default(false)
+  banReason         String?
+  banExpires        DateTime?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   sessions          Session[]
@@ -108,8 +113,45 @@ model User {
   oauthApplications OauthApplication[]
   oauthAccessTokens OauthAccessToken[]
   oauthConsents     OauthConsent[]
+  twoFactors        TwoFactor[]
+  passkeys          Passkey[]
 
   @@map("user")
+}
+
+// Better Auth two-factor plugin: TOTP secret + backup codes (both stored encrypted by the
+// plugin). One row per user once 2FA is enabled; user.twoFactorEnabled gates the challenge.
+model TwoFactor {
+  id          String  @id
+  secret      String
+  backupCodes String
+  userId      String
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verified    Boolean @default(true)
+
+  @@index([secret])
+  @@index([userId])
+  @@map("twoFactor")
+}
+
+// Better Auth passkey plugin (WebAuthn/FIDO2). One row per registered credential.
+model Passkey {
+  id           String    @id
+  name         String?
+  publicKey    String
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentialID String
+  counter      Int
+  deviceType   String
+  backedUp     Boolean
+  transports   String?
+  aaguid       String?
+  createdAt    DateTime? @default(now())
+
+  @@index([userId])
+  @@index([credentialID])
+  @@map("passkey")
 }
 
 model Session {
@@ -121,6 +163,7 @@ model Session {
   userId               String
   user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   activeOrganizationId String?
+  impersonatedBy       String?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

@@ -29,6 +29,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/ingest/health` | Ingest-pipeline health for the ops console: DLQ depth, insert latency, error counters, recent failed batches. OWNER/ADMIN only. |
 | POST | `/v1/ingest/dlq/replay` | Re-enqueue dead-lettered batches from blob onto the ingest queue. Body: `{ limit? }`. OWNER/ADMIN only; audited. |
 | GET | `/health` | Liveness probe (public, unauthenticated) — `{ status: "ok" }`. |
+| GET | `/auth-config` | Which auth methods are enabled (public, unauthenticated) — password/social/magic-link/email-OTP flags the console reads to render the sign-in surfaces the server accepts. |
 | GET | `/metrics` | In-process API metrics (request counts, status classes, per-route latency percentiles, in-flight). Token-gated: returns `404` unless `API_METRICS_TOKEN` is set, then requires `Authorization: Bearer <token>`. |
 
 ### Traces & sessions

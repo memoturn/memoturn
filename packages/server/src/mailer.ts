@@ -1,4 +1,5 @@
 import { createTransport, type Transporter } from "nodemailer";
+import { isProduction } from "./env.js";
 
 /**
  * Transactional email adapter with two interchangeable transports behind one `sendEmail`:
@@ -10,6 +11,11 @@ import { createTransport, type Transporter } from "nodemailer";
  * RESEND_API_KEY is set, else SMTP if `SMTP_CONNECTION_URL` or `SMTP_HOST` is set, else
  * disabled. `sendEmail` never throws and returns false when unconfigured — so an email
  * alert channel is best-effort, exactly like the webhook/Slack channels.
+ *
+ * When no transport is configured, `sendEmail` returns false but in development also logs
+ * the message body to stderr — so email-gated auth flows (password reset, org invitations,
+ * email verification) are fully testable with `bun run dev` and no mail server. Point
+ * `SMTP_CONNECTION_URL` at a local catcher (Mailpit/MailHog) to see rendered mail instead.
  *
  * SMTP accepts either a single `SMTP_CONNECTION_URL` (`smtp://`, `smtps://`, and nodemailer's
  * `ses://<region>` all work) or the discrete `SMTP_HOST/PORT/USER/PASS/SECURE` vars. The
@@ -88,7 +94,21 @@ async function sendViaSmtp(msg: EmailMessage, from: string): Promise<void> {
  */
 export async function sendEmail(msg: EmailMessage): Promise<boolean> {
   const kind = selectedKind();
-  if (kind === "none") return false;
+  if (kind === "none") {
+    // Unconfigured. In development, surface the full message (incl. any action link) to
+    // stderr so reset/invite/verification flows are testable without a mail server; in
+    // production this is a real misconfiguration — warn, but don't leak the body to logs.
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        scope: "mailer.disabled",
+        to: msg.to,
+        subject: msg.subject,
+        ...(isProduction() ? {} : { text: msg.text }),
+      }),
+    );
+    return false;
+  }
   const from = resolveFrom();
   try {
     if (kind === "resend") await sendViaResend(msg, from);

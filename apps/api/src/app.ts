@@ -11,6 +11,7 @@ import {
   assertPublicUrl,
   assignReviewItem,
   auth,
+  authMethods,
   builtinModelPrices,
   cancelExperiment,
   checkRateLimit,
@@ -167,6 +168,11 @@ app.use("*", async (c, next) => {
 
 // Liveness probe (public, unauthenticated) — cheap, no dependencies touched.
 app.get("/health", (c) => c.json({ status: "ok", service: "memoturn-api" }));
+
+// Which auth methods are enabled (public, unauthenticated) — the console reads this on the
+// login/signup pages to render only the sign-in surfaces the server actually accepts, so the
+// UI never offers a social button or passwordless option that isn't configured.
+app.get("/auth-config", (c) => c.json(authMethods()));
 
 // Metrics scrape — token-gated (returns 404 unless API_METRICS_TOKEN is set, so it's off
 // by default; the snapshot leaks route names + latencies, not tenant data).

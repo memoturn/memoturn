@@ -135,6 +135,22 @@ services:
       timeout: 5s
       retries: 10
 
+  # Local mail catcher — captures all outbound email (password reset, org invites,
+  # verification) so the auth flows are testable offline with no real mail provider.
+  # Point the app at it with SMTP_CONNECTION_URL=smtp://localhost:1025; read captured
+  # mail in the web UI at http://localhost:8025.
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1025:1025"   # SMTP
+      - "127.0.0.1:8025:8025"   # web UI
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   # Creates the memoturn bucket on startup, then exits.
   minio-setup:
     image: minio/mc:latest

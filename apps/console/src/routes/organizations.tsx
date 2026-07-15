@@ -13,6 +13,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
+import { Textarea } from "../components/ui/textarea";
 import { authClient } from "../lib/auth";
 
 export const Route = createFileRoute("/organizations")({ component: OrganizationsPage });
@@ -70,14 +71,31 @@ const inviteSchema = z.object({
 type InviteForm = z.infer<typeof inviteSchema>;
 
 const ssoSchema = z.object({
+  type: z.enum(["oidc", "saml"]),
   providerId: z.string().min(1, "Provider id is required"),
   domain: z.string().min(1, "Email domain is required"),
   issuer: z.string().min(1, "Issuer URL is required"),
+  // OIDC
   discovery: z.string(),
   clientId: z.string(),
   clientSecret: z.string(),
+  // SAML
+  entryPoint: z.string(),
+  cert: z.string(),
 });
 type SsoForm = z.infer<typeof ssoSchema>;
+
+const ssoDefaults: SsoForm = {
+  type: "oidc",
+  providerId: "",
+  domain: "",
+  issuer: "",
+  discovery: "",
+  clientId: "",
+  clientSecret: "",
+  entryPoint: "",
+  cert: "",
+};
 
 function OrganizationsPage() {
   const qc = useQueryClient();
@@ -139,26 +157,44 @@ function OrganizationsPage() {
     queryKey: ["sso-providers"],
     queryFn: () => ssoFetch<{ providers: SsoProviderRow[] }>("providers").then((r) => r.providers),
   });
-  const ssoForm = useForm<SsoForm>({
-    resolver: zodResolver(ssoSchema),
-    defaultValues: { providerId: "", domain: "", issuer: "", discovery: "", clientId: "", clientSecret: "" },
-  });
+  const ssoForm = useForm<SsoForm>({ resolver: zodResolver(ssoSchema), defaultValues: ssoDefaults });
+  const ssoType = ssoForm.watch("type");
   const registerSso = useMutation({
-    mutationFn: (values: SsoForm) =>
-      ssoFetch("register", {
+    mutationFn: (values: SsoForm) => {
+      const base = {
         providerId: values.providerId,
         issuer: values.issuer,
         domain: values.domain,
         organizationId: active?.id,
-        oidcConfig: {
-          clientId: values.clientId,
-          clientSecret: values.clientSecret,
-          discoveryEndpoint: values.discovery,
-        },
-      }),
-    onSuccess: () => {
-      toast.success("OIDC provider registered");
-      ssoForm.reset({ providerId: "", domain: "", issuer: "", discovery: "", clientId: "", clientSecret: "" });
+      };
+      // SAML providers post their assertion to this callback — register it with the IdP.
+      const callbackUrl = `${window.location.origin}/api/auth/sso/saml2/callback/${values.providerId}`;
+      return ssoFetch(
+        "register",
+        values.type === "saml"
+          ? {
+              ...base,
+              samlConfig: {
+                issuer: values.issuer,
+                entryPoint: values.entryPoint,
+                cert: values.cert,
+                callbackUrl,
+                spMetadata: { entityID: values.issuer },
+              },
+            }
+          : {
+              ...base,
+              oidcConfig: {
+                clientId: values.clientId,
+                clientSecret: values.clientSecret,
+                discoveryEndpoint: values.discovery,
+              },
+            },
+      );
+    },
+    onSuccess: (_r, values) => {
+      toast.success(`${values.type.toUpperCase()} provider registered`);
+      ssoForm.reset(ssoDefaults);
       qc.invalidateQueries({ queryKey: ["sso-providers"] });
     },
     onError: (e) => toast.error(`Register failed: ${String(e)}`),
@@ -333,6 +369,28 @@ function OrganizationsPage() {
               </p>
               <Form {...ssoForm}>
                 <form onSubmit={ssoForm.handleSubmit((v) => registerSso.mutate(v))} className="space-y-4">
+                  <FormField
+                    control={ssoForm.control}
+                    name="type"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Protocol</FormLabel>
+                        <div className="flex gap-2">
+                          {(["oidc", "saml"] as const).map((t) => (
+                            <Button
+                              key={t}
+                              type="button"
+                              size="sm"
+                              variant={field.value === t ? "default" : "outline"}
+                              onClick={() => field.onChange(t)}
+                            >
+                              {t.toUpperCase()}
+                            </Button>
+                          ))}
+                        </div>
+                      </FormItem>
+                    )}
+                  />
                   <div className="grid gap-4 sm:grid-cols-2">
                     <FormField
                       control={ssoForm.control}
@@ -373,48 +431,86 @@ function OrganizationsPage() {
                         </FormItem>
                       )}
                     />
-                    <FormField
-                      control={ssoForm.control}
-                      name="discovery"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Discovery endpoint</FormLabel>
-                          <FormControl>
-                            <Input placeholder=".well-known/openid-configuration" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={ssoForm.control}
-                      name="clientId"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Client id</FormLabel>
-                          <FormControl>
-                            <Input {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={ssoForm.control}
-                      name="clientSecret"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Client secret</FormLabel>
-                          <FormControl>
-                            <Input type="password" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                    {ssoType === "oidc" && (
+                      <>
+                        <FormField
+                          control={ssoForm.control}
+                          name="discovery"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Discovery endpoint</FormLabel>
+                              <FormControl>
+                                <Input placeholder=".well-known/openid-configuration" {...field} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={ssoForm.control}
+                          name="clientId"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Client id</FormLabel>
+                              <FormControl>
+                                <Input {...field} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={ssoForm.control}
+                          name="clientSecret"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Client secret</FormLabel>
+                              <FormControl>
+                                <Input type="password" {...field} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </>
+                    )}
+                    {ssoType === "saml" && (
+                      <>
+                        <FormField
+                          control={ssoForm.control}
+                          name="entryPoint"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>IdP SSO URL (entry point)</FormLabel>
+                              <FormControl>
+                                <Input placeholder="https://idp.example.com/sso/saml" {...field} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={ssoForm.control}
+                          name="cert"
+                          render={({ field }) => (
+                            <FormItem className="sm:col-span-2">
+                              <FormLabel>IdP X.509 signing certificate</FormLabel>
+                              <FormControl>
+                                <Textarea
+                                  rows={4}
+                                  placeholder="-----BEGIN CERTIFICATE-----&#10;…&#10;-----END CERTIFICATE-----"
+                                  {...field}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </>
+                    )}
                   </div>
                   <Button type="submit" disabled={registerSso.isPending}>
-                    {registerSso.isPending ? "Registering…" : "Register OIDC provider"}
+                    {registerSso.isPending ? "Registering…" : `Register ${ssoType.toUpperCase()} provider`}
                   </Button>
                 </form>
               </Form>

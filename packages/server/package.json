@@ -15,14 +15,15 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
+    "@better-auth/passkey": "1.6.20",
+    "@better-auth/sso": "1.6.20",
+    "@memoturn/contracts": "workspace:*",
     "@memoturn/core": "workspace:*",
     "@memoturn/db": "workspace:*",
     "@memoturn/llm": "workspace:*",
     "@memoturn/telemetry": "workspace:*",
-    "@better-auth/sso": "1.6.20",
     "better-auth": "^1.6.20",
-    "nodemailer": "^9.0.1",
-    "@memoturn/contracts": "workspace:*"
+    "nodemailer": "^9.0.1"
   },
   "devDependencies": {
     "@types/nodemailer": "^7.0.0",
