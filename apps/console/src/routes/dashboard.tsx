@@ -21,6 +21,7 @@ import { z } from "zod";
 import { DataTable } from "../components/data-table";
 import { EmptyState } from "../components/empty-state";
 import { PageHeader } from "../components/page-header";
+import { ModelLabel, ProviderIcon } from "../components/provider-icon";
 import { Button } from "../components/ui/button";
 import {
   Card,
@@ -50,7 +51,7 @@ const modelColumns: ColumnDef<ModelMetric>[] = [
   {
     accessorKey: "model",
     header: "Model",
-    cell: ({ row }) => <span className="font-medium">{row.original.model}</span>,
+    cell: ({ row }) => <ModelLabel model={row.original.model} className="font-medium" />,
   },
   { accessorKey: "generations", header: "Gens", cell: ({ row }) => Number(row.original.generations).toLocaleString() },
   {
@@ -142,6 +143,20 @@ function UsageChart({
   );
 }
 
+/** Vertical-bar-chart Y-axis tick: vendor logo + (truncated) model name, right-aligned to the axis. */
+function ModelYTick({ x, y, payload }: { x?: number; y?: number; payload?: { value: string } }) {
+  const value = payload?.value ?? "";
+  const w = 126;
+  return (
+    <foreignObject x={(x ?? 0) - w} y={(y ?? 0) - 9} width={w} height={18}>
+      <div className="flex items-center justify-end gap-1 pr-1.5 text-xs text-muted-foreground">
+        <ProviderIcon model={value} size={14} />
+        <span className="truncate">{value}</span>
+      </div>
+    </foreignObject>
+  );
+}
+
 // ── Per-model bar chart ───────────────────────────────────────────────────────────
 function ModelBarChart({
   title,
@@ -170,7 +185,15 @@ function ModelBarChart({
           <BarChart data={data} layout="vertical" margin={{ left: 8, right: 16 }}>
             <CartesianGrid horizontal={false} />
             <XAxis type="number" hide />
-            <YAxis dataKey="model" type="category" tickLine={false} axisLine={false} width={110} tickMargin={6} />
+            <YAxis
+              dataKey="model"
+              type="category"
+              tickLine={false}
+              axisLine={false}
+              width={132}
+              tickMargin={6}
+              tick={<ModelYTick />}
+            />
             <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
             <Bar dataKey="value" fill="var(--color-value)" radius={0} />
           </BarChart>
