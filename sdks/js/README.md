@@ -41,8 +41,10 @@ import OpenAI from "openai";
 import { wrapOpenAI } from "@memoturn/sdk/openai";
 
 const openai = wrapOpenAI(new OpenAI(), memoturn);
-// every call is recorded as a generation (model, params, usage, latency, output)
+// chat completions AND the Responses API are recorded as generations
+// (model, params, usage, latency, output)
 await openai.chat.completions.create({ model: "gpt-4o", messages });
+await openai.responses.create({ model: "gpt-4o", input: "hi" });
 ```
 
 ## LangChain

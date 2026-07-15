@@ -99,4 +99,41 @@ describe("wrapOpenAI", () => {
     expect(openai.apiKey).toBe("sk-real");
     expect(typeof openai.models.list).toBe("function");
   });
+
+  it("records a generation for responses.create (input/instructions, output_text, mapped usage)", async () => {
+    active = mockFetch(() => ({ status: 207 }));
+    const memoturn = new Memoturn(creds);
+    const response = {
+      output_text: "it works",
+      output: [{ type: "message", content: [{ type: "output_text", text: "it works" }] }],
+      usage: { input_tokens: 12, output_tokens: 7, total_tokens: 19 },
+    };
+    const openai = wrapOpenAI({ responses: { create: async () => response } }, memoturn);
+
+    const res = await openai.responses.create({ model: "gpt-4o", input: "hi", instructions: "be terse", top_p: 0.9 });
+    expect(res).toBe(response);
+    await memoturn.flush();
+
+    const batch = batchFrom(active);
+    const create = batch.find((e) => e.type === "generation-create");
+    const update = batch.find((e) => e.type === "generation-update");
+    expect(create?.body).toMatchObject({ name: "openai.responses", model: "gpt-4o", provider: "openai" });
+    expect(create?.body.modelParameters).toEqual({ top_p: 0.9 });
+    expect(create?.body.input).toEqual({ instructions: "be terse", input: "hi" });
+    expect(update?.body.output).toBe("it works");
+    expect(update?.body.usage).toEqual({ promptTokens: 12, completionTokens: 7, totalTokens: 19 });
+  });
+
+  it("falls back to output items when responses has no output_text", async () => {
+    active = mockFetch(() => ({ status: 207 }));
+    const memoturn = new Memoturn(creds);
+    const output = [{ type: "function_call", name: "get_weather", arguments: "{}" }];
+    const openai = wrapOpenAI({ responses: { create: async () => ({ output }) } }, memoturn);
+
+    await openai.responses.create({ model: "gpt-4o", input: "weather?" });
+    await memoturn.flush();
+
+    const update = batchFrom(active).find((e) => e.type === "generation-update");
+    expect(update?.body.output).toEqual(output);
+  });
 });
