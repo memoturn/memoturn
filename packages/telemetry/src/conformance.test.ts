@@ -306,6 +306,15 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
 
     expect(await store.countTracesSince(P, 7)).toBe(1);
 
+    // Short-window aggregate (alert engine): the seeded generation is recent, so a wide
+    // window captures it; a tiny window (future-anchored seed excluded) is empty.
+    const win = await store.metricsWindow(P, 7 * 24 * 60);
+    expect(win.generations).toBe(1);
+    expect(win.errors).toBe(0);
+    expect(win.total_tokens).toBe(300);
+    expect(win.trace_count).toBe(1);
+    expect(win.p95_latency_ms).toBeGreaterThan(1000);
+
     const widget = await store.widgetSeries(P, "tokens", "by_model", 7);
     expect(widget).toHaveLength(1);
     expect(widget[0]!.value).toBe(300);

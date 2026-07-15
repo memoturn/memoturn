@@ -32,6 +32,7 @@ import type {
   TraceIO,
   TraceRow,
   TraceScore,
+  WindowMetric,
 } from "../types.js";
 import { closeDorisPool, dorisQuery } from "./client.js";
 import { buildInserts, parseTags, parseVector, toDorisDateTime } from "./serialize.js";
@@ -67,6 +68,11 @@ function cutoffMidnightDaysAgo(days: number): string {
   const d = new Date(Date.now() - Math.floor(days) * 86_400_000);
   d.setUTCHours(0, 0, 0, 0);
   return toDorisDateTime(d.toISOString());
+}
+
+/** ISO timestamp for "now minus N minutes" as a Doris DATETIME literal (short-window metrics). */
+function cutoffMinutesAgo(minutes: number): string {
+  return toDorisDateTime(new Date(Date.now() - Math.floor(minutes) * 60_000).toISOString());
 }
 
 export class DorisTelemetryStore implements TelemetryStore {
@@ -652,6 +658,48 @@ export class DorisTelemetryStore implements TelemetryStore {
       [projectId, cutoffDaysAgo(days)],
     );
     return Number(rows[0]?.c ?? 0);
+  }
+
+  async metricsWindow(projectId: string, sinceMinutes: number): Promise<WindowMetric> {
+    const since = cutoffMinutesAgo(sinceMinutes);
+    // Two scans: GENERATION aggregates from observations, trace volume from traces.
+    const [gens, traces] = await Promise.all([
+      this.query<{
+        generations: unknown;
+        errors: unknown;
+        total_tokens: unknown;
+        total_cost: unknown;
+        p50: unknown;
+        p95: unknown;
+      }>(
+        `
+        SELECT
+          COUNT(*) AS generations,
+          SUM(IF(level = 'ERROR', 1, 0)) AS errors,
+          SUM(total_tokens) AS total_tokens,
+          SUM(total_cost) AS total_cost,
+          PERCENTILE_APPROX(latency_ms, 0.5) AS p50,
+          PERCENTILE_APPROX(latency_ms, 0.95) AS p95
+        FROM observations
+        WHERE project_id = ? AND type = 'GENERATION' AND start_time >= ?
+        `,
+        [projectId, since],
+      ),
+      this.query<{ c: unknown }>("SELECT COUNT(*) AS c FROM traces WHERE project_id = ? AND `timestamp` >= ?", [
+        projectId,
+        since,
+      ]),
+    ]);
+    const g = gens[0];
+    return {
+      generations: Number(g?.generations ?? 0),
+      errors: Number(g?.errors ?? 0),
+      total_tokens: Number(g?.total_tokens ?? 0),
+      total_cost: Number(g?.total_cost ?? 0),
+      p50_latency_ms: Math.round(Number(g?.p50 ?? 0)),
+      p95_latency_ms: Math.round(Number(g?.p95 ?? 0)),
+      trace_count: Number(traces[0]?.c ?? 0),
+    };
   }
 
   async widgetSeries(

@@ -30,6 +30,7 @@ import type {
   TraceIO,
   TraceRow,
   TraceScore,
+  WindowMetric,
 } from "./types.js";
 
 /**
@@ -91,6 +92,8 @@ export interface TelemetryStore {
   evaluatorScoreTrend(projectId: string, days: number): Promise<EvalScoreTrendRow[]>;
   metricsByDay(projectId: string, days: number): Promise<DailyMetric[]>;
   metricsByModel(projectId: string, days: number): Promise<ModelMetric[]>;
+  /** Aggregate GENERATION metrics over a short trailing window (minutes) — for alert evaluation. */
+  metricsWindow(projectId: string, sinceMinutes: number): Promise<WindowMetric>;
   countTracesSince(projectId: string, days: number): Promise<number>;
   widgetSeries(
     projectId: string,

@@ -2,6 +2,8 @@ import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import * as C from "@memoturn/contracts";
 import { type IngestEvent, type IngestResult, ingestEvent, ingestRequest, ingestResponse } from "@memoturn/core";
 import {
+  ALERT_COMPARATORS,
+  ALERT_METRICS,
   addDatasetItems,
   addReviewItems,
   annotateTrace,
@@ -16,6 +18,7 @@ import {
   countSessions,
   countTraces,
   countUsers,
+  createAlertRule,
   createApiKey,
   createAutomation,
   createComment,
@@ -32,8 +35,10 @@ import {
   createWebhook,
   createWidget,
   decodeOtlpTraces,
+  deleteAlertRule,
   deleteAutomation,
   deleteComment,
+  deleteCostBudget,
   deleteModelPrice,
   deleteSavedView,
   deleteScore,
@@ -43,6 +48,7 @@ import {
   exportTracesCsv,
   exportTracesJsonl,
   getAnalyticsSink,
+  getCostBudget,
   getDatasetComparison,
   getDatasetDetail,
   getDatasetVersion,
@@ -61,6 +67,7 @@ import {
   getTrace,
   ingestRateLimitConfig,
   instantiateEvaluatorTemplate,
+  listAlertRules,
   listApiKeys,
   listAuditLogs,
   listAutomations,
@@ -98,6 +105,7 @@ import {
   runScheduledExport,
   safeServeContentType,
   setAnalyticsSink,
+  setCostBudget,
   setMaskingPolicy,
   setRetention,
   setScheduledExport,
@@ -109,6 +117,7 @@ import {
   submitReviewScore,
   traceFacets,
   traceHistogram,
+  updateAlertRule,
 } from "@memoturn/server";
 import { Scalar } from "@scalar/hono-api-reference";
 import { bodyLimit } from "hono/body-limit";
@@ -250,6 +259,10 @@ app.use("/v1/scheduled-exports", requireAuth);
 app.use("/v1/scheduled-exports/*", requireAuth);
 app.use("/v1/automations", requireAuth);
 app.use("/v1/automations/*", requireAuth);
+app.use("/v1/alerts", requireAuth);
+app.use("/v1/alerts/*", requireAuth);
+app.use("/v1/budgets", requireAuth);
+app.use("/v1/budgets/*", requireAuth);
 app.use("/v1/media", requireAuth);
 app.use("/v1/media/*", requireAuth);
 app.use("/v1/payloads/*", requireAuth);
@@ -2653,6 +2666,200 @@ app.openapi(
     const id = c.req.valid("param").id;
     const result = await deleteAutomation(c.get("projectId"), id);
     await recordAudit(c.get("projectId"), c.get("actor"), "automation.delete", id);
+    return c.json(result);
+  },
+);
+
+// ── Alert rules ────────────────────────────────────────────────────────────────────
+const alertChannelBody = z.object({ type: z.enum(["slack", "webhook"]), target: z.string().url() });
+const alertRuleBody = z.object({
+  name: z.string().min(1),
+  metric: z.enum(ALERT_METRICS),
+  window: z.number().int().positive().optional(),
+  threshold: z.number(),
+  comparator: z.enum(ALERT_COMPARATORS).optional(),
+  channels: z.array(alertChannelBody).optional(),
+  enabled: z.boolean().optional(),
+});
+
+/** Re-check every channel target is a public URL (SSRF guard mirrors automations). */
+async function assertChannelsPublic(channels?: { target: string }[]) {
+  for (const ch of channels ?? []) await assertPublicUrl(ch.target);
+}
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/alerts",
+    summary: "List alert rules (with firing/resolved state)",
+    tags: ["platform"],
+    security,
+    responses: {
+      200: { description: "Alert rules", content: { "application/json": { schema: C.listOf(C.alertRule) } } },
+    },
+  }),
+  async (c) => c.json({ data: await listAlertRules(c.get("projectId")) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/alerts",
+    summary: "Create an alert rule (metric: error_rate/latency_p95/cost_per_day/ingest_volume/dlq_depth)",
+    tags: ["platform"],
+    security,
+    request: { body: { content: { "application/json": { schema: alertRuleBody } } } },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: C.alertRule } } },
+      400: { description: "Invalid or disallowed channel URL" },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    try {
+      await assertChannelsPublic(body.channels);
+    } catch {
+      return c.json({ error: "channel targets must be public https endpoints" }, 400);
+    }
+    const result = await createAlertRule(c.get("projectId"), body);
+    await recordAudit(c.get("projectId"), c.get("actor"), "alert.create", `${result.metric}:${result.name}`);
+    return c.json(result, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "patch",
+    path: "/v1/alerts/{id}",
+    summary: "Update an alert rule",
+    tags: ["platform"],
+    security,
+    request: {
+      params: z.object({ id: z.string() }),
+      body: { content: { "application/json": { schema: alertRuleBody.partial() } } },
+    },
+    responses: {
+      200: { description: "Updated", content: { "application/json": { schema: C.alertRule } } },
+      400: { description: "Invalid or disallowed channel URL" },
+      403: { description: "Forbidden" },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    try {
+      await assertChannelsPublic(body.channels);
+    } catch {
+      return c.json({ error: "channel targets must be public https endpoints" }, 400);
+    }
+    const result = await updateAlertRule(c.get("projectId"), c.req.valid("param").id, body);
+    if (!result) return c.json({ error: "not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "alert.update", result.id);
+    return c.json(result);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/alerts/{id}",
+    summary: "Delete an alert rule",
+    tags: ["platform"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Deleted", content: { "application/json": { schema: z.object({ deleted: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const id = c.req.valid("param").id;
+    const result = await deleteAlertRule(c.get("projectId"), id);
+    await recordAudit(c.get("projectId"), c.get("actor"), "alert.delete", id);
+    return c.json(result);
+  },
+);
+
+// ── Cost budget (one per project) ──────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/budgets",
+    summary: "Get the project's monthly cost budget (null if unset)",
+    tags: ["platform"],
+    security,
+    responses: {
+      200: { description: "Cost budget", content: { "application/json": { schema: C.costBudget } } },
+    },
+  }),
+  async (c) => c.json(await getCostBudget(c.get("projectId"))),
+);
+
+app.openapi(
+  createRoute({
+    method: "put",
+    path: "/v1/budgets",
+    summary: "Set the project's monthly cost budget (soft — no hard caps)",
+    tags: ["platform"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              monthlyUsd: z.number().positive(),
+              thresholds: z.array(z.number().positive()).optional(),
+              channels: z.array(alertChannelBody).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Saved", content: { "application/json": { schema: C.costBudget } } },
+      400: { description: "Invalid or disallowed channel URL" },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    try {
+      await assertChannelsPublic(body.channels);
+    } catch {
+      return c.json({ error: "channel targets must be public https endpoints" }, 400);
+    }
+    const result = await setCostBudget(c.get("projectId"), body);
+    await recordAudit(c.get("projectId"), c.get("actor"), "budget.set", `$${body.monthlyUsd}/mo`);
+    return c.json(result);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/budgets",
+    summary: "Remove the project's cost budget",
+    tags: ["platform"],
+    security,
+    responses: {
+      200: { description: "Deleted", content: { "application/json": { schema: z.object({ deleted: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const result = await deleteCostBudget(c.get("projectId"));
+    await recordAudit(c.get("projectId"), c.get("actor"), "budget.delete", c.get("projectId"));
     return c.json(result);
   },
 );

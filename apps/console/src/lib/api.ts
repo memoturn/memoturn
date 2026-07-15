@@ -6,6 +6,8 @@
  * its OpenAPI doc) — single source of truth, no hand-maintained duplicates.
  */
 import type {
+  AlertChannel,
+  AlertRule,
   AnalyticsSink,
   AnnotationResult,
   ApiKey,
@@ -14,6 +16,7 @@ import type {
   Automation,
   ChatMessage,
   Comment,
+  CostBudget,
   DatasetDetail,
   DatasetListItem,
   DatasetVersionDetail,
@@ -99,6 +102,16 @@ async function del<T>(path: string): Promise<T> {
 async function patch<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "PATCH",
+    headers: headers({ "content-type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  return res.json() as Promise<T>;
+}
+
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
     headers: headers({ "content-type": "application/json" }),
     body: JSON.stringify(body),
   });
@@ -249,6 +262,23 @@ export const api = {
     filter?: string;
   }) => post(`/v1/automations`, body),
   deleteAutomation: (id: string) => del(`/v1/automations/${encodeURIComponent(id)}`),
+  listAlerts: () => get<{ data: AlertRule[] }>(`/v1/alerts`).then((r) => r.data),
+  createAlert: (body: {
+    name: string;
+    metric: string;
+    window?: number;
+    threshold: number;
+    comparator?: string;
+    channels?: AlertChannel[];
+    enabled?: boolean;
+  }) => post<AlertRule>(`/v1/alerts`, body),
+  updateAlert: (id: string, body: Partial<{ enabled: boolean; threshold: number; channels: AlertChannel[] }>) =>
+    patch<AlertRule>(`/v1/alerts/${encodeURIComponent(id)}`, body),
+  deleteAlert: (id: string) => del(`/v1/alerts/${encodeURIComponent(id)}`),
+  getBudget: () => get<CostBudget>(`/v1/budgets`),
+  setBudget: (body: { monthlyUsd: number; thresholds?: number[]; channels?: AlertChannel[] }) =>
+    put<CostBudget>(`/v1/budgets`, body),
+  deleteBudget: () => del(`/v1/budgets`),
   listScoreConfigs: () => get<{ data: ScoreConfig[] }>(`/v1/score-configs`).then((r) => r.data),
   listModelPrices: () => get<ModelPriceList>(`/v1/model-prices`),
   createModelPrice: (body: { pattern: string; provider?: string; inputPerMTok: number; outputPerMTok: number }) =>

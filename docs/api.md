@@ -145,6 +145,9 @@ Webhook and automation target URLs are SSRF-validated on write: private IP range
 | DELETE | `/v1/webhooks/{id}` | Delete a webhook. |
 | GET / POST | `/v1/automations` | List / create a trigger→action automation (trigger: `score.created`/`trace.created`/`eval.completed`; action: `webhook`/`slack`). Target URL is SSRF-validated. |
 | DELETE | `/v1/automations/{id}` | Delete an automation. |
+| GET / POST | `/v1/alerts` | List / create a stateful alert rule. A worker cron evaluates `metric` (`error_rate`/`latency_p95`/`cost_per_day`/`ingest_volume`/`dlq_depth`) over a trailing `window` (minutes) against `threshold` per `comparator` (`gt`/`gte`/`lt`/`lte`), notifying `channels` (`[{ type, target }]`, SSRF-validated) once on firing and once on resolve. |
+| PATCH / DELETE | `/v1/alerts/{id}` | Update (e.g. toggle `enabled`, adjust `threshold`/`channels`) / delete an alert rule. |
+| GET / PUT / DELETE | `/v1/budgets` | Get / set / remove the project's monthly cost budget (`monthlyUsd` + `thresholds` steps, default 50/80/100%). Notifies `channels` as month-to-date spend crosses each step. Soft only — no hard caps. |
 
 ### Media / attachments
 

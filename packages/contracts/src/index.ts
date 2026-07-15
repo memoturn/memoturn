@@ -176,6 +176,40 @@ export const automation = z.object({
 });
 export type Automation = z.infer<typeof automation>;
 
+/** A notification channel (shared by alerts + budgets). */
+export const alertChannel = z.object({
+  type: z.enum(["slack", "webhook"]),
+  target: z.string(),
+});
+export type AlertChannel = z.infer<typeof alertChannel>;
+
+export const alertRule = z.object({
+  id: z.string(),
+  name: z.string(),
+  metric: z.string(), // error_rate | latency_p95 | cost_per_day | ingest_volume | dlq_depth
+  window: z.number(),
+  threshold: z.number(),
+  comparator: z.string(), // gt | gte | lt | lte
+  channels: z.array(alertChannel),
+  enabled: z.boolean(),
+  createdAt: z.string(),
+  status: z.string(), // ok | firing | resolved
+  lastValue: z.number().nullable(),
+  lastFiredAt: z.string().nullable(),
+  lastResolvedAt: z.string().nullable(),
+});
+export type AlertRule = z.infer<typeof alertRule>;
+
+export const costBudget = z
+  .object({
+    monthlyUsd: z.number(),
+    thresholds: z.array(z.number()),
+    channels: z.array(alertChannel),
+    createdAt: z.string(),
+  })
+  .nullable();
+export type CostBudget = z.infer<typeof costBudget>;
+
 /** A document a retriever span returned (RAG analysis). */
 export const retrievalDocument = z.object({
   rank: z.number(),

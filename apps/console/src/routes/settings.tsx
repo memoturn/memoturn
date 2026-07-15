@@ -1,10 +1,18 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import type { ApiKey, Automation, ModelPrice, ModelPriceList, ScoreConfig, Webhook } from "@memoturn/contracts";
+import type {
+  AlertRule,
+  ApiKey,
+  Automation,
+  ModelPrice,
+  ModelPriceList,
+  ScoreConfig,
+  Webhook,
+} from "@memoturn/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Copy, DollarSign, KeyRound, ListChecks, Plug, Webhook as WebhookIcon, Zap } from "lucide-react";
-import { useState } from "react";
+import { BellRing, Copy, DollarSign, KeyRound, ListChecks, Plug, Webhook as WebhookIcon, Zap } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -56,6 +64,24 @@ const automationSchema = z.object({
   filter: z.string(),
 });
 type AutomationForm = z.infer<typeof automationSchema>;
+
+const alertSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  metric: z.string(),
+  comparator: z.string(),
+  threshold: z.string().min(1, "Threshold is required"),
+  window: z.string(),
+  channelType: z.string(),
+  channelTarget: z.string().min(1, "Channel URL is required"),
+});
+type AlertForm = z.infer<typeof alertSchema>;
+
+const budgetSchema = z.object({
+  monthlyUsd: z.string().min(1, "Budget is required"),
+  channelType: z.string(),
+  channelTarget: z.string().min(1, "Channel URL is required"),
+});
+type BudgetForm = z.infer<typeof budgetSchema>;
 
 const scoreSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -406,6 +432,142 @@ function SettingsPage() {
     },
   ];
 
+  // ── Alerts ────────────────────────────────────────────────────────────────
+  const { data: alerts } = useQuery({ queryKey: ["alerts"], queryFn: () => api.listAlerts() });
+  const alertForm = useForm<AlertForm>({
+    resolver: zodResolver(alertSchema),
+    defaultValues: {
+      name: "",
+      metric: "error_rate",
+      comparator: "gt",
+      threshold: "",
+      window: "5",
+      channelType: "slack",
+      channelTarget: "",
+    },
+  });
+  const addAlert = useMutation({
+    mutationFn: (v: AlertForm) =>
+      api.createAlert({
+        name: v.name,
+        metric: v.metric,
+        comparator: v.comparator,
+        threshold: Number(v.threshold),
+        window: Number(v.window),
+        channels: [{ type: v.channelType as "slack" | "webhook", target: v.channelTarget }],
+      }),
+    onSuccess: () => {
+      toast.success("Alert rule added");
+      alertForm.reset();
+      qc.invalidateQueries({ queryKey: ["alerts"] });
+    },
+    onError: (e) => toast.error(`Failed to add alert: ${String(e)}`),
+  });
+  const toggleAlert = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateAlert(id, { enabled }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
+    onError: (e) => toast.error(`Failed to update alert: ${String(e)}`),
+  });
+  const removeAlert = useMutation({
+    mutationFn: (id: string) => api.deleteAlert(id),
+    onSuccess: () => {
+      toast.success("Alert deleted");
+      qc.invalidateQueries({ queryKey: ["alerts"] });
+    },
+    onError: (e) => toast.error(`Failed to delete alert: ${String(e)}`),
+  });
+  const alertColumns: ColumnDef<AlertRule>[] = [
+    {
+      accessorKey: "name",
+      header: "Name",
+      cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+    },
+    {
+      accessorKey: "metric",
+      header: "Condition",
+      cell: ({ row }) => (
+        <span className="text-muted-foreground">
+          {row.original.metric} {row.original.comparator} {row.original.threshold} · {row.original.window}m
+        </span>
+      ),
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ row }) => {
+        const s = row.original.status;
+        return <KindBadge tone={s === "firing" ? "red" : s === "resolved" ? "amber" : "green"}>{s}</KindBadge>;
+      },
+    },
+    {
+      id: "channels",
+      header: "Channels",
+      cell: ({ row }) => (
+        <span className="text-muted-foreground">{row.original.channels.map((ch) => ch.type).join(", ") || "—"}</span>
+      ),
+    },
+    {
+      id: "actions",
+      header: "",
+      cell: ({ row }) => (
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={readOnly || toggleAlert.isPending}
+            onClick={() => toggleAlert.mutate({ id: row.original.id, enabled: !row.original.enabled })}
+          >
+            {row.original.enabled ? "Disable" : "Enable"}
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={readOnly || removeAlert.isPending}
+            onClick={() => removeAlert.mutate(row.original.id)}
+          >
+            Delete
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  // ── Cost budget ───────────────────────────────────────────────────────────
+  const { data: budget } = useQuery({ queryKey: ["budget"], queryFn: () => api.getBudget() });
+  const budgetForm = useForm<BudgetForm>({
+    resolver: zodResolver(budgetSchema),
+    defaultValues: { monthlyUsd: "", channelType: "slack", channelTarget: "" },
+  });
+  useEffect(() => {
+    if (budget)
+      budgetForm.reset({
+        monthlyUsd: String(budget.monthlyUsd),
+        channelType: budget.channels[0]?.type ?? "slack",
+        channelTarget: budget.channels[0]?.target ?? "",
+      });
+  }, [budget, budgetForm]);
+  const saveBudget = useMutation({
+    mutationFn: (v: BudgetForm) =>
+      api.setBudget({
+        monthlyUsd: Number(v.monthlyUsd),
+        channels: v.channelTarget ? [{ type: v.channelType as "slack" | "webhook", target: v.channelTarget }] : [],
+      }),
+    onSuccess: () => {
+      toast.success("Budget saved");
+      qc.invalidateQueries({ queryKey: ["budget"] });
+    },
+    onError: (e) => toast.error(`Failed to save budget: ${String(e)}`),
+  });
+  const removeBudget = useMutation({
+    mutationFn: () => api.deleteBudget(),
+    onSuccess: () => {
+      toast.success("Budget removed");
+      budgetForm.reset({ monthlyUsd: "", channelType: "slack", channelTarget: "" });
+      qc.invalidateQueries({ queryKey: ["budget"] });
+    },
+    onError: (e) => toast.error(`Failed to remove budget: ${String(e)}`),
+  });
+
   // ── Score configs ─────────────────────────────────────────────────────────
   const { data: scoreConfigs } = useQuery({ queryKey: ["score-configs"], queryFn: () => api.listScoreConfigs() });
   const scoreForm = useForm<ScoreForm>({
@@ -577,6 +739,7 @@ function SettingsPage() {
           <TabsTrigger value="masking">Masking</TabsTrigger>
           <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
           <TabsTrigger value="automations">Automations</TabsTrigger>
+          <TabsTrigger value="alerts">Alerts</TabsTrigger>
           <TabsTrigger value="scores">Scores</TabsTrigger>
           <TabsTrigger value="pricing">Model Pricing</TabsTrigger>
         </TabsList>
@@ -1238,6 +1401,237 @@ function SettingsPage() {
           ) : (
             <DataTable columns={automationColumns} data={automations} />
           )}
+        </TabsContent>
+
+        {/* ── Alerts ────────────────────────────────────────────────────── */}
+        <TabsContent value="alerts" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Alert rules</CardTitle>
+              <CardDescription>
+                A worker cron evaluates each rule every minute over a trailing window and notifies your channels when it
+                crosses the threshold — firing once, then again when it resolves. Metrics: error_rate (0–1), latency_p95
+                (ms), cost_per_day (USD), ingest_volume (traces), dlq_depth (failed batches).
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Form {...alertForm}>
+                <form onSubmit={alertForm.handleSubmit((v) => addAlert.mutate(v))} className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <FormField
+                      control={alertForm.control}
+                      name="name"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Name</FormLabel>
+                          <FormControl>
+                            <Input placeholder="High error rate" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={alertForm.control}
+                      name="metric"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Metric</FormLabel>
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="error_rate">error_rate</SelectItem>
+                              <SelectItem value="latency_p95">latency_p95</SelectItem>
+                              <SelectItem value="cost_per_day">cost_per_day</SelectItem>
+                              <SelectItem value="ingest_volume">ingest_volume</SelectItem>
+                              <SelectItem value="dlq_depth">dlq_depth</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={alertForm.control}
+                      name="comparator"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Comparator</FormLabel>
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="gt">&gt;</SelectItem>
+                              <SelectItem value="gte">&ge;</SelectItem>
+                              <SelectItem value="lt">&lt;</SelectItem>
+                              <SelectItem value="lte">&le;</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={alertForm.control}
+                      name="threshold"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Threshold</FormLabel>
+                          <FormControl>
+                            <Input type="number" step="any" placeholder="0.05" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={alertForm.control}
+                      name="window"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Window (minutes)</FormLabel>
+                          <FormControl>
+                            <Input type="number" step="1" placeholder="5" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={alertForm.control}
+                      name="channelType"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Channel</FormLabel>
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="slack">slack</SelectItem>
+                              <SelectItem value="webhook">webhook</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={alertForm.control}
+                      name="channelTarget"
+                      render={({ field }) => (
+                        <FormItem className="lg:col-span-2">
+                          <FormLabel>Channel URL</FormLabel>
+                          <FormControl>
+                            <Input placeholder="https://hooks.slack.com/…" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  <Button type="submit" disabled={readOnly || addAlert.isPending}>
+                    {addAlert.isPending ? "Saving…" : "Add alert rule"}
+                  </Button>
+                </form>
+              </Form>
+            </CardContent>
+          </Card>
+
+          {!alerts || alerts.length === 0 ? (
+            <EmptyState icon={BellRing} title="No alert rules yet" description="Add one above to watch production." />
+          ) : (
+            <DataTable columns={alertColumns} data={alerts} />
+          )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Monthly cost budget</CardTitle>
+              <CardDescription>
+                Get notified as month-to-date spend crosses 50% / 80% / 100% of this budget. Soft only — memoturn never
+                caps or blocks traffic.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Form {...budgetForm}>
+                <form onSubmit={budgetForm.handleSubmit((v) => saveBudget.mutate(v))} className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <FormField
+                      control={budgetForm.control}
+                      name="monthlyUsd"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Monthly budget (USD)</FormLabel>
+                          <FormControl>
+                            <Input type="number" step="any" placeholder="500" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={budgetForm.control}
+                      name="channelType"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Channel</FormLabel>
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="slack">slack</SelectItem>
+                              <SelectItem value="webhook">webhook</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={budgetForm.control}
+                      name="channelTarget"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Channel URL</FormLabel>
+                          <FormControl>
+                            <Input placeholder="https://hooks.slack.com/…" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={readOnly || saveBudget.isPending}>
+                      {saveBudget.isPending ? "Saving…" : "Save budget"}
+                    </Button>
+                    {budget && (
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        disabled={readOnly || removeBudget.isPending}
+                        onClick={() => removeBudget.mutate()}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                </form>
+              </Form>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* ── Scores ────────────────────────────────────────────────────── */}
