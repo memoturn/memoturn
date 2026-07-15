@@ -4,17 +4,20 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   Activity,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Coins,
   Columns3,
   DollarSign,
   Download,
   GitCompare,
+  Rows2,
+  Rows3,
   Save,
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { Fragment, type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "../../components/empty-state";
 import { KindBadge } from "../../components/kind-badge";
@@ -147,6 +150,44 @@ function useColumnPrefs() {
     persist({ hidden: [...hidden], order: next });
   };
   return { order, hidden, toggle, move };
+}
+
+/** localStorage-backed view preference (compact density, grouping), persisted across sessions. */
+function usePersisted<T>(key: string, initial: T): [T, (v: T) => void] {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw != null ? (JSON.parse(raw) as T) : initial;
+    } catch {
+      return initial;
+    }
+  });
+  const set = (v: T) => {
+    try {
+      localStorage.setItem(key, JSON.stringify(v));
+    } catch {
+      /* storage unavailable */
+    }
+    setValue(v);
+  };
+  return [value, set];
+}
+
+type GroupKey = "none" | "name" | "userId" | "environment" | "session_id";
+const GROUP_LABEL: Record<GroupKey, string> = {
+  none: "No grouping",
+  name: "Group by name",
+  userId: "Group by user",
+  environment: "Group by environment",
+  session_id: "Group by session",
+};
+/** Group-key value for a trace (empty string bucket rendered as a placeholder). */
+function groupValue(t: TraceSummary, by: GroupKey): string {
+  if (by === "name") return t.name || "(unnamed)";
+  if (by === "userId") return t.user_id || "(no user)";
+  if (by === "environment") return t.environment || "(none)";
+  if (by === "session_id") return t.session_id || "(no session)";
+  return "";
 }
 
 /** Columns dropdown: toggle visibility + reorder (▲/▼) per column. */
@@ -312,6 +353,16 @@ function TracesPage() {
   const readOnly = useIsReadOnly();
   const qc = useQueryClient();
   const { order, hidden, toggle: toggleColumn, move: moveColumn } = useColumnPrefs();
+  const [compact, setCompact] = usePersisted("memoturn.traces.compact", false);
+  const [groupBy, setGroupBy] = usePersisted<GroupKey>("memoturn.traces.groupBy", "none");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleCollapse = (k: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
   const visibleCols = order.filter((k) => !hidden.has(k));
 
   // `peek`/`page`/`pageSize` are view state, not filters — keep them out of the list query's
@@ -334,6 +385,20 @@ function TracesPage() {
   const traces = pageData?.data;
   const total = pageData?.total ?? 0;
   const scores = pageData?.scores ?? {};
+
+  // Group the current page's rows by the chosen field (first-seen order). "none" → one implicit group.
+  const grouped = useMemo(() => {
+    if (!traces) return [];
+    if (groupBy === "none") return [{ key: "", rows: traces }];
+    const m = new Map<string, TraceSummary[]>();
+    for (const t of traces) {
+      const k = groupValue(t, groupBy);
+      const arr = m.get(k);
+      if (arr) arr.push(t);
+      else m.set(k, [t]);
+    }
+    return [...m.entries()].map(([key, rows]) => ({ key, rows }));
+  }, [traces, groupBy]);
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   // Changing a filter resets to page 1 (the old offset would point past the new result set).
@@ -458,6 +523,29 @@ function TracesPage() {
         title="Traces"
         actions={
           <>
+            <Select value={groupBy} onValueChange={(v) => setGroupBy(v as GroupKey)}>
+              <SelectTrigger size="sm" className="h-8 w-auto gap-1.5">
+                <Rows3 className="size-4 text-muted-foreground" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                {(Object.keys(GROUP_LABEL) as GroupKey[]).map((k) => (
+                  <SelectItem key={k} value={k}>
+                    {GROUP_LABEL[k]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant={compact ? "default" : "outline"}
+              size="sm"
+              onClick={() => setCompact(!compact)}
+              className="gap-2"
+              title="Toggle compact row density"
+            >
+              <Rows2 />
+              Compact
+            </Button>
             <ColumnsMenu order={order} hidden={hidden} toggle={toggleColumn} move={moveColumn} />
             <Button variant="outline" size="sm" onClick={promptSaveView} disabled={readOnly} className="gap-2">
               <Save />
@@ -676,7 +764,7 @@ function TracesPage() {
             />
           ) : (
             <div className="border">
-              <Table>
+              <Table className={cn(compact && "[&_td]:py-1 [&_th]:py-1.5")}>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10">
@@ -693,33 +781,57 @@ function TracesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {traces.map((t) => (
-                    <TableRow
-                      key={t.id}
-                      data-state={selected.has(t.id) ? "selected" : peek === t.id ? "selected" : undefined}
-                      onClick={() => setPeek(t.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") setPeek(t.id);
-                      }}
-                      tabIndex={0}
-                      className="cursor-pointer"
-                    >
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <Checkbox
-                          checked={selected.has(t.id)}
-                          onCheckedChange={() => toggle(t.id)}
-                          aria-label={`Select ${t.name || t.id}`}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <span className="font-medium text-primary">{t.name || t.id.slice(0, 8)}</span>
-                      </TableCell>
-                      {visibleCols.map((k) => (
-                        <TableCell key={k} className={COL_CLASS[k]}>
-                          {cellContent[k](t)}
-                        </TableCell>
-                      ))}
-                    </TableRow>
+                  {grouped.map((g) => (
+                    <Fragment key={g.key || "__all"}>
+                      {groupBy !== "none" && (
+                        <TableRow className="bg-muted/40 hover:bg-muted/40">
+                          <TableCell colSpan={2 + visibleCols.length} className="py-1.5">
+                            <button
+                              type="button"
+                              onClick={() => toggleCollapse(g.key)}
+                              className="inline-flex items-center gap-1.5 text-xs font-medium"
+                            >
+                              {collapsed.has(g.key) ? (
+                                <ChevronRight className="size-3.5" />
+                              ) : (
+                                <ChevronDown className="size-3.5" />
+                              )}
+                              <span>{g.key}</span>
+                              <span className="text-muted-foreground">({g.rows.length})</span>
+                            </button>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {!collapsed.has(g.key) &&
+                        g.rows.map((t) => (
+                          <TableRow
+                            key={t.id}
+                            data-state={selected.has(t.id) ? "selected" : peek === t.id ? "selected" : undefined}
+                            onClick={() => setPeek(t.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") setPeek(t.id);
+                            }}
+                            tabIndex={0}
+                            className="cursor-pointer"
+                          >
+                            <TableCell onClick={(e) => e.stopPropagation()}>
+                              <Checkbox
+                                checked={selected.has(t.id)}
+                                onCheckedChange={() => toggle(t.id)}
+                                aria-label={`Select ${t.name || t.id}`}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <span className="font-medium text-primary">{t.name || t.id.slice(0, 8)}</span>
+                            </TableCell>
+                            {visibleCols.map((k) => (
+                              <TableCell key={k} className={COL_CLASS[k]}>
+                                {cellContent[k](t)}
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ))}
+                    </Fragment>
                   ))}
                 </TableBody>
               </Table>
