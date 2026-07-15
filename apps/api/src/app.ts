@@ -116,6 +116,7 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
 import { handleMcp } from "./mcp.js";
+import { logJson, recordRequest, requestStarted, snapshot } from "./metrics.js";
 import { type AuthVars, denyIfReadOnly, requireAuth } from "./middleware/auth.js";
 import { rateLimit } from "./middleware/ratelimit.js";
 
@@ -127,6 +128,40 @@ import { rateLimit } from "./middleware/ratelimit.js";
 type Env = { Variables: AuthVars };
 
 export const app = new OpenAPIHono<Env>();
+
+// ── Observability: time every request, record metrics, structured-log ────────────
+// First middleware so the timing wraps the whole pipeline. Buckets by the matched route
+// PATTERN (c.req.routePath), never the raw path, to keep cardinality bounded.
+app.use("*", async (c, next) => {
+  const start = performance.now();
+  requestStarted();
+  try {
+    await next();
+  } finally {
+    const ms = performance.now() - start;
+    const route = c.req.routePath && c.req.routePath !== "/*" ? c.req.routePath : "(unmatched)";
+    const status = c.res.status;
+    recordRequest(c.req.method, route, status, ms);
+    logJson(status >= 500 ? "error" : "info", "request", {
+      method: c.req.method,
+      route,
+      status,
+      ms: Math.round(ms),
+    });
+  }
+});
+
+// Liveness probe (public, unauthenticated) — cheap, no dependencies touched.
+app.get("/health", (c) => c.json({ status: "ok", service: "memoturn-api" }));
+
+// Metrics scrape — token-gated (returns 404 unless API_METRICS_TOKEN is set, so it's off
+// by default; the snapshot leaks route names + latencies, not tenant data).
+app.get("/metrics", (c) => {
+  const token = process.env.API_METRICS_TOKEN;
+  if (!token) return c.json({ error: "not found" }, 404);
+  if (c.req.header("authorization") !== `Bearer ${token}`) return c.json({ error: "unauthorized" }, 401);
+  return c.json(snapshot());
+});
 
 // ── Global hardening middleware ──────────────────────────────────────────────────
 // Security headers (X-Frame-Options, nosniff, Referrer-Policy, HSTS, …). Defaults are
