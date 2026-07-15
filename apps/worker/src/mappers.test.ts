@@ -56,6 +56,27 @@ describe("mapEvents", () => {
     expect(o.latency_ms).toBe(1000); // endTime − startTime, computed by the mapper
   });
 
+  it("maps prompt-cache usage onto the observation row", () => {
+    const { observations } = mapEvents(PROJECT, [
+      {
+        id: "e1",
+        type: "generation-create",
+        timestamp: "2026-06-25T00:00:00.000Z",
+        body: {
+          id: "cache-g",
+          traceId: "tc",
+          model: "claude-sonnet-4-6",
+          environment: "default",
+          startTime: "2026-06-25T00:00:00.000Z",
+          usage: { promptTokens: 1000, completionTokens: 10, cacheReadTokens: 760, cacheCreationTokens: 240 },
+        },
+      },
+    ]);
+    const o = observations[0]!;
+    expect(o.cache_read_tokens).toBe(760);
+    expect(o.cache_creation_tokens).toBe(240);
+  });
+
   it("treats a cross-batch partial update as a patch over the stored row (bases)", () => {
     // Batch 1 materialized this row (create with full state)...
     const [base] = mapEvents(PROJECT, sampleBatch("t2").slice(0, 2)).observations;

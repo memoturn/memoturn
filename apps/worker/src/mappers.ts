@@ -129,17 +129,23 @@ export function mapEvents(
     let promptTokens: number;
     let completionTokens: number;
     let totalTokens: number;
+    let cacheReadTokens: number;
+    let cacheCreationTokens: number;
     let cost: { inputCost: number; outputCost: number; totalCost: number };
     if (b.usage !== undefined || !base) {
       promptTokens = clampTokens(b.usage?.promptTokens);
       completionTokens = clampTokens(b.usage?.completionTokens);
       totalTokens = clampTokens(b.usage?.totalTokens ?? promptTokens + completionTokens);
+      cacheReadTokens = clampTokens(b.usage?.cacheReadTokens);
+      cacheCreationTokens = clampTokens(b.usage?.cacheCreationTokens);
       const c = computeCost(model, promptTokens, completionTokens, priceOverrides);
       cost = { inputCost: c.inputCost, outputCost: c.outputCost, totalCost: c.totalCost };
     } else {
       promptTokens = base.prompt_tokens;
       completionTokens = base.completion_tokens;
       totalTokens = base.total_tokens;
+      cacheReadTokens = base.cache_read_tokens;
+      cacheCreationTokens = base.cache_creation_tokens;
       cost = { inputCost: base.input_cost, outputCost: base.output_cost, totalCost: base.total_cost };
     }
     const startTime: string = b.startTime ?? base?.start_time ?? event_ts;
@@ -163,6 +169,8 @@ export function mapEvents(
       prompt_tokens: promptTokens,
       completion_tokens: completionTokens,
       total_tokens: totalTokens,
+      cache_read_tokens: cacheReadTokens,
+      cache_creation_tokens: cacheCreationTokens,
       input_cost: cost.inputCost,
       output_cost: cost.outputCost,
       total_cost: cost.totalCost,

@@ -43,6 +43,8 @@ export interface ObservationRow {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
   input_cost: number;
   output_cost: number;
   total_cost: number;

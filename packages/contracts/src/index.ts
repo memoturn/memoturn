@@ -184,6 +184,8 @@ export const observationDetail = z.object({
   prompt_tokens: z.number(),
   completion_tokens: z.number(),
   total_tokens: z.number(),
+  cache_read_tokens: z.number(),
+  cache_creation_tokens: z.number(),
   total_cost: z.number(),
   latency_ms: z.number(),
   input: z.string(),
