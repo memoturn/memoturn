@@ -4,8 +4,12 @@ import type * as React from "react";
  * memoturn brand mark — concentric teal rings (mirrors public/favicon.svg).
  * Sized via className (e.g. `size-6`); the gradient is self-contained so it
  * reads on both light and dark backgrounds.
+ *
+ * Pass `mono` to fill with `currentColor` instead of the teal gradient — used
+ * inside the sidebar's `bg-primary` chip, where a teal-on-teal gradient would
+ * be invisible, so the mark inherits `text-primary-foreground` (near-white).
  */
-export function Logo({ className, ...props }: React.SVGProps<SVGSVGElement>) {
+export function Logo({ className, mono = false, ...props }: React.SVGProps<SVGSVGElement> & { mono?: boolean }) {
   return (
     <svg
       viewBox="0 0 128 128"
@@ -22,7 +26,7 @@ export function Logo({ className, ...props }: React.SVGProps<SVGSVGElement>) {
           <stop offset="100%" stopColor="#328f97" />
         </linearGradient>
       </defs>
-      <g fill="url(#memoturn-logo)">
+      <g fill={mono ? "currentColor" : "url(#memoturn-logo)"}>
         <path
           fillRule="evenodd"
           d="M 64 10 a 54 54 0 1 0 0 108 a 54 54 0 1 0 0 -108 M 64 24 a 40 40 0 1 1 0 80 a 40 40 0 1 1 0 -80"
