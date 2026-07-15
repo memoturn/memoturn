@@ -12,6 +12,7 @@ import { DataTable } from "../components/data-table";
 import { EmptyState } from "../components/empty-state";
 import { KindBadge } from "../components/kind-badge";
 import { PageHeader } from "../components/page-header";
+import { ProviderIcon } from "../components/provider-icon";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Checkbox } from "../components/ui/checkbox";
@@ -507,7 +508,19 @@ function SettingsPage() {
       header: "Pattern",
       cell: ({ row }) => <code className="text-xs">{row.original.pattern}</code>,
     },
-    { accessorKey: "provider", header: "Provider", cell: ({ row }) => row.original.provider || "—" },
+    {
+      accessorKey: "provider",
+      header: "Provider",
+      cell: ({ row }) =>
+        row.original.provider ? (
+          <span className="inline-flex items-center gap-1.5">
+            <ProviderIcon provider={row.original.provider} size={15} />
+            {row.original.provider}
+          </span>
+        ) : (
+          "—"
+        ),
+    },
     { accessorKey: "inputPerMTok", header: "Input / 1M", cell: ({ row }) => `$${row.original.inputPerMTok}` },
     { accessorKey: "outputPerMTok", header: "Output / 1M", cell: ({ row }) => `$${row.original.outputPerMTok}` },
     {
@@ -531,7 +544,19 @@ function SettingsPage() {
       header: "Pattern",
       cell: ({ row }) => <code className="text-xs">{row.original.pattern}</code>,
     },
-    { accessorKey: "provider", header: "Provider", cell: ({ row }) => row.original.provider || "—" },
+    {
+      accessorKey: "provider",
+      header: "Provider",
+      cell: ({ row }) =>
+        row.original.provider ? (
+          <span className="inline-flex items-center gap-1.5">
+            <ProviderIcon provider={row.original.provider} size={15} />
+            {row.original.provider}
+          </span>
+        ) : (
+          "—"
+        ),
+    },
     { accessorKey: "inputPerMTok", header: "Input / 1M", cell: ({ row }) => `$${row.original.inputPerMTok}` },
     { accessorKey: "outputPerMTok", header: "Output / 1M", cell: ({ row }) => `$${row.original.outputPerMTok}` },
   ];
@@ -765,7 +790,12 @@ function SettingsPage() {
                 {
                   accessorKey: "provider",
                   header: "Provider",
-                  cell: ({ row }) => <span className="font-medium">{row.original.provider}</span>,
+                  cell: ({ row }) => (
+                    <span className="inline-flex items-center gap-1.5 font-medium">
+                      <ProviderIcon provider={row.original.provider} size={16} />
+                      {row.original.provider}
+                    </span>
+                  ),
                 },
                 {
                   accessorKey: "masked",

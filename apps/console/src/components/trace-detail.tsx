@@ -9,6 +9,7 @@ import { cn } from "../lib/utils";
 import { CopyButton } from "./copy-button";
 import { EmptyState } from "./empty-state";
 import { KindBadge, type KindBadgeTone, toneForKind } from "./kind-badge";
+import { ProviderIcon } from "./provider-icon";
 import { StatTile } from "./stat-tile";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "./ui/accordion";
 import { Badge } from "./ui/badge";
@@ -422,7 +423,12 @@ function WaterfallRow({ obs, onSelect }: { obs: Laid; onSelect?: () => void }) {
         <div className="flex min-w-0 items-center gap-1.5">
           <KindBadge tone={toneForKind(obs.type)}>{obs.type.toLowerCase()}</KindBadge>
           <span className="truncate font-medium">{obs.name || obs.id.slice(0, 8)}</span>
-          {obs.model && <span className="shrink-0 text-muted-foreground">· {obs.model}</span>}
+          {obs.model && (
+            <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
+              <ProviderIcon provider={obs.provider} model={obs.model} size={13} />
+              {obs.model}
+            </span>
+          )}
           {obs.level !== "DEFAULT" && <KindBadge tone={toneForLevel(obs.level)}>{obs.level.toLowerCase()}</KindBadge>}
         </div>
       </div>
