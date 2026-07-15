@@ -543,6 +543,7 @@ export const evaluatorTemplate = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string(),
+  prompt: z.string(),
   requires: z.array(z.string()),
   defaultModel: z.string(),
 });
@@ -560,9 +561,19 @@ export const evaluator = z.object({
   online: z.boolean(),
   samplingRate: z.number(),
   filterName: z.string(),
+  version: z.number(),
   createdAt: z.string(),
 });
 export type Evaluator = z.infer<typeof evaluator>;
+
+export const evaluatorVersion = z.object({
+  version: z.number(),
+  prompt: z.string(),
+  provider: z.string(),
+  model: z.string(),
+  createdAt: z.string(),
+});
+export type EvaluatorVersion = z.infer<typeof evaluatorVersion>;
 
 // ── Playground ───────────────────────────────────────────────────────────────────
 export const chatMessage = z.object({

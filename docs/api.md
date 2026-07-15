@@ -82,6 +82,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/evaluators/analytics` | Per-evaluator EVAL score summary (avg, count) + daily trend (`days` query, default 30). |
 | GET | `/v1/evaluators/templates` | The prebuilt evaluator library (RAG/quality judge templates). |
 | POST | `/v1/evaluators/from-template` | Instantiate a template into a project evaluator. Body: `{ key, name?, provider?, model?, ... }`. Audited. |
+| GET | `/v1/evaluators/{name}/versions` | Immutable judge-config version history (newest first). A version bumps when the prompt/model/provider changes, so online score drift is attributable to a config change. |
 | POST | `/v1/evaluators/{name}/run` | Run over a trace's input/output → writes an `EVAL` score. |
 
 ### Experiments

@@ -22,18 +22,34 @@ export interface CreateEvaluatorInput {
 }
 
 export async function createEvaluator(projectId: string, input: CreateEvaluatorInput) {
+  const provider = input.provider ?? "mock";
   const data = {
     prompt: input.prompt,
-    provider: input.provider ?? "mock",
+    provider,
     model: input.model,
     online: input.online ?? false,
     samplingRate: input.samplingRate ?? 1.0,
     filterName: input.filterName ?? "",
   };
-  const ev = await prisma.evaluator.upsert({
-    where: { projectId_name: { projectId, name: input.name } },
-    update: data,
-    create: { projectId, name: input.name, ...data },
+  // Version bump: an edit that changes the judge config (prompt/model/provider) is a new
+  // immutable version; unrelated edits (toggling online, sampling) don't bump. A snapshot
+  // row is written per version so score drift can be attributed to a config change.
+  const ev = await prisma.$transaction(async (tx) => {
+    const existing = await tx.evaluator.findUnique({ where: { projectId_name: { projectId, name: input.name } } });
+    const configChanged =
+      !existing || existing.prompt !== data.prompt || existing.model !== data.model || existing.provider !== provider;
+    const version = existing ? existing.version + (configChanged ? 1 : 0) : 1;
+    const row = await tx.evaluator.upsert({
+      where: { projectId_name: { projectId, name: input.name } },
+      update: { ...data, version },
+      create: { projectId, name: input.name, ...data, version },
+    });
+    if (configChanged) {
+      await tx.evaluatorVersion.create({
+        data: { evaluatorId: row.id, version, prompt: data.prompt, provider, model: data.model },
+      });
+    }
+    return row;
   });
   return {
     name: ev.name,
@@ -42,7 +58,24 @@ export async function createEvaluator(projectId: string, input: CreateEvaluatorI
     online: ev.online,
     samplingRate: ev.samplingRate,
     filterName: ev.filterName,
+    version: ev.version,
   };
+}
+
+/** Immutable version history for one evaluator (newest first). */
+export async function listEvaluatorVersions(projectId: string, name: string) {
+  const ev = await prisma.evaluator.findUnique({
+    where: { projectId_name: { projectId, name } },
+    include: { versions: { orderBy: { version: "desc" } } },
+  });
+  if (!ev) return null;
+  return ev.versions.map((v) => ({
+    version: v.version,
+    prompt: v.prompt,
+    provider: v.provider,
+    model: v.model,
+    createdAt: v.createdAt.toISOString(),
+  }));
 }
 
 export async function listEvaluators(projectId: string) {
@@ -55,6 +88,7 @@ export async function listEvaluators(projectId: string) {
     online: e.online,
     samplingRate: e.samplingRate,
     filterName: e.filterName,
+    version: e.version,
     createdAt: e.createdAt.toISOString(),
   }));
 }
@@ -70,6 +104,7 @@ export function listEvaluatorTemplates() {
     key: t.key,
     name: t.name,
     description: t.description,
+    prompt: t.prompt,
     requires: t.requires,
     defaultModel: t.defaultModel ?? "",
   }));

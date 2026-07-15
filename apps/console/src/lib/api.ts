@@ -25,6 +25,7 @@ import type {
   Evaluator,
   EvaluatorAnalytics,
   EvaluatorTemplate,
+  EvaluatorVersion,
   ExperimentComparison,
   ExperimentDetail,
   ExperimentSummary,
@@ -322,6 +323,8 @@ export const api = {
     filterName?: string;
   }) => post(`/v1/evaluators`, body),
   listEvaluatorTemplates: () => get<{ data: EvaluatorTemplate[] }>(`/v1/evaluators/templates`).then((r) => r.data),
+  listEvaluatorVersions: (name: string) =>
+    get<{ data: EvaluatorVersion[] }>(`/v1/evaluators/${encodeURIComponent(name)}/versions`).then((r) => r.data),
   getEmbeddingProjection: (opts: { runId?: string; colorBy?: string; limit?: number } = {}) =>
     get<EmbeddingProjection>(`/v1/embeddings/projection${qs(opts as Record<string, unknown>)}`),
   runEmbeddingProjection: () => post<{ run_id: string; points: number }>(`/v1/embeddings/projection/run`, {}),

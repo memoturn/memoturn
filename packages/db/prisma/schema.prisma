@@ -402,9 +402,30 @@ model Evaluator {
   online       Boolean  @default(false)
   samplingRate Float    @default(1.0)
   filterName   String   @default("")
+  // Monotonic version, bumped whenever the judge prompt/model/provider changes. The
+  // immutable history lives in EvaluatorVersion so online score drift is attributable
+  // (correlate a score-trend shift to when a version was published).
+  version      Int      @default(1)
   createdAt    DateTime @default(now())
 
+  versions EvaluatorVersion[]
+
   @@unique([projectId, name])
+}
+
+// Immutable snapshot of an evaluator's judge config at a point in time. A new row is
+// written on every create/edit that changes the prompt/model/provider.
+model EvaluatorVersion {
+  id           String    @id @default(cuid())
+  evaluatorId  String
+  evaluator    Evaluator @relation(fields: [evaluatorId], references: [id], onDelete: Cascade)
+  version      Int
+  prompt       String
+  provider     String
+  model        String
+  createdAt    DateTime  @default(now())
+
+  @@unique([evaluatorId, version])
 }
 
 enum ExperimentStatus {

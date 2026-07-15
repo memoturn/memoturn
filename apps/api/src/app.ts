@@ -76,6 +76,7 @@ import {
   listDatasetVersions,
   listEvaluators,
   listEvaluatorTemplates,
+  listEvaluatorVersions,
   listExperiments,
   listModelPrices,
   listPrompts,
@@ -1511,6 +1512,26 @@ app.openapi(
     const result = await createEvaluator(c.get("projectId"), body);
     await recordAudit(c.get("projectId"), c.get("actor"), "evaluator.create", `evaluator:${body.name}`);
     return c.json(result, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/evaluators/{name}/versions",
+    summary: "List an evaluator's immutable version history (judge config snapshots)",
+    tags: ["evaluators"],
+    security,
+    request: { params: z.object({ name: z.string() }) },
+    responses: {
+      200: { description: "Versions", content: { "application/json": { schema: C.listOf(C.evaluatorVersion) } } },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const versions = await listEvaluatorVersions(c.get("projectId"), c.req.valid("param").name);
+    if (versions === null) return c.json({ error: "not found" }, 404);
+    return c.json({ data: versions });
   },
 );
 
