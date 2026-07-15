@@ -30,7 +30,7 @@ import type {
   TraceRow,
   TraceScore,
 } from "../types.js";
-import { closeDorisPool, dorisPool } from "./client.js";
+import { closeDorisPool, dorisQuery } from "./client.js";
 import { buildInserts, parseTags, toDorisDateTime } from "./serialize.js";
 
 /**
@@ -67,12 +67,12 @@ function cutoffMidnightDaysAgo(days: number): string {
 
 export class DorisTelemetryStore implements TelemetryStore {
   private async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
-    const [rows] = await dorisPool().query(sql, params);
+    const [rows] = await dorisQuery(sql, params);
     return rows as T[];
   }
 
   private async exec(sql: string, params: unknown[] = []): Promise<void> {
-    await dorisPool().query(sql, params);
+    await dorisQuery(sql, params);
   }
 
   // ── Reads ──────────────────────────────────────────────────────────────────────
