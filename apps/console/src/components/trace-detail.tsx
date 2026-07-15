@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Download, Flag, Plus, RotateCcw, Tag, Trash2 } from "lucide-react";
+import { Download, Flag, FlaskConical, Plus, RotateCcw, Tag, Trash2 } from "lucide-react";
 import { type ReactNode, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -467,6 +467,36 @@ function visibleObservations(observations: ObservationDetail[]): ObservationDeta
   return observations.filter((obs) => obs.input || obs.output || obs.level !== "DEFAULT");
 }
 
+/** Playground handoff: the trace detail writes this, the playground route reads + clears it on mount. */
+const PLAYGROUND_SEED_KEY = "memoturn.playground.seed";
+
+/**
+ * Seed the playground from a generation: pull the system + last user message out of the observation's
+ * input (chat-message array, else the raw input as the user message), plus its provider/model.
+ */
+function writePlaygroundSeed(obs: ObservationDetail) {
+  const parsed = tryParse(obs.input);
+  let system = "";
+  let userMsg = "";
+  if (isMessageArray(parsed)) {
+    for (const m of parsed) {
+      const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      if (String(m.role) === "system") system = content;
+      else userMsg = content;
+    }
+  } else {
+    userMsg = typeof parsed === "string" ? parsed : obs.input;
+  }
+  try {
+    localStorage.setItem(
+      PLAYGROUND_SEED_KEY,
+      JSON.stringify({ provider: obs.provider, model: obs.model, system, userMsg }),
+    );
+  } catch {
+    /* storage unavailable — the playground just opens with its defaults */
+  }
+}
+
 function ObservationDetailItem({
   obs,
   registerRef,
@@ -500,6 +530,16 @@ function ObservationDetailItem({
         </div>
       </AccordionTrigger>
       <AccordionContent className="space-y-3">
+        {obs.type === "GENERATION" && obs.input && (
+          <div className="flex justify-end">
+            <Button asChild variant="outline" size="sm">
+              <Link to="/playground" onClick={() => writePlaygroundSeed(obs)}>
+                <FlaskConical className="size-3.5" />
+                Open in Playground
+              </Link>
+            </Button>
+          </div>
+        )}
         <MediaPreview raw={obs.input} />
         <MediaPreview raw={obs.output} />
         {obs.input && (
