@@ -210,6 +210,17 @@ export const costBudget = z
   .nullable();
 export type CostBudget = z.infer<typeof costBudget>;
 
+export const ingestHealth = z.object({
+  workerReachable: z.boolean(),
+  dlqDepth: z.number(),
+  insertLatencyMs: z.number().nullable(),
+  counters: z.record(z.string(), z.number()),
+  recentFailures: z.array(
+    z.object({ batchId: z.string(), projectId: z.string(), failedAt: z.string(), error: z.string() }),
+  ),
+});
+export type IngestHealth = z.infer<typeof ingestHealth>;
+
 /** A document a retriever span returned (RAG analysis). */
 export const retrievalDocument = z.object({
   rank: z.number(),

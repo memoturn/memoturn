@@ -25,6 +25,7 @@ import {
   Database,
   FlaskConical,
   Gauge,
+  HeartPulse,
   History,
   LayoutDashboard,
   LogOut,
@@ -93,6 +94,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
 // Secondary navigation — pinned to the bottom (sidebar-08 NavSecondary pattern):
 // operate/admin surfaces that shouldn't compete with the primary workflow groups.
 const NAV_SECONDARY: NavItem[] = [
+  { to: "/ops", label: "Ingest health", icon: HeartPulse },
   { to: "/audit", label: "Audit", icon: History },
   { to: "/organizations", label: "Organizations", icon: Building2 },
   { to: "/settings", label: "Settings", icon: SettingsIcon },

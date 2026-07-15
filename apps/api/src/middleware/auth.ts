@@ -83,3 +83,9 @@ const WRITE_ROLES: WorkspaceRole[] = ["OWNER", "ADMIN", "MEMBER"];
 export function denyIfReadOnly(c: Context<{ Variables: AuthVars }>) {
   return WRITE_ROLES.includes(c.get("role")) ? null : c.json({ error: "forbidden: read-only role" }, 403);
 }
+
+/** Guard for admin-only ops surfaces (DLQ, worker metrics): OWNER/ADMIN only. */
+export function denyIfNotAdmin(c: Context<{ Variables: AuthVars }>) {
+  const role = c.get("role");
+  return role === "OWNER" || role === "ADMIN" ? null : c.json({ error: "forbidden: admin only" }, 403);
+}

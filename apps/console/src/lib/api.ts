@@ -29,6 +29,7 @@ import type {
   ExperimentComparison,
   ExperimentDetail,
   ExperimentSummary,
+  IngestHealth,
   MaskingPolicy,
   MetricsSummary,
   ModelPriceList,
@@ -281,6 +282,8 @@ export const api = {
   setBudget: (body: { monthlyUsd: number; thresholds?: number[]; channels?: AlertChannel[] }) =>
     put<CostBudget>(`/v1/budgets`, body),
   deleteBudget: () => del(`/v1/budgets`),
+  getIngestHealth: () => get<IngestHealth>(`/v1/ingest/health`),
+  replayDlq: (limit?: number) => post<{ replayed: number; failed: number }>(`/v1/ingest/dlq/replay`, { limit }),
   listScoreConfigs: () => get<{ data: ScoreConfig[] }>(`/v1/score-configs`).then((r) => r.data),
   listModelPrices: () => get<ModelPriceList>(`/v1/model-prices`),
   createModelPrice: (body: { pattern: string; provider?: string; inputPerMTok: number; outputPerMTok: number }) =>

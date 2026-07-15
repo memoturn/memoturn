@@ -56,6 +56,7 @@ import {
   getEmbeddingProjection,
   getEvaluatorAnalytics,
   getExperiment,
+  getIngestHealth,
   getMaskingPolicy,
   getMedia,
   getMetrics,
@@ -97,6 +98,7 @@ import {
   otlpToEvents,
   recordAudit,
   recordRun,
+  replayDlq,
   replayTrace,
   resolvePrompt,
   revokeApiKey,
@@ -128,7 +130,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
 import { handleMcp } from "./mcp.js";
 import { logJson, recordRequest, requestStarted, snapshot } from "./metrics.js";
-import { type AuthVars, denyIfReadOnly, requireAuth } from "./middleware/auth.js";
+import { type AuthVars, denyIfNotAdmin, denyIfReadOnly, requireAuth } from "./middleware/auth.js";
 import { rateLimit } from "./middleware/ratelimit.js";
 
 /**
@@ -221,6 +223,8 @@ app.openAPIRegistry.registerComponent("securitySchemes", "apiKey", {
   description: "Basic auth: publicKey as username, secretKey as password.",
 });
 app.use("/v1/ingest", requireAuth);
+app.use("/v1/ingest/health", requireAuth);
+app.use("/v1/ingest/dlq/*", requireAuth);
 app.use("/v1/otel/*", requireAuth);
 app.use("/v1/traces", requireAuth);
 app.use("/v1/traces/*", requireAuth);
@@ -484,6 +488,58 @@ app.openapi(
     }
     const successes: IngestResult[] = valid.map((e) => ({ id: e.id, status: 201 }));
     return c.json({ successes, errors }, 207);
+  },
+);
+
+// ── Ingest health + DLQ replay (ops console; OWNER/ADMIN only) ────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/ingest/health",
+    summary: "Ingest-pipeline health: DLQ depth, insert latency, error counters, recent failed batches",
+    tags: ["ingestion"],
+    security,
+    responses: {
+      200: { description: "Health", content: { "application/json": { schema: C.ingestHealth } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfNotAdmin(c);
+    if (denied) return denied;
+    return c.json(await getIngestHealth());
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/ingest/dlq/replay",
+    summary: "Re-enqueue dead-lettered ingest batches from blob onto the ingest queue",
+    tags: ["ingestion"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": { schema: z.object({ limit: z.number().int().positive().optional() }) },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Replayed",
+        content: { "application/json": { schema: z.object({ replayed: z.number(), failed: z.number() }) } },
+      },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c) ?? denyIfNotAdmin(c);
+    if (denied) return denied;
+    const { limit } = c.req.valid("json");
+    const result = await replayDlq(limit ?? Number.POSITIVE_INFINITY);
+    await recordAudit(c.get("projectId"), c.get("actor"), "ingest.dlq.replay", `replayed:${result.replayed}`);
+    return c.json(result);
   },
 );
 

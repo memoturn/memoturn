@@ -1,6 +1,9 @@
 import { addDatasetItems, createDataset, getDatasetDetail, listDatasets } from "./datasets.js";
+import { runEvaluator } from "./evaluators.js";
+import { getMetrics } from "./metrics.js";
 import { createPromptVersion, getPromptDetail, listPrompts, resolvePrompt } from "./prompts.js";
 import { addReviewItems, createReviewQueue, listReviewItems, listReviewQueues, submitReviewScore } from "./review.js";
+import { getScoresByTraceIds, getTrace, getTraceIO, listTraces } from "./traces.js";
 
 /**
  * MCP tool definitions exposing memoturn prompts, datasets, and review queues to
@@ -27,9 +30,116 @@ export interface ToolDef {
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v : String(v ?? ""));
+const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
 const NOT_FOUND = (kind: string, name: string) => ({ error: `${kind} not found: ${name}` });
 
 export const tools: ToolDef[] = [
+  // ── Traces / metrics (observability) ─────────────────────────────────────────────
+  {
+    name: "query_traces",
+    description:
+      "List recent traces with optional filters (environment, user, session, level, tag, score name, free-text search, day window). Returns summaries with rollups (cost, tokens, latency). Use get_trace for full detail.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max traces (default 20)" },
+        days: { type: "number", description: "Only traces from the last N days" },
+        environment: { type: "string", description: "Filter by environment" },
+        userId: { type: "string", description: "Filter by end-user id" },
+        sessionId: { type: "string", description: "Filter by session id" },
+        level: { type: "string", description: "Only traces with an observation at this level (e.g. ERROR)" },
+        tag: { type: "string", description: "Filter by tag" },
+        scoreName: { type: "string", description: "Only traces carrying this score name" },
+        search: { type: "string", description: "Free-text match on trace name / observation IO" },
+      },
+      additionalProperties: false,
+    },
+    handler: (projectId, args) =>
+      listTraces(projectId, {
+        limit: num(args.limit) ?? 20,
+        days: num(args.days),
+        environment: args.environment ? str(args.environment) : undefined,
+        userId: args.userId ? str(args.userId) : undefined,
+        sessionId: args.sessionId ? str(args.sessionId) : undefined,
+        level: args.level ? str(args.level) : undefined,
+        tag: args.tag ? str(args.tag) : undefined,
+        scoreName: args.scoreName ? str(args.scoreName) : undefined,
+        search: args.search ? str(args.search) : undefined,
+      }),
+  },
+  {
+    name: "get_trace",
+    description: "Get a trace's full detail: metadata, the observation tree (spans/generations), and its scores.",
+    inputSchema: {
+      type: "object",
+      properties: { traceId: { type: "string", description: "Trace id" } },
+      required: ["traceId"],
+      additionalProperties: false,
+    },
+    handler: async (projectId, args) =>
+      (await getTrace(projectId, str(args.traceId))) ?? NOT_FOUND("trace", str(args.traceId)),
+  },
+  {
+    name: "get_metrics",
+    description:
+      "Project metrics over the last N days (default 30): totals plus per-day and per-model breakdowns of traces, generations, errors, tokens, and cost.",
+    inputSchema: {
+      type: "object",
+      properties: { days: { type: "number", description: "Day window (default 30)" } },
+      additionalProperties: false,
+    },
+    handler: (projectId, args) => getMetrics(projectId, num(args.days) ?? 30),
+  },
+  {
+    name: "list_scores",
+    description: "List the scores attached to a trace (evaluator/annotation/API), with name, value, and source.",
+    inputSchema: {
+      type: "object",
+      properties: { traceId: { type: "string", description: "Trace id" } },
+      required: ["traceId"],
+      additionalProperties: false,
+    },
+    handler: async (projectId, args) => {
+      const map = await getScoresByTraceIds(projectId, [str(args.traceId)]);
+      return map.get(str(args.traceId)) ?? [];
+    },
+  },
+  {
+    name: "run_evaluator",
+    description:
+      "Run an existing LLM-as-judge evaluator over a trace and record an EVAL score. Provide the trace id; input/output are pulled from the trace unless overridden.",
+    write: true,
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Evaluator name" },
+        traceId: { type: "string", description: "Trace to evaluate" },
+        input: { description: "Override the input judged (default: the trace's input)" },
+        output: { description: "Override the output judged (default: the trace's output)" },
+        expectedOutput: { description: "Optional reference/expected output" },
+      },
+      required: ["name", "traceId"],
+      additionalProperties: false,
+    },
+    handler: async (projectId, args) => {
+      const traceId = str(args.traceId);
+      let { input, output } = args as { input?: unknown; output?: unknown };
+      if (input === undefined || output === undefined) {
+        const io = (await getTraceIO(projectId, [traceId])).get(traceId);
+        input = input ?? io?.input ?? "";
+        output = output ?? io?.output ?? "";
+      }
+      return (
+        (await runEvaluator(projectId, str(args.name), {
+          traceId,
+          input,
+          output,
+          expectedOutput: args.expectedOutput,
+        })) ?? NOT_FOUND("evaluator", str(args.name))
+      );
+    },
+  },
+
   // ── Prompts ────────────────────────────────────────────────────────────────────
   {
     name: "list_prompts",
