@@ -80,6 +80,69 @@ describe("otlpToEvents (JSON)", () => {
     const gen = otlpToEvents(p).find((e) => e.type === "generation-create");
     expect((gen?.body as Record<string, unknown>).input).toBe("newer-input");
   });
+
+  it("maps an MCP tools/call span to a first-class span named after the tool", () => {
+    const mcpPayload = {
+      resourceSpans: [
+        {
+          resource: { attributes: [{ key: "service.name", value: { stringValue: "agent" } }] },
+          scopeSpans: [
+            {
+              spans: [
+                {
+                  traceId: "0af7651916cd43dd8448eb211c80319c",
+                  spanId: "b7ad6b7169203331",
+                  name: "tools/call", // generic instrumentation name
+                  startTimeUnixNano: "1700000000000000000",
+                  endTimeUnixNano: "1700000000500000000",
+                  status: { code: 2, message: "tool failed" },
+                  attributes: [
+                    { key: "mcp.method.name", value: { stringValue: "tools/call" } },
+                    { key: "mcp.tool.name", value: { stringValue: "search-kb" } },
+                    { key: "mcp.session.id", value: { stringValue: "mcp-sess-1" } },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const events = otlpToEvents(mcpPayload);
+    const trace = events.find((e) => e.type === "trace-create")?.body as Record<string, unknown>;
+    const span = events.find((e) => e.type === "span-create")?.body as Record<string, unknown>;
+
+    expect(events.find((e) => e.type === "generation-create")).toBeUndefined(); // not a generation
+    expect(trace.sessionId).toBe("mcp-sess-1"); // mcp.session.id → session
+    expect(span.name).toBe("mcp:search-kb"); // named after the tool, first-class + analytics-visible
+    expect(span.level).toBe("ERROR"); // status code 2
+    expect((span.metadata as Record<string, unknown>)["mcp.method.name"]).toBe("tools/call");
+  });
+
+  it("names non-tool MCP methods after the method", () => {
+    const p = {
+      resourceSpans: [
+        {
+          scopeSpans: [
+            {
+              spans: [
+                {
+                  traceId: "1af7651916cd43dd8448eb211c80319c",
+                  spanId: "c7ad6b7169203331",
+                  name: "list",
+                  startTimeUnixNano: "1700000000000000000",
+                  endTimeUnixNano: "1700000000100000000",
+                  attributes: [{ key: "mcp.method.name", value: { stringValue: "tools/list" } }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const span = otlpToEvents(p).find((e) => e.type === "span-create")?.body as Record<string, unknown>;
+    expect(span.name).toBe("mcp:tools/list");
+  });
 });
 
 // ── Minimal protobuf encoder (inverse of decodeOtlpTraces) for round-trip testing ─
