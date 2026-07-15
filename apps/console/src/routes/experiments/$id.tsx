@@ -43,11 +43,13 @@ function ExperimentDetailPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["experiment", id],
     queryFn: () => api.getExperiment(id),
-    // Poll while the run is in flight so progress + results stream in.
+    // Poll while the run is in flight so progress + results stream in — keep polling
+    // even when the tab is backgrounded (start a run, tab away, come back to see it done).
     refetchInterval: (q) => {
       const s = (q.state.data as ExperimentDetail | undefined)?.status;
       return s === "RUNNING" || s === "PENDING" ? 2000 : false;
     },
+    refetchIntervalInBackground: true,
   });
   const inFlight = data?.status === "RUNNING" || data?.status === "PENDING";
   const { data: comparison } = useQuery({
@@ -55,6 +57,7 @@ function ExperimentDetailPage() {
     queryFn: () => api.getExperimentComparison(id),
     enabled: !!data && (data.completedItems > 0 || data.failedItems > 0),
     refetchInterval: inFlight ? 3000 : false,
+    refetchIntervalInBackground: true,
   });
 
   const cancel = useMutation({
