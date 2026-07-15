@@ -18,6 +18,12 @@ Spans carrying GenAI semantic-convention attributes (`gen_ai.*`) become **genera
 zero-lock-in path for frameworks that emit OTel (LlamaIndex, Pydantic AI, Semantic
 Kernel, etc.). OTLP/protobuf support is planned.
 
+The first-party SDKs pre-wire the endpoint + auth so you don't hand-build the URL/header —
+JS `import { memoturnSpanProcessor, memoturnOtlpConfig } from "@memoturn/sdk/otel"` and
+Python `from memoturn.otel import span_processor, otlp_config`. Both resolve creds from
+`MEMOTURN_BASE_URL` / `MEMOTURN_PUBLIC_KEY` / `MEMOTURN_SECRET_KEY` (or explicit args); the
+OTel exporter packages are optional peer deps used only by the `span_processor` helpers.
+
 ## OpenAI
 
 - **TypeScript:** `wrapOpenAI(new OpenAI(), mt)` — see [TS SDK](./sdk-typescript.md).

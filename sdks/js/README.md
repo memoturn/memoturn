@@ -55,6 +55,32 @@ await chain.invoke(input, { callbacks: [handler] });
 await handler.flush();
 ```
 
+## OpenTelemetry
+
+Already standardized on OpenTelemetry? Keep your instrumentation and point it at memoturn's
+OTLP receiver — it maps GenAI semconv (`gen_ai.*`) spans into traces + generations. The helper
+pre-wires the endpoint URL + Basic-auth header from your API keys.
+
+```ts
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { memoturnSpanProcessor } from "@memoturn/sdk/otel";
+
+// Needs @opentelemetry/exporter-trace-otlp-http + @opentelemetry/sdk-trace-base installed.
+const sdk = new NodeSDK({ spanProcessors: [memoturnSpanProcessor()] });
+sdk.start();
+```
+
+Or dependency-free — hand the config to any OTLP exporter you already use:
+
+```ts
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { memoturnOtlpConfig } from "@memoturn/sdk/otel";
+
+new OTLPTraceExporter(memoturnOtlpConfig()); // { url, headers } from MEMOTURN_* env or args
+```
+
+Python: `from memoturn.otel import span_processor, otlp_config` — same shape.
+
 ## Prompts
 
 ```ts
