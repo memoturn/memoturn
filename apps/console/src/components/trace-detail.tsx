@@ -345,41 +345,75 @@ function MediaPreview({ raw }: { raw: string }) {
   );
 }
 
+/** Per-indent-column tree connector: continuing line, blank gap, branch (├), or last-child elbow (└). */
+type GuideKind = "line" | "blank" | "tee" | "elbow";
+
 interface Laid extends ObservationDetail {
   depth: number;
   offsetPct: number;
   widthPct: number;
   startOffsetMs: number;
+  guides: GuideKind[];
 }
 
-/** Compute waterfall layout: depth from parent chain, bar offset/width from times. */
+/**
+ * Compute waterfall layout: rows in tree pre-order (parent → its children), each with the
+ * connector guides for its indent columns, and bar offset/width from times. Cyclic/orphaned
+ * observations (parent not in the set) render as roots so nothing is dropped.
+ */
 function layout(observations: ObservationDetail[]): Laid[] {
   const byId = new Map(observations.map((o) => [o.id, o]));
-  const depthOf = (o: ObservationDetail): number => {
-    let d = 0;
-    let cur: ObservationDetail | undefined = o;
-    const seen = new Set<string>();
-    while (cur?.parent_observation_id && byId.has(cur.parent_observation_id) && !seen.has(cur.id)) {
-      seen.add(cur.id);
-      cur = byId.get(cur.parent_observation_id);
-      d++;
-    }
-    return d;
-  };
+  const startMs = (o: ObservationDetail) => ms(o.start_time) ?? 0;
 
-  const starts = observations.map((o) => ms(o.start_time) ?? 0);
-  // end_time can be coarser than latency_ms (second precision), so trust whichever runs longer
+  const starts = observations.map(startMs);
+  // end_time can be coarser than latency_ms (second precision), so trust whichever runs longer.
   const ends = observations.map((o, i) => Math.max(ms(o.end_time) ?? 0, starts[i]! + Number(o.latency_ms)));
   const traceStart = Math.min(...starts);
   const total = Math.max(1, Math.max(...ends) - traceStart);
+  const startOffOf = new Map(observations.map((o, i) => [o.id, starts[i]! - traceStart]));
 
-  return observations
-    .map((o, i) => {
-      const offsetPct = Math.min(((starts[i]! - traceStart) / total) * 100, 98.5);
-      const widthPct = Math.max(1.5, Math.min((Number(o.latency_ms) / total) * 100, 100 - offsetPct));
-      return { ...o, depth: depthOf(o), offsetPct, widthPct, startOffsetMs: starts[i]! - traceStart };
-    })
-    .sort((a, b) => (ms(a.start_time) ?? 0) - (ms(b.start_time) ?? 0));
+  // Build the child lists (only for parents present in the set); everything else is a root.
+  const children = new Map<string, ObservationDetail[]>();
+  const roots: ObservationDetail[] = [];
+  for (const o of observations) {
+    const parentId = o.parent_observation_id;
+    if (parentId && byId.has(parentId) && parentId !== o.id) {
+      const arr = children.get(parentId) ?? [];
+      arr.push(o);
+      children.set(parentId, arr);
+    } else {
+      roots.push(o);
+    }
+  }
+  const byStart = (a: ObservationDetail, b: ObservationDetail) => startMs(a) - startMs(b);
+  roots.sort(byStart);
+  for (const arr of children.values()) arr.sort(byStart);
+
+  const out: Laid[] = [];
+  const visited = new Set<string>();
+  const place = (node: ObservationDetail, depth: number, ancestorContinues: boolean[], isLast: boolean) => {
+    if (visited.has(node.id)) return; // cycle guard
+    visited.add(node.id);
+    const startOff = startOffOf.get(node.id) ?? 0;
+    const offsetPct = Math.min((startOff / total) * 100, 98.5);
+    const widthPct = Math.max(1.5, Math.min((Number(node.latency_ms) / total) * 100, 100 - offsetPct));
+    const guides: GuideKind[] = [];
+    for (let c = 0; c < depth; c++) {
+      if (c < depth - 1) guides.push(ancestorContinues[c] ? "line" : "blank");
+      else guides.push(isLast ? "elbow" : "tee");
+    }
+    out.push({ ...node, depth, offsetPct, widthPct, startOffsetMs: startOff, guides });
+    const kids = children.get(node.id) ?? [];
+    kids.forEach((kid, i) => {
+      place(kid, depth + 1, [...ancestorContinues, !isLast], i === kids.length - 1);
+    });
+  };
+  roots.forEach((r, i) => {
+    place(r, 0, [], i === roots.length - 1);
+  });
+  // Safety net: any node not reached (part of a cycle) still gets a row, as a root.
+  for (const o of observations) if (!visited.has(o.id)) place(o, 0, [], true);
+  return out;
 }
 
 /** Bar hues match the KindBadge tones (blue = generation, emerald = span, amber = event). */
@@ -395,6 +429,25 @@ function fmtDuration(msVal: number): string {
 }
 
 const WATERFALL_COLS = "grid-cols-[minmax(220px,300px)_1fr_5.5rem]";
+
+/** One indent-column connector for the trace tree: continuing line, gap, branch (├), or last elbow (└). */
+function TreeGuide({ kind, x }: { kind: GuideKind; x: number }) {
+  if (kind === "blank") return null;
+  if (kind === "line") {
+    return <span aria-hidden className="absolute inset-y-0 w-px bg-border/70" style={{ left: x }} />;
+  }
+  // tee (├) has siblings below → full-height vertical; elbow (└) is the last child → top-half only.
+  return (
+    <>
+      <span
+        aria-hidden
+        className="absolute top-0 w-px bg-border/70"
+        style={{ left: x, height: kind === "tee" ? "100%" : "50%" }}
+      />
+      <span aria-hidden className="absolute h-px w-2.5 bg-border/70" style={{ left: x, top: "50%" }} />
+    </>
+  );
+}
 
 function WaterfallRow({ obs, onSelect }: { obs: Laid; onSelect?: () => void }) {
   const label = `${obs.name || obs.id.slice(0, 8)}${obs.model ? ` · ${obs.model}` : ""}`;
@@ -425,14 +478,9 @@ function WaterfallRow({ obs, onSelect }: { obs: Laid; onSelect?: () => void }) {
         style={{ paddingLeft: `${12 + obs.depth * 16}px` }}
         title={obs.status_message ? `${label} — ${obs.status_message}` : label}
       >
-        {/* Tree guides — one faint vertical rule per ancestor depth. */}
-        {Array.from({ length: obs.depth }).map((_, i) => (
-          <span
-            key={i}
-            aria-hidden
-            className="absolute inset-y-0 w-px bg-border/70"
-            style={{ left: `${18 + i * 16}px` }}
-          />
+        {/* Tree connectors: continuing │ per ancestor, then a ├/└ elbow into this node. */}
+        {obs.guides.map((g, c) => (
+          <TreeGuide key={`${c}-${g}`} kind={g} x={18 + c * 16} />
         ))}
         <div className="flex min-w-0 items-center gap-1.5">
           <KindBadge tone={toneForKind(obs.type)}>{obs.type.toLowerCase()}</KindBadge>
