@@ -35,6 +35,7 @@ import type {
 } from "../types.js";
 import { closeDorisPool, dorisQuery } from "./client.js";
 import { buildInserts, parseTags, parseVector, toDorisDateTime } from "./serialize.js";
+import { streamLoad, streamLoadEnabled } from "./streamload.js";
 
 /**
  * Apache Doris implementation of the TelemetryStore. All tables are UNIQUE KEY
@@ -908,6 +909,12 @@ export class DorisTelemetryStore implements TelemetryStore {
 
   async insertRows<T extends TelemetryTable>(table: T, rows: TelemetryRowMap[T][]): Promise<void> {
     if (rows.length === 0) return;
+    // Opt-in high-throughput path: Stream Load (HTTP). Merge-on-write still dedupes by key,
+    // so a retry re-loading the same rows is idempotent just like the INSERT path.
+    if (streamLoadEnabled()) {
+      await streamLoad(table, rows);
+      return;
+    }
     for (const stmt of buildInserts(table, rows)) {
       await this.exec(stmt.sql, stmt.params);
     }
