@@ -116,6 +116,8 @@ export function AuthPanel({ mode, redirect }: { mode: Mode; redirect?: string })
 
   async function passwordSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!email) return fail("Enter your email address");
+    if (!password) return fail("Enter your password");
     setBusy("password");
     const res =
       mode === "signup"
@@ -132,8 +134,11 @@ export function AuthPanel({ mode, redirect }: { mode: Mode; redirect?: string })
   const passwordless = cfg?.magicLink || cfg?.emailOtp;
   // Sign-up via password is hidden when the server disabled new password signups (cloud).
   const passwordAvailable = cfg?.password.enabled && !(mode === "signup" && cfg.password.signupDisabled);
-  // Whether any non-password method is offered (drives the "or use a password" affordance).
-  const hasOtherMethods = Boolean(anySocial || showPasskey || passwordless);
+  // Any email-based method (passwordless or password) shares one email field below.
+  const emailBased = Boolean(passwordless || passwordAvailable);
+  // Password is primary only when there's no passwordless option; otherwise it's behind a
+  // toggle. Either way it submits with the shared `email` — so it can never post an empty one.
+  const showPasswordForm = passwordAvailable && (showPassword || !passwordless);
 
   return (
     <div className="space-y-4">
@@ -158,112 +163,107 @@ export function AuthPanel({ mode, redirect }: { mode: Mode; redirect?: string })
         </Button>
       )}
 
-      {(anySocial || showPasskey) && passwordless && <OrDivider />}
+      {(anySocial || showPasskey) && emailBased && <OrDivider />}
 
-      {passwordless && (
-        <div className="space-y-2">
-          <Label htmlFor="auth-email">Email</Label>
-          <Input
-            id="auth-email"
-            type="email"
-            autoComplete="email"
-            placeholder="you@company.com"
-            value={email}
-            onChange={(e) => {
-              setEmail(e.target.value);
-              setOtpSent(false);
-            }}
-          />
-          {otpSent ? (
-            <div className="space-y-2">
-              <Label htmlFor="auth-otp">Enter the 6-digit code</Label>
-              <Input
-                id="auth-otp"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                placeholder="123456"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-              />
-              <Button className="w-full" disabled={busy === "otp-verify" || otp.length < 6} onClick={verifyOtp}>
-                {busy === "otp-verify" ? "Verifying…" : "Verify code"}
-              </Button>
-              <button
-                type="button"
-                className="w-full text-xs text-muted-foreground hover:text-foreground"
-                onClick={() => setOtpSent(false)}
-              >
-                Use a different method
-              </button>
-            </div>
-          ) : (
-            <div className="grid gap-2">
-              {cfg?.magicLink && (
-                <Button className="w-full" disabled={!!busy} onClick={sendMagicLink}>
-                  {busy === "magic" ? "Sending…" : "Email me a sign-in link"}
-                </Button>
-              )}
-              {cfg?.emailOtp && (
-                <Button variant="outline" className="w-full" disabled={!!busy} onClick={sendOtp}>
-                  {busy === "otp" ? "Sending…" : "Email me a code instead"}
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {passwordAvailable && hasOtherMethods && !showPassword && (
-        <button
-          type="button"
-          className="w-full text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => setShowPassword(true)}
-        >
-          {mode === "signup" ? "Sign up with a password instead" : "Sign in with a password instead"}
-        </button>
-      )}
-
-      {passwordAvailable && (showPassword || !hasOtherMethods) && (
-        <form onSubmit={passwordSubmit} className="space-y-3">
-          {hasOtherMethods && <OrDivider />}
-          {mode === "signup" && (
-            <div className="space-y-1.5">
-              <Label htmlFor="auth-name">Name</Label>
-              <Input id="auth-name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
-            </div>
-          )}
-          {!passwordless && (
-            <div className="space-y-1.5">
-              <Label htmlFor="auth-email-pw">Email</Label>
-              <Input
-                id="auth-email-pw"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-          )}
+      {emailBased && (
+        <div className="space-y-3">
+          {/* One shared email field — used by every email-based method (magic link, OTP, password). */}
           <div className="space-y-1.5">
-            <Label htmlFor="auth-password">Password</Label>
+            <Label htmlFor="auth-email">Email</Label>
             <Input
-              id="auth-password"
-              type="password"
-              autoComplete={mode === "signup" ? "new-password" : "current-password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              id="auth-email"
+              type="email"
+              autoComplete="email"
+              placeholder="you@company.com"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setOtpSent(false);
+              }}
             />
           </div>
-          <Button type="submit" className="w-full" disabled={busy === "password"}>
-            {busy === "password"
-              ? mode === "signup"
-                ? "Creating account…"
-                : "Signing in…"
-              : mode === "signup"
-                ? "Create account"
-                : "Sign in"}
-          </Button>
-        </form>
+
+          {/* Passwordless (magic link / email OTP) — hidden once the user opts into a password. */}
+          {passwordless &&
+            !showPassword &&
+            (otpSent ? (
+              <div className="space-y-2">
+                <Label htmlFor="auth-otp">Enter the 6-digit code</Label>
+                <Input
+                  id="auth-otp"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="123456"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                />
+                <Button className="w-full" disabled={busy === "otp-verify" || otp.length < 6} onClick={verifyOtp}>
+                  {busy === "otp-verify" ? "Verifying…" : "Verify code"}
+                </Button>
+                <button
+                  type="button"
+                  className="w-full text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => setOtpSent(false)}
+                >
+                  Use a different method
+                </button>
+              </div>
+            ) : (
+              <div className="grid gap-2">
+                {cfg?.magicLink && (
+                  <Button className="w-full" disabled={!!busy} onClick={sendMagicLink}>
+                    {busy === "magic" ? "Sending…" : "Email me a sign-in link"}
+                  </Button>
+                )}
+                {cfg?.emailOtp && (
+                  <Button variant="outline" className="w-full" disabled={!!busy} onClick={sendOtp}>
+                    {busy === "otp" ? "Sending…" : "Email me a code instead"}
+                  </Button>
+                )}
+              </div>
+            ))}
+
+          {/* Reveal the password form (only when passwordless is the primary method). */}
+          {passwordAvailable && passwordless && !showPassword && (
+            <button
+              type="button"
+              className="w-full text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setShowPassword(true)}
+            >
+              {mode === "signup" ? "Sign up with a password instead" : "Sign in with a password instead"}
+            </button>
+          )}
+
+          {showPasswordForm && (
+            <form onSubmit={passwordSubmit} className="space-y-3">
+              {mode === "signup" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="auth-name">Name</Label>
+                  <Input id="auth-name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="auth-password">Password</Label>
+                <Input
+                  id="auth-password"
+                  type="password"
+                  autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+              <Button type="submit" className="w-full" disabled={busy === "password"}>
+                {busy === "password"
+                  ? mode === "signup"
+                    ? "Creating account…"
+                    : "Signing in…"
+                  : mode === "signup"
+                    ? "Create account"
+                    : "Sign in"}
+              </Button>
+            </form>
+          )}
+        </div>
       )}
     </div>
   );
