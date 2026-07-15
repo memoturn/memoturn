@@ -1,6 +1,7 @@
 import { prisma } from "@memoturn/db";
 import { redisConnection } from "@memoturn/db/queue";
 import { mapConcurrent } from "./concurrency.js";
+import { sendEmail } from "./mailer.js";
 import { isPublicUrl } from "./net.js";
 
 /**
@@ -152,34 +153,89 @@ export function automationMatches(
 /** Outbound deliveries in flight at once per dispatch call. */
 const DISPATCH_CONCURRENCY = 8;
 
-/** A notification channel — shared by automations and the alert engine. */
-export type ChannelType = "slack" | "webhook";
+/**
+ * A notification channel — shared by automations and the alert engine. For `slack`/`webhook`
+ * the `target` is a URL; for `pagerduty` it's an Events-API routing key; for `email` it's an
+ * address. (Automations only ever use slack/webhook; alerts use all four.)
+ */
+export type ChannelType = "slack" | "webhook" | "pagerduty" | "email";
 export interface Channel {
   type: ChannelType;
   target: string;
 }
 
 /**
- * Deliver a message to one channel. Never throws. Slack channels POST `{ text }`; webhook
- * channels POST the given JSON body. Re-checks SSRF safety at dispatch time (DNS rebinding)
- * and bounds the request to 5s. Shared by automations and alerts so the delivery hardening
- * lives in one place.
+ * A message to deliver to a channel. `slackText`/`webhookBody` cover slack/webhook; the
+ * remaining fields let pagerduty + email render richer content (all optional so automations
+ * can keep passing just slackText/webhookBody — summary/body fall back to slackText).
  */
-export async function deliverToChannel(
-  channel: Channel,
-  message: { slackText: string; webhookBody: unknown },
-): Promise<boolean> {
-  if (!(await isPublicUrl(channel.target))) return false; // SSRF re-check at dispatch (DNS rebinding)
-  const body =
-    channel.type === "slack" ? JSON.stringify({ text: message.slackText }) : JSON.stringify(message.webhookBody);
+export interface ChannelMessage {
+  slackText: string;
+  webhookBody: unknown;
+  /** One-line summary — PagerDuty summary / email subject. Defaults to slackText. */
+  summary?: string;
+  /** Longer body — email text. Defaults to slackText. */
+  body?: string;
+  severity?: "critical" | "warning" | "info";
+  /** Stable key so PagerDuty groups + auto-resolves an alert's trigger/resolve pair. */
+  dedupKey?: string;
+  /** true → PagerDuty `resolve` (close the incident) instead of `trigger`. */
+  resolved?: boolean;
+}
+
+const PAGERDUTY_EVENTS_URL = "https://events.pagerduty.com/v2/enqueue";
+
+/**
+ * Deliver a message to one channel. Never throws; returns whether it was delivered.
+ * slack → POST `{ text }`; webhook → POST the JSON body; pagerduty → Events API v2
+ * trigger/resolve keyed by dedupKey; email → the configured mail transport. URL targets
+ * (slack/webhook) get an SSRF re-check at dispatch time (DNS rebinding); pagerduty/email
+ * targets are keys/addresses sent to fixed vendor endpoints, so no SSRF check applies.
+ * Shared by automations and alerts so the delivery hardening lives in one place.
+ */
+export async function deliverToChannel(channel: Channel, message: ChannelMessage): Promise<boolean> {
   try {
-    await fetch(channel.target, {
-      method: "POST",
-      headers: { "content-type": "application/json", "user-agent": "memoturn-automations/1" },
-      body,
-      signal: AbortSignal.timeout(5_000),
-    });
-    return true;
+    switch (channel.type) {
+      case "slack":
+      case "webhook": {
+        if (!(await isPublicUrl(channel.target))) return false; // SSRF re-check (DNS rebinding)
+        const body =
+          channel.type === "slack" ? JSON.stringify({ text: message.slackText }) : JSON.stringify(message.webhookBody);
+        await fetch(channel.target, {
+          method: "POST",
+          headers: { "content-type": "application/json", "user-agent": "memoturn-automations/1" },
+          body,
+          signal: AbortSignal.timeout(5_000),
+        });
+        return true;
+      }
+      case "pagerduty": {
+        const summary = message.summary ?? message.slackText;
+        const payload = message.resolved
+          ? { routing_key: channel.target, event_action: "resolve", dedup_key: message.dedupKey }
+          : {
+              routing_key: channel.target,
+              event_action: "trigger",
+              dedup_key: message.dedupKey,
+              payload: { summary: summary.slice(0, 1024), source: "memoturn", severity: message.severity ?? "warning" },
+            };
+        await fetch(PAGERDUTY_EVENTS_URL, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(5_000),
+        });
+        return true;
+      }
+      case "email":
+        return await sendEmail({
+          to: channel.target,
+          subject: message.summary ?? message.slackText,
+          text: message.body ?? message.slackText,
+        });
+      default:
+        return false;
+    }
   } catch {
     return false; // best-effort; a failing target never breaks ingestion
   }

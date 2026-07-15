@@ -21,9 +21,11 @@
     "@memoturn/telemetry": "workspace:*",
     "@better-auth/sso": "1.6.20",
     "better-auth": "^1.6.20",
+    "nodemailer": "^9.0.1",
     "@memoturn/contracts": "workspace:*"
   },
   "devDependencies": {
+    "@types/nodemailer": "^7.0.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   }

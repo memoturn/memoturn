@@ -176,9 +176,10 @@ export const automation = z.object({
 });
 export type Automation = z.infer<typeof automation>;
 
-/** A notification channel (shared by alerts + budgets). */
+/** A notification channel (shared by alerts + budgets). target: URL (slack/webhook),
+ *  routing key (pagerduty), or email address (email). */
 export const alertChannel = z.object({
-  type: z.enum(["slack", "webhook"]),
+  type: z.enum(["slack", "webhook", "pagerduty", "email"]),
   target: z.string(),
 });
 export type AlertChannel = z.infer<typeof alertChannel>;

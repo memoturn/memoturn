@@ -2811,7 +2811,12 @@ app.openapi(
 );
 
 // ── Alert rules ────────────────────────────────────────────────────────────────────
-const alertChannelBody = z.object({ type: z.enum(["slack", "webhook"]), target: z.string().url() });
+// target is a URL (slack/webhook), a routing key (pagerduty), or an email address (email);
+// validated per-type in validateChannels below, so it's a plain string on the wire.
+const alertChannelBody = z.object({
+  type: z.enum(["slack", "webhook", "pagerduty", "email"]),
+  target: z.string().min(1),
+});
 const alertRuleBody = z.object({
   name: z.string().min(1),
   metric: z.enum(ALERT_METRICS),
@@ -2822,9 +2827,17 @@ const alertRuleBody = z.object({
   enabled: z.boolean().optional(),
 });
 
-/** Re-check every channel target is a public URL (SSRF guard mirrors automations). */
-async function assertChannelsPublic(channels?: { target: string }[]) {
-  for (const ch of channels ?? []) await assertPublicUrl(ch.target);
+/**
+ * Validate each channel target for its type — throws (→ 400) on anything invalid.
+ * slack/webhook targets get the SSRF public-URL check (mirrors automations); email must
+ * look like an address; pagerduty just needs a non-empty routing key.
+ */
+async function validateChannels(channels?: { type: string; target: string }[]) {
+  for (const ch of channels ?? []) {
+    if (ch.type === "slack" || ch.type === "webhook") await assertPublicUrl(ch.target);
+    else if (ch.type === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ch.target)) throw new Error("invalid email");
+    else if (ch.type === "pagerduty" && ch.target.trim() === "") throw new Error("empty routing key");
+  }
 }
 
 app.openapi(
@@ -2860,9 +2873,14 @@ app.openapi(
     if (denied) return denied;
     const body = c.req.valid("json");
     try {
-      await assertChannelsPublic(body.channels);
+      await validateChannels(body.channels);
     } catch {
-      return c.json({ error: "channel targets must be public https endpoints" }, 400);
+      return c.json(
+        {
+          error: "invalid channel target (slack/webhook need a public URL; email an address; pagerduty a routing key)",
+        },
+        400,
+      );
     }
     const result = await createAlertRule(c.get("projectId"), body);
     await recordAudit(c.get("projectId"), c.get("actor"), "alert.create", `${result.metric}:${result.name}`);
@@ -2893,9 +2911,14 @@ app.openapi(
     if (denied) return denied;
     const body = c.req.valid("json");
     try {
-      await assertChannelsPublic(body.channels);
+      await validateChannels(body.channels);
     } catch {
-      return c.json({ error: "channel targets must be public https endpoints" }, 400);
+      return c.json(
+        {
+          error: "invalid channel target (slack/webhook need a public URL; email an address; pagerduty a routing key)",
+        },
+        400,
+      );
     }
     const result = await updateAlertRule(c.get("projectId"), c.req.valid("param").id, body);
     if (!result) return c.json({ error: "not found" }, 404);
@@ -2973,9 +2996,14 @@ app.openapi(
     if (denied) return denied;
     const body = c.req.valid("json");
     try {
-      await assertChannelsPublic(body.channels);
+      await validateChannels(body.channels);
     } catch {
-      return c.json({ error: "channel targets must be public https endpoints" }, 400);
+      return c.json(
+        {
+          error: "invalid channel target (slack/webhook need a public URL; email an address; pagerduty a routing key)",
+        },
+        400,
+      );
     }
     const result = await setCostBudget(c.get("projectId"), body);
     await recordAudit(c.get("projectId"), c.get("actor"), "budget.set", `$${body.monthlyUsd}/mo`);
