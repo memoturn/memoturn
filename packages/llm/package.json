@@ -15,7 +15,10 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
+    "@ai-sdk/amazon-bedrock": "^4.0.0",
     "@ai-sdk/anthropic": "^4.0.0",
+    "@ai-sdk/azure": "^4.0.0",
+    "@ai-sdk/google": "^4.0.0",
     "@ai-sdk/openai": "^4.0.0",
     "ai": "^7.0.2"
   },

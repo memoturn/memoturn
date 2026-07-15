@@ -208,6 +208,21 @@ export interface EvalScoreTrendRow {
   avgValue: number;
 }
 
+/**
+ * Aggregate GENERATION metrics over a short trailing time window (minutes), used by
+ * the alert engine — the fine-grained sibling of the day-bucketed DailyMetric.
+ * `errors` is a raw count; error_rate is derived (errors / generations) by the caller.
+ */
+export interface WindowMetric {
+  generations: number;
+  errors: number;
+  total_tokens: number;
+  total_cost: number;
+  p50_latency_ms: number;
+  p95_latency_ms: number;
+  trace_count: number;
+}
+
 export interface ExportObservationRow {
   id: string;
   type: string;

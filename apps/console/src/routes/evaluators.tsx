@@ -25,7 +25,7 @@ export const Route = createFileRoute("/evaluators")({ component: EvaluatorsPage 
 
 const evaluatorSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  provider: z.enum(["mock", "anthropic", "openai"]),
+  provider: z.enum(["mock", "anthropic", "openai", "gemini", "bedrock", "azure", "openai_compatible"]),
   model: z.string().min(1, "Model is required"),
   prompt: z.string().min(1, "Prompt is required"),
   online: z.boolean(),
@@ -35,6 +35,11 @@ type EvaluatorForm = z.infer<typeof evaluatorSchema>;
 
 const columns: ColumnDef<Evaluator>[] = [
   { accessorKey: "name", header: "Name", cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
+  {
+    accessorKey: "version",
+    header: "Version",
+    cell: ({ row }) => <KindBadge tone="neutral">v{row.original.version}</KindBadge>,
+  },
   {
     accessorKey: "provider",
     header: "Provider",
@@ -58,6 +63,10 @@ function EvaluatorsPage() {
   const qc = useQueryClient();
   const readOnly = useIsReadOnly();
   const { data: evaluators } = useQuery({ queryKey: ["evaluators"], queryFn: () => api.listEvaluators() });
+  const { data: templates } = useQuery({
+    queryKey: ["evaluator-templates"],
+    queryFn: () => api.listEvaluatorTemplates(),
+  });
   const { data: analytics } = useQuery({
     queryKey: ["evaluator-analytics"],
     queryFn: () => api.getEvaluatorAnalytics(30),
@@ -99,6 +108,38 @@ function EvaluatorsPage() {
           <CardDescription>Define an LLM-as-judge that scores trace input/output.</CardDescription>
         </CardHeader>
         <CardContent>
+          {templates && templates.length > 0 && (
+            <div className="mb-6 flex flex-wrap items-end gap-3 rounded-lg border border-dashed p-4">
+              <div className="space-y-1">
+                <div className="text-sm font-medium">Start from a template</div>
+                <div className="text-xs text-muted-foreground">
+                  Pre-fill the form with a curated judge (faithfulness, hallucination, toxicity, …), then tweak and
+                  save.
+                </div>
+              </div>
+              <Select
+                onValueChange={(key) => {
+                  const t = templates.find((x) => x.key === key);
+                  if (!t) return;
+                  form.setValue("name", t.name.toLowerCase().replace(/\s+/g, "-"));
+                  form.setValue("prompt", t.prompt);
+                  if (t.defaultModel) form.setValue("model", t.defaultModel);
+                  toast.success(`Loaded “${t.name}” — review and save`);
+                }}
+              >
+                <SelectTrigger className="w-64">
+                  <SelectValue placeholder="Choose a template…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {templates.map((t) => (
+                    <SelectItem key={t.key} value={t.key}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <Form {...form}>
             <form onSubmit={form.handleSubmit((v) => create.mutate(v))} className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
@@ -131,6 +172,10 @@ function EvaluatorsPage() {
                           <SelectItem value="mock">mock</SelectItem>
                           <SelectItem value="anthropic">anthropic</SelectItem>
                           <SelectItem value="openai">openai</SelectItem>
+                          <SelectItem value="gemini">gemini</SelectItem>
+                          <SelectItem value="bedrock">bedrock</SelectItem>
+                          <SelectItem value="azure">azure</SelectItem>
+                          <SelectItem value="openai_compatible">openai_compatible</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />

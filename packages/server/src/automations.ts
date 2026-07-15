@@ -152,20 +152,28 @@ export function automationMatches(
 /** Outbound deliveries in flight at once per dispatch call. */
 const DISPATCH_CONCURRENCY = 8;
 
-/** Deliver one payload to one automation target. Never throws. */
-async function deliverAutomation(
-  a: DispatchableAutomation,
-  projectId: string,
-  event: string,
-  payload: AutomationEvent,
+/** A notification channel — shared by automations and the alert engine. */
+export type ChannelType = "slack" | "webhook";
+export interface Channel {
+  type: ChannelType;
+  target: string;
+}
+
+/**
+ * Deliver a message to one channel. Never throws. Slack channels POST `{ text }`; webhook
+ * channels POST the given JSON body. Re-checks SSRF safety at dispatch time (DNS rebinding)
+ * and bounds the request to 5s. Shared by automations and alerts so the delivery hardening
+ * lives in one place.
+ */
+export async function deliverToChannel(
+  channel: Channel,
+  message: { slackText: string; webhookBody: unknown },
 ): Promise<boolean> {
-  if (!(await isPublicUrl(a.target))) return false; // SSRF re-check at dispatch (DNS rebinding)
+  if (!(await isPublicUrl(channel.target))) return false; // SSRF re-check at dispatch (DNS rebinding)
   const body =
-    a.action === "slack"
-      ? JSON.stringify({ text: slackText(event, projectId, payload) })
-      : JSON.stringify({ event, projectId, ...payload });
+    channel.type === "slack" ? JSON.stringify({ text: message.slackText }) : JSON.stringify(message.webhookBody);
   try {
-    await fetch(a.target, {
+    await fetch(channel.target, {
       method: "POST",
       headers: { "content-type": "application/json", "user-agent": "memoturn-automations/1" },
       body,
@@ -175,6 +183,19 @@ async function deliverAutomation(
   } catch {
     return false; // best-effort; a failing target never breaks ingestion
   }
+}
+
+/** Deliver one payload to one automation target. Never throws. */
+async function deliverAutomation(
+  a: DispatchableAutomation,
+  projectId: string,
+  event: string,
+  payload: AutomationEvent,
+): Promise<boolean> {
+  return deliverToChannel(
+    { type: a.action as ChannelType, target: a.target },
+    { slackText: slackText(event, projectId, payload), webhookBody: { event, projectId, ...payload } },
+  );
 }
 
 /**

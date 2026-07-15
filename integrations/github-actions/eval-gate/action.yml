@@ -1,0 +1,98 @@
+name: "memoturn eval gate"
+description: "Fail a CI job when a memoturn dataset run's evaluator scores regress past thresholds."
+author: "memoturn"
+branding:
+  icon: "check-circle"
+  color: "green"
+
+inputs:
+  base-url:
+    description: "memoturn API base URL (e.g. https://api.memoturn.example)."
+    required: false
+    default: "http://localhost:3001"
+  public-key:
+    description: "memoturn API public key (pk-…). Prefer a repo secret."
+    required: true
+  secret-key:
+    description: "memoturn API secret key (sk-…). Prefer a repo secret."
+    required: true
+  dataset:
+    description: "Dataset name."
+    required: true
+  run:
+    description: "Run name to gate (the experiment run recorded by your job)."
+    required: true
+  thresholds:
+    description: >
+      JSON object of score-name → bound, e.g.
+      {"faithfulness":{"min":0.8},"toxicity":{"max":0.1}}.
+      Each bound may set min, max, and/or maxRegression (maxRegression needs baseline-run).
+    required: true
+  baseline-run:
+    description: "Optional baseline run name to gate on regression (maxRegression bounds)."
+    required: false
+    default: ""
+
+outputs:
+  passed:
+    description: "true if the run met all thresholds."
+    value: ${{ steps.gate.outputs.passed }}
+
+runs:
+  using: "composite"
+  steps:
+    - id: gate
+      shell: bash
+      env:
+        MEMOTURN_BASE_URL: ${{ inputs.base-url }}
+        MEMOTURN_PUBLIC_KEY: ${{ inputs.public-key }}
+        MEMOTURN_SECRET_KEY: ${{ inputs.secret-key }}
+        DATASET: ${{ inputs.dataset }}
+        RUN: ${{ inputs.run }}
+        THRESHOLDS: ${{ inputs.thresholds }}
+        BASELINE_RUN: ${{ inputs.baseline-run }}
+      run: |
+        set -euo pipefail
+
+        body=$(jq -cn --argjson t "$THRESHOLDS" --arg b "$BASELINE_RUN" \
+          'if $b == "" then {thresholds:$t} else {thresholds:$t, baselineRun:$b} end')
+
+        # URL-encode path segments (dataset / run names may contain spaces).
+        enc() { jq -rn --arg s "$1" '$s|@uri'; }
+        url="${MEMOTURN_BASE_URL%/}/v1/datasets/$(enc "$DATASET")/runs/$(enc "$RUN")/gate"
+
+        resp=$(curl -sS -u "${MEMOTURN_PUBLIC_KEY}:${MEMOTURN_SECRET_KEY}" \
+          -H 'content-type: application/json' -X POST "$url" -d "$body")
+
+        # A non-JSON body (e.g. 404 text) means the gate couldn't run — fail loudly.
+        if ! echo "$resp" | jq -e . >/dev/null 2>&1; then
+          echo "::error::gate request failed: $resp"
+          exit 1
+        fi
+
+        passed=$(echo "$resp" | jq -r '.passed')
+        echo "passed=$passed" >> "$GITHUB_OUTPUT"
+
+        {
+          echo "### memoturn eval gate — \`$DATASET\` / \`$RUN\`"
+          echo ""
+          if [ "$passed" = "true" ]; then echo "✅ **passed**"; else echo "❌ **failed**"; fi
+          echo ""
+          echo "| Score | Mean | Count |"
+          echo "| --- | --- | --- |"
+          echo "$resp" | jq -r '.scores[] | "| \(.name) | \(.mean) | \(.count) |"'
+          fails=$(echo "$resp" | jq -r '.failures | length')
+          if [ "$fails" != "0" ]; then
+            echo ""
+            echo "**Failures**"
+            echo ""
+            echo "| Score | Reason | Value | Bound |"
+            echo "| --- | --- | --- | --- |"
+            echo "$resp" | jq -r '.failures[] | "| \(.scoreName) | \(.reason) | \(.value) | \(.bound) |"'
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [ "$passed" != "true" ]; then
+          echo "::error::memoturn eval gate failed for run '$RUN'"
+          exit 1
+        fi

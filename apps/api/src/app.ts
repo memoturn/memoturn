@@ -2,6 +2,8 @@ import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import * as C from "@memoturn/contracts";
 import { type IngestEvent, type IngestResult, ingestEvent, ingestRequest, ingestResponse } from "@memoturn/core";
 import {
+  ALERT_COMPARATORS,
+  ALERT_METRICS,
   addDatasetItems,
   addReviewItems,
   annotateTrace,
@@ -16,6 +18,7 @@ import {
   countSessions,
   countTraces,
   countUsers,
+  createAlertRule,
   createApiKey,
   createAutomation,
   createComment,
@@ -32,23 +35,28 @@ import {
   createWebhook,
   createWidget,
   decodeOtlpTraces,
+  deleteAlertRule,
   deleteAutomation,
   deleteComment,
+  deleteCostBudget,
   deleteModelPrice,
   deleteSavedView,
   deleteScore,
   deleteScoreConfig,
   deleteWebhook,
   deleteWidget,
+  evaluateGate,
   exportTracesCsv,
   exportTracesJsonl,
   getAnalyticsSink,
+  getCostBudget,
   getDatasetComparison,
   getDatasetDetail,
   getDatasetVersion,
   getEmbeddingProjection,
   getEvaluatorAnalytics,
   getExperiment,
+  getIngestHealth,
   getMaskingPolicy,
   getMedia,
   getMetrics,
@@ -61,6 +69,7 @@ import {
   getTrace,
   ingestRateLimitConfig,
   instantiateEvaluatorTemplate,
+  listAlertRules,
   listApiKeys,
   listAuditLogs,
   listAutomations,
@@ -69,6 +78,7 @@ import {
   listDatasetVersions,
   listEvaluators,
   listEvaluatorTemplates,
+  listEvaluatorVersions,
   listExperiments,
   listModelPrices,
   listPrompts,
@@ -88,6 +98,7 @@ import {
   otlpToEvents,
   recordAudit,
   recordRun,
+  replayDlq,
   replayTrace,
   resolvePrompt,
   revokeApiKey,
@@ -98,6 +109,7 @@ import {
   runScheduledExport,
   safeServeContentType,
   setAnalyticsSink,
+  setCostBudget,
   setMaskingPolicy,
   setRetention,
   setScheduledExport,
@@ -109,6 +121,7 @@ import {
   submitReviewScore,
   traceFacets,
   traceHistogram,
+  updateAlertRule,
 } from "@memoturn/server";
 import { Scalar } from "@scalar/hono-api-reference";
 import { bodyLimit } from "hono/body-limit";
@@ -117,7 +130,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
 import { handleMcp } from "./mcp.js";
 import { logJson, recordRequest, requestStarted, snapshot } from "./metrics.js";
-import { type AuthVars, denyIfReadOnly, requireAuth } from "./middleware/auth.js";
+import { type AuthVars, denyIfNotAdmin, denyIfReadOnly, requireAuth } from "./middleware/auth.js";
 import { rateLimit } from "./middleware/ratelimit.js";
 
 /**
@@ -210,6 +223,8 @@ app.openAPIRegistry.registerComponent("securitySchemes", "apiKey", {
   description: "Basic auth: publicKey as username, secretKey as password.",
 });
 app.use("/v1/ingest", requireAuth);
+app.use("/v1/ingest/health", requireAuth);
+app.use("/v1/ingest/dlq/*", requireAuth);
 app.use("/v1/otel/*", requireAuth);
 app.use("/v1/traces", requireAuth);
 app.use("/v1/traces/*", requireAuth);
@@ -250,6 +265,10 @@ app.use("/v1/scheduled-exports", requireAuth);
 app.use("/v1/scheduled-exports/*", requireAuth);
 app.use("/v1/automations", requireAuth);
 app.use("/v1/automations/*", requireAuth);
+app.use("/v1/alerts", requireAuth);
+app.use("/v1/alerts/*", requireAuth);
+app.use("/v1/budgets", requireAuth);
+app.use("/v1/budgets/*", requireAuth);
 app.use("/v1/media", requireAuth);
 app.use("/v1/media/*", requireAuth);
 app.use("/v1/payloads/*", requireAuth);
@@ -264,6 +283,12 @@ app.use("/v1/scores/*", requireAuth);
 app.use("/v1/*", rateLimit);
 
 const security = [{ apiKey: [] }];
+
+// Provider ids accepted on the wire. Connection routes exclude "mock" (no key to store);
+// playground/evaluator routes include it (deterministic, key-free). Keep in sync with the
+// Provider union in packages/llm.
+const PROVIDER_IDS = ["anthropic", "openai", "gemini", "bedrock", "azure", "openai_compatible"] as const;
+const RUN_PROVIDER_IDS = ["mock", ...PROVIDER_IDS] as const;
 
 // Streaming playground (SSE) — plain route; emits { delta } events then [DONE].
 app.post("/v1/playground/stream", async (c) => {
@@ -463,6 +488,58 @@ app.openapi(
     }
     const successes: IngestResult[] = valid.map((e) => ({ id: e.id, status: 201 }));
     return c.json({ successes, errors }, 207);
+  },
+);
+
+// ── Ingest health + DLQ replay (ops console; OWNER/ADMIN only) ────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/ingest/health",
+    summary: "Ingest-pipeline health: DLQ depth, insert latency, error counters, recent failed batches",
+    tags: ["ingestion"],
+    security,
+    responses: {
+      200: { description: "Health", content: { "application/json": { schema: C.ingestHealth } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfNotAdmin(c);
+    if (denied) return denied;
+    return c.json(await getIngestHealth());
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/ingest/dlq/replay",
+    summary: "Re-enqueue dead-lettered ingest batches from blob onto the ingest queue",
+    tags: ["ingestion"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": { schema: z.object({ limit: z.number().int().positive().optional() }) },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Replayed",
+        content: { "application/json": { schema: z.object({ replayed: z.number(), failed: z.number() }) } },
+      },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c) ?? denyIfNotAdmin(c);
+    if (denied) return denied;
+    const { limit } = c.req.valid("json");
+    const result = await replayDlq(limit ?? Number.POSITIVE_INFINITY);
+    await recordAudit(c.get("projectId"), c.get("actor"), "ingest.dlq.replay", `replayed:${result.replayed}`);
+    return c.json(result);
   },
 );
 
@@ -1082,6 +1159,50 @@ app.openapi(
   },
 );
 
+// ── Datasets: CI quality gate ────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    // rbac-exempt: read-only gate computation (aggregates scores, writes nothing)
+    method: "post",
+    path: "/v1/datasets/{name}/runs/{runId}/gate",
+    summary: "Evaluate a run's scores against thresholds for CI gating (returns { passed, failures })",
+    tags: ["datasets"],
+    security,
+    request: {
+      params: z.object({ name: z.string(), runId: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              // { scoreName: { min?, max?, maxRegression? } } — maxRegression needs baselineRun.
+              thresholds: z.record(
+                z.string(),
+                z.object({
+                  min: z.number().optional(),
+                  max: z.number().optional(),
+                  maxRegression: z.number().optional(),
+                }),
+              ),
+              baselineRun: z.string().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Gate result", content: { "application/json": { schema: C.gateResult } } },
+      404: { description: "Dataset or run not found" },
+    },
+  }),
+  async (c) => {
+    const { name, runId } = c.req.valid("param");
+    const { thresholds, baselineRun } = c.req.valid("json");
+    const result = await evaluateGate(c.get("projectId"), name, runId, thresholds, { baselineRun });
+    if (!result) return c.json({ error: "dataset or run not found" }, 404);
+    return c.json(result);
+  },
+);
+
 // ── Datasets: versions (immutable snapshots) ─────────────────────────────────────
 app.openapi(
   createRoute({
@@ -1271,28 +1392,40 @@ app.openapi(
   createRoute({
     method: "post",
     path: "/v1/providers",
-    summary: "Add/update an LLM provider API key (encrypted at rest)",
+    summary: "Add/update an LLM provider connection (credentials encrypted at rest)",
     tags: ["providers"],
     security,
     request: {
       body: {
         content: {
           "application/json": {
-            schema: z.object({ provider: z.enum(["anthropic", "openai"]), apiKey: z.string().min(1) }),
+            schema: z.object({
+              provider: z.enum(PROVIDER_IDS),
+              // openai_compatible may auth via baseUrl alone; others require a key.
+              apiKey: z.string().optional(),
+              baseUrl: z.string().url().optional(), // openai_compatible / azure endpoint
+              region: z.string().optional(), // bedrock
+            }),
           },
         },
       },
     },
     responses: {
       201: { description: "Saved", content: { "application/json": { schema: z.any() } } },
+      400: { description: "Missing required credential" },
       403: { description: "Forbidden" },
     },
   }),
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
-    const { provider, apiKey } = c.req.valid("json");
-    const result = await createProviderConnection(c.get("projectId"), provider, apiKey);
+    const { provider, apiKey, baseUrl, region } = c.req.valid("json");
+    if (provider === "openai_compatible") {
+      if (!baseUrl) return c.json({ error: "openai_compatible requires a baseUrl" }, 400);
+    } else if (!apiKey) {
+      return c.json({ error: `${provider} requires an apiKey` }, 400);
+    }
+    const result = await createProviderConnection(c.get("projectId"), provider, { apiKey, baseUrl, region });
     await recordAudit(c.get("projectId"), c.get("actor"), "provider.connect", `provider:${provider}`);
     return c.json(result, 201);
   },
@@ -1311,7 +1444,7 @@ app.openapi(
         content: {
           "application/json": {
             schema: z.object({
-              provider: z.enum(["mock", "anthropic", "openai"]),
+              provider: z.enum(RUN_PROVIDER_IDS),
               model: z.string(),
               messages: z.array(z.object({ role: z.enum(["system", "user", "assistant"]), content: z.string() })),
               temperature: z.number().optional(),
@@ -1415,7 +1548,7 @@ app.openapi(
             schema: z.object({
               key: z.string(),
               name: z.string().optional(),
-              provider: z.enum(["mock", "anthropic", "openai"]).optional(),
+              provider: z.enum(RUN_PROVIDER_IDS).optional(),
               model: z.string().optional(),
               online: z.boolean().optional(),
               samplingRate: z.number().min(0).max(1).optional(),
@@ -1458,7 +1591,7 @@ app.openapi(
             schema: z.object({
               name: z.string().min(1),
               prompt: z.string().min(1),
-              provider: z.enum(["mock", "anthropic", "openai"]).optional(),
+              provider: z.enum(RUN_PROVIDER_IDS).optional(),
               model: z.string(),
               online: z.boolean().optional(),
               samplingRate: z.number().min(0).max(1).optional(),
@@ -1480,6 +1613,26 @@ app.openapi(
     const result = await createEvaluator(c.get("projectId"), body);
     await recordAudit(c.get("projectId"), c.get("actor"), "evaluator.create", `evaluator:${body.name}`);
     return c.json(result, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/evaluators/{name}/versions",
+    summary: "List an evaluator's immutable version history (judge config snapshots)",
+    tags: ["evaluators"],
+    security,
+    request: { params: z.object({ name: z.string() }) },
+    responses: {
+      200: { description: "Versions", content: { "application/json": { schema: C.listOf(C.evaluatorVersion) } } },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const versions = await listEvaluatorVersions(c.get("projectId"), c.req.valid("param").name);
+    if (versions === null) return c.json({ error: "not found" }, 404);
+    return c.json({ data: versions });
   },
 );
 
@@ -2653,6 +2806,200 @@ app.openapi(
     const id = c.req.valid("param").id;
     const result = await deleteAutomation(c.get("projectId"), id);
     await recordAudit(c.get("projectId"), c.get("actor"), "automation.delete", id);
+    return c.json(result);
+  },
+);
+
+// ── Alert rules ────────────────────────────────────────────────────────────────────
+const alertChannelBody = z.object({ type: z.enum(["slack", "webhook"]), target: z.string().url() });
+const alertRuleBody = z.object({
+  name: z.string().min(1),
+  metric: z.enum(ALERT_METRICS),
+  window: z.number().int().positive().optional(),
+  threshold: z.number(),
+  comparator: z.enum(ALERT_COMPARATORS).optional(),
+  channels: z.array(alertChannelBody).optional(),
+  enabled: z.boolean().optional(),
+});
+
+/** Re-check every channel target is a public URL (SSRF guard mirrors automations). */
+async function assertChannelsPublic(channels?: { target: string }[]) {
+  for (const ch of channels ?? []) await assertPublicUrl(ch.target);
+}
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/alerts",
+    summary: "List alert rules (with firing/resolved state)",
+    tags: ["platform"],
+    security,
+    responses: {
+      200: { description: "Alert rules", content: { "application/json": { schema: C.listOf(C.alertRule) } } },
+    },
+  }),
+  async (c) => c.json({ data: await listAlertRules(c.get("projectId")) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/alerts",
+    summary: "Create an alert rule (metric: error_rate/latency_p95/cost_per_day/ingest_volume/dlq_depth)",
+    tags: ["platform"],
+    security,
+    request: { body: { content: { "application/json": { schema: alertRuleBody } } } },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: C.alertRule } } },
+      400: { description: "Invalid or disallowed channel URL" },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    try {
+      await assertChannelsPublic(body.channels);
+    } catch {
+      return c.json({ error: "channel targets must be public https endpoints" }, 400);
+    }
+    const result = await createAlertRule(c.get("projectId"), body);
+    await recordAudit(c.get("projectId"), c.get("actor"), "alert.create", `${result.metric}:${result.name}`);
+    return c.json(result, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "patch",
+    path: "/v1/alerts/{id}",
+    summary: "Update an alert rule",
+    tags: ["platform"],
+    security,
+    request: {
+      params: z.object({ id: z.string() }),
+      body: { content: { "application/json": { schema: alertRuleBody.partial() } } },
+    },
+    responses: {
+      200: { description: "Updated", content: { "application/json": { schema: C.alertRule } } },
+      400: { description: "Invalid or disallowed channel URL" },
+      403: { description: "Forbidden" },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    try {
+      await assertChannelsPublic(body.channels);
+    } catch {
+      return c.json({ error: "channel targets must be public https endpoints" }, 400);
+    }
+    const result = await updateAlertRule(c.get("projectId"), c.req.valid("param").id, body);
+    if (!result) return c.json({ error: "not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "alert.update", result.id);
+    return c.json(result);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/alerts/{id}",
+    summary: "Delete an alert rule",
+    tags: ["platform"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Deleted", content: { "application/json": { schema: z.object({ deleted: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const id = c.req.valid("param").id;
+    const result = await deleteAlertRule(c.get("projectId"), id);
+    await recordAudit(c.get("projectId"), c.get("actor"), "alert.delete", id);
+    return c.json(result);
+  },
+);
+
+// ── Cost budget (one per project) ──────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/budgets",
+    summary: "Get the project's monthly cost budget (null if unset)",
+    tags: ["platform"],
+    security,
+    responses: {
+      200: { description: "Cost budget", content: { "application/json": { schema: C.costBudget } } },
+    },
+  }),
+  async (c) => c.json(await getCostBudget(c.get("projectId"))),
+);
+
+app.openapi(
+  createRoute({
+    method: "put",
+    path: "/v1/budgets",
+    summary: "Set the project's monthly cost budget (soft — no hard caps)",
+    tags: ["platform"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              monthlyUsd: z.number().positive(),
+              thresholds: z.array(z.number().positive()).optional(),
+              channels: z.array(alertChannelBody).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Saved", content: { "application/json": { schema: C.costBudget } } },
+      400: { description: "Invalid or disallowed channel URL" },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    try {
+      await assertChannelsPublic(body.channels);
+    } catch {
+      return c.json({ error: "channel targets must be public https endpoints" }, 400);
+    }
+    const result = await setCostBudget(c.get("projectId"), body);
+    await recordAudit(c.get("projectId"), c.get("actor"), "budget.set", `$${body.monthlyUsd}/mo`);
+    return c.json(result);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/budgets",
+    summary: "Remove the project's cost budget",
+    tags: ["platform"],
+    security,
+    responses: {
+      200: { description: "Deleted", content: { "application/json": { schema: z.object({ deleted: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const result = await deleteCostBudget(c.get("projectId"));
+    await recordAudit(c.get("projectId"), c.get("actor"), "budget.delete", c.get("projectId"));
     return c.json(result);
   },
 );

@@ -3,6 +3,8 @@ import { QUEUE_NAMES, QUEUE_PREFIX } from "@memoturn/core";
 import { connectionOptions, type ExperimentJob, getDlqQueue, getIngestQueue, type IngestJob } from "@memoturn/db/queue";
 import {
   applyAllRetention,
+  evaluateAllAlerts,
+  evaluateBudgets,
   runAllEmbeddingProjections,
   runAllScheduledExports,
   validateRuntimeEnv,
@@ -99,6 +101,18 @@ const maintenanceWorker = new Worker(
         console.log(`[embeddings] projected ${results.length} project(s), ${total} points`);
       });
       if (ran === null) console.log("[embeddings] skipped — another run holds the lock");
+    } else if (job.name === "alert-eval") {
+      // Short TTL: this runs every minute, so a stuck holder shouldn't block the next tick long.
+      const ran = await withLock("alert-eval", 120, async () => {
+        // dlq_depth alert rules read the global DLQ queue depth (jobs carry projectId, but
+        // the queue count is process-global) — inject it so the engine needn't touch BullMQ.
+        const dlqCounts = await dlq.getJobCounts();
+        const dlqDepth = (dlqCounts.waiting ?? 0) + (dlqCounts.completed ?? 0) + (dlqCounts.failed ?? 0);
+        const [alerts, budgets] = await Promise.all([evaluateAllAlerts({ dlqDepth }), evaluateBudgets()]);
+        if (alerts.fired > 0 || budgets.notified > 0)
+          console.log(`[alerts] ${alerts.fired} fired, ${budgets.notified} budget step(s) notified`);
+      });
+      if (ran === null) console.log("[alerts] skipped — another run holds the lock");
     }
   },
   { connection: connectionOptions(), prefix: QUEUE_PREFIX },
@@ -130,6 +144,16 @@ await maintenanceQueue.add(
   {
     repeat: { pattern: "0 5 * * *" },
     jobId: "embeddings-daily",
+    removeOnComplete: true,
+  },
+);
+// Alert rules + cost budgets: evaluated every minute (stateful firing/resolved, dedup).
+await maintenanceQueue.add(
+  "alert-eval",
+  {},
+  {
+    repeat: { pattern: "* * * * *" },
+    jobId: "alert-eval-cron",
     removeOnComplete: true,
   },
 );

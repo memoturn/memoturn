@@ -300,3 +300,97 @@ export async function getDatasetComparison(projectId: string, name: string, vers
 
   return { dataset: ds.name, runs: ds.runs.map((r) => r.name), items };
 }
+
+// ── CI quality gate ────────────────────────────────────────────────────────────────
+
+/** Per-score-name aggregate over a run's linked traces (mean of numeric scores). */
+async function runScoreMeans(
+  projectId: string,
+  datasetId: string,
+  runName: string,
+): Promise<Map<string, { mean: number; count: number }> | null> {
+  const run = await prisma.datasetRun.findUnique({
+    where: { datasetId_name: { datasetId, name: runName } },
+    include: { items: true },
+  });
+  if (!run) return null;
+  const traceIds = run.items.map((i) => i.traceId).filter(Boolean);
+  const scoresMap = await getScoresByTraceIds(projectId, traceIds);
+  const acc = new Map<string, { sum: number; count: number }>();
+  for (const scores of scoresMap.values()) {
+    for (const s of scores) {
+      if (s.value == null) continue;
+      const a = acc.get(s.name) ?? { sum: 0, count: 0 };
+      a.sum += s.value;
+      a.count += 1;
+      acc.set(s.name, a);
+    }
+  }
+  return new Map([...acc].map(([k, v]) => [k, { mean: v.sum / v.count, count: v.count }]));
+}
+
+/** Threshold bounds per score name. `maxRegression` only applies when a baseline run is given. */
+export interface GateBound {
+  min?: number;
+  max?: number;
+  maxRegression?: number;
+}
+export type GateThresholds = Record<string, GateBound>;
+
+export interface GateFailure {
+  scoreName: string;
+  reason: "below_min" | "above_max" | "regression" | "missing_score";
+  value: number | null;
+  bound: number;
+  baseline?: number;
+}
+
+/**
+ * Evaluate a dataset run against threshold bounds for CI gating. Aggregates each score
+ * name to its mean over the run's traces, then checks absolute `min`/`max` bounds and,
+ * when `baselineRun` is given, a `maxRegression` drop versus the baseline's mean.
+ * Returns `{ passed, failures[] }` — suitable for a CI exit code. Null if run not found.
+ */
+export async function evaluateGate(
+  projectId: string,
+  datasetName: string,
+  runName: string,
+  thresholds: GateThresholds,
+  opts: { baselineRun?: string } = {},
+) {
+  const ds = await findDataset(projectId, datasetName);
+  if (!ds) return null;
+  const means = await runScoreMeans(projectId, ds.id, runName);
+  if (!means) return null;
+  const baseline = opts.baselineRun ? await runScoreMeans(projectId, ds.id, opts.baselineRun) : null;
+
+  const failures: GateFailure[] = [];
+  const scores = [...means].map(([name, v]) => ({ name, mean: v.mean, count: v.count }));
+
+  for (const [scoreName, bound] of Object.entries(thresholds)) {
+    const agg = means.get(scoreName);
+    if (!agg) {
+      // A gated score the run never produced is a failure (can't prove quality).
+      failures.push({ scoreName, reason: "missing_score", value: null, bound: bound.min ?? bound.max ?? 0 });
+      continue;
+    }
+    if (bound.min != null && agg.mean < bound.min)
+      failures.push({ scoreName, reason: "below_min", value: agg.mean, bound: bound.min });
+    if (bound.max != null && agg.mean > bound.max)
+      failures.push({ scoreName, reason: "above_max", value: agg.mean, bound: bound.max });
+    if (bound.maxRegression != null && baseline) {
+      const base = baseline.get(scoreName)?.mean;
+      if (base != null && agg.mean < base - bound.maxRegression)
+        failures.push({ scoreName, reason: "regression", value: agg.mean, bound: bound.maxRegression, baseline: base });
+    }
+  }
+
+  return {
+    dataset: datasetName,
+    run: runName,
+    baselineRun: opts.baselineRun ?? null,
+    passed: failures.length === 0,
+    scores,
+    failures,
+  };
+}

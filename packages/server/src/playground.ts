@@ -1,7 +1,7 @@
 import { isoNow, newId } from "@memoturn/core";
 import { type ChatMessage, generate, generateStream, type Provider, type ToolDef } from "@memoturn/llm";
 import { submitBatch } from "./ingest.js";
-import { resolveProviderKey } from "./providers.js";
+import { resolveProviderConfig } from "./providers.js";
 import { getTrace } from "./traces.js";
 
 /**
@@ -20,8 +20,8 @@ export interface PlaygroundInput {
 }
 
 export async function runPlayground(projectId: string, input: PlaygroundInput, opts: { trace?: boolean } = {}) {
-  const apiKey = await resolveProviderKey(projectId, input.provider);
-  const result = await generate({ ...input, apiKey });
+  const config = await resolveProviderConfig(projectId, input.provider);
+  const result = await generate({ ...input, ...config });
 
   if (opts.trace === false) return result;
 
@@ -139,6 +139,6 @@ export async function replayTrace(
 
 /** Streaming playground — yields text deltas (no trace recording). */
 export async function* streamPlayground(projectId: string, input: PlaygroundInput): AsyncGenerator<string> {
-  const apiKey = await resolveProviderKey(projectId, input.provider);
-  yield* generateStream({ ...input, apiKey });
+  const config = await resolveProviderConfig(projectId, input.provider);
+  yield* generateStream({ ...input, ...config });
 }

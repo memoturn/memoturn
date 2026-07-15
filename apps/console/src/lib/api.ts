@@ -6,6 +6,8 @@
  * its OpenAPI doc) — single source of truth, no hand-maintained duplicates.
  */
 import type {
+  AlertChannel,
+  AlertRule,
   AnalyticsSink,
   AnnotationResult,
   ApiKey,
@@ -14,6 +16,7 @@ import type {
   Automation,
   ChatMessage,
   Comment,
+  CostBudget,
   DatasetDetail,
   DatasetListItem,
   DatasetVersionDetail,
@@ -22,9 +25,11 @@ import type {
   Evaluator,
   EvaluatorAnalytics,
   EvaluatorTemplate,
+  EvaluatorVersion,
   ExperimentComparison,
   ExperimentDetail,
   ExperimentSummary,
+  IngestHealth,
   MaskingPolicy,
   MetricsSummary,
   ModelPriceList,
@@ -99,6 +104,16 @@ async function del<T>(path: string): Promise<T> {
 async function patch<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "PATCH",
+    headers: headers({ "content-type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  return res.json() as Promise<T>;
+}
+
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
     headers: headers({ "content-type": "application/json" }),
     body: JSON.stringify(body),
   });
@@ -210,7 +225,8 @@ export const api = {
     post<{ id: string; status: string }>(`/v1/experiments/${encodeURIComponent(id)}/cancel`, {}),
   playgroundChat: (body: PlaygroundRequest) => post<PlaygroundResponse>(`/v1/playground/chat`, body),
   listProviders: () => get<{ data: ProviderConnection[] }>(`/v1/providers`).then((r) => r.data),
-  addProvider: (provider: string, apiKey: string) => post(`/v1/providers`, { provider, apiKey }),
+  addProvider: (body: { provider: string; apiKey?: string; baseUrl?: string; region?: string }) =>
+    post(`/v1/providers`, body),
   getRetention: () => get<{ days: number }>(`/v1/retention`),
   setRetention: (days: number) => post<{ days: number }>(`/v1/retention`, { days }),
   listApiKeys: () => get<{ data: ApiKey[] }>(`/v1/api-keys`).then((r) => r.data),
@@ -249,6 +265,25 @@ export const api = {
     filter?: string;
   }) => post(`/v1/automations`, body),
   deleteAutomation: (id: string) => del(`/v1/automations/${encodeURIComponent(id)}`),
+  listAlerts: () => get<{ data: AlertRule[] }>(`/v1/alerts`).then((r) => r.data),
+  createAlert: (body: {
+    name: string;
+    metric: string;
+    window?: number;
+    threshold: number;
+    comparator?: string;
+    channels?: AlertChannel[];
+    enabled?: boolean;
+  }) => post<AlertRule>(`/v1/alerts`, body),
+  updateAlert: (id: string, body: Partial<{ enabled: boolean; threshold: number; channels: AlertChannel[] }>) =>
+    patch<AlertRule>(`/v1/alerts/${encodeURIComponent(id)}`, body),
+  deleteAlert: (id: string) => del(`/v1/alerts/${encodeURIComponent(id)}`),
+  getBudget: () => get<CostBudget>(`/v1/budgets`),
+  setBudget: (body: { monthlyUsd: number; thresholds?: number[]; channels?: AlertChannel[] }) =>
+    put<CostBudget>(`/v1/budgets`, body),
+  deleteBudget: () => del(`/v1/budgets`),
+  getIngestHealth: () => get<IngestHealth>(`/v1/ingest/health`),
+  replayDlq: (limit?: number) => post<{ replayed: number; failed: number }>(`/v1/ingest/dlq/replay`, { limit }),
   listScoreConfigs: () => get<{ data: ScoreConfig[] }>(`/v1/score-configs`).then((r) => r.data),
   listModelPrices: () => get<ModelPriceList>(`/v1/model-prices`),
   createModelPrice: (body: { pattern: string; provider?: string; inputPerMTok: number; outputPerMTok: number }) =>
@@ -291,6 +326,8 @@ export const api = {
     filterName?: string;
   }) => post(`/v1/evaluators`, body),
   listEvaluatorTemplates: () => get<{ data: EvaluatorTemplate[] }>(`/v1/evaluators/templates`).then((r) => r.data),
+  listEvaluatorVersions: (name: string) =>
+    get<{ data: EvaluatorVersion[] }>(`/v1/evaluators/${encodeURIComponent(name)}/versions`).then((r) => r.data),
   getEmbeddingProjection: (opts: { runId?: string; colorBy?: string; limit?: number } = {}) =>
     get<EmbeddingProjection>(`/v1/embeddings/projection${qs(opts as Record<string, unknown>)}`),
   runEmbeddingProjection: () => post<{ run_id: string; points: number }>(`/v1/embeddings/projection/run`, {}),

@@ -1,3 +1,4 @@
+export * from "./alerts.js";
 export * from "./analytics.js";
 export * from "./apikeys.js";
 export * from "./audit.js";
@@ -14,6 +15,7 @@ export * from "./evaluators.js";
 export * from "./experiments.js";
 export * from "./export.js";
 export * from "./ingest.js";
+export * from "./ingest-health.js";
 export * from "./lock.js";
 export * from "./masking.js";
 export * from "./mcp-tools.js";

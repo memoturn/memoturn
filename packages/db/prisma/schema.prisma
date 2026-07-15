@@ -85,6 +85,8 @@ model Project {
   analyticsSink   AnalyticsSink?
   maskingPolicy   MaskingPolicy?
   experiments     Experiment[]
+  alertRules      AlertRule[]
+  budget          CostBudget?
 
   @@unique([organizationId, slug])
 }
@@ -400,9 +402,30 @@ model Evaluator {
   online       Boolean  @default(false)
   samplingRate Float    @default(1.0)
   filterName   String   @default("")
+  // Monotonic version, bumped whenever the judge prompt/model/provider changes. The
+  // immutable history lives in EvaluatorVersion so online score drift is attributable
+  // (correlate a score-trend shift to when a version was published).
+  version      Int      @default(1)
   createdAt    DateTime @default(now())
 
+  versions EvaluatorVersion[]
+
   @@unique([projectId, name])
+}
+
+// Immutable snapshot of an evaluator's judge config at a point in time. A new row is
+// written on every create/edit that changes the prompt/model/provider.
+model EvaluatorVersion {
+  id           String    @id @default(cuid())
+  evaluatorId  String
+  evaluator    Evaluator @relation(fields: [evaluatorId], references: [id], onDelete: Cascade)
+  version      Int
+  prompt       String
+  provider     String
+  model        String
+  createdAt    DateTime  @default(now())
+
+  @@unique([evaluatorId, version])
 }
 
 enum ExperimentStatus {
@@ -569,6 +592,56 @@ model Automation {
   createdAt DateTime @default(now())
 
   @@index([projectId, trigger])
+}
+
+// A stateful alert rule: a worker cron evaluates `metric` over a trailing `window`
+// (minutes) and fires when it crosses `threshold` per `comparator`. Unlike an
+// event-triggered Automation, an AlertRule carries firing/resolved state (AlertState)
+// so it notifies only on transitions. `channels` is a JSON array of { type, target }.
+model AlertRule {
+  id         String     @id @default(cuid())
+  projectId  String
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name       String
+  metric     String // error_rate | latency_p95 | cost_per_day | ingest_volume | dlq_depth
+  window     Int        @default(5) // trailing window in minutes
+  threshold  Float
+  comparator String     @default("gt") // gt | gte | lt | lte
+  channels   Json       @default("[]") // [{ type: "slack" | "webhook", target: "https://…" }]
+  filter     String     @default("") // reserved: substring match (unused today)
+  enabled    Boolean    @default(true)
+  createdAt  DateTime   @default(now())
+  state      AlertState?
+
+  @@index([projectId, enabled])
+}
+
+// The firing/resolved state of one AlertRule (1:1). The cron transitions ok→firing on
+// breach and firing→resolved on recovery, notifying only on transition (dedup).
+model AlertState {
+  id             String    @id @default(cuid())
+  ruleId         String    @unique
+  rule           AlertRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  status         String    @default("ok") // ok | firing | resolved
+  lastValue      Float?
+  lastFiredAt    DateTime?
+  lastResolvedAt DateTime?
+  updatedAt      DateTime  @updatedAt
+}
+
+// Per-project monthly USD spend budget. The cron compares month-to-date cost to
+// `monthlyUsd` * each step in `thresholds` (e.g. 50/80/100%) and notifies once per step
+// via `channels`; `notifiedThreshold` records the highest crossed step so it doesn't
+// re-alert every tick. Soft only — no hard caps (memoturn is not a gateway).
+model CostBudget {
+  id                String   @id @default(cuid())
+  projectId         String   @unique
+  project           Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  monthlyUsd        Float
+  thresholds        Json     @default("[0.5,0.8,1.0]")
+  notifiedThreshold Float    @default(0) // highest step already notified this month
+  channels          Json     @default("[]")
+  createdAt         DateTime @default(now())
 }
 
 // A comment on a trace / observation / session / prompt.

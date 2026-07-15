@@ -176,6 +176,51 @@ export const automation = z.object({
 });
 export type Automation = z.infer<typeof automation>;
 
+/** A notification channel (shared by alerts + budgets). */
+export const alertChannel = z.object({
+  type: z.enum(["slack", "webhook"]),
+  target: z.string(),
+});
+export type AlertChannel = z.infer<typeof alertChannel>;
+
+export const alertRule = z.object({
+  id: z.string(),
+  name: z.string(),
+  metric: z.string(), // error_rate | latency_p95 | cost_per_day | ingest_volume | dlq_depth
+  window: z.number(),
+  threshold: z.number(),
+  comparator: z.string(), // gt | gte | lt | lte
+  channels: z.array(alertChannel),
+  enabled: z.boolean(),
+  createdAt: z.string(),
+  status: z.string(), // ok | firing | resolved
+  lastValue: z.number().nullable(),
+  lastFiredAt: z.string().nullable(),
+  lastResolvedAt: z.string().nullable(),
+});
+export type AlertRule = z.infer<typeof alertRule>;
+
+export const costBudget = z
+  .object({
+    monthlyUsd: z.number(),
+    thresholds: z.array(z.number()),
+    channels: z.array(alertChannel),
+    createdAt: z.string(),
+  })
+  .nullable();
+export type CostBudget = z.infer<typeof costBudget>;
+
+export const ingestHealth = z.object({
+  workerReachable: z.boolean(),
+  dlqDepth: z.number(),
+  insertLatencyMs: z.number().nullable(),
+  counters: z.record(z.string(), z.number()),
+  recentFailures: z.array(
+    z.object({ batchId: z.string(), projectId: z.string(), failedAt: z.string(), error: z.string() }),
+  ),
+});
+export type IngestHealth = z.infer<typeof ingestHealth>;
+
 /** A document a retriever span returned (RAG analysis). */
 export const retrievalDocument = z.object({
   rank: z.number(),
@@ -455,6 +500,24 @@ export const experimentComparison = z.object({
 });
 export type ExperimentComparison = z.infer<typeof experimentComparison>;
 
+// CI quality gate: a run's per-score means checked against threshold bounds.
+export const gateFailure = z.object({
+  scoreName: z.string(),
+  reason: z.enum(["below_min", "above_max", "regression", "missing_score"]),
+  value: z.number().nullable(),
+  bound: z.number(),
+  baseline: z.number().optional(),
+});
+export const gateResult = z.object({
+  dataset: z.string(),
+  run: z.string(),
+  baselineRun: z.string().nullable(),
+  passed: z.boolean(),
+  scores: z.array(z.object({ name: z.string(), mean: z.number(), count: z.number() })),
+  failures: z.array(gateFailure),
+});
+export type GateResult = z.infer<typeof gateResult>;
+
 // ── Experiments (server-executed dataset runs) ──────────────────────────────────
 export const experimentStatus = z.enum(["PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]);
 export type ExperimentStatus = z.infer<typeof experimentStatus>;
@@ -509,6 +572,7 @@ export const evaluatorTemplate = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string(),
+  prompt: z.string(),
   requires: z.array(z.string()),
   defaultModel: z.string(),
 });
@@ -526,9 +590,19 @@ export const evaluator = z.object({
   online: z.boolean(),
   samplingRate: z.number(),
   filterName: z.string(),
+  version: z.number(),
   createdAt: z.string(),
 });
 export type Evaluator = z.infer<typeof evaluator>;
+
+export const evaluatorVersion = z.object({
+  version: z.number(),
+  prompt: z.string(),
+  provider: z.string(),
+  model: z.string(),
+  createdAt: z.string(),
+});
+export type EvaluatorVersion = z.infer<typeof evaluatorVersion>;
 
 // ── Playground ───────────────────────────────────────────────────────────────────
 export const chatMessage = z.object({

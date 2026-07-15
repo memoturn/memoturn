@@ -26,6 +26,8 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | --- | --- | --- |
 | POST | `/v1/ingest` | Batched events (`trace-create`, `span/generation-create/update`, `event-create`, `score-create`). Returns `207` with per-event results: schema-invalid events are rejected individually in `errors` (id, index, reason) while valid events are accepted — inspect `errors` to catch silent data loss. Per-event `input`/`output`/`metadata` JSON capped at 1 MB (400 on oversize). Returns `429` when the per-project event rate limit (`INGEST_EVENTS_PER_MINUTE`) is exceeded; `Retry-After` header indicates when to retry. |
 | POST | `/v1/otel/v1/traces` | OpenTelemetry OTLP/HTTP (JSON) receiver; maps GenAI semconv spans. |
+| GET | `/v1/ingest/health` | Ingest-pipeline health for the ops console: DLQ depth, insert latency, error counters, recent failed batches. OWNER/ADMIN only. |
+| POST | `/v1/ingest/dlq/replay` | Re-enqueue dead-lettered batches from blob onto the ingest queue. Body: `{ limit? }`. OWNER/ADMIN only; audited. |
 | GET | `/health` | Liveness probe (public, unauthenticated) — `{ status: "ok" }`. |
 | GET | `/metrics` | In-process API metrics (request counts, status classes, per-route latency percentiles, in-flight). Token-gated: returns `404` unless `API_METRICS_TOKEN` is set, then requires `Authorization: Bearer <token>`. |
 
@@ -63,6 +65,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/datasets/{name}/comparison` | Compare a dataset's runs side by side (per-item output + scores). Optional `version` scopes to runs of one dataset version. |
 | POST | `/v1/datasets/{name}/items` | Append items. |
 | POST | `/v1/datasets/{name}/runs` | Record an experiment run (link items → traces). Optional `version` pins the run to a dataset version (defaults to current). |
+| POST | `/v1/datasets/{name}/runs/{runId}/gate` | CI quality gate: aggregate a run's scores and check them against `thresholds` (`{ scoreName: { min?, max?, maxRegression? } }`; optional `baselineRun` for regression). Returns `{ passed, failures[], scores[] }` for a CI exit code. Read-only. |
 | GET | `/v1/datasets/{name}/versions` | List a dataset's immutable version snapshots. |
 | POST | `/v1/datasets/{name}/versions` | Cut a new version (freeze the current items). Body: `{ label?, description? }`. Audited. |
 | GET | `/v1/datasets/{name}/versions/{version}` | A version's frozen items. |
@@ -82,6 +85,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/evaluators/analytics` | Per-evaluator EVAL score summary (avg, count) + daily trend (`days` query, default 30). |
 | GET | `/v1/evaluators/templates` | The prebuilt evaluator library (RAG/quality judge templates). |
 | POST | `/v1/evaluators/from-template` | Instantiate a template into a project evaluator. Body: `{ key, name?, provider?, model?, ... }`. Audited. |
+| GET | `/v1/evaluators/{name}/versions` | Immutable judge-config version history (newest first). A version bumps when the prompt/model/provider changes, so online score drift is attributable to a config change. |
 | POST | `/v1/evaluators/{name}/run` | Run over a trace's input/output → writes an `EVAL` score. |
 
 ### Experiments
@@ -118,7 +122,7 @@ Server-executed experiments run a prompt/model across a dataset and auto-score e
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET / POST | `/v1/providers` | List (masked) / add an encrypted provider API key. |
+| GET / POST | `/v1/providers` | List (masked) / add an encrypted provider connection. Body: `{ provider, apiKey?, baseUrl?, region? }`. Providers: `anthropic`, `openai`, `gemini`, `bedrock` (needs `region`), `azure` (needs `baseUrl`), `openai_compatible` (needs `baseUrl`; covers vLLM/Ollama/OpenRouter). Credentials stored as an encrypted JSON config blob. |
 
 ### Dashboards, scoring & collaboration
 
@@ -145,6 +149,9 @@ Webhook and automation target URLs are SSRF-validated on write: private IP range
 | DELETE | `/v1/webhooks/{id}` | Delete a webhook. |
 | GET / POST | `/v1/automations` | List / create a trigger→action automation (trigger: `score.created`/`trace.created`/`eval.completed`; action: `webhook`/`slack`). Target URL is SSRF-validated. |
 | DELETE | `/v1/automations/{id}` | Delete an automation. |
+| GET / POST | `/v1/alerts` | List / create a stateful alert rule. A worker cron evaluates `metric` (`error_rate`/`latency_p95`/`cost_per_day`/`ingest_volume`/`dlq_depth`) over a trailing `window` (minutes) against `threshold` per `comparator` (`gt`/`gte`/`lt`/`lte`), notifying `channels` (`[{ type, target }]`, SSRF-validated) once on firing and once on resolve. |
+| PATCH / DELETE | `/v1/alerts/{id}` | Update (e.g. toggle `enabled`, adjust `threshold`/`channels`) / delete an alert rule. |
+| GET / PUT / DELETE | `/v1/budgets` | Get / set / remove the project's monthly cost budget (`monthlyUsd` + `thresholds` steps, default 50/80/100%). Notifies `channels` as month-to-date spend crosses each step. Soft only — no hard caps. |
 
 ### Media / attachments
 

@@ -20,6 +20,11 @@ It also needs the datastore connection env (`DATABASE_URL`, `REDIS_URL`,
 
 | Tool | Purpose |
 | --- | --- |
+| `query_traces` | List recent traces with filters (env, user, session, level, tag, score, search, day window). |
+| `get_trace` | Full trace detail: metadata, observation tree, scores. |
+| `get_metrics` | Project metrics (totals + per-day/per-model) over the last N days. |
+| `list_scores` | Scores attached to a trace (name, value, source). |
+| `run_evaluator` | Run an evaluator over a trace and record an EVAL score (write). |
 | `list_prompts` | List prompts (name, folder, versions, channels). |
 | `get_prompt` | Full prompt detail with every version. |
 | `resolve_prompt` | Resolve a channel (default `production`) to compiled content + config. |

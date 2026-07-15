@@ -1,18 +1,56 @@
 import { prisma } from "@memoturn/db";
-import { decryptSecret, encryptSecret, maskSecret, type Provider } from "@memoturn/llm";
+import { decryptSecret, encryptSecret, maskSecret, type Provider, type ProviderConfig } from "@memoturn/llm";
 
 /**
- * Per-project LLM provider connections. API keys are encrypted at rest (AES-256-GCM)
- * and only ever returned masked. Key resolution falls back to env vars so a single
- * dev key can serve all projects; the "mock" provider needs no key.
+ * Per-project LLM provider connections. Credentials are encrypted at rest (AES-256-GCM)
+ * as a JSON config blob `{ apiKey?, baseUrl?, region? }` — a single column serves
+ * single-key providers (anthropic/openai/gemini) and multi-field ones (bedrock needs a
+ * region, azure/openai_compatible a baseUrl) alike. Keys are only ever returned masked.
+ * Resolution falls back to env vars so a single dev key can serve all projects; the
+ * "mock" provider needs no key.
  */
-export async function createProviderConnection(projectId: string, provider: string, apiKey: string) {
+
+/** Env fallback for the primary API key, per provider. */
+const ENV_KEYS: Record<string, string | undefined> = {
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
+  gemini: "GEMINI_API_KEY",
+  bedrock: "AWS_BEARER_TOKEN_BEDROCK",
+  azure: "AZURE_API_KEY",
+};
+
+/**
+ * Decode a stored `encryptedKey` into a config. Back-compat: legacy rows stored a bare
+ * API-key string (pre config-blob); if the decrypted value isn't JSON, treat it as apiKey.
+ */
+function decodeConfig(encrypted: string): ProviderConfig {
+  const raw = decryptSecret(encrypted);
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") return parsed as ProviderConfig;
+  } catch {
+    // legacy bare-string key
+  }
+  return { apiKey: raw };
+}
+
+export async function createProviderConnection(projectId: string, provider: string, config: ProviderConfig) {
+  const encryptedKey = encryptSecret(JSON.stringify(config));
   const conn = await prisma.providerConnection.upsert({
     where: { projectId_provider: { projectId, provider } },
-    update: { encryptedKey: encryptSecret(apiKey) },
-    create: { projectId, provider, encryptedKey: encryptSecret(apiKey) },
+    update: { encryptedKey },
+    create: { projectId, provider, encryptedKey },
   });
-  return { provider: conn.provider, masked: maskSecret(apiKey), createdAt: conn.createdAt.toISOString() };
+  return { provider: conn.provider, masked: maskConfig(config), createdAt: conn.createdAt.toISOString() };
+}
+
+/** A safe display string for a config: masked apiKey, plus baseUrl/region if present. */
+function maskConfig(config: ProviderConfig): string {
+  const bits: string[] = [];
+  if (config.apiKey) bits.push(maskSecret(config.apiKey));
+  if (config.baseUrl) bits.push(config.baseUrl);
+  if (config.region) bits.push(config.region);
+  return bits.join(" · ") || "…";
 }
 
 export async function listProviderConnections(projectId: string) {
@@ -20,7 +58,7 @@ export async function listProviderConnections(projectId: string) {
   return conns.map((c) => {
     let masked = "…";
     try {
-      masked = maskSecret(decryptSecret(c.encryptedKey));
+      masked = maskConfig(decodeConfig(c.encryptedKey));
     } catch {
       /* ignore */
     }
@@ -33,20 +71,18 @@ export async function deleteProviderConnection(projectId: string, provider: stri
   return { deleted: true };
 }
 
-const ENV_KEYS: Record<string, string | undefined> = {
-  anthropic: "ANTHROPIC_API_KEY",
-  openai: "OPENAI_API_KEY",
-};
-
-/** Resolve a usable API key for a provider: stored connection first, then env. */
-export async function resolveProviderKey(projectId: string, provider: Provider): Promise<string | undefined> {
-  if (provider === "mock") return undefined;
+/**
+ * Resolve a usable provider config: stored connection first, then env fallback for the
+ * API key. The "mock" provider needs none.
+ */
+export async function resolveProviderConfig(projectId: string, provider: Provider): Promise<ProviderConfig> {
+  if (provider === "mock") return {};
   const conn = await prisma.providerConnection.findUnique({
     where: { projectId_provider: { projectId, provider } },
   });
   if (conn) {
     try {
-      return decryptSecret(conn.encryptedKey);
+      return decodeConfig(conn.encryptedKey);
     } catch {
       // A stored key that won't decrypt (e.g. ENCRYPTION_KEY was rotated) must NOT silently
       // fall back to the operator's shared env key — that would mis-attribute cost/traffic.
@@ -54,14 +90,20 @@ export async function resolveProviderKey(projectId: string, provider: Provider):
       console.error(
         JSON.stringify({
           level: "error",
-          scope: "providers.resolveKey",
+          scope: "providers.resolveConfig",
           provider,
-          message: "stored key undecryptable",
+          message: "stored config undecryptable",
         }),
       );
-      throw new Error(`stored ${provider} key could not be decrypted — re-enter it in provider settings`);
+      throw new Error(`stored ${provider} config could not be decrypted — re-enter it in provider settings`);
     }
   }
   const envName = ENV_KEYS[provider];
-  return envName ? process.env[envName] : undefined;
+  const apiKey = envName ? process.env[envName] : undefined;
+  return { apiKey };
+}
+
+/** Back-compat shim: resolve just the API key (callers that don't need baseUrl/region). */
+export async function resolveProviderKey(projectId: string, provider: Provider): Promise<string | undefined> {
+  return (await resolveProviderConfig(projectId, provider)).apiKey;
 }
