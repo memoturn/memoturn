@@ -46,11 +46,13 @@ function ExperimentsPage() {
   const { data: experiments } = useQuery({
     queryKey: ["experiments"],
     queryFn: () => api.listExperiments(),
-    // Poll while any experiment is in flight so progress advances live.
+    // Poll while any experiment is in flight so progress advances live — including
+    // when the tab is backgrounded (start a run, tab away, come back to see it done).
     refetchInterval: (q) =>
       (q.state.data ?? []).some((e: ExperimentSummary) => e.status === "RUNNING" || e.status === "PENDING")
         ? 2000
         : false,
+    refetchIntervalInBackground: true,
   });
 
   return (
