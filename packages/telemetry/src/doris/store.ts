@@ -75,6 +75,19 @@ function cutoffMinutesAgo(minutes: number): string {
   return toDorisDateTime(new Date(Date.now() - Math.floor(minutes) * 60_000).toISOString());
 }
 
+/** Zeroed window metric — the default for a project with no rows in the window. */
+function zeroWindow(): WindowMetric {
+  return {
+    generations: 0,
+    errors: 0,
+    total_tokens: 0,
+    total_cost: 0,
+    p50_latency_ms: 0,
+    p95_latency_ms: 0,
+    trace_count: 0,
+  };
+}
+
 export class DorisTelemetryStore implements TelemetryStore {
   private async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
     const [rows] = await dorisQuery(sql, params);
@@ -661,10 +674,20 @@ export class DorisTelemetryStore implements TelemetryStore {
   }
 
   async metricsWindow(projectId: string, sinceMinutes: number): Promise<WindowMetric> {
+    return (await this.metricsWindowByProjects([projectId], sinceMinutes)).get(projectId) ?? zeroWindow();
+  }
+
+  async metricsWindowByProjects(projectIds: string[], sinceMinutes: number): Promise<Map<string, WindowMetric>> {
+    const out = new Map<string, WindowMetric>();
+    if (projectIds.length === 0) return out;
     const since = cutoffMinutesAgo(sinceMinutes);
-    // Two scans: GENERATION aggregates from observations, trace volume from traces.
+    const placeholders = projectIds.map(() => "?").join(", ");
+    // Two grouped scans across all requested projects at once: GENERATION aggregates from
+    // observations, trace volume from traces. GROUP BY project_id so one query serves N
+    // projects (the alert cron batches every rule sharing a window into one round-trip).
     const [gens, traces] = await Promise.all([
       this.query<{
+        project_id: string;
         generations: unknown;
         errors: unknown;
         total_tokens: unknown;
@@ -674,6 +697,7 @@ export class DorisTelemetryStore implements TelemetryStore {
       }>(
         `
         SELECT
+          project_id,
           COUNT(*) AS generations,
           SUM(IF(level = 'ERROR', 1, 0)) AS errors,
           SUM(total_tokens) AS total_tokens,
@@ -681,25 +705,31 @@ export class DorisTelemetryStore implements TelemetryStore {
           PERCENTILE_APPROX(latency_ms, 0.5) AS p50,
           PERCENTILE_APPROX(latency_ms, 0.95) AS p95
         FROM observations
-        WHERE project_id = ? AND type = 'GENERATION' AND start_time >= ?
+        WHERE project_id IN (${placeholders}) AND type = 'GENERATION' AND start_time >= ?
+        GROUP BY project_id
         `,
-        [projectId, since],
+        [...projectIds, since],
       ),
-      this.query<{ c: unknown }>("SELECT COUNT(*) AS c FROM traces WHERE project_id = ? AND `timestamp` >= ?", [
-        projectId,
-        since,
-      ]),
+      this.query<{ project_id: string; c: unknown }>(
+        `SELECT project_id, COUNT(*) AS c FROM traces WHERE project_id IN (${placeholders}) AND \`timestamp\` >= ? GROUP BY project_id`,
+        [...projectIds, since],
+      ),
     ]);
-    const g = gens[0];
-    return {
-      generations: Number(g?.generations ?? 0),
-      errors: Number(g?.errors ?? 0),
-      total_tokens: Number(g?.total_tokens ?? 0),
-      total_cost: Number(g?.total_cost ?? 0),
-      p50_latency_ms: Math.round(Number(g?.p50 ?? 0)),
-      p95_latency_ms: Math.round(Number(g?.p95 ?? 0)),
-      trace_count: Number(traces[0]?.c ?? 0),
-    };
+    const traceCounts = new Map(traces.map((t) => [t.project_id, Number(t.c ?? 0)]));
+    // Seed zeros so every requested project is present even with no matching generations.
+    for (const id of projectIds) out.set(id, { ...zeroWindow(), trace_count: traceCounts.get(id) ?? 0 });
+    for (const g of gens) {
+      out.set(g.project_id, {
+        generations: Number(g.generations ?? 0),
+        errors: Number(g.errors ?? 0),
+        total_tokens: Number(g.total_tokens ?? 0),
+        total_cost: Number(g.total_cost ?? 0),
+        p50_latency_ms: Math.round(Number(g.p50 ?? 0)),
+        p95_latency_ms: Math.round(Number(g.p95 ?? 0)),
+        trace_count: traceCounts.get(g.project_id) ?? 0,
+      });
+    }
+    return out;
   }
 
   async widgetSeries(
