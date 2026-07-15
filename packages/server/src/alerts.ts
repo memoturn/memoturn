@@ -1,6 +1,6 @@
 import { prisma } from "@memoturn/db";
 import { telemetry, type WindowMetric } from "@memoturn/telemetry";
-import { type Channel, type ChannelType, deliverToChannel } from "./automations.js";
+import { type Channel, type ChannelMessage, type ChannelType, deliverToChannel } from "./automations.js";
 import { mapConcurrent } from "./concurrency.js";
 
 /**
@@ -268,8 +268,31 @@ function alertSlackText(rule: AlertRuleRow, projectId: string, value: number, fi
 
 const round = (n: number) => Math.round(n * 1000) / 1000;
 
-async function notify(channels: Channel[], slackText: string, webhookBody: unknown): Promise<void> {
-  await mapConcurrent(channels, DISPATCH_CONCURRENCY, (ch) => deliverToChannel(ch, { slackText, webhookBody }));
+/** Build the full multi-channel message for an alert transition (slack/webhook/pagerduty/email). */
+function alertMessage(rule: AlertRuleRow, projectId: string, value: number, firing: boolean): ChannelMessage {
+  const summary = `memoturn alert ${firing ? "FIRING" : "RESOLVED"} — ${rule.name}: ${rule.metric} ${rule.comparator} ${rule.threshold} (now ${round(value)}) · project ${projectId}`;
+  return {
+    slackText: alertSlackText(rule, projectId, value, firing),
+    webhookBody: {
+      alert: rule.name,
+      projectId,
+      metric: rule.metric,
+      comparator: rule.comparator,
+      threshold: rule.threshold,
+      value,
+      status: firing ? "firing" : "resolved",
+    },
+    summary,
+    body: summary,
+    severity: firing ? "critical" : "info",
+    // Stable per rule so PagerDuty pairs the trigger + resolve and auto-closes the incident.
+    dedupKey: `memoturn-alert-${rule.id}`,
+    resolved: !firing,
+  };
+}
+
+async function notify(channels: Channel[], message: ChannelMessage): Promise<void> {
+  await mapConcurrent(channels, DISPATCH_CONCURRENCY, (ch) => deliverToChannel(ch, message));
 }
 
 /**
@@ -297,15 +320,7 @@ export async function evaluateAllAlerts(
           update: { status: "firing", lastValue: value, lastFiredAt: new Date() },
           create: { ruleId: rule.id, status: "firing", lastValue: value, lastFiredAt: new Date() },
         });
-        await notify(channels, alertSlackText(rule, rule.projectId, value, true), {
-          alert: rule.name,
-          projectId: rule.projectId,
-          metric: rule.metric,
-          comparator: rule.comparator,
-          threshold: rule.threshold,
-          value,
-          status: "firing",
-        });
+        await notify(channels, alertMessage(rule, rule.projectId, value, true));
         fired++;
       } else if (!breached && status === "firing") {
         await prisma.alertState.upsert({
@@ -313,13 +328,7 @@ export async function evaluateAllAlerts(
           update: { status: "resolved", lastValue: value, lastResolvedAt: new Date() },
           create: { ruleId: rule.id, status: "resolved", lastValue: value, lastResolvedAt: new Date() },
         });
-        await notify(channels, alertSlackText(rule, rule.projectId, value, false), {
-          alert: rule.name,
-          projectId: rule.projectId,
-          metric: rule.metric,
-          value,
-          status: "resolved",
-        });
+        await notify(channels, alertMessage(rule, rule.projectId, value, false));
       } else {
         // No transition — keep lastValue fresh for the UI.
         await prisma.alertState.upsert({
@@ -385,11 +394,16 @@ export async function evaluateBudgets(): Promise<{ evaluated: number; notified: 
       const step = Math.max(...crossed);
       await prisma.costBudget.update({ where: { id: b.id }, data: { notifiedThreshold: step } });
       const pct = Math.round(step * 100);
-      await notify(
-        channels,
-        `*memoturn budget* :moneybag: ${pct}% of $${b.monthlyUsd}/mo reached — spent $${round(mtdCost)} · project: ${b.projectId}`,
-        { budget: b.projectId, monthlyUsd: b.monthlyUsd, spent: mtdCost, step, ratio },
-      );
+      const summary = `memoturn budget ${pct}% of $${b.monthlyUsd}/mo reached — spent $${round(mtdCost)} · project ${b.projectId}`;
+      await notify(channels, {
+        slackText: `*memoturn budget* :moneybag: ${summary}`,
+        webhookBody: { budget: b.projectId, monthlyUsd: b.monthlyUsd, spent: mtdCost, step, ratio },
+        summary,
+        body: summary,
+        severity: step >= 1 ? "critical" : "warning",
+        // Per budget+step so PagerDuty shows each threshold crossing as its own alert.
+        dedupKey: `memoturn-budget-${b.id}-${pct}`,
+      });
       notified++;
     } catch (err) {
       console.error(`[budgets] project ${b.projectId} failed:`, err instanceof Error ? err.message : err);

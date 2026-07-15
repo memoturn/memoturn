@@ -74,14 +74,14 @@ const alertSchema = z.object({
   threshold: z.string().min(1, "Threshold is required"),
   window: z.string(),
   channelType: z.string(),
-  channelTarget: z.string().min(1, "Channel URL is required"),
+  channelTarget: z.string().min(1, "Channel target is required"),
 });
 type AlertForm = z.infer<typeof alertSchema>;
 
 const budgetSchema = z.object({
   monthlyUsd: z.string().min(1, "Budget is required"),
   channelType: z.string(),
-  channelTarget: z.string().min(1, "Channel URL is required"),
+  channelTarget: z.string().min(1, "Channel target is required"),
 });
 type BudgetForm = z.infer<typeof budgetSchema>;
 
@@ -463,7 +463,7 @@ function SettingsPage() {
         comparator: v.comparator,
         threshold: Number(v.threshold),
         window: Number(v.window),
-        channels: [{ type: v.channelType as "slack" | "webhook", target: v.channelTarget }],
+        channels: [{ type: v.channelType as "slack" | "webhook" | "pagerduty" | "email", target: v.channelTarget }],
       }),
     onSuccess: () => {
       toast.success("Alert rule added");
@@ -559,7 +559,9 @@ function SettingsPage() {
     mutationFn: (v: BudgetForm) =>
       api.setBudget({
         monthlyUsd: Number(v.monthlyUsd),
-        channels: v.channelTarget ? [{ type: v.channelType as "slack" | "webhook", target: v.channelTarget }] : [],
+        channels: v.channelTarget
+          ? [{ type: v.channelType as "slack" | "webhook" | "pagerduty" | "email", target: v.channelTarget }]
+          : [],
       }),
     onSuccess: () => {
       toast.success("Budget saved");
@@ -1562,6 +1564,8 @@ function SettingsPage() {
                             <SelectContent>
                               <SelectItem value="slack">slack</SelectItem>
                               <SelectItem value="webhook">webhook</SelectItem>
+                              <SelectItem value="pagerduty">pagerduty</SelectItem>
+                              <SelectItem value="email">email</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -1573,9 +1577,9 @@ function SettingsPage() {
                       name="channelTarget"
                       render={({ field }) => (
                         <FormItem className="lg:col-span-2">
-                          <FormLabel>Channel URL</FormLabel>
+                          <FormLabel>Channel target</FormLabel>
                           <FormControl>
-                            <Input placeholder="https://hooks.slack.com/…" {...field} />
+                            <Input placeholder="URL (slack/webhook), routing key (pagerduty), or email" {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -1636,6 +1640,8 @@ function SettingsPage() {
                             <SelectContent>
                               <SelectItem value="slack">slack</SelectItem>
                               <SelectItem value="webhook">webhook</SelectItem>
+                              <SelectItem value="pagerduty">pagerduty</SelectItem>
+                              <SelectItem value="email">email</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -1647,9 +1653,9 @@ function SettingsPage() {
                       name="channelTarget"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Channel URL</FormLabel>
+                          <FormLabel>Channel target</FormLabel>
                           <FormControl>
-                            <Input placeholder="https://hooks.slack.com/…" {...field} />
+                            <Input placeholder="URL (slack/webhook), routing key (pagerduty), or email" {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
