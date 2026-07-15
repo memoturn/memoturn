@@ -4,7 +4,9 @@ import type {
   ObservationDetail,
   ScoreRow as ScoreDetail,
   SessionSummary,
+  TraceFacets,
   TraceSummary,
+  UserSummary,
   WidgetBreakdown,
   WidgetMetric,
   WidgetPoint,
@@ -38,7 +40,38 @@ import type {
 export interface TelemetryStore {
   // ── Reads ──────────────────────────────────────────────────────────────────────
   listTraces(projectId: string, filters?: TraceFilters): Promise<TraceSummary[]>;
-  listSessions(projectId: string, limit?: number): Promise<SessionSummary[]>;
+  /** Total traces matching the filters (ignores limit/offset) — for paginated page counts. */
+  countTraces(projectId: string, filters?: TraceFilters): Promise<number>;
+  /**
+   * Distinct facet values + counts (environment / name / tags) over the time range, for the filter
+   * panel. Counts are facet-excluding: each dimension honors the *other* active filters but not its
+   * own, so a selected facet still shows the alternatives you could switch to.
+   */
+  traceFacets(
+    projectId: string,
+    opts?: {
+      days?: number;
+      limit?: number;
+      environment?: string;
+      search?: string;
+      userId?: string;
+      tag?: string;
+      scoreName?: string;
+      level?: string;
+    },
+  ): Promise<TraceFacets>;
+  listSessions(
+    projectId: string,
+    opts?: { limit?: number; offset?: number; days?: number; search?: string },
+  ): Promise<SessionSummary[]>;
+  /** Distinct session count (non-empty session_id) within the range — for paginated page counts. */
+  countSessions(projectId: string, days?: number, search?: string): Promise<number>;
+  /** Per-end-user rollups (traces grouped by non-empty user_id), for the Users view. */
+  listUsers(
+    projectId: string,
+    opts?: { limit?: number; offset?: number; days?: number; search?: string },
+  ): Promise<UserSummary[]>;
+  countUsers(projectId: string, days?: number, search?: string): Promise<number>;
   getTraceHeader(projectId: string, traceId: string): Promise<TraceHeader | null>;
   listObservationsByTrace(projectId: string, traceId: string): Promise<ObservationDetail[]>;
   listScoresByTrace(projectId: string, traceId: string): Promise<ScoreDetail[]>;

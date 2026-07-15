@@ -1,31 +1,68 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Activity, Coins, DollarSign, Download, Save, X } from "lucide-react";
-import { useState } from "react";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@memoturn/ui";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import {
+  Activity,
+  ChevronDown,
+  ChevronUp,
+  Coins,
+  Columns3,
+  DollarSign,
+  Download,
+  GitCompare,
+  Save,
+  SlidersHorizontal,
+  X,
+} from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "../../components/empty-state";
 import { KindBadge } from "../../components/kind-badge";
 import { PageHeader } from "../../components/page-header";
+import { ScoreBadges } from "../../components/score-badges";
 import { StatTile } from "../../components/stat-tile";
+import { TracePeekDrawer } from "../../components/trace-peek-drawer";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../../components/ui/dropdown-menu";
 import { Input } from "../../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
-import { api, downloadTracesExport } from "../../lib/api";
+import { api, downloadTracesExport, type FacetCount, type TraceSummary } from "../../lib/api";
 import { useIsReadOnly } from "../../lib/role";
 import { useRangeDays } from "../../lib/timeRange";
+import { cn } from "../../lib/utils";
 
 interface TraceSearch {
   search?: string;
   environment?: string;
   userId?: string;
   tag?: string;
+  scoreName?: string;
+  level?: string;
+  // Open trace id — drives the deep-linkable peek drawer, separate from filters.
+  peek?: string;
+  // Pagination (1-based). Defaults (page 1 / size 50) are kept out of the URL to keep it clean.
+  page?: number;
+  pageSize?: number;
 }
 
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+const posInt = (v: unknown) => {
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+};
+
+const PAGE_SIZES = [25, 50, 100];
+const DEFAULT_PAGE_SIZE = 50;
 
 export const Route = createFileRoute("/traces/")({
   // Filters live in the URL so they're shareable/bookmarkable (deep linkable).
@@ -34,6 +71,11 @@ export const Route = createFileRoute("/traces/")({
     environment: str(s.environment),
     userId: str(s.userId),
     tag: str(s.tag),
+    scoreName: str(s.scoreName),
+    level: str(s.level),
+    peek: str(s.peek),
+    page: posInt(s.page),
+    pageSize: posInt(s.pageSize),
   }),
   component: TracesPage,
 });
@@ -42,34 +84,311 @@ function fmtCost(n: number): string {
   return n > 0 ? `$${n.toFixed(6)}` : "—";
 }
 
+// Toggleable + reorderable trace columns (Name is the identity column and always shown first).
+const TRACE_COLUMNS = [
+  { key: "timestamp", label: "Timestamp", cellClass: "text-muted-foreground" },
+  { key: "obs", label: "Obs", cellClass: "tabular-nums" },
+  { key: "tokens", label: "Tokens", cellClass: "tabular-nums" },
+  { key: "cost", label: "Cost", cellClass: "tabular-nums" },
+  { key: "latency", label: "Latency", cellClass: "tabular-nums" },
+  { key: "scores", label: "Scores" },
+  { key: "env", label: "Env" },
+  { key: "tags", label: "Tags" },
+] as const;
+type ColKey = (typeof TRACE_COLUMNS)[number]["key"];
+const COL_KEYS = TRACE_COLUMNS.map((c) => c.key) as ColKey[];
+const COL_LABEL = Object.fromEntries(TRACE_COLUMNS.map((c) => [c.key, c.label])) as Record<ColKey, string>;
+const COL_CLASS = Object.fromEntries(
+  TRACE_COLUMNS.map((c) => [c.key, "cellClass" in c ? c.cellClass : undefined]),
+) as Record<ColKey, string | undefined>;
+const COL_STORAGE = "memoturn.traces.columns.v2"; // persisted { hidden, order }
+
+/** Column visibility + order, persisted to localStorage. New columns append in their default slot. */
+function useColumnPrefs() {
+  const [prefs, setPrefs] = useState<{ hidden: ColKey[]; order: ColKey[] }>(() => {
+    try {
+      const raw = localStorage.getItem(COL_STORAGE);
+      if (raw) {
+        const p = JSON.parse(raw);
+        return { hidden: Array.isArray(p.hidden) ? p.hidden : [], order: Array.isArray(p.order) ? p.order : [] };
+      }
+    } catch {
+      /* ignore malformed prefs */
+    }
+    return { hidden: [], order: [] };
+  });
+  const persist = (next: { hidden: ColKey[]; order: ColKey[] }) => {
+    try {
+      localStorage.setItem(COL_STORAGE, JSON.stringify(next));
+    } catch {
+      /* storage unavailable */
+    }
+    setPrefs(next);
+  };
+  // Effective order: stored (valid) keys first, then any columns not yet in the stored order.
+  const stored = prefs.order.filter((k): k is ColKey => COL_KEYS.includes(k));
+  const order = [...stored, ...COL_KEYS.filter((k) => !stored.includes(k))];
+  const hidden = new Set(prefs.hidden.filter((k): k is ColKey => COL_KEYS.includes(k)));
+
+  const toggle = (key: ColKey) => {
+    const h = new Set(hidden);
+    if (h.has(key)) h.delete(key);
+    else h.add(key);
+    persist({ hidden: [...h], order });
+  };
+  const move = (key: ColKey, dir: -1 | 1) => {
+    const i = order.indexOf(key);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= order.length) return;
+    const next = [...order];
+    [next[i], next[j]] = [next[j] as ColKey, next[i] as ColKey];
+    persist({ hidden: [...hidden], order: next });
+  };
+  return { order, hidden, toggle, move };
+}
+
+/** Columns dropdown: toggle visibility + reorder (▲/▼) per column. */
+function ColumnsMenu({
+  order,
+  hidden,
+  toggle,
+  move,
+}: {
+  order: ColKey[];
+  hidden: Set<ColKey>;
+  toggle: (k: ColKey) => void;
+  move: (k: ColKey, dir: -1 | 1) => void;
+}) {
+  const shown = order.length - hidden.size;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-2">
+          <Columns3 />
+          Columns
+          <span className="tabular-nums text-muted-foreground">
+            {shown}/{order.length}
+          </span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-60">
+        <DropdownMenuLabel>Columns — toggle &amp; reorder</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {order.map((key, i) => (
+          <div key={key} className="flex items-center gap-2 px-2 py-1 text-sm">
+            <Checkbox
+              checked={!hidden.has(key)}
+              onCheckedChange={() => toggle(key)}
+              aria-label={`Toggle ${COL_LABEL[key]}`}
+            />
+            <span className="flex-1">{COL_LABEL[key]}</span>
+            <button
+              type="button"
+              disabled={i === 0}
+              onClick={() => move(key, -1)}
+              className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+              aria-label={`Move ${COL_LABEL[key]} up`}
+            >
+              <ChevronUp className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              disabled={i === order.length - 1}
+              onClick={() => move(key, 1)}
+              className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+              aria-label={`Move ${COL_LABEL[key]} down`}
+            >
+              <ChevronDown className="size-3.5" />
+            </button>
+          </div>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** One facet dimension: a labeled list of value/count rows; the active value is highlighted. */
+function FacetSection({
+  title,
+  items,
+  active,
+  onPick,
+}: {
+  title: string;
+  items: FacetCount[] | undefined;
+  active?: string;
+  onPick: (value: string) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">{title}</div>
+      {!items ? (
+        <div className="space-y-1">
+          <Skeleton className="h-5 w-full" />
+          <Skeleton className="h-5 w-3/4" />
+        </div>
+      ) : items.length === 0 ? (
+        <div className="px-2 py-1 text-xs text-muted-foreground">None</div>
+      ) : (
+        <div className="space-y-0.5">
+          {items.map((it) => {
+            const on = active === it.value;
+            return (
+              <button
+                key={it.value}
+                type="button"
+                onClick={() => onPick(it.value)}
+                title={`${it.value} · ${it.count}`}
+                className={cn(
+                  "flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-xs transition-colors",
+                  on
+                    ? "bg-primary/10 font-medium text-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                <span className="truncate">{it.value}</span>
+                <span className="shrink-0 tabular-nums text-muted-foreground">{it.count}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type FacetProps = {
+  days: number;
+  environment?: string;
+  search?: string;
+  userId?: string;
+  tag?: string;
+  scoreName?: string;
+  level?: string;
+  onPick: (key: "environment" | "search" | "tag" | "scoreName" | "level", value: string) => void;
+};
+
+/** The facet sections — shared by the desktop rail and the mobile Filters sheet. */
+function FacetSections({ days, environment, search, userId, tag, scoreName, level, onPick }: FacetProps) {
+  // Counts are facet-excluding server-side; passing the active filters makes them narrow live.
+  const { data } = useQuery({
+    queryKey: ["trace-facets", days, environment, search, userId, tag, scoreName, level],
+    queryFn: () => api.traceFacets({ days, limit: 25, environment, search, userId, tag, scoreName, level }),
+    refetchInterval: 15_000,
+    // Keep the current counts on screen while the next set loads — no skeleton flash on select.
+    placeholderData: keepPreviousData,
+  });
+  return (
+    <div className="space-y-4">
+      <FacetSection
+        title="Environment"
+        items={data?.environments}
+        active={environment}
+        onPick={(v) => onPick("environment", v)}
+      />
+      <FacetSection title="Level" items={data?.levels} active={level} onPick={(v) => onPick("level", v)} />
+      <FacetSection title="Name" items={data?.names} active={search} onPick={(v) => onPick("search", v)} />
+      <FacetSection title="Scores" items={data?.scores} active={scoreName} onPick={(v) => onPick("scoreName", v)} />
+      <FacetSection title="Tags" items={data?.tags} active={tag} onPick={(v) => onPick("tag", v)} />
+    </div>
+  );
+}
+
+/** Desktop filter rail — sticky so it stays put while the table scrolls. */
+function FacetPanel(props: FacetProps) {
+  return (
+    <aside className="sticky top-4 hidden max-h-[calc(100svh-2rem)] w-56 shrink-0 self-start overflow-y-auto lg:block">
+      <FacetSections {...props} />
+    </aside>
+  );
+}
+
 function TracesPage() {
   const filters = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const days = useRangeDays();
   const readOnly = useIsReadOnly();
   const qc = useQueryClient();
+  const { order, hidden, toggle: toggleColumn, move: moveColumn } = useColumnPrefs();
+  const visibleCols = order.filter((k) => !hidden.has(k));
+
+  // `peek`/`page`/`pageSize` are view state, not filters — keep them out of the list query's
+  // filter object (so facets/saved views use only real filters), but page/size do drive the query.
+  const { peek, page: pageRaw, pageSize: pageSizeRaw, ...listFilters } = filters;
+  const page = pageRaw ?? 1;
+  const pageSize = pageSizeRaw ?? DEFAULT_PAGE_SIZE;
 
   const {
-    data: traces,
+    data: pageData,
     isLoading,
     error,
   } = useQuery({
-    queryKey: ["traces", filters, days],
-    queryFn: () => api.listTraces({ ...filters, days }),
+    queryKey: ["traces", listFilters, days, page, pageSize],
+    queryFn: () => api.listTracesPage({ ...listFilters, days, page, pageSize }),
     refetchInterval: 5_000,
+    // Keep the prior page/filter results on screen while the next loads — no blank flash on paging.
+    placeholderData: keepPreviousData,
   });
+  const traces = pageData?.data;
+  const total = pageData?.total ?? 0;
+  const scores = pageData?.scores ?? {};
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
+  // Changing a filter resets to page 1 (the old offset would point past the new result set).
   const setFilter = (key: keyof TraceSearch, value: string) => {
-    navigate({ search: (prev) => ({ ...prev, [key]: value || undefined }) });
+    navigate({ search: (prev) => ({ ...prev, [key]: value || undefined, page: undefined }) });
   };
-  const hasFilters = Boolean(filters.search || filters.environment || filters.userId || filters.tag);
+
+  // Per-column cell renderers — the table header/body iterate `visibleCols` in the persisted order.
+  const cellContent: Record<ColKey, (t: TraceSummary) => ReactNode> = {
+    timestamp: (t) => t.timestamp,
+    obs: (t) => Number(t.observation_count).toLocaleString(),
+    tokens: (t) => Number(t.total_tokens).toLocaleString(),
+    cost: (t) => fmtCost(Number(t.total_cost)),
+    latency: (t) => `${t.latency_ms} ms`,
+    scores: (t) => <ScoreBadges scores={scores[t.id] ?? []} onPick={(name) => setFilter("scoreName", name)} />,
+    env: (t) => <Badge variant="secondary">{t.environment}</Badge>,
+    tags: (t) => (
+      <div className="flex flex-wrap gap-1">
+        {t.tags.map((tag) => (
+          <button
+            key={tag}
+            type="button"
+            className="border bg-muted px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+            onClick={(e) => {
+              e.stopPropagation();
+              setFilter("tag", tag);
+            }}
+            title="Filter by tag"
+          >
+            {tag}
+          </button>
+        ))}
+      </div>
+    ),
+  };
+  const setPage = (p: number) => navigate({ search: (prev) => ({ ...prev, page: p > 1 ? p : undefined }) });
+  const setPageSize = (s: number) =>
+    navigate({ search: (prev) => ({ ...prev, pageSize: s !== DEFAULT_PAGE_SIZE ? s : undefined, page: undefined }) });
+  const hasFilters = Boolean(
+    filters.search || filters.environment || filters.userId || filters.tag || filters.scoreName || filters.level,
+  );
+
+  // Facet click toggles the matching filter (name facet maps to the `search`/name filter).
+  const pickFacet = (key: "environment" | "search" | "tag" | "scoreName" | "level", value: string) => {
+    const current = filters[key];
+    setFilter(key, current === value ? "" : value);
+  };
+
+  // Peek drawer: open a trace inline over the list, deep-linkable via ?peek= (drawer owns J/K nav).
+  const setPeek = (id: string | undefined) => navigate({ search: (prev) => ({ ...prev, peek: id }) });
 
   const { data: savedViews } = useQuery({
     queryKey: ["saved-views", "traces"],
     queryFn: () => api.listSavedViews("traces"),
   });
   const saveView = useMutation({
-    mutationFn: (name: string) => api.createSavedView({ name, table: "traces", filters }),
+    mutationFn: (name: string) => api.createSavedView({ name, table: "traces", filters: listFilters }),
     onSuccess: () => {
       toast.success("View saved");
       qc.invalidateQueries({ queryKey: ["saved-views", "traces"] });
@@ -101,22 +420,35 @@ function TracesPage() {
   const allSelected = allShown.length > 0 && allShown.every((id) => selected.has(id));
 
   const runBatch = useMutation({
-    mutationFn: () =>
-      api.batchTraces({
+    mutationFn: async () => {
+      if (action === "add-tag") {
+        // Append the tag to each selected trace's existing tags (setTraceTags replaces the full set).
+        const tag = target.trim();
+        await Promise.all(
+          [...selected].map((id) => {
+            const t = traces?.find((x) => x.id === id);
+            return api.setTraceTags(id, [...new Set([...(t?.tags ?? []), tag])]);
+          }),
+        );
+        return;
+      }
+      await api.batchTraces({
         action,
         traceIds: [...selected],
         datasetName: action === "add-to-dataset" ? target : undefined,
         queueName: action === "review" ? target : undefined,
-      }),
+      });
+    },
     onSuccess: () => {
       toast.success("Batch applied");
       setSelected(new Set());
       setTarget("");
       qc.invalidateQueries({ queryKey: ["traces"] });
+      qc.invalidateQueries({ queryKey: ["trace-facets"] });
     },
     onError: (e) => toast.error(`Batch failed: ${String(e)}`),
   });
-  const needsTarget = action === "add-to-dataset" || action === "review";
+  const needsTarget = action === "add-to-dataset" || action === "review" || action === "add-tag";
 
   return (
     <div className="space-y-4">
@@ -124,15 +456,26 @@ function TracesPage() {
         title="Traces"
         actions={
           <>
+            <ColumnsMenu order={order} hidden={hidden} toggle={toggleColumn} move={moveColumn} />
             <Button variant="outline" size="sm" onClick={promptSaveView} disabled={readOnly} className="gap-2">
               <Save />
               Save view
             </Button>
-            <Button variant="outline" size="sm" onClick={() => void downloadTracesExport("jsonl")} className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void downloadTracesExport("jsonl", { ...listFilters, days })}
+              className="gap-2"
+            >
               <Download />
               Export JSONL
             </Button>
-            <Button variant="outline" size="sm" onClick={() => void downloadTracesExport("csv")} className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void downloadTracesExport("csv", { ...listFilters, days })}
+              className="gap-2"
+            >
               <Download />
               Export CSV
             </Button>
@@ -140,39 +483,84 @@ function TracesPage() {
         }
       />
 
-      {traces && traces.length > 0 && (
+      {(isLoading || (traces && traces.length > 0)) && (
         <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
-          <StatTile label="Traces" value={traces.length} icon={Activity} />
-          <StatTile label="Tokens" value={traces.reduce((a, t) => a + Number(t.total_tokens), 0)} icon={Coins} />
+          <StatTile label="Traces" value={traces ? total : <Skeleton className="h-6 w-16" />} icon={Activity} />
           <StatTile
-            label="Cost"
-            value={fmtCost(traces.reduce((a, t) => a + Number(t.total_cost), 0))}
+            label="Tokens (page)"
+            value={traces ? traces.reduce((a, t) => a + Number(t.total_tokens), 0) : <Skeleton className="h-6 w-16" />}
+            icon={Coins}
+          />
+          <StatTile
+            label="Cost (page)"
+            value={
+              traces ? fmtCost(traces.reduce((a, t) => a + Number(t.total_cost), 0)) : <Skeleton className="h-6 w-16" />
+            }
             icon={DollarSign}
           />
         </div>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
+        {/* Mobile: the facet rail is hidden on small screens, so expose it via a sheet. */}
+        <Sheet>
+          <SheetTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-2 lg:hidden">
+              <SlidersHorizontal />
+              Filters
+            </Button>
+          </SheetTrigger>
+          <SheetContent side="left" className="w-72 gap-0 overflow-y-auto p-0">
+            <SheetHeader className="border-b">
+              <SheetTitle>Filters</SheetTitle>
+            </SheetHeader>
+            <div className="p-4">
+              <FacetSections
+                days={days}
+                environment={filters.environment}
+                search={filters.search}
+                userId={filters.userId}
+                tag={filters.tag}
+                scoreName={filters.scoreName}
+                level={filters.level}
+                onPick={pickFacet}
+              />
+            </div>
+          </SheetContent>
+        </Sheet>
         <Input
           type="search"
-          placeholder="Search name…"
+          placeholder="Search name or content…"
           defaultValue={filters.search ?? ""}
           onChange={(e) => setFilter("search", e.target.value)}
           className="h-9 max-w-xs"
         />
-        <Input
-          placeholder="Environment"
-          defaultValue={filters.environment ?? ""}
-          onChange={(e) => setFilter("environment", e.target.value)}
-          className="h-9 w-40"
-        />
-        <Input
-          placeholder="User ID"
-          defaultValue={filters.userId ?? ""}
-          onChange={(e) => setFilter("userId", e.target.value)}
-          className="h-9 w-40"
-        />
-        {filters.tag && <KindBadge tone="blue">tag: {filters.tag}</KindBadge>}
+        {/* Active-filter chips (environment / user / tag / score / level all set via the facet rail). */}
+        {filters.environment && (
+          <button type="button" onClick={() => setFilter("environment", "")} title="Clear environment filter">
+            <KindBadge tone="neutral">env: {filters.environment} ✕</KindBadge>
+          </button>
+        )}
+        {filters.userId && (
+          <button type="button" onClick={() => setFilter("userId", "")} title="Clear user filter">
+            <KindBadge tone="violet">user: {filters.userId} ✕</KindBadge>
+          </button>
+        )}
+        {filters.tag && (
+          <button type="button" onClick={() => setFilter("tag", "")} title="Clear tag filter">
+            <KindBadge tone="blue">tag: {filters.tag} ✕</KindBadge>
+          </button>
+        )}
+        {filters.scoreName && (
+          <button type="button" onClick={() => setFilter("scoreName", "")} title="Clear score filter">
+            <KindBadge tone="green">score: {filters.scoreName} ✕</KindBadge>
+          </button>
+        )}
+        {filters.level && (
+          <button type="button" onClick={() => setFilter("level", "")} title="Clear level filter">
+            <KindBadge tone="amber">level: {filters.level} ✕</KindBadge>
+          </button>
+        )}
         {hasFilters && (
           <Button variant="ghost" size="sm" onClick={() => navigate({ search: {} })}>
             Clear
@@ -209,6 +597,19 @@ function TracesPage() {
       {selected.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 p-2">
           <strong className="text-sm">{selected.size} selected</strong>
+          {selected.size === 2 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const [a, b] = [...selected];
+                navigate({ to: "/traces/compare", search: { a, b } });
+              }}
+            >
+              <GitCompare />
+              Compare
+            </Button>
+          )}
           <Select value={action} onValueChange={setAction}>
             <SelectTrigger size="sm" className="w-[200px]">
               <SelectValue />
@@ -216,12 +617,15 @@ function TracesPage() {
             <SelectContent>
               <SelectItem value="add-to-dataset">Add to dataset</SelectItem>
               <SelectItem value="review">Add to review queue</SelectItem>
+              <SelectItem value="add-tag">Add tag</SelectItem>
               <SelectItem value="delete">Delete</SelectItem>
             </SelectContent>
           </Select>
           {needsTarget && (
             <Input
-              placeholder={action === "add-to-dataset" ? "dataset name" : "review queue name"}
+              placeholder={
+                action === "add-to-dataset" ? "dataset name" : action === "add-tag" ? "tag name" : "review queue name"
+              }
               value={target}
               onChange={(e) => setTarget(e.target.value)}
               className="h-9 w-52"
@@ -240,81 +644,113 @@ function TracesPage() {
         </div>
       )}
 
-      {isLoading ? (
-        <Skeleton className="h-64 w-full" />
-      ) : error ? (
-        <EmptyState title="Failed to load traces" description={String(error)} />
-      ) : !traces || traces.length === 0 ? (
-        <EmptyState
-          title="No traces match"
-          description="Run `bun run quickstart` to emit one, or adjust your filters."
+      <div className="flex gap-4">
+        <FacetPanel
+          days={days}
+          environment={filters.environment}
+          search={filters.search}
+          userId={filters.userId}
+          tag={filters.tag}
+          scoreName={filters.scoreName}
+          level={filters.level}
+          onPick={pickFacet}
         />
-      ) : (
-        <div className="border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-10">
-                  <Checkbox
-                    checked={allSelected}
-                    onCheckedChange={(c) => setSelected(c ? new Set(allShown) : new Set())}
-                    aria-label="Select all shown"
-                  />
-                </TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Timestamp</TableHead>
-                <TableHead>Obs</TableHead>
-                <TableHead>Tokens</TableHead>
-                <TableHead>Cost</TableHead>
-                <TableHead>Latency</TableHead>
-                <TableHead>Env</TableHead>
-                <TableHead>Tags</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {traces.map((t) => (
-                <TableRow key={t.id} data-state={selected.has(t.id) ? "selected" : undefined}>
-                  <TableCell>
-                    <Checkbox
-                      checked={selected.has(t.id)}
-                      onCheckedChange={() => toggle(t.id)}
-                      aria-label={`Select ${t.name || t.id}`}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Link to="/traces/$id" params={{ id: t.id }} className="font-medium text-primary hover:underline">
-                      {t.name || t.id.slice(0, 8)}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{t.timestamp}</TableCell>
-                  <TableCell>{t.observation_count}</TableCell>
-                  <TableCell>{t.total_tokens}</TableCell>
-                  <TableCell>{fmtCost(Number(t.total_cost))}</TableCell>
-                  <TableCell>{t.latency_ms} ms</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{t.environment}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {t.tags.map((tag) => (
-                        <button
-                          key={tag}
-                          type="button"
-                          className="border bg-muted px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground"
-                          onClick={() => setFilter("tag", tag)}
-                          title="Filter by tag"
-                        >
-                          {tag}
-                        </button>
+        <div className="min-w-0 flex-1">
+          {isLoading ? (
+            <Skeleton className="h-64 w-full" />
+          ) : error ? (
+            <EmptyState title="Failed to load traces" description={String(error)} />
+          ) : !traces || traces.length === 0 ? (
+            <EmptyState
+              title="No traces match"
+              description="Run `bun run quickstart` to emit one, or adjust your filters."
+            />
+          ) : (
+            <div className="border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-10">
+                      <Checkbox
+                        checked={allSelected}
+                        onCheckedChange={(c) => setSelected(c ? new Set(allShown) : new Set())}
+                        aria-label="Select all shown"
+                      />
+                    </TableHead>
+                    <TableHead>Name</TableHead>
+                    {visibleCols.map((k) => (
+                      <TableHead key={k}>{COL_LABEL[k]}</TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {traces.map((t) => (
+                    <TableRow
+                      key={t.id}
+                      data-state={selected.has(t.id) ? "selected" : peek === t.id ? "selected" : undefined}
+                      onClick={() => setPeek(t.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") setPeek(t.id);
+                      }}
+                      tabIndex={0}
+                      className="cursor-pointer"
+                    >
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selected.has(t.id)}
+                          onCheckedChange={() => toggle(t.id)}
+                          aria-label={`Select ${t.name || t.id}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <span className="font-medium text-primary">{t.name || t.id.slice(0, 8)}</span>
+                      </TableCell>
+                      {visibleCols.map((k) => (
+                        <TableCell key={k} className={COL_CLASS[k]}>
+                          {cellContent[k](t)}
+                        </TableCell>
                       ))}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          {traces && total > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 text-sm">
+              <span className="text-muted-foreground">
+                {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Rows</span>
+                <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+                  <SelectTrigger size="sm" className="w-[4.5rem]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZES.map((s) => (
+                      <SelectItem key={s} value={String(s)}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+                  Prev
+                </Button>
+                <span className="tabular-nums text-muted-foreground">
+                  Page {page} / {pageCount}
+                </span>
+                <Button variant="outline" size="sm" disabled={page >= pageCount} onClick={() => setPage(page + 1)}>
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
+
+      <TracePeekDrawer traces={traces} peekId={peek} onPeek={setPeek} />
     </div>
   );
 }

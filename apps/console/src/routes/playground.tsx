@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Play } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageHeader } from "../components/page-header";
 import { Button } from "../components/ui/button";
 import {
@@ -52,6 +52,14 @@ function PlaygroundPage() {
   const [result, setResult] = useState<PlaygroundResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Follow the response to the true bottom as it streams / resolves (not just the anchor top).
+  useEffect(() => {
+    if (busy || streamed || result || error) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+  }, [busy, streamed, result, error]);
 
   // Sensible default model per provider.
   function onProvider(p: string) {
@@ -145,7 +153,19 @@ function PlaygroundPage() {
           </div>
           <div className="space-y-2">
             <Label htmlFor="pg-user">User</Label>
-            <Textarea id="pg-user" value={userMsg} onChange={(e) => setUserMsg(e.target.value)} rows={4} />
+            <Textarea
+              id="pg-user"
+              value={userMsg}
+              onChange={(e) => setUserMsg(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !busy) run();
+              }}
+              rows={4}
+            />
+            <p className="text-xs text-muted-foreground">
+              Press <kbd className="rounded border bg-muted px-1 font-mono text-[0.625rem]">⌘</kbd>
+              <kbd className="rounded border bg-muted px-1 font-mono text-[0.625rem]">↵</kbd> to run.
+            </p>
           </div>
 
           {mode === "structured" && (
@@ -187,53 +207,68 @@ function PlaygroundPage() {
         </CardFooter>
       </Card>
 
-      {error && (
-        <Card className="border-destructive/50">
-          <CardHeader>
-            <CardTitle className="text-destructive">Error</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-destructive">{error}</CardContent>
-        </Card>
-      )}
+      <div className="space-y-6">
+        {busy && !streamed && !result && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Play className="size-4 animate-pulse text-primary" />
+                Running…
+              </CardTitle>
+              <CardDescription>Waiting for the provider to respond.</CardDescription>
+            </CardHeader>
+          </Card>
+        )}
 
-      {streamed && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Response (streaming)</CardTitle>
-            <CardDescription>Live output streamed from the provider.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <pre className="overflow-auto border bg-muted/50 p-3 text-xs whitespace-pre-wrap">{streamed}</pre>
-          </CardContent>
-        </Card>
-      )}
+        {error && (
+          <Card className="border-destructive/50">
+            <CardHeader>
+              <CardTitle className="text-destructive">Error</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-destructive">{error}</CardContent>
+          </Card>
+        )}
 
-      {result && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Response</CardTitle>
-            <CardDescription>
-              {result.provider}/{result.model}
-            </CardDescription>
-            {result.traceId && (
-              <CardAction>
-                <Button asChild variant="outline" size="sm">
-                  <Link to="/traces/$id" params={{ id: result.traceId }}>
-                    View trace
-                    <ArrowRight className="size-3.5" />
-                  </Link>
-                </Button>
-              </CardAction>
-            )}
-          </CardHeader>
-          <CardContent>
-            <pre className="overflow-auto border bg-muted/50 p-3 text-xs whitespace-pre-wrap">{result.content}</pre>
-          </CardContent>
-          <CardFooter className="border-t text-sm text-muted-foreground">
-            {result.usage.totalTokens} tokens ({result.usage.promptTokens}+{result.usage.completionTokens})
-          </CardFooter>
-        </Card>
-      )}
+        {streamed && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Response (streaming)</CardTitle>
+              <CardDescription>Live output streamed from the provider.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <pre className="overflow-auto border bg-muted/50 p-3 text-xs whitespace-pre-wrap">{streamed}</pre>
+            </CardContent>
+          </Card>
+        )}
+
+        {result && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Response</CardTitle>
+              <CardDescription>
+                {result.provider}/{result.model}
+              </CardDescription>
+              {result.traceId && (
+                <CardAction>
+                  <Button asChild variant="outline" size="sm">
+                    <Link to="/traces/$id" params={{ id: result.traceId }}>
+                      View trace
+                      <ArrowRight className="size-3.5" />
+                    </Link>
+                  </Button>
+                </CardAction>
+              )}
+            </CardHeader>
+            <CardContent>
+              <pre className="overflow-auto border bg-muted/50 p-3 text-xs whitespace-pre-wrap">{result.content}</pre>
+            </CardContent>
+            <CardFooter className="border-t text-sm text-muted-foreground">
+              {result.usage.totalTokens} tokens ({result.usage.promptTokens}+{result.usage.completionTokens})
+            </CardFooter>
+          </Card>
+        )}
+      </div>
+      <div ref={bottomRef} />
     </div>
   );
 }

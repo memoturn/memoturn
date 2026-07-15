@@ -31,12 +31,12 @@ export function ThemeProvider({
   useEffect(() => {
     const root = window.document.documentElement;
     root.classList.remove("light", "dark");
-    if (theme === "system") {
-      const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-      root.classList.add(systemTheme);
-      return;
-    }
-    root.classList.add(theme);
+    const resolved =
+      theme === "system" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : theme;
+    root.classList.add(resolved);
+    // Also stamp data-theme so @memoturn/ui's attribute-keyed token selectors and
+    // its prefers-color-scheme guard (`:not([data-theme="light"])`) resolve correctly.
+    root.setAttribute("data-theme", resolved);
   }, [theme]);
 
   const setTheme = (next: Theme) => {

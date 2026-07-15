@@ -1,4 +1,14 @@
-import type { ObservationDetail, ScoreRow, SessionSummary, TraceDetail, TraceSummary } from "@memoturn/contracts";
+import type {
+  ObservationDetail,
+  ScoreRow,
+  SessionSummary,
+  TraceDetail,
+  TraceFacets,
+  TraceSummary,
+  TraceTags,
+  UserSummary,
+} from "@memoturn/contracts";
+import { isoNow } from "@memoturn/core";
 import { type TraceFilters, type TraceIO, type TraceScore, telemetry } from "@memoturn/telemetry";
 
 /**
@@ -22,8 +32,60 @@ export async function listTraces(projectId: string, filters: TraceFilters = {}):
   return telemetry().listTraces(projectId, filters);
 }
 
-export async function listSessions(projectId: string, limit = 50): Promise<SessionSummary[]> {
-  return telemetry().listSessions(projectId, limit);
+export async function countTraces(projectId: string, filters: TraceFilters = {}): Promise<number> {
+  return telemetry().countTraces(projectId, filters);
+}
+
+/**
+ * Replace a trace's tags. Reads the stored trace row and re-inserts it with the new tags and a
+ * newer event_ts — the telemetry store's last-writer-wins merge overwrites the old row without a
+ * DELETE (same mechanism as score correction). Returns null when the trace doesn't exist.
+ */
+export async function setTraceTags(projectId: string, traceId: string, tags: string[]): Promise<TraceTags | null> {
+  const store = telemetry();
+  const [row] = await store.getTraceRowsByIds(projectId, [traceId]);
+  if (!row) return null;
+  const clean = [...new Set(tags.map((t) => t.trim()).filter(Boolean))];
+  await store.insertRows("traces", [{ ...row, tags: clean, event_ts: isoNow() }]);
+  return { traceId, tags: clean };
+}
+
+export async function traceFacets(
+  projectId: string,
+  opts: {
+    days?: number;
+    limit?: number;
+    environment?: string;
+    search?: string;
+    userId?: string;
+    tag?: string;
+    scoreName?: string;
+    level?: string;
+  } = {},
+): Promise<TraceFacets> {
+  return telemetry().traceFacets(projectId, opts);
+}
+
+export async function listSessions(
+  projectId: string,
+  opts: { limit?: number; offset?: number; days?: number; search?: string } = {},
+): Promise<SessionSummary[]> {
+  return telemetry().listSessions(projectId, opts);
+}
+
+export async function countSessions(projectId: string, days?: number, search?: string): Promise<number> {
+  return telemetry().countSessions(projectId, days, search);
+}
+
+export async function listUsers(
+  projectId: string,
+  opts: { limit?: number; offset?: number; days?: number; search?: string } = {},
+): Promise<UserSummary[]> {
+  return telemetry().listUsers(projectId, opts);
+}
+
+export async function countUsers(projectId: string, days?: number, search?: string): Promise<number> {
+  return telemetry().countUsers(projectId, days, search);
 }
 
 /** Lightweight fetch of name/input/output for a set of traces (for review queues). */

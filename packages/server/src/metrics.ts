@@ -20,6 +20,7 @@ export async function getMetrics(projectId: string, days = 30): Promise<MetricsS
   return {
     total_traces: totalTraces,
     total_generations: byModel.reduce((s, m) => s + m.generations, 0),
+    total_errors: byDay.reduce((s, d) => s + d.errors, 0),
     total_tokens: byModel.reduce((s, m) => s + m.total_tokens, 0),
     total_cost: byModel.reduce((s, m) => s + m.total_cost, 0),
     byDay,

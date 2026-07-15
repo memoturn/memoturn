@@ -23,6 +23,37 @@ export const traceSummary = z.object({
 });
 export type TraceSummary = z.infer<typeof traceSummary>;
 
+// A trace's scores, condensed for the list view (name + value).
+export const traceListScore = z.object({
+  name: z.string(),
+  value: z.number().nullable(),
+  string_value: z.string(),
+});
+export type TraceListScore = z.infer<typeof traceListScore>;
+
+// Paginated trace list: the page of rows, the total matching the filters, and a per-trace score map.
+export const tracePage = z.object({
+  data: z.array(traceSummary),
+  total: z.number(),
+  scores: z.record(z.string(), z.array(traceListScore)),
+});
+export type TracePage = z.infer<typeof tracePage>;
+
+// Result of annotating a trace (writing an ANNOTATION score); the score lands asynchronously.
+export const annotationResult = z.object({
+  scoreId: z.string(),
+  traceId: z.string(),
+  name: z.string(),
+});
+export type AnnotationResult = z.infer<typeof annotationResult>;
+
+// Result of editing a trace's tags (merge-on-write into the telemetry store).
+export const traceTags = z.object({
+  traceId: z.string(),
+  tags: z.array(z.string()),
+});
+export type TraceTags = z.infer<typeof traceTags>;
+
 export const scoreConfig = z.object({
   id: z.string(),
   name: z.string(),
@@ -51,6 +82,20 @@ export const savedView = z.object({
   createdAt: z.string(),
 });
 export type SavedView = z.infer<typeof savedView>;
+
+// Faceted filter counts for the traces list — one {value, count} per distinct facet value,
+// scoped to the current time range. Powers the faceted filter panel with live counts.
+export const facetCount = z.object({ value: z.string(), count: z.number() });
+export type FacetCount = z.infer<typeof facetCount>;
+
+export const traceFacets = z.object({
+  environments: z.array(facetCount),
+  names: z.array(facetCount),
+  tags: z.array(facetCount),
+  scores: z.array(facetCount),
+  levels: z.array(facetCount),
+});
+export type TraceFacets = z.infer<typeof traceFacets>;
 
 export const modelPrice = z.object({
   id: z.string(),
@@ -134,6 +179,8 @@ export const observationDetail = z.object({
   status_message: z.string(),
   model: z.string(),
   provider: z.string(),
+  prompt_id: z.string(),
+  prompt_version: z.string(),
   prompt_tokens: z.number(),
   completion_tokens: z.number(),
   total_tokens: z.number(),
@@ -184,10 +231,33 @@ export const sessionSummary = z.object({
 });
 export type SessionSummary = z.infer<typeof sessionSummary>;
 
+export const sessionPage = z.object({
+  data: z.array(sessionSummary),
+  total: z.number(),
+});
+export type SessionPage = z.infer<typeof sessionPage>;
+
+// Per-end-user rollup (traces grouped by user_id) — the Users view.
+export const userSummary = z.object({
+  user_id: z.string(),
+  trace_count: z.number(),
+  first_seen: z.string(),
+  last_seen: z.string(),
+  total_cost: z.number(),
+});
+export type UserSummary = z.infer<typeof userSummary>;
+
+export const userPage = z.object({
+  data: z.array(userSummary),
+  total: z.number(),
+});
+export type UserPage = z.infer<typeof userPage>;
+
 // ── Metrics ────────────────────────────────────────────────────────────────────
 export const dailyMetric = z.object({
   date: z.string(),
   generations: z.number(),
+  errors: z.number(),
   total_tokens: z.number(),
   total_cost: z.number(),
   p50_latency_ms: z.number(),
@@ -206,6 +276,7 @@ export type ModelMetric = z.infer<typeof modelMetric>;
 export const metricsSummary = z.object({
   total_traces: z.number(),
   total_generations: z.number(),
+  total_errors: z.number(),
   total_tokens: z.number(),
   total_cost: z.number(),
   byDay: z.array(dailyMetric),

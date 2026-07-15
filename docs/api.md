@@ -31,11 +31,15 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/v1/traces` | List; filters: `limit`, `userId`, `sessionId`, `environment`, `search`, `tag`, `days`. |
+| GET | `/v1/traces` | Paginated list `{ data, total, scores }` (per-trace score map); paging: `page`, `pageSize` (or legacy `limit`); filters: `userId`, `sessionId`, `environment`, `search` (matches trace name OR observation input/output content), `tag`, `promptId`, `scoreName`, `level`, `days`. |
+| GET | `/v1/traces/facets` | Distinct filter facet values + counts (`environment`, `name`, `tags`, `scores`, `levels`) over the range; params: `days`, `limit`, plus active filters (`environment`, `search`, `userId`, `tag`, `scoreName`, `level`) for facet-excluding counts. |
 | POST | `/v1/traces/batch` | Bulk action on selected traces: `delete`, `add-to-dataset`, or `review`. |
 | GET | `/v1/traces/{id}` | Assembled trace: observations + scores. |
 | POST | `/v1/traces/{id}/replay` | Re-run a stored trace's input through the LLM gateway and record the result as a new trace. Body: `{ provider?, model? }`. Audited. |
-| GET | `/v1/sessions` | Sessions (traces grouped by `sessionId`). |
+| POST | `/v1/traces/{id}/annotate` | Add a manual ANNOTATION score to a trace. Body: `{ name, dataType, value?, stringValue?, comment? }`. Audited. |
+| POST | `/v1/traces/{id}/tags` | Replace a trace's tags (merge-on-write). Body: `{ tags: string[] }`. Audited. |
+| GET | `/v1/sessions` | Paginated sessions `{ data, total }` (traces grouped by `sessionId`); paging: `page`, `pageSize` (or legacy `limit`); scoped by `days`; `search` filters by `sessionId` substring. |
+| GET | `/v1/users` | Paginated end users `{ data, total }` (traces grouped by `userId`); paging: `page`, `pageSize` (or legacy `limit`); scoped by `days`; `search` filters by `userId` substring. |
 | GET | `/v1/metrics` | Cost/token/latency rollups by day and model (`days` query). |
 
 ### Prompts
@@ -82,6 +86,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/review-queues/{name}/items` | Pending items with trace input/output. |
 | POST | `/v1/review-queues/{name}/items/{itemId}/assign` | Assign an item to a user (empty `assigneeId` unassigns; defaults to self). |
 | POST | `/v1/review-queues/{name}/items/{itemId}/score` | Submit a human `ANNOTATION` score. |
+| POST | `/v1/review-queues/{name}/items/{itemId}/skip` | Skip an item without scoring it (marks it `SKIPPED`). |
 
 ### Providers
 
@@ -135,7 +140,7 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | POST | `/v1/retention/apply` | Apply retention now. |
 | GET / POST | `/v1/model-prices` | List / create-update custom model price overrides (matched by name pattern, override built-ins). |
 | DELETE | `/v1/model-prices/{id}` | Delete a model price override. |
-| GET | `/v1/exports/traces` | Download traces as NDJSON (`application/x-ndjson`, default) or CSV (`?format=csv`); params: `limit`, `environment`. |
+| GET | `/v1/exports/traces` | Download traces as NDJSON (`application/x-ndjson`, default) or CSV (`?format=csv`); honors the trace-list filters: `limit`, `environment`, `search`, `userId`, `tag`, `scoreName`, `level`, `days`. |
 | GET / POST | `/v1/scheduled-exports` | Get / configure the recurring daily NDJSON export of traces to blob storage. |
 | POST | `/v1/scheduled-exports/run` | Run the export now and write the NDJSON to blob storage. |
 | GET / POST | `/v1/masking` | Get / configure the PII redaction policy (built-in + custom patterns) applied to trace input/output at ingest. |

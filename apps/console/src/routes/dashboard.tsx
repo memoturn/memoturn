@@ -1,9 +1,18 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { ModelMetric, Widget } from "@memoturn/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Activity, Coins, DollarSign, LayoutDashboard, type LucideIcon, Sparkles, Trash2 } from "lucide-react";
+import {
+  Activity,
+  Coins,
+  DollarSign,
+  LayoutDashboard,
+  type LucideIcon,
+  Sparkles,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
@@ -53,11 +62,12 @@ const modelColumns: ColumnDef<ModelMetric>[] = [
 ];
 
 // ── Interactive usage-over-time area chart ────────────────────────────────────────
-type MetricKey = "cost" | "tokens" | "gens" | "latency";
+type MetricKey = "cost" | "tokens" | "gens" | "errors" | "latency";
 const usageConfig = {
   cost: { label: "Cost", color: "var(--chart-1)" },
   tokens: { label: "Tokens", color: "var(--chart-2)" },
   gens: { label: "Generations", color: "var(--chart-3)" },
+  errors: { label: "Errors", color: "var(--destructive)" },
   latency: { label: "p95 latency", color: "var(--chart-4)" },
 } satisfies ChartConfig;
 
@@ -71,7 +81,7 @@ function UsageChart({
   days: number;
 }) {
   const [active, setActive] = useState<MetricKey>("cost");
-  const metrics: MetricKey[] = ["cost", "tokens", "gens", "latency"];
+  const metrics: MetricKey[] = ["cost", "tokens", "gens", "errors", "latency"];
 
   return (
     <Card className="gap-0 py-0">
@@ -171,15 +181,36 @@ function ModelBarChart({
   );
 }
 
+/** First-load skeleton that mirrors the dashboard layout (stat row + charts) — no gray-block pop. */
+function DashboardSkeleton({ days }: { days: number }) {
+  return (
+    <div className="space-y-6">
+      <PageHeader title="Dashboard" description={`Overview of the last ${days} days.`} />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <Skeleton key={i} className="h-24 w-full" />
+        ))}
+      </div>
+      <Skeleton className="h-[340px] w-full" />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Skeleton className="h-[320px] w-full" />
+        <Skeleton className="h-[320px] w-full" />
+      </div>
+    </div>
+  );
+}
+
 function DashboardPage() {
   const days = useRangeDays();
   const { data, isLoading, error } = useQuery({
     queryKey: ["metrics", days],
     queryFn: () => api.getMetrics(days),
     refetchInterval: 10_000,
+    // Keep the prior dashboard on screen while a new time range loads — no full-page skeleton flash.
+    placeholderData: keepPreviousData,
   });
 
-  if (isLoading) return <Skeleton className="h-96 w-full" />;
+  if (isLoading) return <DashboardSkeleton days={days} />;
   if (error) return <EmptyState title="Failed to load dashboard" description={String(error)} />;
   if (!data) return null;
 
@@ -188,6 +219,7 @@ function DashboardPage() {
     cost: Number(d.total_cost),
     tokens: Number(d.total_tokens),
     gens: Number(d.generations),
+    errors: Number(d.errors),
     latency: Number(d.p95_latency_ms),
   }));
   const maxLatency = Math.max(0, ...series.map((s) => s.latency));
@@ -195,6 +227,7 @@ function DashboardPage() {
     cost: money(data.total_cost),
     tokens: Number(data.total_tokens).toLocaleString(),
     gens: Number(data.total_generations).toLocaleString(),
+    errors: Number(data.total_errors).toLocaleString(),
     latency: `${maxLatency} ms`,
   };
   const costByModel = data.byModel.map((m) => ({ model: m.model, value: Number(m.total_cost) }));
@@ -206,9 +239,10 @@ function DashboardPage() {
     <div className="space-y-6">
       <PageHeader title="Dashboard" description={`Overview of the last ${days} days.`} />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Stat label="Traces" value={Number(data.total_traces).toLocaleString()} icon={Activity} />
         <Stat label="Generations" value={Number(data.total_generations).toLocaleString()} icon={Sparkles} />
+        <Stat label="Errors" value={Number(data.total_errors).toLocaleString()} icon={TriangleAlert} />
         <Stat label="Tokens" value={Number(data.total_tokens).toLocaleString()} icon={Coins} />
         <Stat label="Cost" value={money(data.total_cost)} icon={DollarSign} />
       </div>

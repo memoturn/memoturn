@@ -85,18 +85,23 @@ export type TelemetryTable = keyof TelemetryRowMap;
 
 export interface TraceFilters {
   limit?: number;
+  offset?: number; // rows to skip (pagination)
   userId?: string;
   sessionId?: string;
   environment?: string;
   search?: string; // matches trace name (case-insensitive substring)
   tag?: string; // trace must carry this tag
+  promptId?: string; // trace has an observation that used this prompt (by prompt_id)
+  scoreName?: string; // trace has a score with this name
+  level?: string; // trace has an observation at this level (e.g. ERROR / WARNING)
   days?: number; // only traces from the last N days
 }
 
-export interface ExportFilters {
-  limit?: number;
-  environment?: string;
-}
+/**
+ * Batch-export filters. Same shape as the trace list so an export honors whatever
+ * filters the user has applied in the console (environment, search, tag, score, level, …).
+ */
+export type ExportFilters = TraceFilters;
 
 // ── Read shapes not covered by @memoturn/contracts ───────────────────────────────
 
