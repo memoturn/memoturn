@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+import { AccountSecurity } from "../components/account-security";
 import { DataTable } from "../components/data-table";
 import { EmptyState } from "../components/empty-state";
 import { KindBadge } from "../components/kind-badge";
@@ -744,6 +745,7 @@ function SettingsPage() {
       <Tabs defaultValue="api-keys">
         <TabsList className="h-auto flex-wrap">
           <TabsTrigger value="api-keys">API Keys</TabsTrigger>
+          <TabsTrigger value="security">Security</TabsTrigger>
           <TabsTrigger value="providers">Providers</TabsTrigger>
           <TabsTrigger value="retention">Data Retention</TabsTrigger>
           <TabsTrigger value="exports">Exports &amp; Analytics</TabsTrigger>
@@ -754,6 +756,11 @@ function SettingsPage() {
           <TabsTrigger value="scores">Scores</TabsTrigger>
           <TabsTrigger value="pricing">Model Pricing</TabsTrigger>
         </TabsList>
+
+        {/* ── Security (per-user: 2FA + passkeys) ───────────────────────── */}
+        <TabsContent value="security" className="space-y-6">
+          <AccountSecurity />
+        </TabsContent>
 
         {/* ── API Keys ──────────────────────────────────────────────────── */}
         <TabsContent value="api-keys" className="space-y-6">

@@ -66,6 +66,19 @@ export type * from "@memoturn/contracts";
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 const PROJECT_KEY = "memoturn.project";
 
+/**
+ * Enabled auth methods, from the public /auth-config endpoint (not a /v1 contract route, so
+ * the shape lives here). The login/signup pages render only what the server accepts.
+ */
+export type AuthConfig = {
+  password: { enabled: boolean; signupDisabled: boolean };
+  social: { google: boolean; github: boolean };
+  magicLink: boolean;
+  emailOtp: boolean;
+  passkey: boolean;
+  emailConfigured: boolean;
+};
+
 export function getActiveProject(): string {
   return (typeof localStorage !== "undefined" && localStorage.getItem(PROJECT_KEY)) || "";
 }
@@ -154,6 +167,8 @@ export interface PlaygroundRequest {
 }
 
 export const api = {
+  // Public — no session required (used by the login/signup pages).
+  getAuthConfig: () => get<AuthConfig>(`/auth-config`),
   listTraces: (filters: TraceFilters & { limit?: number } = {}) =>
     get<{ data: TraceSummary[] }>(`/v1/traces${qs(filters as Record<string, unknown>)}`).then((r) => r.data),
   listTracesPage: (filters: TraceFilters & { page?: number; pageSize?: number } = {}) =>

@@ -34,6 +34,7 @@ import {
   ScrollText,
   Search,
   Settings as SettingsIcon,
+  ShieldCheck,
   Terminal,
   Users,
 } from "lucide-react";
@@ -136,6 +137,10 @@ function ProjectSwitcher() {
 function AppSidebar({ email, initials }: { email: string; initials: string }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const { data: session } = useSession();
+  // Platform-admin nav is shown to users with the global admin role; superadmins designated
+  // only by SUPERADMIN_USER_IDS can still reach /admin/users directly.
+  const isAdmin = (session?.user as { role?: string } | undefined)?.role === "admin";
   return (
     <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader className="gap-2">
@@ -193,6 +198,21 @@ function AppSidebar({ email, initials }: { email: string; initials: string }) {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+              {isAdmin && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    size="sm"
+                    isActive={isActivePath(pathname, "/admin/users")}
+                    tooltip="Platform users"
+                  >
+                    <Link to="/admin/users">
+                      <ShieldCheck />
+                      <span>Platform users</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -249,19 +269,41 @@ function AppSidebar({ email, initials }: { email: string; initials: string }) {
   );
 }
 
+// Routes reachable without a session (sign-in, sign-up, and the email-link landing pages).
+const PUBLIC_AUTH_ROUTES = [
+  "/login",
+  "/signup",
+  "/forgot-password",
+  "/reset-password",
+  "/accept-invite",
+  "/two-factor",
+];
+// Entry points a signed-in user should be bounced away from (they're already authenticated).
+const AUTH_ENTRY_ROUTES = ["/login", "/signup"];
+
 function RootComponent() {
   const { data: session, isPending } = useSession();
   const location = useLocation();
   const navigate = useNavigate();
-  const onLogin = location.pathname === "/login";
+  const path = location.pathname;
+  const isPublicAuth = PUBLIC_AUTH_ROUTES.includes(path);
+  const isAuthEntry = AUTH_ENTRY_ROUTES.includes(path);
+  // A signed-in user with no active organization (e.g. a fresh social/password signup) needs
+  // to create one before the project-scoped app is usable — onboard them on /organizations.
+  const activeOrg = (session?.session as { activeOrganizationId?: string | null } | undefined)?.activeOrganizationId;
+  const needsOrg = Boolean(session) && !activeOrg;
 
-  // Gate the app: send unauthenticated users to /login (except the login page itself).
+  // Gate the app: send unauthenticated users to /login (except the public auth pages), bounce
+  // already-signed-in users off the login/signup entry points, and steer org-less accounts to
+  // onboarding before anything project-scoped loads.
   useEffect(() => {
-    if (!isPending && !session && !onLogin) navigate({ to: "/login" });
-    if (!isPending && session && onLogin) navigate({ to: "/dashboard" });
-  }, [isPending, session, onLogin, navigate]);
+    if (isPending) return;
+    if (!session && !isPublicAuth) navigate({ to: "/login" });
+    else if (session && needsOrg && path !== "/organizations") navigate({ to: "/organizations" });
+    else if (session && isAuthEntry && !needsOrg) navigate({ to: "/dashboard" });
+  }, [isPending, session, isPublicAuth, isAuthEntry, needsOrg, path, navigate]);
 
-  if (onLogin) return <Outlet />;
+  if (isPublicAuth) return <Outlet />;
   if (isPending)
     return <div className="flex min-h-svh items-center justify-center text-sm text-muted-foreground">Loading…</div>;
   if (!session)

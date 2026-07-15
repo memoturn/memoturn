@@ -36,6 +36,9 @@ export default defineConfig({
       timeout: 120_000,
       stdout: "pipe",
       stderr: "pipe",
+      // The suite signs in many times from one IP; disable the auth rate limiter so the
+      // built-in sign-in sub-limit doesn't 429 legitimate repeated logins. Test-only.
+      env: { ...process.env, AUTH_RATE_LIMIT_DISABLED: "true" },
     },
     {
       command: "bun --filter @memoturn/console dev",
