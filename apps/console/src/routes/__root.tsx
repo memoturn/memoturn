@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { useEffect } from "react";
 import { CommandPalette } from "../components/CommandPalette";
+import { KeyboardHelp } from "../components/keyboard-help";
 import { Logo } from "../components/logo";
 import { ModeToggle } from "../components/mode-toggle";
 import { TimeRangeSelect } from "../components/TimeRangeSelect";
@@ -294,6 +295,7 @@ function RootComponent() {
         </main>
       </SidebarInset>
       <CommandPalette />
+      <KeyboardHelp />
     </SidebarProvider>
   );
 }
