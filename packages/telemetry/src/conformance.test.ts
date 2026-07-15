@@ -315,6 +315,20 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(win.trace_count).toBe(1);
     expect(win.p95_latency_ms).toBeGreaterThan(1000);
 
+    // Batched variant (alert cron): one grouped query for many projects. The known project
+    // matches; an unknown project is present with zeroed metrics (never absent).
+    const batch = await store.metricsWindowByProjects([P, "proj-absent"], 7 * 24 * 60);
+    expect(batch.get(P)).toEqual(win);
+    expect(batch.get("proj-absent")).toEqual({
+      generations: 0,
+      errors: 0,
+      total_tokens: 0,
+      total_cost: 0,
+      p50_latency_ms: 0,
+      p95_latency_ms: 0,
+      trace_count: 0,
+    });
+
     const widget = await store.widgetSeries(P, "tokens", "by_model", 7);
     expect(widget).toHaveLength(1);
     expect(widget[0]!.value).toBe(300);

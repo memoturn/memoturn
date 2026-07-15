@@ -1,5 +1,5 @@
 import { prisma } from "@memoturn/db";
-import { telemetry } from "@memoturn/telemetry";
+import { telemetry, type WindowMetric } from "@memoturn/telemetry";
 import { type Channel, type ChannelType, deliverToChannel } from "./automations.js";
 import { mapConcurrent } from "./concurrency.js";
 
@@ -20,6 +20,8 @@ export const ALERT_COMPARATORS = ["gt", "gte", "lt", "lte"] as const;
 export type AlertComparator = (typeof ALERT_COMPARATORS)[number];
 
 const DISPATCH_CONCURRENCY = 8;
+/** Distinct-window telemetry reads (and budget reads) in flight at once per sweep. */
+const METRIC_FETCH_CONCURRENCY = 8;
 
 export interface AlertRuleInput {
   name: string;
@@ -207,16 +209,45 @@ function breaches(value: number, comparator: string, threshold: number): boolean
   }
 }
 
-/** The current value of an alert metric. Returns null when it can't be computed (skip). */
-async function metricValue(
-  projectId: string,
-  metric: string,
-  windowMinutes: number,
+const windowKey = (projectId: string, window: number) => `${projectId}:${window}`;
+
+/**
+ * Prefetch the window metrics every rule needs, batched by window: one grouped Doris query
+ * per distinct window (across all its projects), run with bounded concurrency. This makes a
+ * sweep O(distinct windows) queries instead of O(rules) — the key scalability lever as the
+ * project/rule count grows. dlq_depth rules need no telemetry read (injected by the worker).
+ */
+async function prefetchWindows(
+  rules: { projectId: string; metric: string; window: number }[],
+): Promise<Map<string, WindowMetric>> {
+  const projectsByWindow = new Map<number, Set<string>>();
+  for (const r of rules) {
+    if (r.metric === "dlq_depth") continue;
+    (projectsByWindow.get(r.window) ?? projectsByWindow.set(r.window, new Set()).get(r.window)!).add(r.projectId);
+  }
+  const cache = new Map<string, WindowMetric>();
+  await mapConcurrent([...projectsByWindow.entries()], METRIC_FETCH_CONCURRENCY, async ([window, projectIds]) => {
+    try {
+      const byProject = await telemetry().metricsWindowByProjects([...projectIds], window);
+      for (const [projectId, metric] of byProject) cache.set(windowKey(projectId, window), metric);
+    } catch (err) {
+      // Leave this window's projects uncached → those rules skip this tick (no false transition).
+      console.error(`[alerts] window ${window}m fetch failed:`, err instanceof Error ? err.message : err);
+    }
+  });
+  return cache;
+}
+
+/** The current value of an alert metric from the prefetched cache. Null → can't compute (skip). */
+function ruleValue(
+  rule: { projectId: string; metric: string; window: number },
+  cache: Map<string, WindowMetric>,
   ctx: { dlqDepth?: number },
-): Promise<number | null> {
-  if (metric === "dlq_depth") return ctx.dlqDepth ?? null; // global queue depth, injected by the worker
-  const win = await telemetry().metricsWindow(projectId, windowMinutes);
-  switch (metric) {
+): number | null {
+  if (rule.metric === "dlq_depth") return ctx.dlqDepth ?? null; // global queue depth, injected by the worker
+  const win = cache.get(windowKey(rule.projectId, rule.window));
+  if (!win) return null; // fetch failed for this window → skip
+  switch (rule.metric) {
     case "error_rate":
       return win.generations > 0 ? win.errors / win.generations : 0;
     case "latency_p95":
@@ -251,10 +282,11 @@ export async function evaluateAllAlerts(
   ctx: { dlqDepth?: number } = {},
 ): Promise<{ evaluated: number; fired: number }> {
   const rules = await prisma.alertRule.findMany({ where: { enabled: true }, include: { state: true } });
+  const windows = await prefetchWindows(rules);
   let fired = 0;
   for (const rule of rules) {
     try {
-      const value = await metricValue(rule.projectId, rule.metric, rule.window, ctx);
+      const value = ruleValue(rule, windows, ctx);
       if (value === null) continue;
       const breached = breaches(value, rule.comparator, rule.threshold);
       const status = rule.state?.status ?? "ok";
@@ -315,13 +347,29 @@ function daysSinceMonthStart(): number {
  */
 export async function evaluateBudgets(): Promise<{ evaluated: number; notified: number }> {
   const budgets = await prisma.costBudget.findMany();
-  let notified = 0;
   const daysAgo = daysSinceMonthStart();
-  for (const b of budgets) {
+  const active = budgets.filter((b) => b.monthlyUsd > 0);
+
+  // Batch the month-to-date cost reads (one metricsByModel per project) with bounded
+  // concurrency so the budget sweep doesn't serialize a Doris query per project.
+  const costByProject = new Map<string, number>();
+  await mapConcurrent(active, METRIC_FETCH_CONCURRENCY, async (b) => {
     try {
-      if (b.monthlyUsd <= 0) continue;
       const byModel = await telemetry().metricsByModel(b.projectId, daysAgo);
-      const mtdCost = byModel.reduce((s, m) => s + m.total_cost, 0);
+      costByProject.set(
+        b.projectId,
+        byModel.reduce((s, m) => s + m.total_cost, 0),
+      );
+    } catch (err) {
+      console.error(`[budgets] project ${b.projectId} fetch failed:`, err instanceof Error ? err.message : err);
+    }
+  });
+
+  let notified = 0;
+  for (const b of active) {
+    try {
+      const mtdCost = costByProject.get(b.projectId);
+      if (mtdCost === undefined) continue; // fetch failed → skip this tick
       const ratio = mtdCost / b.monthlyUsd;
       const steps = parseThresholds(b.thresholds);
       const channels = parseChannels(b.channels);

@@ -94,6 +94,12 @@ export interface TelemetryStore {
   metricsByModel(projectId: string, days: number): Promise<ModelMetric[]>;
   /** Aggregate GENERATION metrics over a short trailing window (minutes) — for alert evaluation. */
   metricsWindow(projectId: string, sinceMinutes: number): Promise<WindowMetric>;
+  /**
+   * Batched `metricsWindow` for many projects in a single grouped query per table — the
+   * alert cron uses this so one tick issues O(distinct windows) queries, not O(rules).
+   * Projects with no rows in the window are present with zeroed metrics.
+   */
+  metricsWindowByProjects(projectIds: string[], sinceMinutes: number): Promise<Map<string, WindowMetric>>;
   countTracesSince(projectId: string, days: number): Promise<number>;
   widgetSeries(
     projectId: string,
