@@ -47,8 +47,10 @@ const apiKeySchema = z.object({
 type ApiKeyForm = z.infer<typeof apiKeySchema>;
 
 const providerSchema = z.object({
-  provider: z.enum(["anthropic", "openai"]),
-  apiKey: z.string().min(1, "API key is required"),
+  provider: z.enum(["anthropic", "openai", "gemini", "bedrock", "azure", "openai_compatible"]),
+  apiKey: z.string(),
+  baseUrl: z.string(),
+  region: z.string(),
 });
 type ProviderForm = z.infer<typeof providerSchema>;
 
@@ -192,10 +194,17 @@ function SettingsPage() {
   const { data: providers } = useQuery({ queryKey: ["providers"], queryFn: () => api.listProviders() });
   const providerForm = useForm<ProviderForm>({
     resolver: zodResolver(providerSchema),
-    defaultValues: { provider: "anthropic", apiKey: "" },
+    defaultValues: { provider: "anthropic", apiKey: "", baseUrl: "", region: "" },
   });
+  const providerKind = providerForm.watch("provider");
   const saveProvider = useMutation({
-    mutationFn: (v: ProviderForm) => api.addProvider(v.provider, v.apiKey),
+    mutationFn: (v: ProviderForm) =>
+      api.addProvider({
+        provider: v.provider,
+        apiKey: v.apiKey || undefined,
+        baseUrl: v.baseUrl || undefined,
+        region: v.region || undefined,
+      }),
     onSuccess: () => {
       toast.success("Provider key saved");
       providerForm.reset();
@@ -918,6 +927,10 @@ function SettingsPage() {
                           <SelectContent>
                             <SelectItem value="anthropic">anthropic</SelectItem>
                             <SelectItem value="openai">openai</SelectItem>
+                            <SelectItem value="gemini">gemini</SelectItem>
+                            <SelectItem value="bedrock">bedrock</SelectItem>
+                            <SelectItem value="azure">azure</SelectItem>
+                            <SelectItem value="openai_compatible">openai_compatible</SelectItem>
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -929,7 +942,7 @@ function SettingsPage() {
                     name="apiKey"
                     render={({ field }) => (
                       <FormItem className="flex-1 min-w-[260px]">
-                        <FormLabel>API key</FormLabel>
+                        <FormLabel>API key{providerKind === "openai_compatible" ? " (optional)" : ""}</FormLabel>
                         <FormControl>
                           <Input type="password" placeholder="API key" {...field} />
                         </FormControl>
@@ -937,6 +950,36 @@ function SettingsPage() {
                       </FormItem>
                     )}
                   />
+                  {(providerKind === "openai_compatible" || providerKind === "azure") && (
+                    <FormField
+                      control={providerForm.control}
+                      name="baseUrl"
+                      render={({ field }) => (
+                        <FormItem className="flex-1 min-w-[260px]">
+                          <FormLabel>Base URL</FormLabel>
+                          <FormControl>
+                            <Input placeholder="https://…/v1" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+                  {providerKind === "bedrock" && (
+                    <FormField
+                      control={providerForm.control}
+                      name="region"
+                      render={({ field }) => (
+                        <FormItem className="w-40">
+                          <FormLabel>Region</FormLabel>
+                          <FormControl>
+                            <Input placeholder="us-east-1" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
                   <Button type="submit" disabled={readOnly || saveProvider.isPending}>
                     {saveProvider.isPending ? "Saving…" : "Save key"}
                   </Button>

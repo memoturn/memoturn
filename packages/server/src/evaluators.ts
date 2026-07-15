@@ -4,7 +4,7 @@ import { prisma } from "@memoturn/db";
 import { generate, type Provider } from "@memoturn/llm";
 import { telemetry } from "@memoturn/telemetry";
 import { submitBatch } from "./ingest.js";
-import { resolveProviderKey } from "./providers.js";
+import { resolveProviderConfig } from "./providers.js";
 
 /**
  * LLM-as-judge evaluators. An evaluator is a judge prompt + model; running it scores a
@@ -140,11 +140,11 @@ export async function runEvaluator(projectId: string, name: string, input: RunEv
   const ev = await prisma.evaluator.findUnique({ where: { projectId_name: { projectId, name } } });
   if (!ev) return null;
 
-  const apiKey = await resolveProviderKey(projectId, ev.provider as Provider);
+  const config = await resolveProviderConfig(projectId, ev.provider as Provider);
   const result = await generate({
     provider: ev.provider as Provider,
     model: ev.model,
-    apiKey,
+    ...config,
     temperature: 0,
     messages: [
       {

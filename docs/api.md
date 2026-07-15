@@ -118,7 +118,7 @@ Server-executed experiments run a prompt/model across a dataset and auto-score e
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET / POST | `/v1/providers` | List (masked) / add an encrypted provider API key. |
+| GET / POST | `/v1/providers` | List (masked) / add an encrypted provider connection. Body: `{ provider, apiKey?, baseUrl?, region? }`. Providers: `anthropic`, `openai`, `gemini`, `bedrock` (needs `region`), `azure` (needs `baseUrl`), `openai_compatible` (needs `baseUrl`; covers vLLM/Ollama/OpenRouter). Credentials stored as an encrypted JSON config blob. |
 
 ### Dashboards, scoring & collaboration
 

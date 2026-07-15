@@ -278,6 +278,12 @@ app.use("/v1/*", rateLimit);
 
 const security = [{ apiKey: [] }];
 
+// Provider ids accepted on the wire. Connection routes exclude "mock" (no key to store);
+// playground/evaluator routes include it (deterministic, key-free). Keep in sync with the
+// Provider union in packages/llm.
+const PROVIDER_IDS = ["anthropic", "openai", "gemini", "bedrock", "azure", "openai_compatible"] as const;
+const RUN_PROVIDER_IDS = ["mock", ...PROVIDER_IDS] as const;
+
 // Streaming playground (SSE) — plain route; emits { delta } events then [DONE].
 app.post("/v1/playground/stream", async (c) => {
   const input = (await c.req.json()) as Parameters<typeof streamPlayground>[1];
@@ -1284,28 +1290,40 @@ app.openapi(
   createRoute({
     method: "post",
     path: "/v1/providers",
-    summary: "Add/update an LLM provider API key (encrypted at rest)",
+    summary: "Add/update an LLM provider connection (credentials encrypted at rest)",
     tags: ["providers"],
     security,
     request: {
       body: {
         content: {
           "application/json": {
-            schema: z.object({ provider: z.enum(["anthropic", "openai"]), apiKey: z.string().min(1) }),
+            schema: z.object({
+              provider: z.enum(PROVIDER_IDS),
+              // openai_compatible may auth via baseUrl alone; others require a key.
+              apiKey: z.string().optional(),
+              baseUrl: z.string().url().optional(), // openai_compatible / azure endpoint
+              region: z.string().optional(), // bedrock
+            }),
           },
         },
       },
     },
     responses: {
       201: { description: "Saved", content: { "application/json": { schema: z.any() } } },
+      400: { description: "Missing required credential" },
       403: { description: "Forbidden" },
     },
   }),
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
-    const { provider, apiKey } = c.req.valid("json");
-    const result = await createProviderConnection(c.get("projectId"), provider, apiKey);
+    const { provider, apiKey, baseUrl, region } = c.req.valid("json");
+    if (provider === "openai_compatible") {
+      if (!baseUrl) return c.json({ error: "openai_compatible requires a baseUrl" }, 400);
+    } else if (!apiKey) {
+      return c.json({ error: `${provider} requires an apiKey` }, 400);
+    }
+    const result = await createProviderConnection(c.get("projectId"), provider, { apiKey, baseUrl, region });
     await recordAudit(c.get("projectId"), c.get("actor"), "provider.connect", `provider:${provider}`);
     return c.json(result, 201);
   },
@@ -1324,7 +1342,7 @@ app.openapi(
         content: {
           "application/json": {
             schema: z.object({
-              provider: z.enum(["mock", "anthropic", "openai"]),
+              provider: z.enum(RUN_PROVIDER_IDS),
               model: z.string(),
               messages: z.array(z.object({ role: z.enum(["system", "user", "assistant"]), content: z.string() })),
               temperature: z.number().optional(),
@@ -1428,7 +1446,7 @@ app.openapi(
             schema: z.object({
               key: z.string(),
               name: z.string().optional(),
-              provider: z.enum(["mock", "anthropic", "openai"]).optional(),
+              provider: z.enum(RUN_PROVIDER_IDS).optional(),
               model: z.string().optional(),
               online: z.boolean().optional(),
               samplingRate: z.number().min(0).max(1).optional(),
@@ -1471,7 +1489,7 @@ app.openapi(
             schema: z.object({
               name: z.string().min(1),
               prompt: z.string().min(1),
-              provider: z.enum(["mock", "anthropic", "openai"]).optional(),
+              provider: z.enum(RUN_PROVIDER_IDS).optional(),
               model: z.string(),
               online: z.boolean().optional(),
               samplingRate: z.number().min(0).max(1).optional(),

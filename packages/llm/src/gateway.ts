@@ -1,6 +1,9 @@
+import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createAzure } from "@ai-sdk/azure";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateObject, generateText, jsonSchema, streamText, tool } from "ai";
+import { generateObject, generateText, jsonSchema, type LanguageModel, streamText, tool } from "ai";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -9,8 +12,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * LLM-as-judge evaluators. Real providers go through the Vercel AI SDK; the "mock"
  * provider returns a deterministic response so the platform is fully testable without
  * API keys.
+ *
+ * `openai_compatible` covers any OpenAI-shaped endpoint (vLLM / Ollama / OpenRouter)
+ * via a custom baseUrl; `bedrock` uses a bearer apiKey + region; `azure` uses an apiKey
+ * + resource baseUrl.
  */
-export type Provider = "mock" | "anthropic" | "openai";
+export type Provider = "mock" | "anthropic" | "openai" | "gemini" | "bedrock" | "azure" | "openai_compatible";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -30,9 +37,52 @@ export interface GenerateInput {
   temperature?: number;
   maxTokens?: number;
   apiKey?: string;
+  /** Custom endpoint (openai_compatible, azure) or provider host override. */
+  baseUrl?: string;
+  /** AWS region (bedrock). */
+  region?: string;
   tools?: ToolDef[];
   /** When set, the model returns an object matching this JSON Schema (structured output). */
   responseFormat?: { type: "json_schema"; schema: Record<string, unknown> };
+}
+
+/** Provider-specific connection config resolved from a stored connection or env. */
+export interface ProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  region?: string;
+}
+
+/**
+ * Build a Vercel AI SDK language model for a real (non-mock) provider. Throws if the
+ * required credential is missing. Kept in one place so `generate` and `generateStream`
+ * dispatch identically.
+ */
+function languageModelFor(provider: Provider, model: string, config: ProviderConfig): LanguageModel {
+  const { apiKey, baseUrl, region } = config;
+  switch (provider) {
+    case "anthropic":
+      if (!apiKey) throw new Error("no API key configured for provider 'anthropic'");
+      return createAnthropic({ apiKey })(model);
+    case "openai":
+      if (!apiKey) throw new Error("no API key configured for provider 'openai'");
+      return createOpenAI({ apiKey })(model);
+    case "gemini":
+      if (!apiKey) throw new Error("no API key configured for provider 'gemini'");
+      return createGoogleGenerativeAI({ apiKey })(model);
+    case "bedrock":
+      if (!apiKey) throw new Error("no API key configured for provider 'bedrock'");
+      return createAmazonBedrock({ apiKey, region: region ?? "us-east-1" })(model);
+    case "azure":
+      if (!apiKey) throw new Error("no API key configured for provider 'azure'");
+      return createAzure({ apiKey, ...(baseUrl ? { baseURL: baseUrl } : {}) })(model);
+    case "openai_compatible":
+      if (!baseUrl) throw new Error("no baseUrl configured for provider 'openai_compatible'");
+      // Many self-hosted OpenAI-compatible servers (vLLM/Ollama) accept any/empty key.
+      return createOpenAI({ apiKey: apiKey ?? "not-needed", baseURL: baseUrl })(model);
+    default:
+      throw new Error(`unsupported provider '${provider}'`);
+  }
 }
 
 export interface GenerateResult {
@@ -52,7 +102,7 @@ function usageOf(usage: unknown, prompt: string, completion: string) {
 }
 
 export async function generate(input: GenerateInput): Promise<GenerateResult> {
-  const { provider, model, messages, temperature, maxTokens, apiKey, tools, responseFormat } = input;
+  const { provider, model, messages, temperature, maxTokens, apiKey, baseUrl, region, tools, responseFormat } = input;
   const promptText = messages.map((m) => m.content).join("\n");
 
   if (provider === "mock") {
@@ -65,8 +115,7 @@ export async function generate(input: GenerateInput): Promise<GenerateResult> {
     return { provider, model, content, usage: usageOf(undefined, promptText, content) };
   }
 
-  if (!apiKey) throw new Error(`no API key configured for provider '${provider}'`);
-  const languageModel = provider === "anthropic" ? createAnthropic({ apiKey })(model) : createOpenAI({ apiKey })(model);
+  const languageModel = languageModelFor(provider, model, { apiKey, baseUrl, region });
   const sdkMessages = messages.map((m) => ({ role: m.role, content: m.content }));
 
   // Structured output: the model returns an object matching the JSON Schema.
@@ -116,7 +165,7 @@ export async function generate(input: GenerateInput): Promise<GenerateResult> {
 
 /** Streaming variant — yields text deltas. Mock streams the canned reply word by word. */
 export async function* generateStream(input: GenerateInput): AsyncGenerator<string> {
-  const { provider, model, messages, temperature, maxTokens, apiKey } = input;
+  const { provider, model, messages, temperature, maxTokens, apiKey, baseUrl, region } = input;
 
   if (provider === "mock") {
     const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
@@ -128,8 +177,7 @@ export async function* generateStream(input: GenerateInput): AsyncGenerator<stri
     return;
   }
 
-  if (!apiKey) throw new Error(`no API key configured for provider '${provider}'`);
-  const languageModel = provider === "anthropic" ? createAnthropic({ apiKey })(model) : createOpenAI({ apiKey })(model);
+  const languageModel = languageModelFor(provider, model, { apiKey, baseUrl, region });
   const result = streamText({
     model: languageModel,
     messages: messages.map((m) => ({ role: m.role, content: m.content })),

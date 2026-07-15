@@ -22,6 +22,35 @@ export const MODEL_PRICES: ModelPrice[] = [
   { match: /^gpt-4\.1-mini/i, provider: "openai", inputPerMTok: 0.4, outputPerMTok: 1.6 },
   { match: /^gpt-4\.1/i, provider: "openai", inputPerMTok: 2, outputPerMTok: 8 },
   { match: /^o3-mini/i, provider: "openai", inputPerMTok: 1.1, outputPerMTok: 4.4 },
+  // Google Gemini
+  { match: /^gemini-2\.5-pro/i, provider: "gemini", inputPerMTok: 1.25, outputPerMTok: 10 },
+  { match: /^gemini-2\.5-flash-lite/i, provider: "gemini", inputPerMTok: 0.1, outputPerMTok: 0.4 },
+  { match: /^gemini-2\.5-flash/i, provider: "gemini", inputPerMTok: 0.3, outputPerMTok: 2.5 },
+  { match: /^gemini-2\.0-flash/i, provider: "gemini", inputPerMTok: 0.1, outputPerMTok: 0.4 },
+  // AWS Bedrock (model ids are prefixed by vendor, optionally a region shard like `us.`)
+  {
+    match: /^(?:[a-z]{2}\.)?anthropic\.claude-(?:opus|3-opus)/i,
+    provider: "bedrock",
+    inputPerMTok: 15,
+    outputPerMTok: 75,
+  },
+  {
+    match: /^(?:[a-z]{2}\.)?anthropic\.claude-(?:sonnet|3-5-sonnet|3-sonnet)/i,
+    provider: "bedrock",
+    inputPerMTok: 3,
+    outputPerMTok: 15,
+  },
+  {
+    match: /^(?:[a-z]{2}\.)?anthropic\.claude-(?:haiku|3-5-haiku|3-haiku)/i,
+    provider: "bedrock",
+    inputPerMTok: 1,
+    outputPerMTok: 5,
+  },
+  { match: /^(?:[a-z]{2}\.)?amazon\.nova-pro/i, provider: "bedrock", inputPerMTok: 0.8, outputPerMTok: 3.2 },
+  { match: /^(?:[a-z]{2}\.)?amazon\.nova-lite/i, provider: "bedrock", inputPerMTok: 0.06, outputPerMTok: 0.24 },
+  { match: /^(?:[a-z]{2}\.)?amazon\.nova-micro/i, provider: "bedrock", inputPerMTok: 0.035, outputPerMTok: 0.14 },
+  // Azure OpenAI (deployments are commonly named after the base model)
+  { match: /^azure\//i, provider: "azure", inputPerMTok: 2.5, outputPerMTok: 10 },
 ];
 
 export interface CostBreakdown {

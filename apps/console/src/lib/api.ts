@@ -223,7 +223,8 @@ export const api = {
     post<{ id: string; status: string }>(`/v1/experiments/${encodeURIComponent(id)}/cancel`, {}),
   playgroundChat: (body: PlaygroundRequest) => post<PlaygroundResponse>(`/v1/playground/chat`, body),
   listProviders: () => get<{ data: ProviderConnection[] }>(`/v1/providers`).then((r) => r.data),
-  addProvider: (provider: string, apiKey: string) => post(`/v1/providers`, { provider, apiKey }),
+  addProvider: (body: { provider: string; apiKey?: string; baseUrl?: string; region?: string }) =>
+    post(`/v1/providers`, body),
   getRetention: () => get<{ days: number }>(`/v1/retention`),
   setRetention: (days: number) => post<{ days: number }>(`/v1/retention`, { days }),
   listApiKeys: () => get<{ data: ApiKey[] }>(`/v1/api-keys`).then((r) => r.data),
