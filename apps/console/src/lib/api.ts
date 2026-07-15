@@ -173,6 +173,8 @@ export const api = {
   getDataset: (name: string) => get<DatasetDetail>(`/v1/datasets/${encodeURIComponent(name)}`),
   getDatasetComparison: (name: string) =>
     get<ExperimentComparison>(`/v1/datasets/${encodeURIComponent(name)}/comparison`),
+  addDatasetItems: (name: string, items: { input: unknown; expectedOutput?: unknown }[]) =>
+    post<{ added: number }>(`/v1/datasets/${encodeURIComponent(name)}/items`, { items }),
   playgroundChat: (body: PlaygroundRequest) => post<PlaygroundResponse>(`/v1/playground/chat`, body),
   listProviders: () => get<{ data: ProviderConnection[] }>(`/v1/providers`).then((r) => r.data),
   addProvider: (provider: string, apiKey: string) => post(`/v1/providers`, { provider, apiKey }),
