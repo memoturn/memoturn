@@ -244,6 +244,13 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
         const end = nanoToIso(span.endTimeUnixNano);
         const isGen = Object.keys(attrs).some((k) => k.startsWith("gen_ai."));
         const level: "ERROR" | "DEFAULT" = span.status?.code === 2 ? "ERROR" : "DEFAULT";
+        // MCP (Model Context Protocol) semconv: name the observation after the tool (for a
+        // tools/call) or the method, so MCP calls are first-class in the waterfall AND land
+        // in the by-tool analytics next to other tools. Raw mcp.* attrs stay in metadata.
+        const mcpMethod = str(attrs["mcp.method.name"]);
+        const mcpName = mcpMethod
+          ? `mcp:${str(attrs["mcp.tool.name"]) ?? str(attrs["mcp.prompt.name"]) ?? mcpMethod}`
+          : undefined;
 
         if (!seenTraces.has(span.traceId)) {
           seenTraces.add(span.traceId);
@@ -256,7 +263,7 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
               name: span.name ?? str(resourceAttrs["service.name"]) ?? "otel-trace",
               environment,
               release,
-              sessionId: str(attrs["gen_ai.conversation.id"] ?? attrs["session.id"]),
+              sessionId: str(attrs["gen_ai.conversation.id"] ?? attrs["mcp.session.id"] ?? attrs["session.id"]),
               userId: str(attrs["gen_ai.user.id"] ?? attrs["enduser.id"] ?? attrs["user.id"]),
             },
           });
@@ -266,7 +273,7 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
           id: span.spanId,
           traceId: span.traceId,
           parentObservationId: span.parentSpanId || undefined,
-          name: span.name,
+          name: mcpName ?? span.name,
           startTime: start,
           endTime: end,
           environment,

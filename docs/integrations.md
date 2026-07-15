@@ -18,6 +18,11 @@ Spans carrying GenAI semantic-convention attributes (`gen_ai.*`) become **genera
 zero-lock-in path for frameworks that emit OTel (LlamaIndex, Pydantic AI, Semantic
 Kernel, etc.). OTLP/protobuf support is planned.
 
+MCP semantic-convention spans are surfaced first-class: `mcp.session.id` maps to the trace
+session, and a `tools/call` span is named after the tool (`mcp:<tool>`, or `mcp:<method>` for
+`tools/list` / `resources/read` / `prompts/get`) so MCP calls appear in the trace waterfall
+and the by-tool analytics next to other tools. The raw `mcp.*` attributes stay in metadata.
+
 The first-party SDKs pre-wire the endpoint + auth so you don't hand-build the URL/header —
 JS `import { memoturnSpanProcessor, memoturnOtlpConfig } from "@memoturn/sdk/otel"` and
 Python `from memoturn.otel import span_processor, otlp_config`. Both resolve creds from
