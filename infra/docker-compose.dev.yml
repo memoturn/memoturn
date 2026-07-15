@@ -86,6 +86,11 @@ services:
       nofile:
         soft: 655350
         hard: 655350
+    ports:
+      # BE HTTP (webserver) — exposed so a host-run worker can Stream Load directly to the
+      # BE (the FE's 307 redirect points at the BE's in-network IP, unreachable from the
+      # host). Set DORIS_STREAM_LOAD_PORT=8040 to use it. In-container deploys hit the FE.
+      - "127.0.0.1:8040:8040"
     volumes:
       - dorisbedata:/opt/apache-doris/be/storage
     networks:
