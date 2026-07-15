@@ -1,6 +1,6 @@
 import { computeCost } from "@memoturn/core/models";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowRight, Play, Plus, Save, X } from "lucide-react";
+import { ArrowRight, Play, Plus, Repeat, Save, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "../components/page-header";
@@ -24,7 +24,13 @@ import { Textarea } from "../components/ui/textarea";
 import { api, type PlaygroundResponse, streamPlayground } from "../lib/api";
 import { useIsReadOnly } from "../lib/role";
 
-export const Route = createFileRoute("/playground")({ component: PlaygroundPage });
+export const Route = createFileRoute("/playground")({
+  component: PlaygroundPage,
+  // ?replay=<traceId> deep-links a captured span in as the replay source (from trace detail).
+  validateSearch: (s: Record<string, unknown>): { replay?: string } => ({
+    replay: typeof s.replay === "string" ? s.replay : undefined,
+  }),
+});
 
 type Mode = "chat" | "structured" | "tools";
 type Column = { id: number; provider: string; model: string; temperature: number };
@@ -42,6 +48,9 @@ function fmtCost(c: number): string {
 
 function PlaygroundPage() {
   const readOnly = useIsReadOnly();
+  const { replay } = Route.useSearch();
+  // Optional source trace: "replay this captured span" per column (prefilled by ?replay=).
+  const [sourceTraceId, setSourceTraceId] = useState(replay ?? "");
   // Shared prompt drives every column.
   const [system, setSystem] = useState("You are a helpful assistant.");
   const [userMsg, setUserMsg] = useState("Explain what memoturn is in one sentence.");
@@ -114,6 +123,18 @@ function PlaygroundPage() {
     { role: "system" as const, content: system },
     { role: "user" as const, content: userMsg },
   ];
+
+  // Replay the source trace's captured input through one column's model (records a new trace).
+  async function replayInto(col: Column) {
+    if (!sourceTraceId) return;
+    setColState((s) => ({ ...s, [col.id]: { ...EMPTY_COL, busy: true } }));
+    try {
+      const r = await api.replayTrace(sourceTraceId, { provider: col.provider, model: col.model });
+      setColState((s) => ({ ...s, [col.id]: { ...EMPTY_COL, result: r } }));
+    } catch (e) {
+      setColState((s) => ({ ...s, [col.id]: { ...EMPTY_COL, error: String(e) } }));
+    }
+  }
 
   async function runAll() {
     let responseFormat: { type: "json_schema"; schema: Record<string, unknown> } | undefined;
@@ -246,6 +267,18 @@ function PlaygroundPage() {
           <Button variant="outline" size="sm" onClick={addColumn} disabled={columns.length >= MAX_COLUMNS}>
             <Plus className="size-4" /> Add model
           </Button>
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor="pg-source" className="text-xs text-muted-foreground">
+              Replay trace
+            </Label>
+            <Input
+              id="pg-source"
+              value={sourceTraceId}
+              onChange={(e) => setSourceTraceId(e.target.value)}
+              placeholder="trace id"
+              className="h-8 w-[220px]"
+            />
+          </div>
           <Button onClick={runAll} disabled={anyBusy} className="ml-auto">
             <Play className="size-4" />
             {anyBusy ? "Running…" : `Run all (${columns.length})`}
@@ -263,8 +296,10 @@ function PlaygroundPage() {
             col={col}
             state={colState[col.id]}
             canRemove={columns.length > 1}
+            canReplay={!!sourceTraceId && !readOnly}
             onChange={(patch) => updateColumn(col.id, patch)}
             onRemove={() => removeColumn(col.id)}
+            onReplay={() => replayInto(col)}
           />
         ))}
       </div>
@@ -276,14 +311,18 @@ function ColumnCard({
   col,
   state,
   canRemove,
+  canReplay,
   onChange,
   onRemove,
+  onReplay,
 }: {
   col: Column;
   state: ColState | undefined;
   canRemove: boolean;
+  canReplay: boolean;
   onChange: (patch: Partial<Column>) => void;
   onRemove: () => void;
+  onReplay: () => void;
 }) {
   const result = state?.result;
   const cost = result ? computeCost(result.model, result.usage.promptTokens, result.usage.completionTokens) : null;
@@ -302,11 +341,25 @@ function ColumnCard({
               <SelectItem value="openai">openai</SelectItem>
             </SelectContent>
           </Select>
-          {canRemove && (
-            <Button variant="ghost" size="icon" className="size-8" onClick={onRemove}>
-              <X className="size-4" />
-            </Button>
-          )}
+          <div className="flex items-center gap-0.5">
+            {canReplay && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                title="Replay the source trace through this model"
+                disabled={state?.busy}
+                onClick={onReplay}
+              >
+                <Repeat className="size-4" />
+              </Button>
+            )}
+            {canRemove && (
+              <Button variant="ghost" size="icon" className="size-8" onClick={onRemove}>
+                <X className="size-4" />
+              </Button>
+            )}
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <Input
