@@ -1,6 +1,17 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Database, Download, Flag, FlaskConical, Plus, RotateCcw, Tag, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Database,
+  Download,
+  Flag,
+  FlaskConical,
+  Plus,
+  RotateCcw,
+  Tag,
+  Trash2,
+} from "lucide-react";
 import { type ReactNode, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -354,6 +365,30 @@ interface Laid extends ObservationDetail {
   widthPct: number;
   startOffsetMs: number;
   guides: GuideKind[];
+  hasChildren: boolean;
+  /** Descendants hidden because this node is collapsed (0 when expanded / leaf). */
+  hiddenCount: number;
+  /** True when an ERROR observation lives at or below this node (highlight the failing branch). */
+  onFailedPath: boolean;
+}
+
+/**
+ * Ids of every observation on a path to a failure: each ERROR node plus all its ancestors.
+ * Lets the waterfall highlight the failing branch — even when the error is collapsed away.
+ */
+function failedPathIds(observations: ObservationDetail[]): Set<string> {
+  const byId = new Map(observations.map((o) => [o.id, o]));
+  const out = new Set<string>();
+  for (const o of observations) {
+    if (o.level !== "ERROR") continue;
+    out.add(o.id);
+    let p: string | undefined = o.parent_observation_id;
+    while (p && byId.has(p) && !out.has(p)) {
+      out.add(p);
+      p = byId.get(p)?.parent_observation_id;
+    }
+  }
+  return out;
 }
 
 /**
@@ -361,7 +396,7 @@ interface Laid extends ObservationDetail {
  * connector guides for its indent columns, and bar offset/width from times. Cyclic/orphaned
  * observations (parent not in the set) render as roots so nothing is dropped.
  */
-function layout(observations: ObservationDetail[]): Laid[] {
+function layout(observations: ObservationDetail[], collapsed: Set<string>, failed: Set<string>): Laid[] {
   const byId = new Map(observations.map((o) => [o.id, o]));
   const startMs = (o: ObservationDetail) => ms(o.start_time) ?? 0;
 
@@ -389,6 +424,17 @@ function layout(observations: ObservationDetail[]): Laid[] {
   roots.sort(byStart);
   for (const arr of children.values()) arr.sort(byStart);
 
+  // Total descendants under a node (for the "+N hidden" badge on a collapsed row).
+  const descCache = new Map<string, number>();
+  const descCount = (id: string): number => {
+    const cached = descCache.get(id);
+    if (cached !== undefined) return cached;
+    const kids = children.get(id) ?? [];
+    const n = kids.reduce((acc, k) => acc + 1 + descCount(k.id), 0);
+    descCache.set(id, n);
+    return n;
+  };
+
   const out: Laid[] = [];
   const visited = new Set<string>();
   const place = (node: ObservationDetail, depth: number, ancestorContinues: boolean[], isLast: boolean) => {
@@ -402,8 +448,33 @@ function layout(observations: ObservationDetail[]): Laid[] {
       if (c < depth - 1) guides.push(ancestorContinues[c] ? "line" : "blank");
       else guides.push(isLast ? "elbow" : "tee");
     }
-    out.push({ ...node, depth, offsetPct, widthPct, startOffsetMs: startOff, guides });
     const kids = children.get(node.id) ?? [];
+    const isCollapsed = kids.length > 0 && collapsed.has(node.id);
+    out.push({
+      ...node,
+      depth,
+      offsetPct,
+      widthPct,
+      startOffsetMs: startOff,
+      guides,
+      hasChildren: kids.length > 0,
+      hiddenCount: isCollapsed ? descCount(node.id) : 0,
+      onFailedPath: failed.has(node.id),
+    });
+    if (isCollapsed) {
+      // Mark the hidden subtree visited so the orphan safety-net below doesn't re-add
+      // collapsed descendants as roots.
+      const markHidden = (nid: string) => {
+        for (const k of children.get(nid) ?? []) {
+          if (!visited.has(k.id)) {
+            visited.add(k.id);
+            markHidden(k.id);
+          }
+        }
+      };
+      markHidden(node.id);
+      return;
+    }
     kids.forEach((kid, i) => {
       place(kid, depth + 1, [...ancestorContinues, !isLast], i === kids.length - 1);
     });
@@ -414,6 +485,17 @@ function layout(observations: ObservationDetail[]): Laid[] {
   // Safety net: any node not reached (part of a cycle) still gets a row, as a root.
   for (const o of observations) if (!visited.has(o.id)) place(o, 0, [], true);
   return out;
+}
+
+/** Every observation that has at least one child — the set "Collapse all" toggles. */
+function collapsibleIds(observations: ObservationDetail[]): Set<string> {
+  const byId = new Set(observations.map((o) => o.id));
+  const parents = new Set<string>();
+  for (const o of observations) {
+    const p = o.parent_observation_id;
+    if (p && byId.has(p) && p !== o.id) parents.add(p);
+  }
+  return parents;
 }
 
 /** Bar hues match the KindBadge tones (blue = generation, emerald = span, amber = event). */
@@ -449,8 +531,9 @@ function TreeGuide({ kind, x }: { kind: GuideKind; x: number }) {
   );
 }
 
-function WaterfallRow({ obs, onSelect }: { obs: Laid; onSelect?: () => void }) {
+function WaterfallRow({ obs, onSelect, onToggle }: { obs: Laid; onSelect?: () => void; onToggle?: () => void }) {
   const label = `${obs.name || obs.id.slice(0, 8)}${obs.model ? ` · ${obs.model}` : ""}`;
+  const collapsed = obs.hiddenCount > 0;
   // Errors/warnings tint the whole row so failures pop while scanning the waterfall.
   const tint =
     obs.level === "ERROR"
@@ -458,11 +541,14 @@ function WaterfallRow({ obs, onSelect }: { obs: Laid; onSelect?: () => void }) {
       : obs.level === "WARNING"
         ? "bg-amber-500/5 hover:bg-amber-500/10"
         : "hover:bg-muted/40";
+  // Ancestor of a failure → accent the branch so you can trace the failing path (the ERROR row
+  // itself already carries the red tint).
+  const failAccent = obs.onFailedPath && obs.level !== "ERROR" ? "border-l-2 border-l-destructive/50" : "";
   const bar = obs.level === "ERROR" ? "bg-destructive" : barColor(obs.type);
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: interactive only when onSelect is set, where role/tabIndex/onKeyDown are all provided
     <div
-      className={`group grid ${WATERFALL_COLS} items-center border-b transition-colors last:border-b-0 ${tint} ${onSelect ? "cursor-pointer" : ""}`}
+      className={`group grid ${WATERFALL_COLS} items-center border-b transition-colors last:border-b-0 ${tint} ${failAccent} ${onSelect ? "cursor-pointer" : ""}`}
       role={onSelect ? "button" : undefined}
       tabIndex={onSelect ? 0 : undefined}
       onClick={onSelect}
@@ -483,8 +569,28 @@ function WaterfallRow({ obs, onSelect }: { obs: Laid; onSelect?: () => void }) {
           <TreeGuide key={`${c}-${g}`} kind={g} x={18 + c * 16} />
         ))}
         <div className="flex min-w-0 items-center gap-1.5">
+          {obs.hasChildren ? (
+            <button
+              type="button"
+              aria-label={collapsed ? "Expand subgraph" : "Collapse subgraph"}
+              className="-ml-0.5 flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggle?.();
+              }}
+            >
+              {collapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+            </button>
+          ) : (
+            <span className="size-4 shrink-0" aria-hidden />
+          )}
           <KindBadge tone={toneForKind(obs.type)}>{obs.type.toLowerCase()}</KindBadge>
           <span className="truncate font-medium">{obs.name || obs.id.slice(0, 8)}</span>
+          {collapsed && (
+            <span className="shrink-0 rounded bg-muted px-1 text-[0.6875rem] tabular-nums text-muted-foreground">
+              +{obs.hiddenCount}
+            </span>
+          )}
           {obs.model && (
             <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
               <ProviderIcon provider={obs.provider} model={obs.model} size={13} />
@@ -1082,6 +1188,8 @@ function MetricsGrid({ trace }: { trace: TraceDetail }) {
 export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: string; showBreadcrumb?: boolean }) {
   // Payloads accordion open state + scroll targets, so clicking a waterfall row jumps here.
   const [openPayloads, setOpenPayloads] = useState<string[]>([]);
+  // Collapsed subgraphs in the waterfall (by observation id).
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const payloadRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const qc = useQueryClient();
   const readOnly = useIsReadOnly();
@@ -1128,6 +1236,18 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
   const payloadIds = new Set(payloadObs.map((o) => o.id));
   const errorCount = trace.observations.filter((o) => o.level === "ERROR").length;
   const warningCount = trace.observations.filter((o) => o.level === "WARNING").length;
+
+  // Waterfall collapse/expand + failed-path highlight (small traces → recompute per render).
+  const failedPath = failedPathIds(trace.observations);
+  const collapsible = collapsibleIds(trace.observations);
+  const allCollapsed = collapsible.size > 0 && [...collapsible].every((id) => collapsed.has(id));
+  const toggleCollapse = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   // Open (if collapsed) and scroll to an observation's payload — driven from the waterfall + graph.
   const selectObs = (id: string) => {
@@ -1273,7 +1393,21 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
       <Card>
         <CardHeader>
           <CardTitle>Observations ({trace.observation_count})</CardTitle>
-          <CardDescription>Execution timeline for this trace — click a row to jump to its payload.</CardDescription>
+          <CardDescription>
+            Execution timeline for this trace — click a row to jump to its payload.
+            {errorCount > 0 && " Branches leading to a failure are accented in red."}
+          </CardDescription>
+          {collapsible.size > 0 && (
+            <CardAction>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(collapsible))}
+              >
+                {allCollapsed ? "Expand all" : "Collapse all"}
+              </Button>
+            </CardAction>
+          )}
         </CardHeader>
         <CardContent className="px-0">
           {trace.observations.length === 0 ? (
@@ -1289,11 +1423,12 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
                 <span>Timeline</span>
                 <span className="pr-3 text-right">Duration</span>
               </div>
-              {layout(trace.observations).map((obs) => (
+              {layout(trace.observations, collapsed, failedPath).map((obs) => (
                 <WaterfallRow
                   key={obs.id}
                   obs={obs}
                   onSelect={payloadIds.has(obs.id) ? () => selectObs(obs.id) : undefined}
+                  onToggle={() => toggleCollapse(obs.id)}
                 />
               ))}
             </div>
