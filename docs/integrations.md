@@ -29,8 +29,8 @@ OTel exporter packages are optional peer deps used only by the `span_processor` 
 - **TypeScript:** `wrapOpenAI(new OpenAI(), mt)` — see [TS SDK](./sdk-typescript.md).
 - **Python:** `wrap_openai(OpenAI())` — see [Python SDK](./sdk-python.md).
 
-Each `chat.completions.create` is recorded as a generation with model, params, usage,
-latency, and errors.
+Each `chat.completions.create` and `responses.create` (the Responses API) is recorded as a
+generation with model, params, usage, latency, and errors.
 
 ## LangChain
 
