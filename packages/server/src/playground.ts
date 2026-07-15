@@ -81,6 +81,47 @@ export async function runPlayground(projectId: string, input: PlaygroundInput, o
  * replay always works without needing provider keys configured.
  * Returns null when the trace doesn't exist.
  */
+/**
+ * Derive chat messages from an arbitrary stored trace input / dataset item input:
+ * - JSON array of {role, content} → used directly
+ * - JSON object with a .messages array → that array is used
+ * - a JSON string, or any other value → wrapped as a single user message
+ * Shared by trace replay and the experiment runner so both interpret item/trace input
+ * identically. Accepts a string (raw JSON) or an already-parsed value.
+ */
+export function messagesFromInput(input: unknown): ChatMessage[] {
+  const wrap = (v: unknown): ChatMessage[] => {
+    const content = typeof v === "string" ? v : JSON.stringify(v);
+    return [{ role: "user", content: content || "(empty input)" }];
+  };
+
+  let value: unknown = input;
+  if (typeof input === "string") {
+    try {
+      value = JSON.parse(input);
+    } catch {
+      return wrap(input);
+    }
+  }
+
+  if (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((m) => m !== null && typeof m === "object" && "role" in m && "content" in m)
+  ) {
+    return value as ChatMessage[];
+  }
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Array.isArray((value as Record<string, unknown>).messages)
+  ) {
+    return (value as { messages: ChatMessage[] }).messages;
+  }
+  return wrap(value);
+}
+
 export async function replayTrace(
   projectId: string,
   traceId: string,
@@ -89,32 +130,7 @@ export async function replayTrace(
   const trace = await getTrace(projectId, traceId);
   if (!trace) return null;
 
-  let messages: ChatMessage[] = [];
-  const raw = trace.input ?? "";
-
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      Array.isArray(parsed) &&
-      parsed.every((m) => m !== null && typeof m === "object" && "role" in m && "content" in m)
-    ) {
-      // [{role, content}, ...]
-      messages = parsed as ChatMessage[];
-    } else if (
-      parsed !== null &&
-      typeof parsed === "object" &&
-      !Array.isArray(parsed) &&
-      Array.isArray((parsed as Record<string, unknown>).messages)
-    ) {
-      // {messages: [{role, content}, ...], ...}
-      messages = (parsed as { messages: ChatMessage[] }).messages;
-    } else {
-      messages = [{ role: "user", content: raw || "(empty input)" }];
-    }
-  } catch {
-    messages = [{ role: "user", content: raw || "(empty input)" }];
-  }
-
+  const messages = messagesFromInput(trace.input ?? "");
   const provider = (overrides.provider ?? "mock") as Provider;
   const model = overrides.model ?? "mock-gpt-4o";
 

@@ -176,6 +176,16 @@ export const automation = z.object({
 });
 export type Automation = z.infer<typeof automation>;
 
+/** A document a retriever span returned (RAG analysis). */
+export const retrievalDocument = z.object({
+  rank: z.number(),
+  score: z.number().nullable(),
+  doc_id: z.string(),
+  content: z.string(),
+  metadata: z.string(),
+});
+export type RetrievalDocument = z.infer<typeof retrievalDocument>;
+
 export const observationDetail = z.object({
   id: z.string(),
   trace_id: z.string(),
@@ -200,8 +210,30 @@ export const observationDetail = z.object({
   input: z.string(),
   output: z.string(),
   metadata: z.string(),
+  // RAG: documents this span retrieved (empty for non-retriever spans).
+  retrieval_documents: z.array(retrievalDocument),
 });
 export type ObservationDetail = z.infer<typeof observationDetail>;
+
+// ── Embeddings projection (RAG cluster/scatter view) ────────────────────────────
+export const embeddingPoint = z.object({
+  observation_id: z.string(),
+  trace_id: z.string(),
+  x: z.number(),
+  y: z.number(),
+  z: z.number().nullable(),
+  cluster_id: z.number(),
+  color_value: z.number().nullable(), // e.g. an eval score, for color-by
+});
+export type EmbeddingPoint = z.infer<typeof embeddingPoint>;
+
+export const embeddingProjection = z.object({
+  run_id: z.string(),
+  method: z.string(),
+  cluster_count: z.number(),
+  points: z.array(embeddingPoint),
+});
+export type EmbeddingProjection = z.infer<typeof embeddingProjection>;
 
 export const scoreRow = z.object({
   name: z.string(),
@@ -362,16 +394,41 @@ export const datasetItemRow = z.object({
 });
 export type DatasetItemRow = z.infer<typeof datasetItemRow>;
 
-export const datasetRunRow = z.object({ name: z.string(), itemCount: z.number(), createdAt: z.string() });
+export const datasetRunRow = z.object({
+  name: z.string(),
+  itemCount: z.number(),
+  createdAt: z.string(),
+  version: z.number().nullable(),
+});
 export type DatasetRunRow = z.infer<typeof datasetRunRow>;
+
+export const datasetVersionRow = z.object({
+  version: z.number(),
+  label: z.string(),
+  description: z.string(),
+  itemCount: z.number(),
+  runCount: z.number(),
+  createdAt: z.string(),
+});
+export type DatasetVersionRow = z.infer<typeof datasetVersionRow>;
 
 export const datasetDetail = z.object({
   name: z.string(),
   description: z.string(),
+  currentVersion: z.number(),
   items: z.array(datasetItemRow),
   runs: z.array(datasetRunRow),
+  versions: z.array(datasetVersionRow),
 });
 export type DatasetDetail = z.infer<typeof datasetDetail>;
+
+export const datasetVersionDetail = z.object({
+  version: z.number(),
+  label: z.string(),
+  description: z.string(),
+  items: z.array(datasetItemRow),
+});
+export type DatasetVersionDetail = z.infer<typeof datasetVersionDetail>;
 
 export const experimentCell = z.object({
   traceId: z.string(),
@@ -390,6 +447,65 @@ export const experimentComparison = z.object({
   items: z.array(experimentItem),
 });
 export type ExperimentComparison = z.infer<typeof experimentComparison>;
+
+// ── Experiments (server-executed dataset runs) ──────────────────────────────────
+export const experimentStatus = z.enum(["PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]);
+export type ExperimentStatus = z.infer<typeof experimentStatus>;
+
+export const experimentConfig = z.object({
+  datasetName: z.string(),
+  name: z.string(),
+  provider: z.string().optional(),
+  model: z.string(),
+  params: z.record(z.string(), z.unknown()).optional(),
+  promptName: z.string().optional(),
+  promptChannel: z.string().optional(),
+  evaluators: z.array(z.string()).optional(),
+});
+export type ExperimentConfig = z.infer<typeof experimentConfig>;
+
+export const experimentSummary = z.object({
+  id: z.string(),
+  name: z.string(),
+  dataset: z.string(),
+  status: experimentStatus,
+  provider: z.string(),
+  model: z.string(),
+  totalItems: z.number(),
+  completedItems: z.number(),
+  failedItems: z.number(),
+  createdAt: z.string(),
+});
+export type ExperimentSummary = z.infer<typeof experimentSummary>;
+
+export const experimentItemResult = z.object({
+  datasetItemId: z.string(),
+  status: z.string(),
+  traceId: z.string(),
+  error: z.string(),
+});
+export type ExperimentItemResult = z.infer<typeof experimentItemResult>;
+
+export const experimentDetail = experimentSummary.extend({
+  promptName: z.string(),
+  promptChannel: z.string(),
+  promptVersion: z.number().nullable(),
+  evaluators: z.array(z.string()),
+  error: z.string(),
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+  items: z.array(experimentItemResult),
+});
+export type ExperimentDetail = z.infer<typeof experimentDetail>;
+
+export const evaluatorTemplate = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string(),
+  requires: z.array(z.string()),
+  defaultModel: z.string(),
+});
+export type EvaluatorTemplate = z.infer<typeof evaluatorTemplate>;
 
 // ── Providers / evaluators ───────────────────────────────────────────────────────
 export const providerConnection = z.object({ provider: z.string(), masked: z.string(), createdAt: z.string() });

@@ -127,6 +127,21 @@ export async function getTrace(projectId: string, traceId: string): Promise<Trac
   const observations = await store.listObservationsByTrace(projectId, traceId);
   const scores = await store.listScoresByTrace(projectId, traceId);
 
+  // RAG: attach retrieved documents to the spans that produced them.
+  const docs = await store.listRetrievalDocumentsByObservationIds(
+    projectId,
+    observations.map((o) => o.id),
+  );
+  if (docs.length > 0) {
+    const byObs = new Map<string, (typeof observations)[number]["retrieval_documents"]>();
+    for (const d of docs) {
+      const arr = byObs.get(d.observation_id) ?? [];
+      arr.push({ rank: d.rank, score: d.score, doc_id: d.doc_id, content: d.content, metadata: d.metadata });
+      byObs.set(d.observation_id, arr);
+    }
+    for (const o of observations) o.retrieval_documents = byObs.get(o.id) ?? [];
+  }
+
   return {
     ...header,
     observation_count: observations.length,

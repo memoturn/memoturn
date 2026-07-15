@@ -58,9 +58,12 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | --- | --- | --- |
 | GET / POST | `/v1/datasets` | List / create. |
 | GET | `/v1/datasets/{name}` | Items + runs. |
-| GET | `/v1/datasets/{name}/comparison` | Compare a dataset's runs side by side (per-item output + scores). |
+| GET | `/v1/datasets/{name}/comparison` | Compare a dataset's runs side by side (per-item output + scores). Optional `version` scopes to runs of one dataset version. |
 | POST | `/v1/datasets/{name}/items` | Append items. |
-| POST | `/v1/datasets/{name}/runs` | Record an experiment run (link items → traces). |
+| POST | `/v1/datasets/{name}/runs` | Record an experiment run (link items → traces). Optional `version` pins the run to a dataset version (defaults to current). |
+| GET | `/v1/datasets/{name}/versions` | List a dataset's immutable version snapshots. |
+| POST | `/v1/datasets/{name}/versions` | Cut a new version (freeze the current items). Body: `{ label?, description? }`. Audited. |
+| GET | `/v1/datasets/{name}/versions/{version}` | A version's frozen items. |
 
 ### Playground
 
@@ -75,7 +78,26 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | --- | --- | --- |
 | GET / POST | `/v1/evaluators` | List / create (supports `online`, `samplingRate`, `filterName`). |
 | GET | `/v1/evaluators/analytics` | Per-evaluator EVAL score summary (avg, count) + daily trend (`days` query, default 30). |
+| GET | `/v1/evaluators/templates` | The prebuilt evaluator library (RAG/quality judge templates). |
+| POST | `/v1/evaluators/from-template` | Instantiate a template into a project evaluator. Body: `{ key, name?, provider?, model?, ... }`. Audited. |
 | POST | `/v1/evaluators/{name}/run` | Run over a trace's input/output → writes an `EVAL` score. |
+
+### Experiments
+
+Server-executed experiments run a prompt/model across a dataset and auto-score each item (a BullMQ job on the worker); results surface through the dataset comparison grid.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET / POST | `/v1/experiments` | List / create + enqueue. Create body: `{ datasetName, name, provider?, model, params?, promptName?, promptChannel?, evaluators? }`. Audited. |
+| GET | `/v1/experiments/{id}` | Config, progress counters, and per-item results. |
+| GET | `/v1/experiments/{id}/comparison` | The experiment's results as an items × runs grid. |
+| POST | `/v1/experiments/{id}/cancel` | Cancel a pending/running experiment. Audited. |
+
+### Embeddings
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/v1/embeddings/projection` | 2D PCA projection of observation embeddings (clusters + optional `colorBy` score). Computed by the daily worker cron. Params: `runId?`, `colorBy?`, `limit?`. |
 
 ### Review queues
 

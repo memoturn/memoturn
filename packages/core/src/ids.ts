@@ -19,4 +19,5 @@ export const QUEUE_NAMES = {
   eval: "eval",
   export: "export",
   automation: "automation",
+  experiment: "experiment", // server-executed dataset experiments (fan-out per item)
 } as const;

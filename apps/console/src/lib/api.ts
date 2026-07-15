@@ -16,9 +16,15 @@ import type {
   Comment,
   DatasetDetail,
   DatasetListItem,
+  DatasetVersionDetail,
+  DatasetVersionRow,
+  EmbeddingProjection,
   Evaluator,
   EvaluatorAnalytics,
+  EvaluatorTemplate,
   ExperimentComparison,
+  ExperimentDetail,
+  ExperimentSummary,
   MaskingPolicy,
   MetricsSummary,
   ModelPriceList,
@@ -171,10 +177,37 @@ export const api = {
   getPrompt: (name: string) => get<PromptDetail>(`/v1/prompts/${encodeURIComponent(name)}/detail`),
   listDatasets: () => get<{ data: DatasetListItem[] }>(`/v1/datasets`).then((r) => r.data),
   getDataset: (name: string) => get<DatasetDetail>(`/v1/datasets/${encodeURIComponent(name)}`),
-  getDatasetComparison: (name: string) =>
-    get<ExperimentComparison>(`/v1/datasets/${encodeURIComponent(name)}/comparison`),
+  getDatasetComparison: (name: string, version?: number) =>
+    get<ExperimentComparison>(`/v1/datasets/${encodeURIComponent(name)}/comparison${qs({ version })}`),
+  createDataset: (name: string, description?: string) =>
+    post<{ id: string; name: string }>(`/v1/datasets`, { name, description }),
   addDatasetItems: (name: string, items: { input: unknown; expectedOutput?: unknown }[]) =>
-    post<{ added: number }>(`/v1/datasets/${encodeURIComponent(name)}/items`, { items }),
+    post<{ added: number; itemIds: string[] }>(`/v1/datasets/${encodeURIComponent(name)}/items`, { items }),
+  recordRun: (name: string, runName: string, links: { datasetItemId: string; traceId: string }[], version?: number) =>
+    post<{ run: string; linked: number }>(`/v1/datasets/${encodeURIComponent(name)}/runs`, { runName, links, version }),
+  listDatasetVersions: (name: string) =>
+    get<{ data: DatasetVersionRow[] }>(`/v1/datasets/${encodeURIComponent(name)}/versions`).then((r) => r.data),
+  createDatasetVersion: (name: string, body: { label?: string; description?: string }) =>
+    post<DatasetVersionRow>(`/v1/datasets/${encodeURIComponent(name)}/versions`, body),
+  getDatasetVersion: (name: string, version: number) =>
+    get<DatasetVersionDetail>(`/v1/datasets/${encodeURIComponent(name)}/versions/${version}`),
+  // Experiments (server-executed dataset runs)
+  listExperiments: () => get<{ data: ExperimentSummary[] }>(`/v1/experiments`).then((r) => r.data),
+  createExperiment: (body: {
+    datasetName: string;
+    name: string;
+    provider?: string;
+    model: string;
+    params?: Record<string, unknown>;
+    promptName?: string;
+    promptChannel?: string;
+    evaluators?: string[];
+  }) => post<ExperimentSummary>(`/v1/experiments`, body),
+  getExperiment: (id: string) => get<ExperimentDetail>(`/v1/experiments/${encodeURIComponent(id)}`),
+  getExperimentComparison: (id: string) =>
+    get<ExperimentComparison>(`/v1/experiments/${encodeURIComponent(id)}/comparison`),
+  cancelExperiment: (id: string) =>
+    post<{ id: string; status: string }>(`/v1/experiments/${encodeURIComponent(id)}/cancel`, {}),
   playgroundChat: (body: PlaygroundRequest) => post<PlaygroundResponse>(`/v1/playground/chat`, body),
   listProviders: () => get<{ data: ProviderConnection[] }>(`/v1/providers`).then((r) => r.data),
   addProvider: (provider: string, apiKey: string) => post(`/v1/providers`, { provider, apiKey }),
@@ -257,6 +290,18 @@ export const api = {
     samplingRate?: number;
     filterName?: string;
   }) => post(`/v1/evaluators`, body),
+  listEvaluatorTemplates: () => get<{ data: EvaluatorTemplate[] }>(`/v1/evaluators/templates`).then((r) => r.data),
+  getEmbeddingProjection: (opts: { runId?: string; colorBy?: string; limit?: number } = {}) =>
+    get<EmbeddingProjection>(`/v1/embeddings/projection${qs(opts as Record<string, unknown>)}`),
+  instantiateEvaluatorTemplate: (body: {
+    key: string;
+    name?: string;
+    provider?: string;
+    model?: string;
+    online?: boolean;
+    samplingRate?: number;
+    filterName?: string;
+  }) => post<Evaluator>(`/v1/evaluators/from-template`, body),
   listSessions: () => get<{ data: SessionSummary[] }>(`/v1/sessions`).then((r) => r.data),
   listSessionsPage: (opts: { page?: number; pageSize?: number; days?: number; search?: string } = {}) =>
     get<SessionPage>(`/v1/sessions${qs(opts as Record<string, unknown>)}`),

@@ -79,6 +79,24 @@ export const traceBody = z.object({
 });
 export type TraceBody = z.infer<typeof traceBody>;
 
+/** Max embedding dimensionality accepted on the wire (covers common 1536/3072 models). */
+export const MAX_EMBEDDING_DIM = 4096;
+
+/**
+ * A single retrieved document on a RAG/retriever span. The worker explodes a span's
+ * `retrievedDocuments` into queryable rows so "show me low-relevance retrievals" is a
+ * table scan, not JSON parsing. `rank` is the position in the result set (0-based).
+ */
+export const retrievedDocument = z.object({
+  id: z.string().max(MAX_IDENTIFIER_LEN).optional(), // stable doc id if the store has one
+  rank: z.number().int().nonnegative(),
+  score: z.number().optional(), // relevance/similarity score
+  content: z.string().max(MAX_MESSAGE_LEN), // document text (bounded)
+  metadata: Json.optional(), // source uri, chunk id, etc.
+  embedding: z.array(z.number()).max(MAX_EMBEDDING_DIM).optional(), // optional per-doc vector
+});
+export type RetrievedDocument = z.infer<typeof retrievedDocument>;
+
 // ── Observation (span / generation / event) ─────────────────────────────────────
 const observationBase = z.object({
   id: z.string().min(1).max(MAX_IDENTIFIER_LEN),
@@ -93,6 +111,12 @@ const observationBase = z.object({
   metadata: Json.optional(),
   input: Json.optional(),
   output: Json.optional(),
+  // RAG: documents retrieved by this span (retriever/vector-search spans).
+  retrievedDocuments: z.array(retrievedDocument).max(500).optional(),
+  // Embedding vector for THIS observation (e.g. an embedding-model generation). The
+  // embedded text typically lives in `input`; points on the projection view are
+  // observations that carry a vector.
+  embedding: z.array(z.number()).max(MAX_EMBEDDING_DIM).optional(),
 });
 
 export const spanBody = observationBase;

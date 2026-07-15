@@ -27,6 +27,8 @@ const NAV: Nav[] = [
   { label: "Sessions", to: "/sessions" },
   { label: "Prompts", to: "/prompts" },
   { label: "Datasets", to: "/datasets" },
+  { label: "Experiments", to: "/experiments" },
+  { label: "Embeddings", to: "/embeddings" },
   { label: "Playground", to: "/playground" },
   { label: "Evaluators", to: "/evaluators" },
   { label: "Review", to: "/review" },

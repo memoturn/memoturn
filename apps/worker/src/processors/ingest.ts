@@ -188,7 +188,12 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     observations: new Map(observationBases.map((r) => [r.id, r])),
   };
 
-  const { traces, observations, scores } = mapEvents(projectId, parsed.batch, priceOverrides, bases);
+  const { traces, observations, scores, retrieval_documents, embeddings } = mapEvents(
+    projectId,
+    parsed.batch,
+    priceOverrides,
+    bases,
+  );
 
   // Insert each table independently so one table's failure is isolated and observable.
   // Re-insert on retry is safe — the store's last-writer-wins merge (event_ts) dedupes
@@ -197,6 +202,8 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     insertTable("traces", traces),
     insertTable("observations", observations),
     insertTable("scores", scores),
+    insertTable("retrieval_documents", retrieval_documents),
+    insertTable("embeddings", embeddings),
   ]);
   const failed = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
   inc("ingest_events_total", undefined, parsed.batch.length);
@@ -211,6 +218,8 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     traces: traces.length,
     observations: observations.length,
     scores: scores.length,
+    retrievalDocs: retrieval_documents.length,
+    embeddings: embeddings.length,
   });
 
   // Fire webhooks + automations + analytics for this batch: one config lookup per

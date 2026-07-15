@@ -464,7 +464,9 @@ function WaterfallRow({ obs, onSelect }: { obs: Laid; onSelect?: () => void }) {
 }
 
 function visibleObservations(observations: ObservationDetail[]): ObservationDetail[] {
-  return observations.filter((obs) => obs.input || obs.output || obs.level !== "DEFAULT");
+  return observations.filter(
+    (obs) => obs.input || obs.output || obs.level !== "DEFAULT" || obs.retrieval_documents.length > 0,
+  );
 }
 
 /** Playground handoff: the trace detail writes this, the playground route reads + clears it on mount. */
@@ -596,6 +598,7 @@ function ObservationDetailItem({
             <PayloadView raw={obs.output} />
           </div>
         )}
+        {obs.retrieval_documents.length > 0 && <RetrievalDocs docs={obs.retrieval_documents} />}
         {obs.status_message && (
           <div className="space-y-1">
             <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Status</div>
@@ -604,6 +607,29 @@ function ObservationDetailItem({
         )}
       </AccordionContent>
     </AccordionItem>
+  );
+}
+
+/** Retrieved documents for a RAG/retriever span — ranked, with relevance score + source. */
+function RetrievalDocs({ docs }: { docs: ObservationDetail["retrieval_documents"] }) {
+  return (
+    <div className="space-y-1.5">
+      <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+        Retrieved documents ({docs.length})
+      </div>
+      <div className="space-y-1.5">
+        {docs.map((d) => (
+          <div key={d.rank} className="rounded-md border p-2">
+            <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+              <KindBadge tone="blue">#{d.rank}</KindBadge>
+              {d.score != null && <span>score {d.score.toFixed(4)}</span>}
+              {d.doc_id && <span className="truncate">· {d.doc_id}</span>}
+            </div>
+            <pre className={PRE_CLASS}>{d.content}</pre>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

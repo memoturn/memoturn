@@ -120,6 +120,93 @@ describe("mapEvents", () => {
     expect(patch.total_cost).toBeCloseTo(0.018);
     expect(patch.output).toBe("hi");
   });
+
+  it("explodes retrievedDocuments into retrieval_documents rows (rank/score preserved)", () => {
+    const events: IngestEvent[] = [
+      {
+        id: "t",
+        type: "trace-create",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        body: { id: "tr", environment: "default" },
+      },
+      {
+        id: "s",
+        type: "span-create",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        body: {
+          id: "sp",
+          traceId: "tr",
+          name: "retriever",
+          environment: "default",
+          startTime: "2026-07-15T00:00:00.000Z",
+          retrievedDocuments: [
+            { rank: 0, score: 0.9, content: "doc a", id: "a", metadata: { src: "kb" } },
+            { rank: 1, score: 0.5, content: "doc b" },
+          ],
+        },
+      },
+    ];
+    const { retrieval_documents } = mapEvents(PROJECT, events);
+    expect(retrieval_documents).toHaveLength(2);
+    expect(retrieval_documents[0]).toMatchObject({
+      observation_id: "sp",
+      trace_id: "tr",
+      rank: 0,
+      score: 0.9,
+      doc_id: "a",
+      content: "doc a",
+    });
+    expect(retrieval_documents[0]!.metadata).toContain("kb");
+    expect(retrieval_documents[1]).toMatchObject({ rank: 1, score: 0.5, doc_id: "" });
+  });
+
+  it("maps an observation embedding into an embeddings row with the right dim", () => {
+    const events: IngestEvent[] = [
+      {
+        id: "t",
+        type: "trace-create",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        body: { id: "tr", environment: "default" },
+      },
+      {
+        id: "g",
+        type: "generation-create",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        body: {
+          id: "ge",
+          traceId: "tr",
+          model: "text-embedding-3-small",
+          environment: "default",
+          startTime: "2026-07-15T00:00:00.000Z",
+          embedding: [0.1, 0.2, 0.3, 0.4],
+        },
+      },
+    ];
+    const { embeddings } = mapEvents(PROJECT, events);
+    expect(embeddings).toHaveLength(1);
+    expect(embeddings[0]).toMatchObject({ observation_id: "ge", trace_id: "tr", kind: "OBSERVATION", dim: 4 });
+    expect(embeddings[0]!.vector).toEqual([0.1, 0.2, 0.3, 0.4]);
+  });
+
+  it("produces no retrieval/embedding rows for a plain span", () => {
+    const events: IngestEvent[] = [
+      {
+        id: "t",
+        type: "trace-create",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        body: { id: "tr", environment: "default" },
+      },
+      {
+        id: "s",
+        type: "span-create",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        body: { id: "sp", traceId: "tr", environment: "default", startTime: "2026-07-15T00:00:00.000Z" },
+      },
+    ];
+    const { retrieval_documents, embeddings } = mapEvents(PROJECT, events);
+    expect(retrieval_documents).toHaveLength(0);
+    expect(embeddings).toHaveLength(0);
+  });
 });
 
 // Integration: full round-trip through the telemetry store. Skipped if it isn't reachable.

@@ -1,4 +1,13 @@
-import type { ObservationRow, ScoreWriteRow, TelemetryRowMap, TelemetryTable, TraceRow } from "../types.js";
+import type {
+  EmbeddingProjectionRow,
+  EmbeddingRow,
+  ObservationRow,
+  RetrievalDocumentRow,
+  ScoreWriteRow,
+  TelemetryRowMap,
+  TelemetryTable,
+  TraceRow,
+} from "../types.js";
 
 /**
  * Serialization between memoturn's engine-neutral row shapes and Doris SQL.
@@ -32,6 +41,22 @@ export function parseTags(value: unknown): string[] {
   } catch {
     return [];
   }
+}
+
+/** Parse a Doris ARRAY<FLOAT> value (read via CAST(... AS JSON)) into numbers. */
+export function parseVector(value: unknown): number[] {
+  const arr = Array.isArray(value)
+    ? value
+    : typeof value === "string" && value !== ""
+      ? (() => {
+          try {
+            return JSON.parse(value);
+          } catch {
+            return [];
+          }
+        })()
+      : [];
+  return Array.isArray(arr) ? arr.map(Number).filter((n) => Number.isFinite(n)) : [];
 }
 
 /**
@@ -117,10 +142,55 @@ const scoreColumns: ColumnSpec<ScoreWriteRow>[] = [
   { name: "event_ts", values: (r) => [toDorisDateTime(r.event_ts)] },
 ];
 
+const retrievalDocumentColumns: ColumnSpec<RetrievalDocumentRow>[] = [
+  { name: "project_id", values: (r) => [r.project_id] },
+  { name: "observation_id", values: (r) => [r.observation_id] },
+  { name: "rank", values: (r) => [r.rank] },
+  { name: "trace_id", values: (r) => [r.trace_id] },
+  { name: "doc_id", values: (r) => [r.doc_id] },
+  { name: "score", values: (r) => [r.score] },
+  { name: "content", values: (r) => [r.content] },
+  { name: "metadata", values: (r) => [r.metadata] },
+  { name: "event_ts", values: (r) => [toDorisDateTime(r.event_ts)] },
+];
+
+const embeddingColumns: ColumnSpec<EmbeddingRow>[] = [
+  { name: "project_id", values: (r) => [r.project_id] },
+  { name: "observation_id", values: (r) => [r.observation_id] },
+  { name: "trace_id", values: (r) => [r.trace_id] },
+  { name: "kind", values: (r) => [r.kind] },
+  { name: "model", values: (r) => [r.model] },
+  { name: "dim", values: (r) => [r.dim] },
+  {
+    // ARRAY<FLOAT> — one placeholder per element with NUMERIC values (never a string CAST,
+    // whose parser corrupts values; same rule as `tags`).
+    name: "vector",
+    placeholder: (r) => (r.vector?.length ? `[${r.vector.map(() => "?").join(", ")}]` : "[]"),
+    values: (r) => r.vector ?? [],
+  },
+  { name: "event_ts", values: (r) => [toDorisDateTime(r.event_ts)] },
+];
+
+const embeddingProjectionColumns: ColumnSpec<EmbeddingProjectionRow>[] = [
+  { name: "project_id", values: (r) => [r.project_id] },
+  { name: "run_id", values: (r) => [r.run_id] },
+  { name: "observation_id", values: (r) => [r.observation_id] },
+  { name: "trace_id", values: (r) => [r.trace_id] },
+  { name: "x", values: (r) => [r.x] },
+  { name: "y", values: (r) => [r.y] },
+  { name: "z", values: (r) => [r.z] },
+  { name: "cluster_id", values: (r) => [r.cluster_id] },
+  { name: "method", values: (r) => [r.method] },
+  { name: "event_ts", values: (r) => [toDorisDateTime(r.event_ts)] },
+];
+
 const COLUMNS: { [T in TelemetryTable]: ColumnSpec<TelemetryRowMap[T]>[] } = {
   traces: traceColumns,
   observations: observationColumns,
   scores: scoreColumns,
+  retrieval_documents: retrievalDocumentColumns,
+  embeddings: embeddingColumns,
+  embedding_projections: embeddingProjectionColumns,
 };
 
 export interface InsertStatement {

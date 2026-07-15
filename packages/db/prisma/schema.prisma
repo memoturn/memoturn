@@ -84,6 +84,7 @@ model Project {
   automations     Automation[]
   analyticsSink   AnalyticsSink?
   maskingPolicy   MaskingPolicy?
+  experiments     Experiment[]
 
   @@unique([organizationId, slug])
 }
@@ -290,14 +291,19 @@ model PromptChannel {
 
 // ── Datasets & evaluation (Phase 5) ─────────────────────────────────────────────
 model Dataset {
-  id          String        @id @default(cuid())
-  projectId   String
-  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  name        String
-  description String        @default("")
-  createdAt   DateTime      @default(now())
-  items       DatasetItem[]
-  runs        DatasetRun[]
+  id             String           @id @default(cuid())
+  projectId      String
+  project        Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name           String
+  description    String           @default("")
+  // Highest version number cut for this dataset (0 = no version cut yet). Cutting a
+  // version freezes the current DatasetItem working set into a DatasetVersion snapshot.
+  currentVersion Int              @default(0)
+  createdAt      DateTime         @default(now())
+  items          DatasetItem[]
+  runs           DatasetRun[]
+  versions       DatasetVersion[]
+  experiments    Experiment[]
 
   @@unique([projectId, name])
 }
@@ -324,10 +330,45 @@ model DatasetRun {
   dataset   Dataset          @relation(fields: [datasetId], references: [id], onDelete: Cascade)
   name      String
   metadata  Json             @default("{}")
+  // The dataset version this run executed against (nullable for runs recorded before
+  // versioning; SetNull so deleting a version doesn't cascade-delete run history).
+  versionId String?
+  version   DatasetVersion?  @relation(fields: [versionId], references: [id], onDelete: SetNull)
   createdAt DateTime         @default(now())
   items     DatasetRunItem[]
 
   @@unique([datasetId, name])
+}
+
+// Immutable snapshot of a dataset's DatasetItem working set at cut time. Runs pin a
+// versionId so an experiment is reproducible even if the working set is later edited.
+model DatasetVersion {
+  id          String               @id @default(cuid())
+  datasetId   String
+  dataset     Dataset              @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  version     Int // monotonic per dataset (1,2,3,…)
+  label       String               @default("") // optional human label, e.g. "golden-v2"
+  description String               @default("")
+  itemCount   Int                  @default(0)
+  createdAt   DateTime             @default(now())
+  items       DatasetVersionItem[]
+  runs        DatasetRun[]
+
+  @@unique([datasetId, version])
+  @@index([datasetId])
+}
+
+// Frozen copy of one item's content as of a version (copy-on-write at snapshot time).
+model DatasetVersionItem {
+  id             String         @id @default(cuid())
+  versionId      String
+  version        DatasetVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  datasetItemId  String // provenance pointer to the live item (may be edited/deleted later)
+  input          Json
+  expectedOutput Json?
+  metadata       Json           @default("{}")
+
+  @@index([versionId])
 }
 
 model DatasetRunItem {
@@ -362,6 +403,70 @@ model Evaluator {
   createdAt    DateTime @default(now())
 
   @@unique([projectId, name])
+}
+
+enum ExperimentStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// A server-executed experiment: run every dataset item through a prompt-version × model
+// (+ params), auto-score each output with evaluators, and produce a DatasetRun for
+// comparison. Config + lifecycle live here (OLTP); output traces + EVAL scores go to the
+// telemetry store via the normal ingest path.
+model Experiment {
+  id        String           @id @default(cuid())
+  projectId String
+  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  datasetId String
+  dataset   Dataset          @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  name      String // also the DatasetRun name it produces
+  status    ExperimentStatus @default(PENDING)
+
+  // Execution config
+  provider      String  @default("mock")
+  model         String
+  params        Json    @default("{}") // { temperature, maxTokens, ... }
+  promptName    String  @default("") // "" = use item.input directly
+  promptChannel String  @default("")
+  promptVersion Int? // resolved version snapshot, so re-runs are reproducible
+  evaluators    String[] @default([]) // Evaluator.name list to run per item
+
+  // Progress
+  totalItems     Int    @default(0)
+  completedItems Int    @default(0)
+  failedItems    Int    @default(0)
+  error          String @default("")
+
+  createdAt   DateTime  @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  items ExperimentItemResult[]
+
+  @@unique([datasetId, name])
+  @@index([projectId, status])
+}
+
+// Per-item execution checkpoint — the idempotency/resume key. A retried job skips items
+// already DONE so a trace is never double-written to the (append-only) telemetry store.
+model ExperimentItemResult {
+  id            String     @id @default(cuid())
+  experimentId  String
+  experiment    Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  datasetItemId String
+  status        String     @default("PENDING") // PENDING | RUNNING | DONE | FAILED
+  traceId       String     @default("")
+  error         String     @default("")
+  attempts      Int        @default(0)
+  updatedAt     DateTime   @updatedAt
+
+  @@unique([experimentId, datasetItemId])
+  @@index([experimentId, status])
 }
 
 model ScoreConfig {
