@@ -28,6 +28,7 @@ import { Checkbox } from "../../components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -461,24 +462,30 @@ function TracesPage() {
               <Save />
               Save view
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void downloadTracesExport("jsonl", { ...listFilters, days })}
-              className="gap-2"
-            >
-              <Download />
-              Export JSONL
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void downloadTracesExport("csv", { ...listFilters, days })}
-              className="gap-2"
-            >
-              <Download />
-              Export CSV
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                  <Download />
+                  Export
+                  <ChevronDown className="size-3.5 opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>
+                  Download {Math.min(total, 1000).toLocaleString()}
+                  {total > 1000 ? ` of ${total.toLocaleString()}` : ""} traces
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => void downloadTracesExport("jsonl", { ...listFilters, days })}>
+                  JSONL
+                  <span className="ml-auto text-xs text-muted-foreground">.jsonl</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void downloadTracesExport("csv", { ...listFilters, days })}>
+                  CSV
+                  <span className="ml-auto text-xs text-muted-foreground">.csv</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </>
         }
       />
