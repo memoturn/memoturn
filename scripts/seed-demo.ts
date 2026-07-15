@@ -274,6 +274,41 @@ function makeGenerationBody(
   };
 }
 
+// ── RAG demo helpers: retrieved documents + topic-clustered embeddings ───────────
+const NUM_TOPICS = 6;
+const EMBED_DIM = 16;
+const DOC_SOURCES = ["kb://faq", "kb://docs", "web://blog", "kb://runbook"] as const;
+const DOC_SNIPPETS = [
+  "See the configuration reference for the relevant setting.",
+  "This behavior changed in a recent release; check the migration notes.",
+  "The retriever ranks candidates by cosine similarity over embeddings.",
+  "Rate limits apply per project; increase them in settings.",
+  "Costs are computed from token usage against the model price registry.",
+  "Traces group by session id; users group by user id.",
+] as const;
+
+/** Deterministic topic id for a question (so embeddings form visible clusters). */
+function topicOf(question: string): number {
+  return fnv1a(question) % NUM_TOPICS;
+}
+
+/** A demo embedding centered on the question's topic cluster, plus small noise. */
+function demoEmbedding(rng: Rng, topic: number): number[] {
+  return Array.from({ length: EMBED_DIM }, (_, i) => Math.sin(topic * 1.3 + i * 0.7) + (rng() - 0.5) * 0.3);
+}
+
+/** N retrieved documents with descending relevance scores. */
+function makeRetrievedDocs(rng: Rng, question: string, n: number) {
+  const topic = topicOf(question);
+  return Array.from({ length: n }, (_, i) => ({
+    rank: i,
+    score: Math.max(0, Number((0.95 - i * 0.15 - rng() * 0.05).toFixed(4))),
+    content: `${pick(rng, DOC_SNIPPETS)} (re: ${question.slice(0, 40)})`,
+    id: `doc-${topic}-${i}`,
+    metadata: { source: pick(rng, DOC_SOURCES) },
+  }));
+}
+
 /** Builds all ingest events for one trace. Fully deterministic from (SEED, dayIndex, traceIndex). */
 function makeTrace(dayIndex: number, traceIndex: number, dayStartMs: number, dayCutoffMs: number): IngestEvent[] {
   const rng = mulberry32(fnv1a(`${SEED}:${dayIndex}:${traceIndex}`));
@@ -316,15 +351,18 @@ function makeTrace(dayIndex: number, traceIndex: number, dayStartMs: number, day
     });
     finalGenerationId = addObservation(ctx, "generation-create", cursor, cursor + gen.durationMs, {
       name: "chat",
+      embedding: demoEmbedding(rng, topicOf(question)),
       ...gen.body,
     });
     cursor += gen.durationMs;
   } else if (scenario === "rag-pipeline") {
     const retrieveMs = randInt(rng, 40, 280);
+    const numDocs = randInt(rng, 2, 5);
     const spanId = addObservation(ctx, "span-create", cursor, cursor + retrieveMs, {
       name: "retrieve-docs",
       input: { query: question, topK: 5 },
-      output: { hits: randInt(rng, 2, 5) },
+      output: { hits: numDocs },
+      retrievedDocuments: makeRetrievedDocs(rng, question, numDocs),
       ...(hasWarning ? { level: "WARNING", statusMessage: pick(rng, WARNING_MESSAGES) } : {}),
     });
     if (rng() < 0.6) {
@@ -345,6 +383,7 @@ function makeTrace(dayIndex: number, traceIndex: number, dayStartMs: number, day
       name: "answer",
       promptId: "support-reply",
       promptVersion: "1",
+      embedding: demoEmbedding(rng, topicOf(question)),
       ...gen.body,
     });
     cursor += gen.durationMs;
