@@ -1,12 +1,16 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { EmptyState } from "../components/empty-state";
 import { PageHeader } from "../components/page-header";
+import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Skeleton } from "../components/ui/skeleton";
 import { api } from "../lib/api";
+import { useIsReadOnly } from "../lib/role";
 
 export const Route = createFileRoute("/embeddings")({ component: EmbeddingsPage });
 
@@ -39,12 +43,27 @@ const PAD = 24;
 
 function EmbeddingsPage() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
+  const readOnly = useIsReadOnly();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [colorBy, setColorBy] = useState<string>("__cluster__");
 
   const { data, isLoading } = useQuery({
     queryKey: ["embedding-projection", colorBy],
     queryFn: () => api.getEmbeddingProjection({ colorBy: colorBy === "__cluster__" ? undefined : colorBy }),
+  });
+
+  const runProjection = useMutation({
+    mutationFn: () => api.runEmbeddingProjection(),
+    onSuccess: (r) => {
+      if (r.points > 0) {
+        toast.success(`Projected ${r.points} points`);
+        qc.invalidateQueries({ queryKey: ["embedding-projection"] });
+      } else {
+        toast.message("Need at least 2 observations with embeddings to project.");
+      }
+    },
+    onError: (e) => toast.error(String(e)),
   });
   // Score names to color by (from the trace facets).
   const { data: facets } = useQuery({
@@ -129,6 +148,19 @@ function EmbeddingsPage() {
       <PageHeader
         title="Embeddings"
         description="2D projection of observation embeddings — clusters surface outliers; color by a score to find problem areas."
+        actions={
+          !readOnly ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={runProjection.isPending}
+              onClick={() => runProjection.mutate()}
+            >
+              <RefreshCw className={`mr-1.5 size-4 ${runProjection.isPending ? "animate-spin" : ""}`} />
+              {runProjection.isPending ? "Projecting…" : "Run projection"}
+            </Button>
+          ) : undefined
+        }
       />
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
@@ -153,7 +185,15 @@ function EmbeddingsPage() {
           ) : points.length === 0 ? (
             <EmptyState
               title="No projection yet"
-              description="Ingest observations with embeddings, then the daily projection job (or a manual run) computes the layout."
+              description="Ingest observations with embeddings, then run the projection (or wait for the daily job) to compute the layout."
+              action={
+                !readOnly ? (
+                  <Button size="sm" disabled={runProjection.isPending} onClick={() => runProjection.mutate()}>
+                    <RefreshCw className={`mr-1.5 size-4 ${runProjection.isPending ? "animate-spin" : ""}`} />
+                    Run projection
+                  </Button>
+                ) : undefined
+              }
             />
           ) : (
             <div className="overflow-x-auto">
