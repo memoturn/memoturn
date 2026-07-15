@@ -3,6 +3,7 @@ from .client import Memoturn, Span, Trace
 from .dataset import add_dataset_items, create_dataset, evaluate_gate, get_dataset, record_run
 from .decorator import configure, get_client, observe
 from .openai import wrap_openai
+from .otel import otlp_config, span_exporter, span_processor
 from .prompt import compile_prompt, get_prompt
 
 __all__ = [
@@ -20,6 +21,9 @@ __all__ = [
     "get_dataset",
     "record_run",
     "evaluate_gate",
+    "otlp_config",
+    "span_exporter",
+    "span_processor",
 ]
 
 __version__ = "0.2.0"

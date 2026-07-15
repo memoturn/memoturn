@@ -26,7 +26,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./openai": "./src/openai.ts",
-    "./langchain": "./src/langchain.ts"
+    "./langchain": "./src/langchain.ts",
+    "./otel": "./src/otel.ts"
   },
   "files": [
     "dist",
@@ -48,6 +49,10 @@
       "./langchain": {
         "types": "./dist/langchain.d.ts",
         "default": "./dist/langchain.js"
+      },
+      "./otel": {
+        "types": "./dist/otel.d.ts",
+        "default": "./dist/otel.js"
       }
     }
   },
@@ -60,10 +65,18 @@
     "clean": "rm -rf dist .turbo"
   },
   "peerDependencies": {
-    "openai": ">=4"
+    "openai": ">=4",
+    "@opentelemetry/exporter-trace-otlp-http": ">=0.50.0",
+    "@opentelemetry/sdk-trace-base": ">=1.20.0"
   },
   "peerDependenciesMeta": {
     "openai": {
+      "optional": true
+    },
+    "@opentelemetry/exporter-trace-otlp-http": {
+      "optional": true
+    },
+    "@opentelemetry/sdk-trace-base": {
       "optional": true
     }
   },
