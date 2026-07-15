@@ -5,6 +5,7 @@ import type {
   ObservationDetail,
   ScoreRow as ScoreDetail,
   SessionSummary,
+  ToolAnalyticsRow,
   TraceFacets,
   TraceHistogramBucket,
   TraceSummary,
@@ -671,6 +672,48 @@ export class DorisTelemetryStore implements TelemetryStore {
       [projectId, cutoffDaysAgo(days)],
     );
     return Number(rows[0]?.c ?? 0);
+  }
+
+  async toolAnalytics(projectId: string, days: number): Promise<ToolAnalyticsRow[]> {
+    // Tool calls are SPAN observations named after the tool (LangChain callbacks, OTel
+    // execute_tool spans). Group by name for the "which tool/step is slow or failing" view.
+    const rows = await this.query<{
+      tool: string;
+      calls: unknown;
+      errors: unknown;
+      p50: unknown;
+      p95: unknown;
+      avg_latency: unknown;
+    }>(
+      `
+      SELECT
+        name AS tool,
+        COUNT(*) AS calls,
+        SUM(IF(level = 'ERROR', 1, 0)) AS errors,
+        PERCENTILE_APPROX(latency_ms, 0.5) AS p50,
+        PERCENTILE_APPROX(latency_ms, 0.95) AS p95,
+        AVG(latency_ms) AS avg_latency
+      FROM observations
+      WHERE project_id = ? AND type = 'SPAN' AND name != '' AND start_time >= ?
+      GROUP BY name
+      ORDER BY calls DESC
+      LIMIT 200
+      `,
+      [projectId, cutoffMidnightDaysAgo(days)],
+    );
+    return rows.map((r) => {
+      const calls = Number(r.calls);
+      const errors = Number(r.errors ?? 0);
+      return {
+        tool: r.tool,
+        calls,
+        errors,
+        error_rate: calls > 0 ? errors / calls : 0,
+        p50_latency_ms: Math.round(Number(r.p50 ?? 0)),
+        p95_latency_ms: Math.round(Number(r.p95 ?? 0)),
+        avg_latency_ms: Math.round(Number(r.avg_latency ?? 0)),
+      };
+    });
   }
 
   async metricsWindow(projectId: string, sinceMinutes: number): Promise<WindowMetric> {

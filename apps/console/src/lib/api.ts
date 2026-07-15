@@ -48,6 +48,7 @@ import type {
   ScoreCorrected,
   SessionPage,
   SessionSummary,
+  ToolAnalyticsRow,
   TraceDetail,
   TraceFacets,
   TraceHistogram,
@@ -188,6 +189,8 @@ export const api = {
   ) => post<AnnotationResult>(`/v1/traces/${encodeURIComponent(id)}/annotate`, body),
   setTraceTags: (id: string, tags: string[]) => post<TraceTags>(`/v1/traces/${encodeURIComponent(id)}/tags`, { tags }),
   getMetrics: (days = 30) => get<MetricsSummary>(`/v1/metrics${qs({ days })}`),
+  getToolAnalytics: (days = 30) =>
+    get<{ data: ToolAnalyticsRow[] }>(`/v1/metrics/tools${qs({ days })}`).then((r) => r.data),
   listPrompts: () => get<{ data: PromptListItem[] }>(`/v1/prompts`).then((r) => r.data),
   getPrompt: (name: string) => get<PromptDetail>(`/v1/prompts/${encodeURIComponent(name)}/detail`),
   listDatasets: () => get<{ data: DatasetListItem[] }>(`/v1/datasets`).then((r) => r.data),

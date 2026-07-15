@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import type { ModelMetric, Widget } from "@memoturn/contracts";
+import type { ModelMetric, ToolAnalyticsRow, Widget } from "@memoturn/contracts";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -60,6 +60,25 @@ const modelColumns: ColumnDef<ModelMetric>[] = [
     cell: ({ row }) => Number(row.original.total_tokens).toLocaleString(),
   },
   { accessorKey: "total_cost", header: "Cost", cell: ({ row }) => money(row.original.total_cost) },
+];
+
+const toolColumns: ColumnDef<ToolAnalyticsRow>[] = [
+  { accessorKey: "tool", header: "Tool", cell: ({ row }) => <span className="font-medium">{row.original.tool}</span> },
+  { accessorKey: "calls", header: "Calls", cell: ({ row }) => Number(row.original.calls).toLocaleString() },
+  {
+    accessorKey: "error_rate",
+    header: "Error rate",
+    cell: ({ row }) => {
+      const rate = row.original.error_rate;
+      return (
+        <span className={rate > 0 ? "text-destructive" : "text-muted-foreground"}>
+          {(rate * 100).toFixed(1)}% ({Number(row.original.errors).toLocaleString()})
+        </span>
+      );
+    },
+  },
+  { accessorKey: "p50_latency_ms", header: "p50", cell: ({ row }) => `${row.original.p50_latency_ms} ms` },
+  { accessorKey: "p95_latency_ms", header: "p95", cell: ({ row }) => `${row.original.p95_latency_ms} ms` },
 ];
 
 // ── Interactive usage-over-time area chart ────────────────────────────────────────
@@ -232,6 +251,12 @@ function DashboardPage() {
     // Keep the prior dashboard on screen while a new time range loads — no full-page skeleton flash.
     placeholderData: keepPreviousData,
   });
+  const { data: tools } = useQuery({
+    queryKey: ["tool-analytics", days],
+    queryFn: () => api.getToolAnalytics(days),
+    refetchInterval: 10_000,
+    placeholderData: keepPreviousData,
+  });
 
   if (isLoading) return <DashboardSkeleton days={days} />;
   if (error) return <EmptyState title="Failed to load dashboard" description={String(error)} />;
@@ -314,6 +339,25 @@ function DashboardPage() {
             <EmptyState title="No model data yet" description="Per-model breakdown appears once generations record." />
           ) : (
             <DataTable columns={modelColumns} data={data.byModel} />
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>By tool ({tools?.length ?? 0})</CardTitle>
+          <CardDescription>
+            Call volume, error rate, and latency per tool/step (named spans) — where agents are slow or failing.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {!tools || tools.length === 0 ? (
+            <EmptyState
+              title="No tool data yet"
+              description="Tool analytics appear once traces record tool/step spans (LangChain tools, OTel execute_tool spans)."
+            />
+          ) : (
+            <DataTable columns={toolColumns} data={tools} />
           )}
         </CardContent>
       </Card>

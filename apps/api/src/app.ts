@@ -66,6 +66,7 @@ import {
   getReviewAnalytics,
   getScheduledExport,
   getScoresByTraceIds,
+  getToolAnalytics,
   getTrace,
   ingestRateLimitConfig,
   instantiateEvaluatorTemplate,
@@ -231,6 +232,7 @@ app.use("/v1/traces/*", requireAuth);
 app.use("/v1/sessions", requireAuth);
 app.use("/v1/users", requireAuth);
 app.use("/v1/metrics", requireAuth);
+app.use("/v1/metrics/*", requireAuth);
 app.use("/v1/prompts", requireAuth);
 app.use("/v1/prompts/*", requireAuth);
 app.use("/v1/datasets", requireAuth);
@@ -833,6 +835,21 @@ app.openapi(
     const data = await getMetrics(c.get("projectId"), c.req.valid("query").days ?? 30);
     return c.json(data);
   },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/metrics/tools",
+    summary: "Per-tool (named SPAN) analytics: call volume, error rate, and latency",
+    tags: ["metrics"],
+    security,
+    request: { query: z.object({ days: z.coerce.number().int().min(1).max(365).optional() }) },
+    responses: {
+      200: { description: "Tool analytics", content: { "application/json": { schema: C.listOf(C.toolAnalyticsRow) } } },
+    },
+  }),
+  async (c) => c.json({ data: await getToolAnalytics(c.get("projectId"), c.req.valid("query").days ?? 30) }),
 );
 
 app.openapi(
