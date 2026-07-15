@@ -52,6 +52,36 @@ export function getIngestQueue(): Queue<IngestJob> {
   return ingestQueue;
 }
 
+/** Payload enqueued per experiment run — the worker loads config + items from Postgres. */
+export interface ExperimentJob {
+  projectId: string;
+  experimentId: string;
+}
+
+let experimentQueue: Queue<ExperimentJob> | undefined;
+
+/**
+ * Queue for server-executed dataset experiments. Each job fans out over dataset items
+ * (LLM calls + evaluators), so it can run for minutes — the worker consumes this on a
+ * dedicated Worker at low concurrency so experiments never starve ingest. Retries are
+ * safe because the ExperimentItemResult checkpoint table skips already-DONE items.
+ */
+export function getExperimentQueue(): Queue<ExperimentJob> {
+  if (!experimentQueue) {
+    experimentQueue = new Queue<ExperimentJob>(QUEUE_NAMES.experiment, {
+      connection: connectionOptions(),
+      prefix: QUEUE_PREFIX,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 2000 },
+        removeOnComplete: 1000,
+        removeOnFail: 5000, // retain for inspection
+      },
+    });
+  }
+  return experimentQueue;
+}
+
 let dlqQueue: Queue<IngestDlqJob> | undefined;
 
 /** Dead-letter queue for ingest batches that exhaust their retries (inspect/replay). */

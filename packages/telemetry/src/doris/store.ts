@@ -1,5 +1,6 @@
 import type {
   DailyMetric,
+  EmbeddingPoint,
   ModelMetric,
   ObservationDetail,
   ScoreRow as ScoreDetail,
@@ -14,6 +15,7 @@ import type {
 } from "@memoturn/contracts";
 import type { TelemetryStore } from "../store.js";
 import type {
+  EmbeddingVectorRow,
   EvalScoreSummaryRow,
   EvalScoreTrendRow,
   ExportFilters,
@@ -22,6 +24,7 @@ import type {
   FullScoreRow,
   ObservationRow,
   ProjectRowCounts,
+  RetrievalDocumentDetail,
   TelemetryRowMap,
   TelemetryTable,
   TraceFilters,
@@ -31,7 +34,7 @@ import type {
   TraceScore,
 } from "../types.js";
 import { closeDorisPool, dorisQuery } from "./client.js";
-import { buildInserts, parseTags, toDorisDateTime } from "./serialize.js";
+import { buildInserts, parseTags, parseVector, toDorisDateTime } from "./serialize.js";
 
 /**
  * Apache Doris implementation of the TelemetryStore. All tables are UNIQUE KEY
@@ -481,6 +484,8 @@ export class DorisTelemetryStore implements TelemetryStore {
       cache_creation_tokens: Number(r.cache_creation_tokens),
       total_cost: Number(r.total_cost),
       latency_ms: Number(r.latency_ms),
+      // Enriched by packages/server getTrace (kept empty at the store boundary).
+      retrieval_documents: [],
     }));
   }
 
@@ -793,6 +798,102 @@ export class DorisTelemetryStore implements TelemetryStore {
     }));
   }
 
+  // ── RAG: retrieval documents + embeddings ────────────────────────────────────────
+
+  async listRetrievalDocumentsByObservationIds(
+    projectId: string,
+    observationIds: string[],
+  ): Promise<RetrievalDocumentDetail[]> {
+    if (observationIds.length === 0) return [];
+    const rows = await this.query<{
+      observation_id: string;
+      rank: unknown;
+      score: unknown;
+      doc_id: string;
+      content: string;
+      metadata: string;
+    }>(
+      `
+      SELECT observation_id, rank, score, doc_id,
+             COALESCE(content, '') AS content,
+             COALESCE(metadata, '{}') AS metadata
+      FROM retrieval_documents
+      WHERE project_id = ? AND observation_id IN (?)
+      ORDER BY observation_id ASC, rank ASC
+      `,
+      [projectId, observationIds],
+    );
+    return rows.map((r) => ({
+      observation_id: r.observation_id,
+      rank: Number(r.rank),
+      score: r.score === null ? null : Number(r.score),
+      doc_id: r.doc_id,
+      content: r.content,
+      metadata: r.metadata,
+    }));
+  }
+
+  async listEmbeddingsForProjection(
+    projectId: string,
+    opts: { days?: number; limit?: number } = {},
+  ): Promise<EmbeddingVectorRow[]> {
+    const { days = 30, limit = 5000 } = opts;
+    const rows = await this.query<{ observation_id: string; trace_id: string; vector: unknown }>(
+      `
+      SELECT observation_id, trace_id, CAST(vector AS JSON) AS vector
+      FROM embeddings
+      WHERE project_id = ? AND event_ts >= ? AND dim > 0
+      ORDER BY event_ts DESC
+      LIMIT ?
+      `,
+      [projectId, cutoffDaysAgo(days), Math.floor(limit)],
+    );
+    return rows
+      .map((r) => ({ observation_id: r.observation_id, trace_id: r.trace_id, vector: parseVector(r.vector) }))
+      .filter((r) => r.vector.length > 0);
+  }
+
+  async latestProjectionRunId(projectId: string): Promise<string | null> {
+    const rows = await this.query<{ run_id: string }>(
+      "SELECT run_id FROM embedding_projections WHERE project_id = ? ORDER BY event_ts DESC LIMIT 1",
+      [projectId],
+    );
+    return rows[0]?.run_id ?? null;
+  }
+
+  async listEmbeddingProjection(
+    projectId: string,
+    opts: { runId?: string; limit?: number } = {},
+  ): Promise<EmbeddingPoint[]> {
+    const runId = opts.runId ?? (await this.latestProjectionRunId(projectId));
+    if (!runId) return [];
+    const rows = await this.query<{
+      observation_id: string;
+      trace_id: string;
+      x: unknown;
+      y: unknown;
+      z: unknown;
+      cluster_id: unknown;
+    }>(
+      `
+      SELECT observation_id, trace_id, x, y, z, cluster_id
+      FROM embedding_projections
+      WHERE project_id = ? AND run_id = ?
+      LIMIT ?
+      `,
+      [projectId, runId, Math.floor(opts.limit ?? 10000)],
+    );
+    return rows.map((r) => ({
+      observation_id: r.observation_id,
+      trace_id: r.trace_id,
+      x: Number(r.x),
+      y: Number(r.y),
+      z: r.z === null ? null : Number(r.z),
+      cluster_id: Number(r.cluster_id),
+      color_value: null, // filled in packages/server from scores when color-by is requested
+    }));
+  }
+
   async countProjectRows(projectId: string): Promise<ProjectRowCounts> {
     const count = async (table: TelemetryTable) => {
       const rows = await this.query<{ c: unknown }>(`SELECT COUNT(*) AS c FROM ${table} WHERE project_id = ?`, [
@@ -821,6 +922,12 @@ export class DorisTelemetryStore implements TelemetryStore {
     await this.exec("DELETE FROM traces WHERE project_id = ? AND id IN (?)", [projectId, traceIds]);
     await this.exec("DELETE FROM observations WHERE project_id = ? AND trace_id IN (?)", [projectId, traceIds]);
     await this.exec("DELETE FROM scores WHERE project_id = ? AND trace_id IN (?)", [projectId, traceIds]);
+    await this.exec("DELETE FROM retrieval_documents WHERE project_id = ? AND trace_id IN (?)", [projectId, traceIds]);
+    await this.exec("DELETE FROM embeddings WHERE project_id = ? AND trace_id IN (?)", [projectId, traceIds]);
+    await this.exec("DELETE FROM embedding_projections WHERE project_id = ? AND trace_id IN (?)", [
+      projectId,
+      traceIds,
+    ]);
   }
 
   async deleteOlderThan(projectId: string, days: number): Promise<void> {
@@ -828,12 +935,18 @@ export class DorisTelemetryStore implements TelemetryStore {
     await this.exec("DELETE FROM traces WHERE project_id = ? AND `timestamp` < ?", [projectId, cutoff]);
     await this.exec("DELETE FROM observations WHERE project_id = ? AND start_time < ?", [projectId, cutoff]);
     await this.exec("DELETE FROM scores WHERE project_id = ? AND `timestamp` < ?", [projectId, cutoff]);
+    await this.exec("DELETE FROM retrieval_documents WHERE project_id = ? AND event_ts < ?", [projectId, cutoff]);
+    await this.exec("DELETE FROM embeddings WHERE project_id = ? AND event_ts < ?", [projectId, cutoff]);
+    await this.exec("DELETE FROM embedding_projections WHERE project_id = ? AND event_ts < ?", [projectId, cutoff]);
   }
 
   async deleteProjectData(projectId: string): Promise<void> {
     await this.exec("DELETE FROM traces WHERE project_id = ?", [projectId]);
     await this.exec("DELETE FROM observations WHERE project_id = ?", [projectId]);
     await this.exec("DELETE FROM scores WHERE project_id = ?", [projectId]);
+    await this.exec("DELETE FROM retrieval_documents WHERE project_id = ?", [projectId]);
+    await this.exec("DELETE FROM embeddings WHERE project_id = ?", [projectId]);
+    await this.exec("DELETE FROM embedding_projections WHERE project_id = ?", [projectId]);
   }
 
   // ── Ops ────────────────────────────────────────────────────────────────────────

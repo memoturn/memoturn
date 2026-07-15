@@ -11,6 +11,21 @@ export interface Usage {
 
 export type ObservationLevel = "DEBUG" | "DEFAULT" | "WARNING" | "ERROR";
 
+/** A document a retriever/RAG span returned (surfaced in the trace view + RAG analysis). */
+export interface RetrievedDocument {
+  /** Stable id in the source store, if any. */
+  id?: string;
+  /** Position in the result set (0-based). */
+  rank: number;
+  /** Relevance / similarity score. */
+  score?: number;
+  /** Document text. */
+  content: string;
+  metadata?: JsonValue;
+  /** Optional per-document embedding vector. */
+  embedding?: number[];
+}
+
 export interface TraceInput {
   id?: string;
   name?: string;
@@ -34,6 +49,10 @@ export interface SpanInput {
   output?: JsonValue;
   level?: ObservationLevel;
   statusMessage?: string;
+  /** RAG: documents this span retrieved (retriever / vector-search spans). */
+  retrievedDocuments?: RetrievedDocument[];
+  /** Embedding vector for this observation (e.g. an embedding-model call). */
+  embedding?: number[];
 }
 
 export interface GenerationInput extends SpanInput {

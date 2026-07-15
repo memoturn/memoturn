@@ -108,6 +108,29 @@ describe("event shapes", () => {
     expect(update?.body.usage).toEqual({ totalTokens: 5 });
   });
 
+  it("carries retrievedDocuments on a span and an embedding on a generation", async () => {
+    const m = setup();
+    const client = new Memoturn(creds);
+    const trace = client.trace();
+    const retriever = trace.span({
+      name: "retriever",
+      retrievedDocuments: [
+        { rank: 0, score: 0.9, content: "doc a", id: "a" },
+        { rank: 1, score: 0.4, content: "doc b" },
+      ],
+    });
+    retriever.end();
+    trace.generation({ name: "embed", model: "text-embedding-3-small", embedding: [0.1, 0.2, 0.3] });
+    await client.flush();
+
+    const batch = batchFrom(m);
+    const span = batch.find((e) => e.body.id === retriever.id && e.type === "span-create");
+    expect(span?.body.retrievedDocuments).toHaveLength(2);
+    expect((span?.body.retrievedDocuments as { rank: number }[])[0]).toMatchObject({ rank: 0, score: 0.9 });
+    const gen = batch.find((e) => e.type === "generation-create" && Array.isArray(e.body.embedding));
+    expect(gen?.body.embedding).toEqual([0.1, 0.2, 0.3]);
+  });
+
   it("nested span sets parentObservationId to the parent span", async () => {
     const m = setup();
     const client = new Memoturn(creds);

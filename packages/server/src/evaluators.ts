@@ -1,5 +1,5 @@
 import type { EvaluatorAnalytics } from "@memoturn/contracts";
-import { isoNow, newId } from "@memoturn/core";
+import { EVALUATOR_TEMPLATES, getEvaluatorTemplate, isoNow, newId } from "@memoturn/core";
 import { prisma } from "@memoturn/db";
 import { generate, type Provider } from "@memoturn/llm";
 import { telemetry } from "@memoturn/telemetry";
@@ -62,6 +62,49 @@ export async function listEvaluators(projectId: string) {
 /** Online evaluators for a project (run automatically on sampled incoming traces). */
 export async function listOnlineEvaluators(projectId: string) {
   return prisma.evaluator.findMany({ where: { projectId, online: true } });
+}
+
+/** The prebuilt evaluator library (RAG/quality judge templates) — instantiate to use. */
+export function listEvaluatorTemplates() {
+  return EVALUATOR_TEMPLATES.map((t) => ({
+    key: t.key,
+    name: t.name,
+    description: t.description,
+    requires: t.requires,
+    defaultModel: t.defaultModel ?? "",
+  }));
+}
+
+export interface InstantiateTemplateInput {
+  /** Override the evaluator name (defaults to the template's name). */
+  name?: string;
+  provider?: string;
+  model?: string;
+  online?: boolean;
+  samplingRate?: number;
+  filterName?: string;
+}
+
+/**
+ * Instantiate a prebuilt template into a real Evaluator row (a thin adapter over
+ * `createEvaluator`). Returns null if the template key is unknown.
+ */
+export async function instantiateEvaluatorTemplate(
+  projectId: string,
+  key: string,
+  overrides: InstantiateTemplateInput = {},
+) {
+  const template = getEvaluatorTemplate(key);
+  if (!template) return null;
+  return createEvaluator(projectId, {
+    name: overrides.name ?? template.name,
+    prompt: template.prompt,
+    provider: overrides.provider ?? "mock",
+    model: overrides.model ?? template.defaultModel ?? "mock-gpt-4o",
+    online: overrides.online,
+    samplingRate: overrides.samplingRate,
+    filterName: overrides.filterName,
+  });
 }
 
 /**

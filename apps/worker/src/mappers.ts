@@ -1,5 +1,5 @@
 import { clampTokens, computeCost, type IngestEvent, type ModelPrice, providerForModel } from "@memoturn/core";
-import type { ObservationRow, ScoreWriteRow, TraceRow } from "@memoturn/telemetry";
+import type { EmbeddingRow, ObservationRow, RetrievalDocumentRow, ScoreWriteRow, TraceRow } from "@memoturn/telemetry";
 
 /**
  * Maps validated ingest events into telemetry-store row shapes. Multiple events for
@@ -19,7 +19,7 @@ import type { ObservationRow, ScoreWriteRow, TraceRow } from "@memoturn/telemetr
 const json = (v: unknown): string => (typeof v === "string" ? v : JSON.stringify(v));
 const meta = (v: unknown): string => JSON.stringify(v);
 
-export type { ObservationRow, ScoreWriteRow, TraceRow };
+export type { EmbeddingRow, ObservationRow, RetrievalDocumentRow, ScoreWriteRow, TraceRow };
 
 /** Currently stored rows for entities referenced by this batch (read-merge bases). */
 export interface RowBases {
@@ -31,6 +31,8 @@ export interface MappedRows {
   traces: TraceRow[];
   observations: ObservationRow[];
   scores: ScoreWriteRow[];
+  retrieval_documents: RetrievalDocumentRow[];
+  embeddings: EmbeddingRow[];
 }
 
 const OBS_TYPE: Record<string, "SPAN" | "GENERATION" | "EVENT"> = {
@@ -184,5 +186,46 @@ export function mapEvents(
     };
   });
 
-  return { traces, observations, scores: scoreRows };
+  // RAG: explode each observation's retrievedDocuments[] into rows, and capture an
+  // observation-level embedding vector. (Per-document embeddings on the wire are accepted
+  // but not stored yet — the embeddings table is keyed one-vector-per-observation.)
+  const retrieval_documents: RetrievalDocumentRow[] = [];
+  const embeddings: EmbeddingRow[] = [];
+  for (const { body, event_ts } of obsAcc.values()) {
+    const b = body as Record<string, any>;
+    const base = bases.observations?.get(b.id);
+    const traceId: string = b.traceId ?? base?.trace_id ?? "";
+    if (Array.isArray(b.retrievedDocuments)) {
+      for (const doc of b.retrievedDocuments) {
+        retrieval_documents.push({
+          project_id: projectId,
+          observation_id: b.id,
+          rank: Number(doc.rank ?? 0),
+          trace_id: traceId,
+          doc_id: doc.id ?? "",
+          score: doc.score ?? null,
+          content: typeof doc.content === "string" ? doc.content : json(doc.content),
+          metadata: doc.metadata !== undefined ? meta(doc.metadata) : "{}",
+          event_ts,
+        });
+      }
+    }
+    if (Array.isArray(b.embedding) && b.embedding.length > 0) {
+      const vector = (b.embedding as unknown[]).map(Number).filter((n) => Number.isFinite(n));
+      if (vector.length > 0) {
+        embeddings.push({
+          project_id: projectId,
+          observation_id: b.id,
+          trace_id: traceId,
+          kind: "OBSERVATION",
+          model: b.model ?? base?.model ?? "",
+          dim: vector.length,
+          vector,
+          event_ts,
+        });
+      }
+    }
+  }
+
+  return { traces, observations, scores: scoreRows, retrieval_documents, embeddings };
 }

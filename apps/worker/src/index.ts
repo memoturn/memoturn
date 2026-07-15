@@ -1,9 +1,16 @@
 import { createServer } from "node:http";
 import { QUEUE_NAMES, QUEUE_PREFIX } from "@memoturn/core";
-import { connectionOptions, getDlqQueue, getIngestQueue, type IngestJob } from "@memoturn/db/queue";
-import { applyAllRetention, runAllScheduledExports, validateRuntimeEnv, withLock } from "@memoturn/server";
+import { connectionOptions, type ExperimentJob, getDlqQueue, getIngestQueue, type IngestJob } from "@memoturn/db/queue";
+import {
+  applyAllRetention,
+  runAllEmbeddingProjections,
+  runAllScheduledExports,
+  validateRuntimeEnv,
+  withLock,
+} from "@memoturn/server";
 import { Queue, Worker } from "bullmq";
 import { logJson, snapshot } from "./metrics.js";
+import { processExperiment } from "./processors/experiment.js";
 import { processIngest } from "./processors/ingest.js";
 
 /**
@@ -46,6 +53,20 @@ ingestWorker.on("failed", async (job, err) => {
   }
 });
 
+// ── Experiments (server-executed dataset runs) ───────────────────────────────────
+// A dedicated worker at low concurrency: each job fans out over dataset items, so it
+// must not share the ingest worker's slots (a long experiment would starve ingest).
+const experimentConcurrency = Number(process.env.EXPERIMENT_CONCURRENCY ?? 2);
+const experimentWorker = new Worker<ExperimentJob>(QUEUE_NAMES.experiment, processExperiment, {
+  connection: connectionOptions(),
+  prefix: QUEUE_PREFIX,
+  concurrency: experimentConcurrency,
+});
+experimentWorker.on("ready", () => console.log(`[worker] experiment ready (concurrency=${experimentConcurrency})`));
+experimentWorker.on("failed", (job, err) =>
+  logJson("error", "experiment job failed", { jobId: job?.id, attemptsMade: job?.attemptsMade, error: err.message }),
+);
+
 // ── Daily maintenance crons (retention + scheduled exports) ──────────────────────
 const maintenanceQueue = new Queue(QUEUE_NAMES.export, {
   connection: connectionOptions(),
@@ -69,6 +90,15 @@ const maintenanceWorker = new Worker(
         console.log(`[export] ran ${results.length} project export(s), wrote ${total} traces`);
       });
       if (ran === null) console.log("[export] skipped — another run holds the lock");
+    } else if (job.name === "embeddings") {
+      // Lock so overlapping runs don't race (UMAP-free PCA is deterministic, but two
+      // concurrent runs would still write competing run_ids).
+      const ran = await withLock("embedding-projection", 30 * 60, async () => {
+        const results = await runAllEmbeddingProjections();
+        const total = results.reduce((n, r) => n + r.points, 0);
+        console.log(`[embeddings] projected ${results.length} project(s), ${total} points`);
+      });
+      if (ran === null) console.log("[embeddings] skipped — another run holds the lock");
     }
   },
   { connection: connectionOptions(), prefix: QUEUE_PREFIX },
@@ -91,6 +121,15 @@ await maintenanceQueue.add(
   {
     repeat: { pattern: "0 4 * * *" },
     jobId: "export-daily",
+    removeOnComplete: true,
+  },
+);
+await maintenanceQueue.add(
+  "embeddings",
+  {},
+  {
+    repeat: { pattern: "0 5 * * *" },
+    jobId: "embeddings-daily",
     removeOnComplete: true,
   },
 );
@@ -144,7 +183,7 @@ healthServer.listen(healthPort, healthHost, () =>
 async function shutdown(signal: string) {
   console.log(`[worker] ${signal} received, draining…`);
   healthServer.close();
-  await Promise.all([ingestWorker.close(), maintenanceWorker.close(), dlq.close()]);
+  await Promise.all([ingestWorker.close(), experimentWorker.close(), maintenanceWorker.close(), dlq.close()]);
   process.exit(0);
 }
 

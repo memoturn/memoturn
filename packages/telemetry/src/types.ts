@@ -74,11 +74,53 @@ export interface ScoreWriteRow {
   event_ts: string;
 }
 
+/** One retrieved document on a RAG/retriever span (exploded from retrievedDocuments[]). */
+export interface RetrievalDocumentRow {
+  project_id: string;
+  observation_id: string;
+  rank: number;
+  trace_id: string;
+  doc_id: string;
+  score: number | null;
+  content: string;
+  metadata: string;
+  event_ts: string;
+}
+
+/** Raw embedding vector for an observation (or retrieved doc). */
+export interface EmbeddingRow {
+  project_id: string;
+  observation_id: string;
+  trace_id: string;
+  kind: "OBSERVATION" | "RETRIEVAL_DOC";
+  model: string;
+  dim: number;
+  vector: number[];
+  event_ts: string;
+}
+
+/** Reduced 2D/3D projection coordinate + cluster for one point in a reduction run. */
+export interface EmbeddingProjectionRow {
+  project_id: string;
+  run_id: string;
+  observation_id: string;
+  trace_id: string;
+  x: number;
+  y: number;
+  z: number | null;
+  cluster_id: number;
+  method: string;
+  event_ts: string;
+}
+
 /** Per-table write-row map — keeps `insertRows(table, rows)` type-safe generically. */
 export interface TelemetryRowMap {
   traces: TraceRow;
   observations: ObservationRow;
   scores: ScoreWriteRow;
+  retrieval_documents: RetrievalDocumentRow;
+  embeddings: EmbeddingRow;
+  embedding_projections: EmbeddingProjectionRow;
 }
 
 export type TelemetryTable = keyof TelemetryRowMap;
@@ -192,4 +234,21 @@ export interface ProjectRowCounts {
   traces: number;
   observations: number;
   scores: number;
+}
+
+/** Raw vector read for the dimensionality-reduction job (worker cron). */
+export interface EmbeddingVectorRow {
+  observation_id: string;
+  trace_id: string;
+  vector: number[];
+}
+
+/** One retrieved doc read back with its owning observation id (getTrace enrichment). */
+export interface RetrievalDocumentDetail {
+  observation_id: string;
+  rank: number;
+  score: number | null;
+  doc_id: string;
+  content: string;
+  metadata: string;
 }

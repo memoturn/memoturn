@@ -1,5 +1,6 @@
 import type {
   DailyMetric,
+  EmbeddingPoint,
   ModelMetric,
   ObservationDetail,
   ScoreRow as ScoreDetail,
@@ -13,6 +14,7 @@ import type {
   WidgetPoint,
 } from "@memoturn/contracts";
 import type {
+  EmbeddingVectorRow,
   EvalScoreSummaryRow,
   EvalScoreTrendRow,
   ExportFilters,
@@ -20,6 +22,7 @@ import type {
   FullScoreRow,
   ObservationRow,
   ProjectRowCounts,
+  RetrievalDocumentDetail,
   TelemetryRowMap,
   TelemetryTable,
   TraceFilters,
@@ -105,6 +108,22 @@ export interface TelemetryStore {
    */
   getTraceRowsByIds(projectId: string, traceIds: string[]): Promise<TraceRow[]>;
   getObservationRowsByIds(projectId: string, observationIds: string[]): Promise<ObservationRow[]>;
+
+  // ── RAG: retrieval documents + embeddings ────────────────────────────────────────
+  /** Retrieved documents for a set of observation ids (getTrace enrichment). */
+  listRetrievalDocumentsByObservationIds(
+    projectId: string,
+    observationIds: string[],
+  ): Promise<RetrievalDocumentDetail[]>;
+  /** Raw vectors for the dimensionality-reduction job (most-recent window, capped). */
+  listEmbeddingsForProjection(
+    projectId: string,
+    opts?: { days?: number; limit?: number },
+  ): Promise<EmbeddingVectorRow[]>;
+  /** Reduced projection points for a run (latest run if `runId` omitted). color_value is null. */
+  listEmbeddingProjection(projectId: string, opts?: { runId?: string; limit?: number }): Promise<EmbeddingPoint[]>;
+  /** The most recent projection run id for a project, or null if none computed yet. */
+  latestProjectionRunId(projectId: string): Promise<string | null>;
 
   // ── Writes ─────────────────────────────────────────────────────────────────────
   /**

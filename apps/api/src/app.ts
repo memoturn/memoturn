@@ -10,6 +10,7 @@ import {
   assignReviewItem,
   auth,
   builtinModelPrices,
+  cancelExperiment,
   checkRateLimit,
   correctScore,
   countSessions,
@@ -19,7 +20,9 @@ import {
   createAutomation,
   createComment,
   createDataset,
+  createDatasetVersion,
   createEvaluator,
+  createExperiment,
   createModelPrice,
   createPromptVersion,
   createProviderConnection,
@@ -42,7 +45,10 @@ import {
   getAnalyticsSink,
   getDatasetComparison,
   getDatasetDetail,
+  getDatasetVersion,
+  getEmbeddingProjection,
   getEvaluatorAnalytics,
+  getExperiment,
   getMaskingPolicy,
   getMedia,
   getMetrics,
@@ -54,12 +60,16 @@ import {
   getScoresByTraceIds,
   getTrace,
   ingestRateLimitConfig,
+  instantiateEvaluatorTemplate,
   listApiKeys,
   listAuditLogs,
   listAutomations,
   listComments,
   listDatasets,
+  listDatasetVersions,
   listEvaluators,
+  listEvaluatorTemplates,
+  listExperiments,
   listModelPrices,
   listPrompts,
   listProviderConnections,
@@ -178,6 +188,9 @@ app.use("/v1/providers", requireAuth);
 app.use("/v1/playground/*", requireAuth);
 app.use("/v1/evaluators", requireAuth);
 app.use("/v1/evaluators/*", requireAuth);
+app.use("/v1/experiments", requireAuth);
+app.use("/v1/experiments/*", requireAuth);
+app.use("/v1/embeddings/*", requireAuth);
 app.use("/v1/projects", requireAuth);
 app.use("/v1/audit-logs", requireAuth);
 app.use("/v1/review-queues", requireAuth);
@@ -1016,15 +1029,98 @@ app.openapi(
     summary: "Compare a dataset's runs side by side (per-item output + scores)",
     tags: ["datasets"],
     security,
-    request: { params: z.object({ name: z.string() }) },
+    request: {
+      params: z.object({ name: z.string() }),
+      query: z.object({ version: z.coerce.number().int().optional() }),
+    },
     responses: {
       200: { description: "Comparison", content: { "application/json": { schema: C.experimentComparison } } },
       404: { description: "Not found" },
     },
   }),
   async (c) => {
-    const result = await getDatasetComparison(c.get("projectId"), c.req.valid("param").name);
+    const { version } = c.req.valid("query");
+    const result = await getDatasetComparison(c.get("projectId"), c.req.valid("param").name, version);
     if (!result) return c.json({ error: "dataset not found" }, 404);
+    return c.json(result);
+  },
+);
+
+// ── Datasets: versions (immutable snapshots) ─────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/datasets/{name}/versions",
+    summary: "List a dataset's versions",
+    tags: ["datasets"],
+    security,
+    request: { params: z.object({ name: z.string() }) },
+    responses: {
+      200: { description: "Versions", content: { "application/json": { schema: C.listOf(C.datasetVersionRow) } } },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const versions = await listDatasetVersions(c.get("projectId"), c.req.valid("param").name);
+    if (!versions) return c.json({ error: "dataset not found" }, 404);
+    return c.json({ data: versions });
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/datasets/{name}/versions",
+    summary: "Cut a new immutable version (snapshot of the current items)",
+    tags: ["datasets"],
+    security,
+    request: {
+      params: z.object({ name: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({ label: z.string().optional(), description: z.string().optional() }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Version cut", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const name = c.req.valid("param").name;
+    const body = c.req.valid("json");
+    const result = await createDatasetVersion(c.get("projectId"), name, body);
+    if (!result) return c.json({ error: "dataset not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "dataset.version.create", `dataset:${name}`, {
+      version: result.version,
+    });
+    return c.json(result, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/datasets/{name}/versions/{version}",
+    summary: "Get a dataset version's frozen items",
+    tags: ["datasets"],
+    security,
+    request: { params: z.object({ name: z.string(), version: z.coerce.number().int() }) },
+    responses: {
+      200: { description: "Version", content: { "application/json": { schema: C.datasetVersionDetail } } },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const { name, version } = c.req.valid("param");
+    const result = await getDatasetVersion(c.get("projectId"), name, version);
+    if (!result) return c.json({ error: "version not found" }, 404);
     return c.json(result);
   },
 );
@@ -1091,6 +1187,7 @@ app.openapi(
             schema: z.object({
               runName: z.string().min(1),
               links: z.array(z.object({ datasetItemId: z.string(), traceId: z.string() })),
+              version: z.number().int().optional(),
             }),
           },
         },
@@ -1107,7 +1204,7 @@ app.openapi(
     if (denied) return denied;
     const name = c.req.valid("param").name;
     const body = c.req.valid("json");
-    const result = await recordRun(c.get("projectId"), name, body.runName, body.links);
+    const result = await recordRun(c.get("projectId"), name, body.runName, body.links, body.version);
     if (!result) return c.json({ error: "dataset not found" }, 404);
     await recordAudit(c.get("projectId"), c.get("actor"), "dataset.run.record", `dataset:${name}`, {
       run: body.runName,
@@ -1253,6 +1350,64 @@ app.openapi(
   },
 );
 
+// Prebuilt evaluator library — static `/templates` path, registered before `/{name}`.
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/evaluators/templates",
+    summary: "List the prebuilt evaluator library (RAG/quality judge templates)",
+    tags: ["evaluators"],
+    security,
+    responses: {
+      200: { description: "Templates", content: { "application/json": { schema: C.listOf(C.evaluatorTemplate) } } },
+    },
+  }),
+  async (c) => c.json({ data: listEvaluatorTemplates() }),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/evaluators/from-template",
+    summary: "Instantiate a prebuilt template into a project evaluator",
+    tags: ["evaluators"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              key: z.string(),
+              name: z.string().optional(),
+              provider: z.enum(["mock", "anthropic", "openai"]).optional(),
+              model: z.string().optional(),
+              online: z.boolean().optional(),
+              samplingRate: z.number().min(0).max(1).optional(),
+              filterName: z.string().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: z.any() } } },
+      400: { description: "Unknown template" },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const { key, ...overrides } = c.req.valid("json");
+    const result = await instantiateEvaluatorTemplate(c.get("projectId"), key, overrides);
+    if (!result) return c.json({ error: `unknown template "${key}"` }, 400);
+    await recordAudit(c.get("projectId"), c.get("actor"), "evaluator.from-template", `evaluator:${result.name}`, {
+      key,
+    });
+    return c.json(result, 201);
+  },
+);
+
 app.openapi(
   createRoute({
     method: "post",
@@ -1328,6 +1483,141 @@ app.openapi(
     if (!result) return c.json({ error: "evaluator not found" }, 404);
     await recordAudit(c.get("projectId"), c.get("actor"), "evaluator.run", `evaluator:${name}`);
     return c.json(result);
+  },
+);
+
+// ── Experiments (server-executed dataset runs) ───────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/experiments",
+    summary: "List experiments (status + progress)",
+    tags: ["experiments"],
+    security,
+    responses: {
+      200: { description: "Experiments", content: { "application/json": { schema: C.listOf(C.experimentSummary) } } },
+    },
+  }),
+  async (c) => c.json({ data: await listExperiments(c.get("projectId")) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/experiments",
+    summary: "Create + enqueue an experiment (run a prompt/model across a dataset)",
+    tags: ["experiments"],
+    security,
+    request: { body: { content: { "application/json": { schema: C.experimentConfig } } } },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: C.experimentSummary } } },
+      400: { description: "Bad request" },
+      403: { description: "Forbidden" },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    const result = await createExperiment(c.get("projectId"), body);
+    if (!result.ok) return c.json({ error: result.error }, result.code === "not_found" ? 404 : 400);
+    await recordAudit(c.get("projectId"), c.get("actor"), "experiment.create", `experiment:${body.name}`, {
+      dataset: body.datasetName,
+    });
+    return c.json(result.experiment, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/experiments/{id}",
+    summary: "Get an experiment (config, progress, per-item results)",
+    tags: ["experiments"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Experiment", content: { "application/json": { schema: C.experimentDetail } } },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const detail = await getExperiment(c.get("projectId"), c.req.valid("param").id);
+    if (!detail) return c.json({ error: "experiment not found" }, 404);
+    return c.json(detail);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/experiments/{id}/comparison",
+    summary: "Compare an experiment's results (reuses the dataset comparison grid)",
+    tags: ["experiments"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Comparison", content: { "application/json": { schema: C.experimentComparison } } },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const exp = await getExperiment(c.get("projectId"), c.req.valid("param").id);
+    if (!exp) return c.json({ error: "experiment not found" }, 404);
+    const result = await getDatasetComparison(c.get("projectId"), exp.dataset);
+    if (!result) return c.json({ error: "dataset not found" }, 404);
+    return c.json(result);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/experiments/{id}/cancel",
+    summary: "Cancel a pending/running experiment",
+    tags: ["experiments"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Cancelled", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const id = c.req.valid("param").id;
+    const result = await cancelExperiment(c.get("projectId"), id);
+    if (!result) return c.json({ error: "experiment not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "experiment.cancel", `experiment:${id}`);
+    return c.json(result);
+  },
+);
+
+// ── Embeddings projection (RAG cluster/scatter view) ─────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/embeddings/projection",
+    summary: "Reduced 2D embedding projection (optionally colored by an eval score)",
+    tags: ["embeddings"],
+    security,
+    request: {
+      query: z.object({
+        runId: z.string().optional(),
+        colorBy: z.string().optional(),
+        limit: z.coerce.number().int().min(1).max(20000).optional(),
+      }),
+    },
+    responses: {
+      200: { description: "Projection", content: { "application/json": { schema: C.embeddingProjection } } },
+    },
+  }),
+  async (c) => {
+    const { runId, colorBy, limit } = c.req.valid("query");
+    return c.json(await getEmbeddingProjection(c.get("projectId"), { runId, colorBy, limit }));
   },
 );
 
