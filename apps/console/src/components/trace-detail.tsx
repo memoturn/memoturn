@@ -1,16 +1,15 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Coins, DollarSign, Download, Layers, Plus, RotateCcw, Tag, Timer, Trash2 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { Download, Plus, RotateCcw, Tag, Trash2 } from "lucide-react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { api, fetchOffloadedPayload, type ObservationDetail } from "../lib/api";
+import { api, fetchOffloadedPayload, type ObservationDetail, type TraceDetail } from "../lib/api";
 import { useIsReadOnly } from "../lib/role";
 import { cn } from "../lib/utils";
 import { CopyButton } from "./copy-button";
 import { EmptyState } from "./empty-state";
 import { KindBadge, type KindBadgeTone, toneForKind } from "./kind-badge";
 import { ProviderIcon } from "./provider-icon";
-import { StatTile } from "./stat-tile";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "./ui/accordion";
 import { Badge } from "./ui/badge";
 import {
@@ -680,26 +679,42 @@ function AnnotateButton({ traceId }: { traceId: string }) {
  * Prompt/completion token split + prompt-cache breakdown, summed across a trace's
  * generations. Cache figures render only when present (non-caching traces stay clean).
  */
-function TokenBreakdown({ observations }: { observations: ObservationDetail[] }) {
-  const sum = (k: keyof ObservationDetail) => observations.reduce((a, o) => a + Number(o[k] ?? 0), 0);
+function MetricsGrid({ trace }: { trace: TraceDetail }) {
+  const sum = (k: keyof ObservationDetail) => trace.observations.reduce((a, o) => a + Number(o[k] ?? 0), 0);
   const prompt = sum("prompt_tokens");
   const completion = sum("completion_tokens");
   const cacheRead = sum("cache_read_tokens");
   const cacheCreation = sum("cache_creation_tokens");
-  if (prompt === 0 && completion === 0 && cacheRead === 0 && cacheCreation === 0) return null;
+  const cost = Number(trace.total_cost);
 
-  const part = (label: string, value: number) => (
-    <span>
-      {label} <span className="font-medium tabular-nums text-foreground">{value.toLocaleString()}</span>
-    </span>
-  );
+  const items: { label: string; value: ReactNode }[] = [
+    { label: "Start", value: trace.timestamp.replace("T", " ").replace("Z", "") },
+    { label: "Duration", value: `${trace.latency_ms} ms` },
+    { label: "Observations", value: trace.observation_count.toLocaleString() },
+    { label: "Total tokens", value: Number(trace.total_tokens).toLocaleString() },
+    { label: "Prompt tokens", value: prompt.toLocaleString() },
+    { label: "Completion tokens", value: completion.toLocaleString() },
+    ...(cacheRead > 0 ? [{ label: "Cache read", value: cacheRead.toLocaleString() }] : []),
+    ...(cacheCreation > 0 ? [{ label: "Cache write", value: cacheCreation.toLocaleString() }] : []),
+    { label: "Est. cost", value: cost > 0 ? `$${cost.toFixed(6)}` : "—" },
+  ];
+
   return (
-    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-      {part("Prompt", prompt)}
-      {part("Completion", completion)}
-      {cacheRead > 0 && part("Cache read", cacheRead)}
-      {cacheCreation > 0 && part("Cache write", cacheCreation)}
-    </div>
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Metrics</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-4">
+          {items.map((it) => (
+            <div key={it.label} className="space-y-0.5">
+              <dt className="text-xs text-muted-foreground">{it.label}</dt>
+              <dd className="text-sm font-semibold tabular-nums">{it.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -812,18 +827,7 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <StatTile label="Observations" value={trace.observation_count} icon={Layers} />
-        <StatTile label="Tokens" value={trace.total_tokens} icon={Coins} />
-        <StatTile
-          label="Cost"
-          value={Number(trace.total_cost) > 0 ? `$${Number(trace.total_cost).toFixed(6)}` : "—"}
-          icon={DollarSign}
-        />
-        <StatTile label="Latency" value={`${trace.latency_ms} ms`} icon={Timer} />
-      </div>
-
-      <TokenBreakdown observations={trace.observations} />
+      <MetricsGrid trace={trace} />
 
       <Card>
         <CardHeader>
@@ -832,8 +836,6 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
         </CardHeader>
         <CardContent className="space-y-4">
           <dl className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-2.5 text-sm">
-            <dt className="text-muted-foreground">Timestamp</dt>
-            <dd className="tabular-nums">{trace.timestamp.replace("T", " ").replace("Z", " UTC")}</dd>
             {trace.user_id && (
               <>
                 <dt className="text-muted-foreground">User</dt>
