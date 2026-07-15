@@ -5,6 +5,7 @@ import type {
   ScoreRow as ScoreDetail,
   SessionSummary,
   TraceFacets,
+  TraceHistogramBucket,
   TraceSummary,
   UserSummary,
   WidgetBreakdown,
@@ -136,6 +137,27 @@ export class DorisTelemetryStore implements TelemetryStore {
     const { where, params } = this.traceListWhere(projectId, filters);
     const [row] = await this.query<{ c: unknown }>(`SELECT COUNT(*) AS c FROM traces t WHERE ${where}`, params);
     return Number(row?.c ?? 0);
+  }
+
+  async traceHistogram(
+    projectId: string,
+    filters: TraceFilters = {},
+    interval: "hour" | "day" = "day",
+  ): Promise<TraceHistogramBucket[]> {
+    // Bucket format is chosen from a fixed set (never user input) so it's safe to inline.
+    const fmt = interval === "hour" ? "%Y-%m-%dT%H:00" : "%Y-%m-%d";
+    const { where, params } = this.traceListWhere(projectId, filters);
+    const rows = await this.query<{ bucket: string; c: unknown }>(
+      `
+      SELECT DATE_FORMAT(t.\`timestamp\`, '${fmt}') AS bucket, COUNT(*) AS c
+      FROM traces t
+      WHERE ${where}
+      GROUP BY bucket
+      ORDER BY bucket ASC
+      `,
+      params,
+    );
+    return rows.map((r) => ({ bucket: r.bucket, count: Number(r.c) }));
   }
 
   async listTraces(projectId: string, filters: TraceFilters = {}): Promise<TraceSummary[]> {

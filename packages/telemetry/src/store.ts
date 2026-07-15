@@ -5,6 +5,7 @@ import type {
   ScoreRow as ScoreDetail,
   SessionSummary,
   TraceFacets,
+  TraceHistogramBucket,
   TraceSummary,
   UserSummary,
   WidgetBreakdown,
@@ -42,6 +43,11 @@ export interface TelemetryStore {
   listTraces(projectId: string, filters?: TraceFilters): Promise<TraceSummary[]>;
   /** Total traces matching the filters (ignores limit/offset) — for paginated page counts. */
   countTraces(projectId: string, filters?: TraceFilters): Promise<number>;
+  /**
+   * Trace counts bucketed by hour or day over the filtered range, for the volume histogram
+   * above the list. Honors the same filters as listTraces (so the bars track the on-screen set).
+   */
+  traceHistogram(projectId: string, filters: TraceFilters, interval: "hour" | "day"): Promise<TraceHistogramBucket[]>;
   /**
    * Distinct facet values + counts (environment / name / tags) over the time range, for the filter
    * panel. Counts are facet-excluding: each dimension honors the *other* active filters but not its

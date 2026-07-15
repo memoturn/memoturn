@@ -97,6 +97,7 @@ import {
   submitBatch,
   submitReviewScore,
   traceFacets,
+  traceHistogram,
 } from "@memoturn/server";
 import { Scalar } from "@scalar/hono-api-reference";
 import { bodyLimit } from "hono/body-limit";
@@ -574,6 +575,44 @@ app.openapi(
     const data = await traceFacets(c.get("projectId"), {
       days,
       limit,
+      environment,
+      search,
+      userId,
+      tag,
+      scoreName,
+      level,
+    });
+    return c.json(data);
+  },
+);
+
+// Registered before /v1/traces/{id} so the static segment resolves ahead of the param route.
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/traces/histogram",
+    summary: "Trace volume bucketed by hour/day over the range (honors the trace-list filters)",
+    tags: ["traces"],
+    security,
+    request: {
+      query: z.object({
+        days: z.coerce.number().int().min(1).max(365).optional(),
+        environment: z.string().optional(),
+        search: z.string().optional(),
+        userId: z.string().optional(),
+        tag: z.string().optional(),
+        scoreName: z.string().optional(),
+        level: z.string().optional(),
+      }),
+    },
+    responses: {
+      200: { description: "Trace volume histogram", content: { "application/json": { schema: C.traceHistogram } } },
+    },
+  }),
+  async (c) => {
+    const { days, environment, search, userId, tag, scoreName, level } = c.req.valid("query");
+    const data = await traceHistogram(c.get("projectId"), {
+      days,
       environment,
       search,
       userId,

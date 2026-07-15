@@ -135,6 +135,20 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(await store.listTraces(P, { limit: 10, offset: 1 })).toHaveLength(0);
   });
 
+  it("buckets trace volume by day and hour for the histogram, honoring filters", async () => {
+    const daily = await store.traceHistogram(P, { days: 7 }, "day");
+    expect(daily).toHaveLength(1);
+    expect(daily[0]!.count).toBe(1);
+    expect(daily[0]!.bucket).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    const hourly = await store.traceHistogram(P, { days: 7 }, "hour");
+    expect(hourly).toHaveLength(1);
+    expect(hourly[0]!.bucket).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:00$/);
+
+    // Honors the trace-list filters (non-matching tag → no buckets).
+    expect(await store.traceHistogram(P, { tag: "nope" }, "day")).toHaveLength(0);
+  });
+
   it("groups traces into sessions with counts, and paginates", async () => {
     const sessions = await store.listSessions(P, {});
     expect(sessions).toHaveLength(1);

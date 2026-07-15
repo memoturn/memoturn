@@ -33,6 +33,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | --- | --- | --- |
 | GET | `/v1/traces` | Paginated list `{ data, total, scores }` (per-trace score map); paging: `page`, `pageSize` (or legacy `limit`); filters: `userId`, `sessionId`, `environment`, `search` (matches trace name OR observation input/output content), `tag`, `promptId`, `scoreName`, `level`, `days`. |
 | GET | `/v1/traces/facets` | Distinct filter facet values + counts (`environment`, `name`, `tags`, `scores`, `levels`) over the range; params: `days`, `limit`, plus active filters (`environment`, `search`, `userId`, `tag`, `scoreName`, `level`) for facet-excluding counts. |
+| GET | `/v1/traces/histogram` | Trace volume `{ interval, buckets }` bucketed by hour (ranges ≤ 2 days) or day; honors the trace-list filters (`environment`, `search`, `userId`, `tag`, `scoreName`, `level`, `days`). |
 | POST | `/v1/traces/batch` | Bulk action on selected traces: `delete`, `add-to-dataset`, or `review`. |
 | GET | `/v1/traces/{id}` | Assembled trace: observations + scores. |
 | POST | `/v1/traces/{id}/replay` | Re-run a stored trace's input through the LLM gateway and record the result as a new trace. Body: `{ provider?, model? }`. Audited. |
