@@ -1,6 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { telemetry } from "./index.js";
-import type { ObservationRow, ScoreWriteRow, TraceRow } from "./types.js";
+import type {
+  EmbeddingProjectionRow,
+  EmbeddingRow,
+  ObservationRow,
+  RetrievalDocumentRow,
+  ScoreWriteRow,
+  TraceRow,
+} from "./types.js";
 
 /**
  * Behavioral conformance suite for the telemetry store — the contract every engine
@@ -85,6 +92,45 @@ const score = (over: Partial<ScoreWriteRow> = {}): ScoreWriteRow => ({
   ...over,
 });
 
+const retrievalDoc = (over: Partial<RetrievalDocumentRow> = {}): RetrievalDocumentRow => ({
+  project_id: P,
+  observation_id: "o1",
+  rank: 0,
+  trace_id: "t1",
+  doc_id: "docA",
+  score: 0.9,
+  content: "Doc A",
+  metadata: '{"src":"kb"}',
+  event_ts: iso(),
+  ...over,
+});
+
+const embeddingRow = (over: Partial<EmbeddingRow> = {}): EmbeddingRow => ({
+  project_id: P,
+  observation_id: "o1",
+  trace_id: "t1",
+  kind: "OBSERVATION",
+  model: "text-embedding-3-small",
+  dim: 4,
+  vector: [0.1, 0.2, 0.3, 0.4],
+  event_ts: iso(),
+  ...over,
+});
+
+const projectionRow = (over: Partial<EmbeddingProjectionRow> = {}): EmbeddingProjectionRow => ({
+  project_id: P,
+  run_id: "run1",
+  observation_id: "o1",
+  trace_id: "t1",
+  x: 1.5,
+  y: -2.5,
+  z: null,
+  cluster_id: 2,
+  method: "pca",
+  event_ts: iso(),
+  ...over,
+});
+
 describe.skipIf(!reachable)("telemetry store conformance", () => {
   beforeAll(async () => {
     await store.insertRows("traces", [trace()]);
@@ -93,6 +139,18 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
       observation({ id: "o2", type: "SPAN", end_time: null, model: "", total_tokens: 0, total_cost: 0, latency_ms: 0 }),
     ]);
     await store.insertRows("scores", [score()]);
+    await store.insertRows("retrieval_documents", [
+      retrievalDoc(),
+      retrievalDoc({ rank: 1, doc_id: "docB", score: 0.4, content: 'tricky "quoted", comma doc' }),
+    ]);
+    await store.insertRows("embeddings", [
+      embeddingRow(),
+      embeddingRow({ observation_id: "o2", vector: [1, 1, 1, 1] }),
+    ]);
+    await store.insertRows("embedding_projections", [
+      projectionRow(),
+      projectionRow({ observation_id: "o2", x: 9, y: 9, cluster_id: 5 }),
+    ]);
   });
 
   afterAll(async () => {
@@ -301,6 +359,52 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(await store.getScoresByTraceIds(P, ["t1"])).toHaveLength(1);
   });
 
+  it("round-trips retrieval documents, embeddings, and projections", async () => {
+    // Retrieval docs by observation id, ordered by rank; quotes/commas survive round-trip.
+    const docs = await store.listRetrievalDocumentsByObservationIds(P, ["o1"]);
+    expect(docs).toHaveLength(2);
+    expect(docs[0]).toMatchObject({ observation_id: "o1", rank: 0, doc_id: "docA", content: "Doc A" });
+    expect(docs[0]!.score).toBeCloseTo(0.9);
+    expect(docs[0]!.metadata).toContain("kb");
+    expect(docs[1]!.rank).toBe(1);
+    expect(docs[1]!.content).toContain('tricky "quoted", comma');
+    expect(await store.listRetrievalDocumentsByObservationIds(P, ["missing"])).toHaveLength(0);
+    expect(await store.listRetrievalDocumentsByObservationIds(P, [])).toHaveLength(0);
+
+    // Embeddings: raw ARRAY<FLOAT> vectors round-trip (per-element placeholders, no CAST corruption).
+    const vecs = await store.listEmbeddingsForProjection(P, { days: 7, limit: 100 });
+    expect(vecs).toHaveLength(2);
+    const o1 = vecs.find((v) => v.observation_id === "o1")!;
+    expect(o1.trace_id).toBe("t1");
+    expect(o1.vector).toHaveLength(4);
+    [0.1, 0.2, 0.3, 0.4].forEach((n, i) => {
+      expect(o1.vector[i]!).toBeCloseTo(n, 5);
+    });
+
+    // Projection points + latest-run resolution.
+    expect(await store.latestProjectionRunId(P)).toBe("run1");
+    const points = await store.listEmbeddingProjection(P, { runId: "run1" });
+    expect(points).toHaveLength(2);
+    const p1 = points.find((p) => p.observation_id === "o1")!;
+    expect(p1).toMatchObject({ trace_id: "t1", cluster_id: 2 });
+    expect(p1.x).toBeCloseTo(1.5);
+    expect(p1.y).toBeCloseTo(-2.5);
+    expect(p1.z).toBeNull();
+    expect(p1.color_value).toBeNull(); // store leaves color null; packages/server fills it
+    // Resolves the latest run without an explicit runId.
+    expect(await store.listEmbeddingProjection(P)).toHaveLength(2);
+  });
+
+  it("overwrites an embedding vector on same id + newer event_ts (LWW), no duplicate", async () => {
+    await store.insertRows("embeddings", [embeddingRow({ vector: [9, 8, 7, 6], event_ts: iso(60_000) })]);
+    const vecs = await store.listEmbeddingsForProjection(P, { days: 7, limit: 100 });
+    expect(vecs).toHaveLength(2); // o1 overwritten in place, o2 unchanged — no duplicate row
+    const o1 = vecs.find((v) => v.observation_id === "o1")!;
+    [9, 8, 7, 6].forEach((n, i) => {
+      expect(o1.vector[i]!).toBeCloseTo(n, 4);
+    });
+  });
+
   it("deletes by score id, by retention cutoff, and by trace ids", async () => {
     await store.insertRows("scores", [score({ id: "sc-del", event_ts: iso(2000) })]);
     await store.deleteScore(P, "sc-del");
@@ -314,5 +418,9 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     // ...and deleting the trace removes its observations and scores too.
     await store.deleteTraces(P, ["t1"]);
     expect(await store.countProjectRows(P)).toEqual({ traces: 0, observations: 0, scores: 0 });
+    // Retrieval docs, embeddings, and projections for the trace are cascade-deleted as well.
+    expect(await store.listRetrievalDocumentsByObservationIds(P, ["o1"])).toHaveLength(0);
+    expect(await store.listEmbeddingsForProjection(P, { days: 30, limit: 100 })).toHaveLength(0);
+    expect(await store.listEmbeddingProjection(P, { runId: "run1" })).toHaveLength(0);
   });
 });
