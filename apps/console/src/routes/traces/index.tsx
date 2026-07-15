@@ -37,6 +37,7 @@ import { Input } from "../../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
+import { VolumeHistogram } from "../../components/volume-histogram";
 import { api, downloadTracesExport, type FacetCount, type TraceSummary } from "../../lib/api";
 import { useIsReadOnly } from "../../lib/role";
 import { useRangeDays } from "../../lib/timeRange";
@@ -662,7 +663,8 @@ function TracesPage() {
           level={filters.level}
           onPick={pickFacet}
         />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 space-y-3">
+          <VolumeHistogram filters={{ ...listFilters, days }} />
           {isLoading ? (
             <Skeleton className="h-64 w-full" />
           ) : error ? (

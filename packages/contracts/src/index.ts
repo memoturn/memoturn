@@ -97,6 +97,15 @@ export const traceFacets = z.object({
 });
 export type TraceFacets = z.infer<typeof traceFacets>;
 
+/** Trace volume over the selected range, bucketed by hour (short ranges) or day. */
+export const traceHistogramBucket = z.object({ bucket: z.string(), count: z.number() });
+export type TraceHistogramBucket = z.infer<typeof traceHistogramBucket>;
+export const traceHistogram = z.object({
+  interval: z.enum(["hour", "day"]),
+  buckets: z.array(traceHistogramBucket),
+});
+export type TraceHistogram = z.infer<typeof traceHistogram>;
+
 export const modelPrice = z.object({
   id: z.string(),
   pattern: z.string(),

@@ -39,6 +39,7 @@ import type {
   SessionSummary,
   TraceDetail,
   TraceFacets,
+  TraceHistogram,
   TracePage,
   TraceSummary,
   TraceTags,
@@ -147,6 +148,8 @@ export const api = {
       level?: string;
     } = {},
   ) => get<TraceFacets>(`/v1/traces/facets${qs(opts as Record<string, unknown>)}`),
+  traceHistogram: (opts: TraceFilters = {}) =>
+    get<TraceHistogram>(`/v1/traces/histogram${qs(opts as Record<string, unknown>)}`),
   getTrace: (id: string) => get<TraceDetail>(`/v1/traces/${encodeURIComponent(id)}`),
   batchTraces: (body: { action: string; traceIds: string[]; datasetName?: string; queueName?: string }) =>
     post<{ action: string; affected: number }>(`/v1/traces/batch`, body),

@@ -50,6 +50,19 @@ export async function setTraceTags(projectId: string, traceId: string, tags: str
   return { traceId, tags: clean };
 }
 
+/**
+ * Trace volume over the range for the histogram above the list. Buckets by hour for short
+ * ranges (≤ 2 days) and by day otherwise, so the bars stay readable at both scales.
+ */
+export async function traceHistogram(
+  projectId: string,
+  filters: TraceFilters = {},
+): Promise<import("@memoturn/contracts").TraceHistogram> {
+  const interval = filters.days && filters.days > 0 && filters.days <= 2 ? "hour" : "day";
+  const buckets = await telemetry().traceHistogram(projectId, filters, interval);
+  return { interval, buckets };
+}
+
 export async function traceFacets(
   projectId: string,
   opts: {
