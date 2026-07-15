@@ -52,6 +52,8 @@ const observation = (over: Partial<ObservationRow> = {}): ObservationRow => ({
   prompt_tokens: 100,
   completion_tokens: 200,
   total_tokens: 300,
+  cache_read_tokens: 40,
+  cache_creation_tokens: 60,
   input_cost: 0.001,
   output_cost: 0.002,
   total_cost: 0.003,
@@ -195,6 +197,8 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     const gen = obs.find((o) => o.id === "o1")!;
     expect(gen.latency_ms).toBe(1234);
     expect(gen.total_cost).toBeCloseTo(0.003, 6);
+    expect(gen.cache_read_tokens).toBe(40);
+    expect(gen.cache_creation_tokens).toBe(60);
     expect(gen.end_time).not.toBeNull();
     expect(gen.prompt_id).toBe("p1"); // prompt linkage surfaced on the observation
     expect(obs.find((o) => o.id === "o2")!.end_time).toBeNull();
@@ -258,6 +262,8 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(gen.trace_id).toBe("t1");
     expect(gen.model).toBe("gpt-x");
     expect(gen.prompt_tokens).toBe(100);
+    expect(gen.cache_read_tokens).toBe(40);
+    expect(gen.cache_creation_tokens).toBe(60);
     expect(gen.total_cost).toBeCloseTo(0.003, 6);
     expect(gen.end_time).not.toBeNull();
     expect(obs.find((o) => o.id === "o2")!.end_time).toBeNull();

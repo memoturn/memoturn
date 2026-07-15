@@ -54,6 +54,10 @@ const usage = z
     promptTokens: z.number().int().nonnegative().optional(),
     completionTokens: z.number().int().nonnegative().optional(),
     totalTokens: z.number().int().nonnegative().optional(),
+    // Prompt-caching usage (e.g. Anthropic): tokens served from cache vs. tokens written to
+    // the cache on this call. Both are subsets/companions of promptTokens, reported separately.
+    cacheReadTokens: z.number().int().nonnegative().optional(),
+    cacheCreationTokens: z.number().int().nonnegative().optional(),
   })
   .optional();
 

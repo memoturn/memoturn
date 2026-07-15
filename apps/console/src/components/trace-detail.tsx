@@ -671,6 +671,33 @@ function AnnotateButton({ traceId }: { traceId: string }) {
 }
 
 /**
+ * Prompt/completion token split + prompt-cache breakdown, summed across a trace's
+ * generations. Cache figures render only when present (non-caching traces stay clean).
+ */
+function TokenBreakdown({ observations }: { observations: ObservationDetail[] }) {
+  const sum = (k: keyof ObservationDetail) => observations.reduce((a, o) => a + Number(o[k] ?? 0), 0);
+  const prompt = sum("prompt_tokens");
+  const completion = sum("completion_tokens");
+  const cacheRead = sum("cache_read_tokens");
+  const cacheCreation = sum("cache_creation_tokens");
+  if (prompt === 0 && completion === 0 && cacheRead === 0 && cacheCreation === 0) return null;
+
+  const part = (label: string, value: number) => (
+    <span>
+      {label} <span className="font-medium tabular-nums text-foreground">{value.toLocaleString()}</span>
+    </span>
+  );
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      {part("Prompt", prompt)}
+      {part("Completion", completion)}
+      {cacheRead > 0 && part("Cache read", cacheRead)}
+      {cacheCreation > 0 && part("Cache write", cacheCreation)}
+    </div>
+  );
+}
+
+/**
  * Full trace detail — the query, stat strip, waterfall/graph, payloads and comments.
  * Shared by the full-page route (`/traces/$id`) and the peek drawer on the list, so
  * both stay in lockstep. `showBreadcrumb` is off in the drawer (its header carries context).
@@ -789,6 +816,8 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
         />
         <StatTile label="Latency" value={`${trace.latency_ms} ms`} icon={Timer} />
       </div>
+
+      <TokenBreakdown observations={trace.observations} />
 
       <Card>
         <CardHeader>
