@@ -489,6 +489,24 @@ export const experimentComparison = z.object({
 });
 export type ExperimentComparison = z.infer<typeof experimentComparison>;
 
+// CI quality gate: a run's per-score means checked against threshold bounds.
+export const gateFailure = z.object({
+  scoreName: z.string(),
+  reason: z.enum(["below_min", "above_max", "regression", "missing_score"]),
+  value: z.number().nullable(),
+  bound: z.number(),
+  baseline: z.number().optional(),
+});
+export const gateResult = z.object({
+  dataset: z.string(),
+  run: z.string(),
+  baselineRun: z.string().nullable(),
+  passed: z.boolean(),
+  scores: z.array(z.object({ name: z.string(), mean: z.number(), count: z.number() })),
+  failures: z.array(gateFailure),
+});
+export type GateResult = z.infer<typeof gateResult>;
+
 // ── Experiments (server-executed dataset runs) ──────────────────────────────────
 export const experimentStatus = z.enum(["PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]);
 export type ExperimentStatus = z.infer<typeof experimentStatus>;

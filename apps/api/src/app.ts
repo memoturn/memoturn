@@ -45,6 +45,7 @@ import {
   deleteScoreConfig,
   deleteWebhook,
   deleteWidget,
+  evaluateGate,
   exportTracesCsv,
   exportTracesJsonl,
   getAnalyticsSink,
@@ -1098,6 +1099,50 @@ app.openapi(
     const { version } = c.req.valid("query");
     const result = await getDatasetComparison(c.get("projectId"), c.req.valid("param").name, version);
     if (!result) return c.json({ error: "dataset not found" }, 404);
+    return c.json(result);
+  },
+);
+
+// ── Datasets: CI quality gate ────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    // rbac-exempt: read-only gate computation (aggregates scores, writes nothing)
+    method: "post",
+    path: "/v1/datasets/{name}/runs/{runId}/gate",
+    summary: "Evaluate a run's scores against thresholds for CI gating (returns { passed, failures })",
+    tags: ["datasets"],
+    security,
+    request: {
+      params: z.object({ name: z.string(), runId: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              // { scoreName: { min?, max?, maxRegression? } } — maxRegression needs baselineRun.
+              thresholds: z.record(
+                z.string(),
+                z.object({
+                  min: z.number().optional(),
+                  max: z.number().optional(),
+                  maxRegression: z.number().optional(),
+                }),
+              ),
+              baselineRun: z.string().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Gate result", content: { "application/json": { schema: C.gateResult } } },
+      404: { description: "Dataset or run not found" },
+    },
+  }),
+  async (c) => {
+    const { name, runId } = c.req.valid("param");
+    const { thresholds, baselineRun } = c.req.valid("json");
+    const result = await evaluateGate(c.get("projectId"), name, runId, thresholds, { baselineRun });
+    if (!result) return c.json({ error: "dataset or run not found" }, 404);
     return c.json(result);
   },
 );

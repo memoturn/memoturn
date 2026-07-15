@@ -63,6 +63,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/datasets/{name}/comparison` | Compare a dataset's runs side by side (per-item output + scores). Optional `version` scopes to runs of one dataset version. |
 | POST | `/v1/datasets/{name}/items` | Append items. |
 | POST | `/v1/datasets/{name}/runs` | Record an experiment run (link items → traces). Optional `version` pins the run to a dataset version (defaults to current). |
+| POST | `/v1/datasets/{name}/runs/{runId}/gate` | CI quality gate: aggregate a run's scores and check them against `thresholds` (`{ scoreName: { min?, max?, maxRegression? } }`; optional `baselineRun` for regression). Returns `{ passed, failures[], scores[] }` for a CI exit code. Read-only. |
 | GET | `/v1/datasets/{name}/versions` | List a dataset's immutable version snapshots. |
 | POST | `/v1/datasets/{name}/versions` | Cut a new version (freeze the current items). Body: `{ label?, description? }`. Audited. |
 | GET | `/v1/datasets/{name}/versions/{version}` | A version's frozen items. |
