@@ -214,10 +214,17 @@ export const auth = betterAuth({
   trustedOrigins: (process.env.AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000").split(","),
   // 7-day sessions, refreshed at most daily.
   session: { expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24 },
-  // Brute-force protection on the auth routes (login/signup/reset). Explicit + enabled in
-  // every env (Better Auth only auto-enables in production). Backed by Redis (customStorage)
-  // so the counter is shared across API replicas instead of per-process in-memory.
-  rateLimit: { enabled: true, window: 60, max: 30, customStorage: rateLimitStorage },
+  // Brute-force protection on the auth routes (login/signup/reset). On by default in every
+  // env (Better Auth only auto-enables in production). Backed by Redis (customStorage) so the
+  // counter is shared across API replicas instead of per-process in-memory. Set
+  // AUTH_RATE_LIMIT_DISABLED=true only for test suites that sign in repeatedly (e2e) — never
+  // in production; the built-in sign-in sub-limit otherwise 429s the rapid logins.
+  rateLimit: {
+    enabled: process.env.AUTH_RATE_LIMIT_DISABLED !== "true",
+    window: 60,
+    max: 30,
+    customStorage: rateLimitStorage,
+  },
   advanced: {
     cookiePrefix: "memoturn",
     // Secure cookies in production; httpOnly + SameSite=Lax always (CSRF defense-in-depth).
