@@ -19,7 +19,7 @@ score configs · scores on traces · comments · tags + facets · webhooks + aut
 (Slack) · auth (sessions + API keys) · organizations + SSO + RBAC + project switcher ·
 audit log · data retention · rate limiting · NDJSON/CSV export + scheduled blob
 exports · saved views · batch actions · multimodal media · custom model prices ·
-product-analytics sink (PostHog) · ⌘K palette · global time range · agent-graph view ·
+event sink / CDP forwarding · ⌘K palette · global time range · agent-graph view ·
 MCP server (stdio + remote Streamable HTTP with OAuth + per-tool RBAC) ·
 TypeScript + Python SDKs (tracing, OpenAI, LangChain, prompts).
 

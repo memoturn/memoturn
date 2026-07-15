@@ -21,7 +21,7 @@ management, playground, and datasets. Self-hostable, OpenTelemetry-native, Bun-n
 - **Evaluation (trifecta)** — **offline** (datasets & experiments), **online** (sampled production traces via the worker), and **human** (review queues). All write scores into Doris; scores show on the trace.
 - **Datasets & experiments** — dataset items, runs linking items to traces.
 - **Platform** — Better Auth login, organizations → projects with a project switcher, RBAC (read-only viewers), **SSO** (OIDC/SAML), API-key management (mint/revoke), per-project **rate limiting**, **PII masking** at ingest, audit logs, data retention, and scheduled NDJSON exports to blob.
-- **Automations & integrations** — webhooks and trigger→action automations (`score.created`/`trace.created`/`eval.completed` → webhook/Slack), product-analytics export (PostHog), custom model prices, and an **MCP server** exposing prompts/datasets/review queues to agent IDEs.
+- **Automations & integrations** — webhooks and trigger→action automations (`score.created`/`trace.created`/`eval.completed` → webhook/Slack), an event sink for CDP forwarding (PostHog-compatible capture API), custom model prices, and an **MCP server** exposing prompts/datasets/review queues to agent IDEs.
 - **SDKs** — TypeScript (`@memoturn/sdk`) and Python (`memoturn`): tracing, `@observe`/`wrapOpenAI`, LangChain callbacks, prompts.
 
 ## Architecture

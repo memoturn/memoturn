@@ -4,12 +4,14 @@ import { decryptSecret, encryptSecret, maskSecret } from "@memoturn/llm";
 import { isPublicUrl } from "./net.js";
 
 /**
- * Product-analytics sink: forward trace/score events to PostHog (capture API) so teams
- * can build funnels/retention over their LLM usage. Config is per-project and cached in
+ * Event sink (CDP forwarding): forward trace/score events to a customer's product-analytics
+ * endpoint so teams can build funnels/retention over their LLM usage. The wire format is
+ * PostHog's capture `/batch/` API (also accepted by Segment, Jitsu, and self-hosted PostHog),
+ * hence the internal `type: "posthog"` discriminator. Config is per-project and cached in
  * Redis; forwarding is best-effort (a failing sink never breaks ingestion).
  *
- * The PostHog project API key is encrypted at rest (AES-256-GCM, same scheme as provider
- * keys) and only ever returned masked. Redis caches the ciphertext form — never plaintext.
+ * The capture API key is encrypted at rest (AES-256-GCM, same scheme as provider keys) and
+ * only ever returned masked. Redis caches the ciphertext form — never plaintext.
  */
 const CACHE_TTL_SECONDS = 30;
 const cacheKey = (projectId: string) => `memoturn:analytics:${projectId}`;

@@ -2274,7 +2274,7 @@ app.openapi(
   createRoute({
     method: "get",
     path: "/v1/analytics-sink",
-    summary: "Get the project's product-analytics sink (PostHog forwarding) config",
+    summary: "Get the project's event sink (CDP forwarding) config",
     tags: ["platform"],
     security,
     responses: { 200: { description: "Config", content: { "application/json": { schema: C.analyticsSink } } } },
@@ -2286,7 +2286,7 @@ app.openapi(
   createRoute({
     method: "post",
     path: "/v1/analytics-sink",
-    summary: "Configure forwarding trace/score events to PostHog",
+    summary: "Configure forwarding trace/score events to a product-analytics sink / CDP",
     tags: ["platform"],
     security,
     request: {
