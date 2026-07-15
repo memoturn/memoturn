@@ -12,6 +12,7 @@ export * from "./components/label";
 export * from "./components/popover";
 export * from "./components/separator";
 export * from "./components/sheet";
+export * from "./components/sidebar";
 export * from "./components/skeleton";
 export * from "./components/sonner";
 export * from "./components/table";
@@ -28,6 +29,7 @@ export * from "./composite/EmptyState";
 export * from "./composite/ThemeToggle";
 
 // Hooks
+export * from "./lib/use-mobile";
 export * from "./lib/use-toast";
 
 // Utils

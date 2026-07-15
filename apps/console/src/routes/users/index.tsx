@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Activity, DollarSign, MessageSquare } from "lucide-react";
+import { Activity, DollarSign, Users } from "lucide-react";
 import { EmptyState } from "../../components/empty-state";
 import { PageHeader } from "../../components/page-header";
 import { StatTile } from "../../components/stat-tile";
@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { api } from "../../lib/api";
 import { useRangeDays } from "../../lib/timeRange";
 
-interface SessionSearch {
+interface UserSearch {
   page?: number;
   pageSize?: number;
   search?: string;
@@ -28,18 +28,18 @@ const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
 const PAGE_SIZES = [25, 50, 100];
 const DEFAULT_PAGE_SIZE = 50;
 
-export const Route = createFileRoute("/sessions/")({
-  validateSearch: (s: Record<string, unknown>): SessionSearch => ({
+export const Route = createFileRoute("/users/")({
+  validateSearch: (s: Record<string, unknown>): UserSearch => ({
     page: posInt(s.page),
     pageSize: posInt(s.pageSize),
     search: str(s.search),
   }),
-  component: SessionsPage,
+  component: UsersPage,
 });
 
 const money = (n: number) => (n > 0 ? `$${n.toFixed(4)}` : "—");
 
-function SessionsPage() {
+function UsersPage() {
   const { page: pageRaw, pageSize: pageSizeRaw, search } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const days = useRangeDays();
@@ -51,12 +51,12 @@ function SessionsPage() {
     isLoading,
     error,
   } = useQuery({
-    queryKey: ["sessions", page, pageSize, days, search],
-    queryFn: () => api.listSessionsPage({ page, pageSize, days, search }),
+    queryKey: ["users", page, pageSize, days, search],
+    queryFn: () => api.listUsersPage({ page, pageSize, days, search }),
     refetchInterval: 5_000,
     placeholderData: keepPreviousData,
   });
-  const sessions = pageData?.data;
+  const users = pageData?.data;
   const total = pageData?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
@@ -68,38 +68,28 @@ function SessionsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Sessions" description="Grouped traces sharing a session id." />
+      <PageHeader title="Users" description="Traces grouped by end-user id." />
 
       <Input
         type="search"
-        placeholder="Search by session id…"
+        placeholder="Search by user id…"
         defaultValue={search ?? ""}
         onChange={(e) => setSearch(e.target.value)}
         className="h-9 max-w-xs"
       />
 
-      {(isLoading || (sessions && sessions.length > 0)) && (
+      {(isLoading || (users && users.length > 0)) && (
         <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
-          <StatTile
-            label="Sessions"
-            value={sessions ? total : <Skeleton className="h-6 w-16" />}
-            icon={MessageSquare}
-          />
+          <StatTile label="Users" value={users ? total : <Skeleton className="h-6 w-16" />} icon={Users} />
           <StatTile
             label="Traces (page)"
-            value={
-              sessions ? sessions.reduce((a, s) => a + Number(s.trace_count), 0) : <Skeleton className="h-6 w-16" />
-            }
+            value={users ? users.reduce((a, u) => a + Number(u.trace_count), 0) : <Skeleton className="h-6 w-16" />}
             icon={Activity}
           />
           <StatTile
             label="Cost (page)"
             value={
-              sessions ? (
-                money(sessions.reduce((a, s) => a + Number(s.total_cost), 0))
-              ) : (
-                <Skeleton className="h-6 w-16" />
-              )
+              users ? money(users.reduce((a, u) => a + Number(u.total_cost), 0)) : <Skeleton className="h-6 w-16" />
             }
             icon={DollarSign}
           />
@@ -109,13 +99,15 @@ function SessionsPage() {
       {isLoading ? (
         <Skeleton className="h-64 w-full" />
       ) : error ? (
-        <EmptyState title="Failed to load sessions" description={String(error)} />
-      ) : !sessions || sessions.length === 0 ? (
+        <EmptyState title="Failed to load users" description={String(error)} />
+      ) : !users || users.length === 0 ? (
         <EmptyState
-          icon={MessageSquare}
-          title={search ? "No matching sessions" : "No sessions yet"}
+          icon={Users}
+          title={search ? "No matching users" : "No users yet"}
           description={
-            search ? `No session id matches “${search}”.` : "Sessions appear when traces share a session id."
+            search
+              ? `No user id matches “${search}”.`
+              : "Users appear when traces carry a user id (set `userId` on your traces)."
           }
         />
       ) : (
@@ -124,7 +116,7 @@ function SessionsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Session</TableHead>
+                  <TableHead>User</TableHead>
                   <TableHead>Traces</TableHead>
                   <TableHead>Cost</TableHead>
                   <TableHead>First seen</TableHead>
@@ -132,19 +124,19 @@ function SessionsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sessions.map((s) => (
+                {users.map((u) => (
                   <TableRow
-                    key={s.session_id}
-                    onClick={() => navigate({ to: "/sessions/$id", params: { id: s.session_id } })}
+                    key={u.user_id}
+                    onClick={() => navigate({ to: "/users/$id", params: { id: u.user_id } })}
                     className="cursor-pointer"
                   >
                     <TableCell>
-                      <span className="font-medium text-primary">{s.session_id}</span>
+                      <span className="font-medium text-primary">{u.user_id}</span>
                     </TableCell>
-                    <TableCell>{s.trace_count}</TableCell>
-                    <TableCell>{money(Number(s.total_cost))}</TableCell>
-                    <TableCell className="text-muted-foreground">{s.first_seen}</TableCell>
-                    <TableCell className="text-muted-foreground">{s.last_seen}</TableCell>
+                    <TableCell>{u.trace_count}</TableCell>
+                    <TableCell>{money(Number(u.total_cost))}</TableCell>
+                    <TableCell className="text-muted-foreground">{u.first_seen}</TableCell>
+                    <TableCell className="text-muted-foreground">{u.last_seen}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

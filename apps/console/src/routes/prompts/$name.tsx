@@ -5,6 +5,7 @@ import { useState } from "react";
 import { EmptyState } from "../../components/empty-state";
 import { KindBadge } from "../../components/kind-badge";
 import { StatTile } from "../../components/stat-tile";
+import { TracePeekDrawer } from "../../components/trace-peek-drawer";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../../components/ui/accordion";
 import {
   Breadcrumb,
@@ -14,10 +15,85 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "../../components/ui/breadcrumb";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Skeleton } from "../../components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { api, type PromptDetail, type PromptVersionDetail } from "../../lib/api";
+
+function fmtCost(n: number): string {
+  return n > 0 ? `$${n.toFixed(6)}` : "—";
+}
+
+/** Traces that logged a generation referencing this prompt (by prompt_id) — with the peek drawer. */
+function PromptUsage({ name }: { name: string }) {
+  const [peek, setPeek] = useState<string | undefined>(undefined);
+  const { data, isLoading } = useQuery({
+    queryKey: ["prompt-traces", name],
+    queryFn: () => api.listTracesPage({ promptId: name, pageSize: 25 }),
+    refetchInterval: 10_000,
+  });
+  const traces = data?.data;
+  const total = data?.total ?? 0;
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>Traces using this prompt{total > 0 ? ` (${total})` : ""}</CardTitle>
+          <CardDescription>Traces with a generation that referenced this prompt's id.</CardDescription>
+          {total > 25 && (
+            <CardAction>
+              <span className="text-xs text-muted-foreground">Showing 25 of {total.toLocaleString()}</span>
+            </CardAction>
+          )}
+        </CardHeader>
+        <CardContent className={traces && traces.length > 0 ? "px-0" : undefined}>
+          {isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : !traces || traces.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No traces yet. Traces appear here when a generation logs this prompt's id/version.
+            </p>
+          ) : (
+            <div className="overflow-x-auto border-t">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Trace Name</TableHead>
+                    <TableHead>Timestamp</TableHead>
+                    <TableHead>Tokens</TableHead>
+                    <TableHead>Cost</TableHead>
+                    <TableHead>Latency</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {traces.map((t) => (
+                    <TableRow
+                      key={t.id}
+                      data-state={peek === t.id ? "selected" : undefined}
+                      onClick={() => setPeek(t.id)}
+                      className="cursor-pointer"
+                    >
+                      <TableCell>
+                        <span className="font-medium text-primary">{t.name || t.id.slice(0, 8)}</span>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{t.timestamp}</TableCell>
+                      <TableCell>{t.total_tokens}</TableCell>
+                      <TableCell>{fmtCost(Number(t.total_cost))}</TableCell>
+                      <TableCell>{t.latency_ms} ms</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      <TracePeekDrawer traces={traces} peekId={peek} onPeek={setPeek} />
+    </>
+  );
+}
 
 export const Route = createFileRoute("/prompts/$name")({ component: PromptDetailPage });
 
@@ -242,6 +318,8 @@ function PromptDetailPage() {
           </Accordion>
         </CardContent>
       </Card>
+
+      <PromptUsage name={prompt.name} />
     </div>
   );
 }

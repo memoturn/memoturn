@@ -134,6 +134,19 @@ export async function assignReviewItem(projectId: string, name: string, itemId: 
   return { itemId: item.id, assigneeId: assigneeId || "" };
 }
 
+/**
+ * Skip a review item without scoring it: marks the item SKIPPED so it drops out of the pending
+ * queue but is still counted in throughput analytics. Returns null when the queue/item is missing.
+ */
+export async function skipReviewItem(projectId: string, name: string, itemId: string) {
+  const queue = await findQueue(projectId, name);
+  if (!queue) return null;
+  const item = await prisma.reviewItem.findFirst({ where: { id: itemId, queueId: queue.id } });
+  if (!item) return null;
+  await prisma.reviewItem.update({ where: { id: item.id }, data: { status: "SKIPPED", completedAt: new Date() } });
+  return { itemId: item.id, status: "SKIPPED" as const };
+}
+
 export interface ReviewScoreInput {
   value?: number;
   stringValue?: string;
@@ -170,6 +183,46 @@ export async function submitReviewScore(projectId: string, name: string, itemId:
 
   await prisma.reviewItem.update({ where: { id: item.id }, data: { status: "DONE", completedAt: new Date() } });
   return { itemId: item.id, traceId: item.traceId, scoreName: queue.scoreName };
+}
+
+// ── Direct trace annotation ─────────────────────────────────────────────────────
+
+export interface AnnotateTraceInput {
+  name: string;
+  dataType: "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
+  value?: number;
+  stringValue?: string;
+  comment?: string;
+}
+
+/**
+ * Annotate a trace directly (outside a review queue) — writes an ANNOTATION score through the
+ * ingest pipeline, same path as submitReviewScore. The score lands asynchronously in the
+ * telemetry store; callers should refetch the trace shortly after.
+ */
+export async function annotateTrace(projectId: string, traceId: string, input: AnnotateTraceInput) {
+  const scoreId = newId();
+  await submitBatch(projectId, {
+    batch: [
+      {
+        id: newId(),
+        type: "score-create",
+        timestamp: isoNow(),
+        body: {
+          id: scoreId,
+          traceId,
+          name: input.name,
+          source: "ANNOTATION",
+          dataType: input.dataType,
+          value: input.value,
+          stringValue: input.stringValue,
+          comment: input.comment,
+          environment: "default",
+        },
+      },
+    ],
+  });
+  return { scoreId, traceId, name: input.name };
 }
 
 // ── Score correction / deletion ───────────────────────────────────────────────

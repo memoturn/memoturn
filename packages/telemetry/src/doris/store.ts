@@ -4,7 +4,9 @@ import type {
   ObservationDetail,
   ScoreRow as ScoreDetail,
   SessionSummary,
+  TraceFacets,
   TraceSummary,
+  UserSummary,
   WidgetBreakdown,
   WidgetMetric,
   WidgetPoint,
@@ -74,8 +76,9 @@ export class DorisTelemetryStore implements TelemetryStore {
 
   // ── Reads ──────────────────────────────────────────────────────────────────────
 
-  async listTraces(projectId: string, filters: TraceFilters = {}): Promise<TraceSummary[]> {
-    const { limit = 50, userId, sessionId, environment, search, tag, days } = filters;
+  /** Shared filter predicate for listTraces + countTraces (alias `t`), sans limit/offset. */
+  private traceListWhere(projectId: string, filters: TraceFilters): { where: string; params: unknown[] } {
+    const { userId, sessionId, environment, search, tag, promptId, scoreName, level, days } = filters;
     const conds: string[] = ["t.project_id = ?"];
     const params: unknown[] = [projectId];
     if (userId) {
@@ -91,18 +94,54 @@ export class DorisTelemetryStore implements TelemetryStore {
       params.push(environment);
     }
     if (search) {
-      conds.push("LOWER(t.name) LIKE CONCAT('%', LOWER(?), '%')");
-      params.push(search);
+      // Match the trace name OR any observation's input/output content (inline payloads only —
+      // payloads offloaded to blob at ingest aren't searchable here).
+      conds.push(
+        `(LOWER(t.name) LIKE CONCAT('%', LOWER(?), '%')
+          OR t.id IN (
+            SELECT trace_id FROM observations
+            WHERE project_id = ?
+              AND (LOWER(input) LIKE CONCAT('%', LOWER(?), '%') OR LOWER(output) LIKE CONCAT('%', LOWER(?), '%'))
+          ))`,
+      );
+      params.push(search, projectId, search, search);
     }
     if (tag) {
       conds.push("array_contains(t.tags, ?)");
       params.push(tag);
     }
+    if (promptId) {
+      // Trace has at least one observation (generation) that used this prompt.
+      conds.push("t.id IN (SELECT trace_id FROM observations WHERE project_id = ? AND prompt_id = ?)");
+      params.push(projectId, promptId);
+    }
+    if (scoreName) {
+      // Trace has at least one score with this name (eval/annotation/api).
+      conds.push("t.id IN (SELECT trace_id FROM scores WHERE project_id = ? AND name = ?)");
+      params.push(projectId, scoreName);
+    }
+    if (level) {
+      // Trace has at least one observation at this level (e.g. ERROR / WARNING).
+      conds.push("t.id IN (SELECT trace_id FROM observations WHERE project_id = ? AND level = ?)");
+      params.push(projectId, level);
+    }
     if (days && days > 0) {
       conds.push("t.`timestamp` >= ?");
       params.push(cutoffDaysAgo(days));
     }
-    params.push(Math.floor(limit));
+    return { where: conds.join(" AND "), params };
+  }
+
+  async countTraces(projectId: string, filters: TraceFilters = {}): Promise<number> {
+    const { where, params } = this.traceListWhere(projectId, filters);
+    const [row] = await this.query<{ c: unknown }>(`SELECT COUNT(*) AS c FROM traces t WHERE ${where}`, params);
+    return Number(row?.c ?? 0);
+  }
+
+  async listTraces(projectId: string, filters: TraceFilters = {}): Promise<TraceSummary[]> {
+    const { limit = 50, offset = 0 } = filters;
+    const { where, params } = this.traceListWhere(projectId, filters);
+    params.push(Math.floor(limit), Math.max(0, Math.floor(offset)));
 
     // Two-step (like exportTraces): pick the page of traces first, then aggregate
     // observations for just those trace ids — an unconditioned subquery would scan
@@ -120,9 +159,9 @@ export class DorisTelemetryStore implements TelemetryStore {
         t.environment AS environment,
         CAST(t.tags AS JSON) AS tags
       FROM traces t
-      WHERE ${conds.join(" AND ")}
-      ORDER BY t.\`timestamp\` DESC
-      LIMIT ?
+      WHERE ${where}
+      ORDER BY t.\`timestamp\` DESC, t.id DESC
+      LIMIT ? OFFSET ?
       `,
       params,
     );
@@ -161,7 +200,133 @@ export class DorisTelemetryStore implements TelemetryStore {
     });
   }
 
-  async listSessions(projectId: string, limit = 50): Promise<SessionSummary[]> {
+  async traceFacets(
+    projectId: string,
+    opts: {
+      days?: number;
+      limit?: number;
+      environment?: string;
+      search?: string;
+      userId?: string;
+      tag?: string;
+      scoreName?: string;
+      level?: string;
+    } = {},
+  ): Promise<TraceFacets> {
+    const { days = 0, limit = 25, environment, search, userId, tag, scoreName, level } = opts;
+    const cap = Math.floor(limit);
+
+    // Compose a WHERE from a chosen subset of the active filters. Each facet omits its own
+    // dimension (facet-excluding counts) so a selected value still shows its alternatives.
+    const build = (include: {
+      env?: boolean;
+      name?: boolean;
+      user?: boolean;
+      tag?: boolean;
+      score?: boolean;
+      level?: boolean;
+    }) => {
+      const conds = ["project_id = ?"];
+      const params: unknown[] = [projectId];
+      if (days > 0) {
+        conds.push("`timestamp` >= ?");
+        params.push(cutoffDaysAgo(days));
+      }
+      if (include.env && environment) {
+        conds.push("environment = ?");
+        params.push(environment);
+      }
+      if (include.name && search) {
+        conds.push(
+          `(LOWER(name) LIKE CONCAT('%', LOWER(?), '%')
+            OR id IN (
+              SELECT trace_id FROM observations
+              WHERE project_id = ?
+                AND (LOWER(input) LIKE CONCAT('%', LOWER(?), '%') OR LOWER(output) LIKE CONCAT('%', LOWER(?), '%'))
+            ))`,
+        );
+        params.push(search, projectId, search, search);
+      }
+      if (include.user && userId) {
+        conds.push("user_id = ?");
+        params.push(userId);
+      }
+      if (include.tag && tag) {
+        conds.push("array_contains(tags, ?)");
+        params.push(tag);
+      }
+      if (include.score && scoreName) {
+        conds.push("id IN (SELECT trace_id FROM scores WHERE project_id = ? AND name = ?)");
+        params.push(projectId, scoreName);
+      }
+      if (include.level && level) {
+        conds.push("id IN (SELECT trace_id FROM observations WHERE project_id = ? AND level = ?)");
+        params.push(projectId, level);
+      }
+      return { where: conds.join(" AND "), params };
+    };
+
+    // One {value, count} list per facet, ordered by frequency. Tags is an ARRAY<STRING>
+    // column, so it's unnested with LATERAL VIEW explode before grouping (empty/NULL
+    // tag arrays simply contribute no rows).
+    const facet = (sql: string, params: unknown[]) =>
+      this.query<{ value: string; count: unknown }>(sql, params).then((rows) =>
+        rows.filter((r) => r.value != null && r.value !== "").map((r) => ({ value: r.value, count: Number(r.count) })),
+      );
+
+    const envW = build({ name: true, user: true, tag: true, score: true, level: true });
+    const nameW = build({ env: true, user: true, tag: true, score: true, level: true });
+    const tagW = build({ env: true, name: true, user: true, score: true, level: true });
+    // Scores + levels facets each join their source table to the filtered trace set and exclude
+    // their own dimension, so a selected value still shows its alternatives.
+    const scoreW = build({ env: true, name: true, user: true, tag: true, level: true });
+    const levelW = build({ env: true, name: true, user: true, tag: true, score: true });
+
+    const [environments, names, tags, scores, levels] = await Promise.all([
+      facet(
+        `SELECT environment AS value, COUNT(*) AS count FROM traces
+         WHERE ${envW.where} GROUP BY environment ORDER BY count DESC LIMIT ?`,
+        [...envW.params, cap],
+      ),
+      facet(
+        `SELECT name AS value, COUNT(*) AS count FROM traces
+         WHERE ${nameW.where} GROUP BY name ORDER BY count DESC LIMIT ?`,
+        [...nameW.params, cap],
+      ),
+      facet(
+        `SELECT tag AS value, COUNT(*) AS count FROM traces
+         LATERAL VIEW explode(tags) tv AS tag
+         WHERE ${tagW.where} GROUP BY tag ORDER BY count DESC LIMIT ?`,
+        [...tagW.params, cap],
+      ),
+      facet(
+        `SELECT s.name AS value, COUNT(DISTINCT s.trace_id) AS count
+         FROM scores s
+         WHERE s.project_id = ? AND s.trace_id IN (SELECT id FROM traces WHERE ${scoreW.where})
+         GROUP BY s.name ORDER BY count DESC LIMIT ?`,
+        [projectId, ...scoreW.params, cap],
+      ),
+      facet(
+        `SELECT o.level AS value, COUNT(DISTINCT o.trace_id) AS count
+         FROM observations o
+         WHERE o.project_id = ? AND o.trace_id IN (SELECT id FROM traces WHERE ${levelW.where})
+         GROUP BY o.level ORDER BY count DESC LIMIT ?`,
+        [projectId, ...levelW.params, cap],
+      ),
+    ]);
+
+    return { environments, names, tags, scores, levels };
+  }
+
+  async listSessions(
+    projectId: string,
+    opts: { limit?: number; offset?: number; days?: number; search?: string } = {},
+  ): Promise<SessionSummary[]> {
+    const { limit = 50, offset = 0, days = 0, search = "" } = opts;
+    const dayCond = days > 0 ? "AND t.`timestamp` >= ?" : "";
+    const dayParam = days > 0 ? [cutoffDaysAgo(days)] : [];
+    const searchCond = search ? "AND t.session_id LIKE ?" : "";
+    const searchParam = search ? [`%${search}%`] : [];
     const rows = await this.query<SessionSummary>(
       `
       SELECT
@@ -177,14 +342,70 @@ export class DorisTelemetryStore implements TelemetryStore {
         WHERE project_id = ?
         GROUP BY trace_id
       ) o ON o.trace_id = t.id
-      WHERE t.project_id = ? AND t.session_id != ''
+      WHERE t.project_id = ? AND t.session_id != '' ${dayCond} ${searchCond}
       GROUP BY t.session_id
-      ORDER BY last_seen DESC
-      LIMIT ?
+      ORDER BY last_seen DESC, t.session_id DESC
+      LIMIT ? OFFSET ?
       `,
-      [projectId, projectId, Math.floor(limit)],
+      [projectId, projectId, ...dayParam, ...searchParam, Math.floor(limit), Math.max(0, Math.floor(offset))],
     );
     return rows.map((r) => ({ ...r, trace_count: Number(r.trace_count), total_cost: Number(r.total_cost) }));
+  }
+
+  async countSessions(projectId: string, days = 0, search = ""): Promise<number> {
+    const dayCond = days > 0 ? "AND `timestamp` >= ?" : "";
+    const searchCond = search ? "AND session_id LIKE ?" : "";
+    const params = [projectId, ...(days > 0 ? [cutoffDaysAgo(days)] : []), ...(search ? [`%${search}%`] : [])];
+    const [row] = await this.query<{ c: unknown }>(
+      `SELECT COUNT(DISTINCT session_id) AS c FROM traces WHERE project_id = ? AND session_id != '' ${dayCond} ${searchCond}`,
+      params,
+    );
+    return Number(row?.c ?? 0);
+  }
+
+  async listUsers(
+    projectId: string,
+    opts: { limit?: number; offset?: number; days?: number; search?: string } = {},
+  ): Promise<UserSummary[]> {
+    const { limit = 50, offset = 0, days = 0, search = "" } = opts;
+    const dayCond = days > 0 ? "AND t.`timestamp` >= ?" : "";
+    const dayParam = days > 0 ? [cutoffDaysAgo(days)] : [];
+    const searchCond = search ? "AND t.user_id LIKE ?" : "";
+    const searchParam = search ? [`%${search}%`] : [];
+    const rows = await this.query<UserSummary>(
+      `
+      SELECT
+        t.user_id AS user_id,
+        COUNT(t.id) AS trace_count,
+        DATE_FORMAT(MIN(t.\`timestamp\`), ${ISO_FMT}) AS first_seen,
+        DATE_FORMAT(MAX(t.\`timestamp\`), ${ISO_FMT}) AS last_seen,
+        COALESCE(SUM(o.total_cost), 0) AS total_cost
+      FROM traces t
+      LEFT JOIN (
+        SELECT trace_id, SUM(total_cost) AS total_cost
+        FROM observations
+        WHERE project_id = ?
+        GROUP BY trace_id
+      ) o ON o.trace_id = t.id
+      WHERE t.project_id = ? AND t.user_id != '' ${dayCond} ${searchCond}
+      GROUP BY t.user_id
+      ORDER BY last_seen DESC, t.user_id DESC
+      LIMIT ? OFFSET ?
+      `,
+      [projectId, projectId, ...dayParam, ...searchParam, Math.floor(limit), Math.max(0, Math.floor(offset))],
+    );
+    return rows.map((r) => ({ ...r, trace_count: Number(r.trace_count), total_cost: Number(r.total_cost) }));
+  }
+
+  async countUsers(projectId: string, days = 0, search = ""): Promise<number> {
+    const dayCond = days > 0 ? "AND `timestamp` >= ?" : "";
+    const searchCond = search ? "AND user_id LIKE ?" : "";
+    const params = [projectId, ...(days > 0 ? [cutoffDaysAgo(days)] : []), ...(search ? [`%${search}%`] : [])];
+    const [row] = await this.query<{ c: unknown }>(
+      `SELECT COUNT(DISTINCT user_id) AS c FROM traces WHERE project_id = ? AND user_id != '' ${dayCond} ${searchCond}`,
+      params,
+    );
+    return Number(row?.c ?? 0);
   }
 
   async getTraceHeader(projectId: string, traceId: string): Promise<TraceHeader | null> {
@@ -217,6 +438,7 @@ export class DorisTelemetryStore implements TelemetryStore {
         level,
         COALESCE(status_message, '') AS status_message,
         model, provider,
+        COALESCE(prompt_id, '') AS prompt_id, COALESCE(prompt_version, '') AS prompt_version,
         prompt_tokens, completion_tokens, total_tokens, total_cost, latency_ms,
         COALESCE(input, '') AS input,
         COALESCE(output, '') AS output,
@@ -336,6 +558,7 @@ export class DorisTelemetryStore implements TelemetryStore {
     const rows = await this.query<{
       date: string;
       generations: unknown;
+      errors: unknown;
       total_tokens: unknown;
       total_cost: unknown;
       p50: unknown;
@@ -345,6 +568,7 @@ export class DorisTelemetryStore implements TelemetryStore {
       SELECT
         DATE_FORMAT(start_time, '%Y-%m-%d') AS date,
         COUNT(*) AS generations,
+        SUM(IF(level = 'ERROR', 1, 0)) AS errors,
         SUM(total_tokens) AS total_tokens,
         SUM(total_cost) AS total_cost,
         PERCENTILE_APPROX(latency_ms, 0.5) AS p50,
@@ -359,6 +583,7 @@ export class DorisTelemetryStore implements TelemetryStore {
     return rows.map((r) => ({
       date: r.date,
       generations: Number(r.generations),
+      errors: Number(r.errors ?? 0),
       total_tokens: Number(r.total_tokens),
       total_cost: Number(r.total_cost),
       p50_latency_ms: Math.round(Number(r.p50 ?? 0)),
@@ -429,26 +654,23 @@ export class DorisTelemetryStore implements TelemetryStore {
   }
 
   async exportTraces(projectId: string, filters: ExportFilters = {}): Promise<ExportTraceRow[]> {
-    const { limit = 1000, environment } = filters;
-    const conds = ["project_id = ?"];
-    const params: unknown[] = [projectId];
-    if (environment) {
-      conds.push("environment = ?");
-      params.push(environment);
-    }
-    params.push(Math.floor(limit));
+    const { limit = 1000 } = filters;
+    // Reuse the trace-list WHERE so exports honor the same filters as the console list
+    // (environment, search, tag, score, level, user, …).
+    const { where, params: whereParams } = this.traceListWhere(projectId, filters);
+    const params = [...whereParams, Math.floor(limit)];
 
     const traces = await this.query<Omit<ExportTraceRow, "observations">>(
       `
       SELECT
-        id, name,
-        DATE_FORMAT(\`timestamp\`, ${ISO_FMT}) AS \`timestamp\`,
-        user_id, session_id, environment,
-        COALESCE(input, '') AS input,
-        COALESCE(output, '') AS output
-      FROM traces
-      WHERE ${conds.join(" AND ")}
-      ORDER BY \`timestamp\` DESC
+        t.id, t.name,
+        DATE_FORMAT(t.\`timestamp\`, ${ISO_FMT}) AS \`timestamp\`,
+        t.user_id, t.session_id, t.environment,
+        COALESCE(t.input, '') AS input,
+        COALESCE(t.output, '') AS output
+      FROM traces t
+      WHERE ${where}
+      ORDER BY t.\`timestamp\` DESC
       LIMIT ?
       `,
       params,

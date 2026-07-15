@@ -7,6 +7,7 @@
  */
 import type {
   AnalyticsSink,
+  AnnotationResult,
   ApiKey,
   ApiKeyCreated,
   AuditEntry,
@@ -34,9 +35,14 @@ import type {
   ScheduledExportResult,
   ScoreConfig,
   ScoreCorrected,
+  SessionPage,
   SessionSummary,
   TraceDetail,
+  TraceFacets,
+  TracePage,
   TraceSummary,
+  TraceTags,
+  UserPage,
   Webhook,
   Widget,
 } from "@memoturn/contracts";
@@ -109,6 +115,9 @@ export interface TraceFilters {
   environment?: string;
   search?: string;
   tag?: string;
+  promptId?: string;
+  scoreName?: string;
+  level?: string;
   days?: number;
 }
 export interface PlaygroundRequest {
@@ -124,11 +133,36 @@ export interface PlaygroundRequest {
 export const api = {
   listTraces: (filters: TraceFilters & { limit?: number } = {}) =>
     get<{ data: TraceSummary[] }>(`/v1/traces${qs(filters as Record<string, unknown>)}`).then((r) => r.data),
+  listTracesPage: (filters: TraceFilters & { page?: number; pageSize?: number } = {}) =>
+    get<TracePage>(`/v1/traces${qs(filters as Record<string, unknown>)}`),
+  traceFacets: (
+    opts: {
+      days?: number;
+      limit?: number;
+      environment?: string;
+      search?: string;
+      userId?: string;
+      tag?: string;
+      scoreName?: string;
+      level?: string;
+    } = {},
+  ) => get<TraceFacets>(`/v1/traces/facets${qs(opts as Record<string, unknown>)}`),
   getTrace: (id: string) => get<TraceDetail>(`/v1/traces/${encodeURIComponent(id)}`),
   batchTraces: (body: { action: string; traceIds: string[]; datasetName?: string; queueName?: string }) =>
     post<{ action: string; affected: number }>(`/v1/traces/batch`, body),
   replayTrace: (id: string, body: { provider?: string; model?: string } = {}) =>
     post<PlaygroundResponse>(`/v1/traces/${encodeURIComponent(id)}/replay`, body),
+  annotateTrace: (
+    id: string,
+    body: {
+      name: string;
+      dataType: "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
+      value?: number;
+      stringValue?: string;
+      comment?: string;
+    },
+  ) => post<AnnotationResult>(`/v1/traces/${encodeURIComponent(id)}/annotate`, body),
+  setTraceTags: (id: string, tags: string[]) => post<TraceTags>(`/v1/traces/${encodeURIComponent(id)}/tags`, { tags }),
   getMetrics: (days = 30) => get<MetricsSummary>(`/v1/metrics${qs({ days })}`),
   listPrompts: () => get<{ data: PromptListItem[] }>(`/v1/prompts`).then((r) => r.data),
   getPrompt: (name: string) => get<PromptDetail>(`/v1/prompts/${encodeURIComponent(name)}/detail`),
@@ -219,6 +253,10 @@ export const api = {
     filterName?: string;
   }) => post(`/v1/evaluators`, body),
   listSessions: () => get<{ data: SessionSummary[] }>(`/v1/sessions`).then((r) => r.data),
+  listSessionsPage: (opts: { page?: number; pageSize?: number; days?: number; search?: string } = {}) =>
+    get<SessionPage>(`/v1/sessions${qs(opts as Record<string, unknown>)}`),
+  listUsersPage: (opts: { page?: number; pageSize?: number; days?: number; search?: string } = {}) =>
+    get<UserPage>(`/v1/users${qs(opts as Record<string, unknown>)}`),
   listProjects: () => get<{ data: Project[] }>(`/v1/projects`).then((r) => r.data),
   listAuditLogs: () => get<{ data: AuditEntry[] }>(`/v1/audit-logs`).then((r) => r.data),
   listReviewQueues: () => get<{ data: ReviewQueue[] }>(`/v1/review-queues`).then((r) => r.data),
@@ -233,6 +271,8 @@ export const api = {
     post(`/v1/review-queues/${encodeURIComponent(name)}/items/${encodeURIComponent(itemId)}/score`, body),
   assignReviewItem: (name: string, itemId: string, assigneeId?: string) =>
     post(`/v1/review-queues/${encodeURIComponent(name)}/items/${encodeURIComponent(itemId)}/assign`, { assigneeId }),
+  skipReviewItem: (name: string, itemId: string) =>
+    post(`/v1/review-queues/${encodeURIComponent(name)}/items/${encodeURIComponent(itemId)}/skip`, {}),
 };
 
 /** Stream a playground completion (SSE), invoking onDelta for each text chunk. */
@@ -268,10 +308,15 @@ export async function streamPlayground(body: PlaygroundRequest, onDelta: (delta:
   }
 }
 
-/** Download the traces export for the active project via an object URL (NDJSON or CSV). */
-export async function downloadTracesExport(format: "jsonl" | "csv" = "jsonl"): Promise<void> {
-  const qs = format === "csv" ? "?format=csv" : "";
-  const res = await fetch(`${API_BASE}/v1/exports/traces${qs}`, { headers: headers() });
+/**
+ * Download the traces export for the active project via an object URL (NDJSON or CSV).
+ * Honors the same filters as the trace list so the export matches the on-screen view.
+ */
+export async function downloadTracesExport(
+  format: "jsonl" | "csv" = "jsonl",
+  filters: TraceFilters & { limit?: number } = {},
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/v1/exports/traces${qs({ format, ...filters })}`, { headers: headers() });
   if (!res.ok) throw new Error(`export failed: ${res.status}`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);

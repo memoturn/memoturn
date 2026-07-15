@@ -18,38 +18,36 @@ import { Skeleton } from "../../components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { api } from "../../lib/api";
 
-interface SessionSearch {
+interface UserSearch {
   peek?: string;
 }
 
-export const Route = createFileRoute("/sessions/$id")({
-  validateSearch: (s: Record<string, unknown>): SessionSearch => ({
+export const Route = createFileRoute("/users/$id")({
+  validateSearch: (s: Record<string, unknown>): UserSearch => ({
     peek: typeof s.peek === "string" && s.peek ? s.peek : undefined,
   }),
-  component: SessionDetailPage,
+  component: UserDetailPage,
 });
 
 function fmtCost(n: number): string {
   return n > 0 ? `$${n.toFixed(6)}` : "—";
 }
 
-function SessionDetailPage() {
+function UserDetailPage() {
   const { id } = Route.useParams();
   const { peek } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const setPeek = (pid: string | undefined) => navigate({ search: (prev) => ({ ...prev, peek: pid }) });
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["session-traces", id],
-    queryFn: () => api.listTracesPage({ sessionId: id, pageSize: 500 }),
+    queryKey: ["user-traces", id],
+    queryFn: () => api.listTracesPage({ userId: id, pageSize: 500 }),
   });
   const traces = data?.data;
   const scores = data?.scores ?? {};
 
-  // Show the session as a conversation — oldest trace first (the list query returns newest-first).
-  const ordered = traces ? [...traces].sort((a, b) => a.timestamp.localeCompare(b.timestamp)) : undefined;
-  const totalTokens = ordered?.reduce((a, t) => a + Number(t.total_tokens), 0) ?? 0;
-  const totalCost = ordered?.reduce((a, t) => a + Number(t.total_cost), 0) ?? 0;
+  const totalTokens = traces?.reduce((a, t) => a + Number(t.total_tokens), 0) ?? 0;
+  const totalCost = traces?.reduce((a, t) => a + Number(t.total_cost), 0) ?? 0;
 
   return (
     <div className="space-y-4">
@@ -57,7 +55,7 @@ function SessionDetailPage() {
         <BreadcrumbList>
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
-              <Link to="/sessions">Sessions</Link>
+              <Link to="/users">Users</Link>
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator />
@@ -67,18 +65,18 @@ function SessionDetailPage() {
         </BreadcrumbList>
       </Breadcrumb>
 
-      <PageHeader title={`Session ${id}`} description="Traces sharing this session id — click a row to preview." />
+      <PageHeader title={`User ${id}`} description="Traces from this end user — click a row to preview." />
 
       {isLoading ? (
         <Skeleton className="h-64 w-full" />
       ) : error ? (
         <EmptyState title="Failed to load traces" description={String(error)} />
-      ) : !ordered || ordered.length === 0 ? (
-        <EmptyState icon={Activity} title="No traces in this session" description="This session has no traces yet." />
+      ) : !traces || traces.length === 0 ? (
+        <EmptyState icon={Activity} title="No traces for this user" description="This user has no traces yet." />
       ) : (
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
-            <StatTile label="Traces" value={ordered.length} icon={Activity} />
+            <StatTile label="Traces" value={traces.length} icon={Activity} />
             <StatTile label="Tokens" value={totalTokens} icon={Coins} />
             <StatTile label="Cost" value={fmtCost(totalCost)} icon={DollarSign} />
           </div>
@@ -97,7 +95,7 @@ function SessionDetailPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {ordered.map((t) => (
+                {traces.map((t) => (
                   <TableRow
                     key={t.id}
                     data-state={peek === t.id ? "selected" : undefined}
@@ -127,7 +125,7 @@ function SessionDetailPage() {
         </div>
       )}
 
-      <TracePeekDrawer traces={ordered} peekId={peek} onPeek={setPeek} />
+      <TracePeekDrawer traces={traces} peekId={peek} onPeek={setPeek} />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { type IngestEvent, type IngestResult, ingestEvent, ingestRequest, ingest
 import {
   addDatasetItems,
   addReviewItems,
+  annotateTrace,
   applyRetention,
   assertPublicUrl,
   assignReviewItem,
@@ -11,6 +12,9 @@ import {
   builtinModelPrices,
   checkRateLimit,
   correctScore,
+  countSessions,
+  countTraces,
+  countUsers,
   createApiKey,
   createAutomation,
   createComment,
@@ -47,6 +51,7 @@ import {
   getRetention,
   getReviewAnalytics,
   getScheduledExport,
+  getScoresByTraceIds,
   getTrace,
   ingestRateLimitConfig,
   listApiKeys,
@@ -65,6 +70,7 @@ import {
   listSessions,
   listTraces,
   listUserProjects,
+  listUsers,
   listWebhooks,
   listWidgets,
   mcpAuthorizationServerMetadata,
@@ -84,10 +90,13 @@ import {
   setMaskingPolicy,
   setRetention,
   setScheduledExport,
+  setTraceTags,
+  skipReviewItem,
   storeDataUri,
   streamPlayground,
   submitBatch,
   submitReviewScore,
+  traceFacets,
 } from "@memoturn/server";
 import { Scalar } from "@scalar/hono-api-reference";
 import { bodyLimit } from "hono/body-limit";
@@ -158,6 +167,7 @@ app.use("/v1/otel/*", requireAuth);
 app.use("/v1/traces", requireAuth);
 app.use("/v1/traces/*", requireAuth);
 app.use("/v1/sessions", requireAuth);
+app.use("/v1/users", requireAuth);
 app.use("/v1/metrics", requireAuth);
 app.use("/v1/prompts", requireAuth);
 app.use("/v1/prompts/*", requireAuth);
@@ -275,17 +285,27 @@ app.get("/v1/payloads/*", async (c) => {
 // Batch export (NDJSON download) — plain route so we can set a file download header.
 app.get("/v1/exports/traces", async (c) => {
   const url = new URL(c.req.url);
-  const limit = Number(url.searchParams.get("limit") ?? 1000);
-  const environment = url.searchParams.get("environment") || undefined;
-  const format = url.searchParams.get("format") === "csv" ? "csv" : "jsonl";
+  const q = url.searchParams;
+  const format = q.get("format") === "csv" ? "csv" : "jsonl";
+  // Honor the same filters as the trace list so an export matches the on-screen view.
+  const filters = {
+    limit: Number(q.get("limit") ?? 1000),
+    environment: q.get("environment") || undefined,
+    search: q.get("search") || undefined,
+    userId: q.get("userId") || undefined,
+    tag: q.get("tag") || undefined,
+    scoreName: q.get("scoreName") || undefined,
+    level: q.get("level") || undefined,
+    days: q.get("days") ? Number(q.get("days")) : undefined,
+  };
   if (format === "csv") {
-    const body = await exportTracesCsv(c.get("projectId"), { limit, environment });
+    const body = await exportTracesCsv(c.get("projectId"), filters);
     return c.body(body, 200, {
       "content-type": "text/csv",
       "content-disposition": "attachment; filename=memoturn-traces.csv",
     });
   }
-  const body = await exportTracesJsonl(c.get("projectId"), { limit, environment });
+  const body = await exportTracesJsonl(c.get("projectId"), filters);
   return c.body(body, 200, {
     "content-type": "application/x-ndjson",
     "content-disposition": "attachment; filename=memoturn-traces.jsonl",
@@ -481,22 +501,87 @@ app.openapi(
     request: {
       query: z.object({
         limit: z.coerce.number().int().min(1).max(500).optional(),
+        page: z.coerce.number().int().min(1).optional(),
+        pageSize: z.coerce.number().int().min(1).max(500).optional(),
         userId: z.string().optional(),
         sessionId: z.string().optional(),
         environment: z.string().optional(),
         search: z.string().optional(),
         tag: z.string().optional(),
+        promptId: z.string().optional(),
+        scoreName: z.string().optional(),
+        level: z.string().optional(),
         days: z.coerce.number().int().min(1).max(365).optional(),
       }),
     },
     responses: {
-      200: { description: "Trace list", content: { "application/json": { schema: C.listOf(C.traceSummary) } } },
+      200: { description: "Trace page", content: { "application/json": { schema: C.tracePage } } },
     },
   }),
   async (c) => {
-    const { limit, userId, sessionId, environment, search, tag, days } = c.req.valid("query");
-    const data = await listTraces(c.get("projectId"), { limit, userId, sessionId, environment, search, tag, days });
-    return c.json({ data });
+    const { limit, page, pageSize, userId, sessionId, environment, search, tag, promptId, scoreName, level, days } =
+      c.req.valid("query");
+    // `page`/`pageSize` drive pagination; `limit` stays as a legacy single-page cap (e.g. session view).
+    const size = pageSize ?? limit ?? 50;
+    const offset = page ? (page - 1) * size : 0;
+    const base = { userId, sessionId, environment, search, tag, promptId, scoreName, level, days };
+    const [data, total] = await Promise.all([
+      listTraces(c.get("projectId"), { ...base, limit: size, offset }),
+      countTraces(c.get("projectId"), base),
+    ]);
+    // Attach each trace's scores (eval/annotation quality) so the list can show them at a glance.
+    const scores: Record<string, { name: string; value: number | null; string_value: string }[]> = {};
+    if (data.length) {
+      const scoreMap = await getScoresByTraceIds(
+        c.get("projectId"),
+        data.map((t) => t.id),
+      );
+      for (const [traceId, arr] of scoreMap) {
+        scores[traceId] = arr.map((s) => ({ name: s.name, value: s.value, string_value: s.string_value }));
+      }
+    }
+    return c.json({ data, total, scores });
+  },
+);
+
+// Registered before /v1/traces/{id} so the static segment resolves ahead of the param route.
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/traces/facets",
+    summary: "Distinct filter facet values + counts for traces (environment / name / tags / scores)",
+    tags: ["traces"],
+    security,
+    request: {
+      query: z.object({
+        days: z.coerce.number().int().min(1).max(365).optional(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+        // Active filters — counts are facet-excluding (each dimension ignores its own filter).
+        environment: z.string().optional(),
+        search: z.string().optional(),
+        userId: z.string().optional(),
+        tag: z.string().optional(),
+        scoreName: z.string().optional(),
+        level: z.string().optional(),
+      }),
+    },
+    responses: {
+      200: { description: "Trace facets", content: { "application/json": { schema: C.traceFacets } } },
+    },
+  }),
+  async (c) => {
+    const { days, limit, environment, search, userId, tag, scoreName, level } = c.req.valid("query");
+    const data = await traceFacets(c.get("projectId"), {
+      days,
+      limit,
+      environment,
+      search,
+      userId,
+      tag,
+      scoreName,
+      level,
+    });
+    return c.json(data);
   },
 );
 
@@ -508,14 +593,61 @@ app.openapi(
     summary: "List sessions (traces grouped by session_id)",
     tags: ["traces"],
     security,
-    request: { query: z.object({ limit: z.coerce.number().int().min(1).max(500).optional() }) },
+    request: {
+      query: z.object({
+        limit: z.coerce.number().int().min(1).max(500).optional(),
+        page: z.coerce.number().int().min(1).optional(),
+        pageSize: z.coerce.number().int().min(1).max(500).optional(),
+        days: z.coerce.number().int().min(1).max(365).optional(),
+        search: z.string().optional(),
+      }),
+    },
     responses: {
-      200: { description: "Session list", content: { "application/json": { schema: C.listOf(C.sessionSummary) } } },
+      200: { description: "Session page", content: { "application/json": { schema: C.sessionPage } } },
     },
   }),
   async (c) => {
-    const data = await listSessions(c.get("projectId"), c.req.valid("query").limit ?? 50);
-    return c.json({ data });
+    const { limit, page, pageSize, days, search } = c.req.valid("query");
+    const size = pageSize ?? limit ?? 50;
+    const offset = page ? (page - 1) * size : 0;
+    const [data, total] = await Promise.all([
+      listSessions(c.get("projectId"), { limit: size, offset, days, search }),
+      countSessions(c.get("projectId"), days, search),
+    ]);
+    return c.json({ data, total });
+  },
+);
+
+// ── Users ────────────────────────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/users",
+    summary: "List end users (traces grouped by user_id)",
+    tags: ["traces"],
+    security,
+    request: {
+      query: z.object({
+        limit: z.coerce.number().int().min(1).max(500).optional(),
+        page: z.coerce.number().int().min(1).optional(),
+        pageSize: z.coerce.number().int().min(1).max(500).optional(),
+        days: z.coerce.number().int().min(1).max(365).optional(),
+        search: z.string().optional(),
+      }),
+    },
+    responses: {
+      200: { description: "User page", content: { "application/json": { schema: C.userPage } } },
+    },
+  }),
+  async (c) => {
+    const { limit, page, pageSize, days, search } = c.req.valid("query");
+    const size = pageSize ?? limit ?? 50;
+    const offset = page ? (page - 1) * size : 0;
+    const [data, total] = await Promise.all([
+      listUsers(c.get("projectId"), { limit: size, offset, days, search }),
+      countUsers(c.get("projectId"), days, search),
+    ]);
+    return c.json({ data, total });
   },
 );
 
@@ -600,6 +732,73 @@ app.openapi(
       console.error(JSON.stringify({ level: "error", scope: "trace.replay", message: String(err) }));
       return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
     }
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/traces/{id}/annotate",
+    summary: "Annotate a trace with a manual ANNOTATION score (name + value/category + comment)",
+    tags: ["traces"],
+    security,
+    request: {
+      params: z.object({ id: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              name: z.string().min(1),
+              dataType: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]).default("NUMERIC"),
+              value: z.number().optional(),
+              stringValue: z.string().optional(),
+              comment: z.string().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Annotation recorded", content: { "application/json": { schema: C.annotationResult } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const id = c.req.valid("param").id;
+    const body = c.req.valid("json");
+    const result = await annotateTrace(c.get("projectId"), id, body);
+    await recordAudit(c.get("projectId"), c.get("actor"), "trace.annotate", `trace:${id}`, { score: body.name });
+    return c.json(result, 200);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/traces/{id}/tags",
+    summary: "Replace a trace's tags",
+    tags: ["traces"],
+    security,
+    request: {
+      params: z.object({ id: z.string() }),
+      body: { content: { "application/json": { schema: z.object({ tags: z.array(z.string()) }) } } },
+    },
+    responses: {
+      200: { description: "Updated tags", content: { "application/json": { schema: C.traceTags } } },
+      403: { description: "Forbidden" },
+      404: { description: "Trace not found" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const id = c.req.valid("param").id;
+    const result = await setTraceTags(c.get("projectId"), id, c.req.valid("json").tags);
+    if (!result) return c.json({ error: "trace not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "trace.tags", `trace:${id}`);
+    return c.json(result, 200);
   },
 );
 
@@ -1325,6 +1524,33 @@ app.openapi(
     const result = await submitReviewScore(c.get("projectId"), name, itemId, c.req.valid("json"));
     if (!result) return c.json({ error: "queue or item not found" }, 404);
     await recordAudit(c.get("projectId"), c.get("actor"), "review.score", `trace:${result.traceId}`, { score: name });
+    return c.json(result);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/review-queues/{name}/items/{itemId}/skip",
+    summary: "Skip a review item without scoring it (marks it SKIPPED)",
+    tags: ["review"],
+    security,
+    request: {
+      params: z.object({ name: z.string(), itemId: z.string() }),
+    },
+    responses: {
+      200: { description: "Skipped", content: { "application/json": { schema: z.any() } } },
+      403: { description: "Forbidden" },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const { name, itemId } = c.req.valid("param");
+    const result = await skipReviewItem(c.get("projectId"), name, itemId);
+    if (!result) return c.json({ error: "queue or item not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "review.skip", `item:${itemId}`, { queue: name });
     return c.json(result);
   },
 );

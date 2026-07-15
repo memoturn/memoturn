@@ -13,6 +13,7 @@ import { EmptyState } from "../components/empty-state";
 import { KindBadge } from "../components/kind-badge";
 import { PageHeader } from "../components/page-header";
 import { StatTile } from "../components/stat-tile";
+import { PayloadView } from "../components/trace-detail";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Checkbox } from "../components/ui/checkbox";
@@ -31,15 +32,6 @@ const queueSchema = z.object({
   scoreName: z.string().min(1, "Score name is required"),
 });
 type QueueForm = z.infer<typeof queueSchema>;
-
-function pretty(v: string): string {
-  if (!v) return "—";
-  try {
-    return JSON.stringify(JSON.parse(v), null, 2);
-  } catch {
-    return v;
-  }
-}
 
 function ReviewCard({
   queue,
@@ -74,6 +66,14 @@ function ReviewCard({
     onSuccess: onDone,
     onError: (e) => toast.error(`Failed to assign: ${String(e)}`),
   });
+  const skip = useMutation({
+    mutationFn: () => api.skipReviewItem(queue, item.id),
+    onSuccess: () => {
+      toast.success("Item skipped");
+      onDone();
+    },
+    onError: (e) => toast.error(`Failed to skip: ${String(e)}`),
+  });
   const mine = item.assigneeId && item.assigneeId === myId;
 
   return (
@@ -100,14 +100,16 @@ function ReviewCard({
           )}
         </div>
         {item.trace.input && (
-          <pre className="overflow-auto rounded-md border bg-muted/50 p-3 text-xs max-h-60 whitespace-pre-wrap">
-            {pretty(item.trace.input)}
-          </pre>
+          <div className="space-y-1">
+            <div className="text-xs font-medium text-muted-foreground">Input</div>
+            <PayloadView raw={item.trace.input} />
+          </div>
         )}
         {item.trace.output && (
-          <pre className="overflow-auto rounded-md border bg-muted/50 p-3 text-xs max-h-60 whitespace-pre-wrap">
-            {pretty(item.trace.output)}
-          </pre>
+          <div className="space-y-1">
+            <div className="text-xs font-medium text-muted-foreground">Output</div>
+            <PayloadView raw={item.trace.output} />
+          </div>
         )}
         <div className="flex flex-wrap items-end gap-2">
           {categorical ? (
@@ -141,6 +143,15 @@ function ReviewCard({
           />
           <Button disabled={readOnly || submit.isPending} onClick={() => submit.mutate()}>
             {submit.isPending ? "Saving…" : "Submit score"}
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={readOnly || skip.isPending}
+            onClick={() => skip.mutate()}
+            className="text-muted-foreground"
+          >
+            <SkipForward className="size-4" />
+            {skip.isPending ? "Skipping…" : "Skip"}
           </Button>
         </div>
       </CardContent>
