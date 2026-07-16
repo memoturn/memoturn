@@ -14,6 +14,7 @@ export * from "./env.js";
 export * from "./evaluators.js";
 export * from "./experiments.js";
 export * from "./export.js";
+export * from "./guardrails.js";
 export * from "./ingest.js";
 export * from "./ingest-health.js";
 export * from "./lock.js";
