@@ -21,8 +21,13 @@ function ForgotPasswordPage() {
   const form = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: { email: "" } });
 
   async function onSubmit(values: FormValues) {
-    // Better Auth verifies the token on click, then redirects to /reset-password?token=…
-    const res = await authClient.requestPasswordReset({ email: values.email, redirectTo: "/reset-password" });
+    // Better Auth verifies the token on click, then redirects to redirectTo?token=… . Use an
+    // absolute console-origin URL: the verify endpoint runs on the API origin, so a relative
+    // path would resolve there (:3001 in dev) and 404 instead of landing on the console.
+    const res = await authClient.requestPasswordReset({
+      email: values.email,
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
     if (res.error) {
       toast.error(res.error.message ?? "Could not send reset email");
       return;
