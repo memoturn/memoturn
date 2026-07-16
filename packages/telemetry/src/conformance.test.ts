@@ -477,6 +477,62 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     });
   });
 
+  it("ranks similar traces by exact cosine, scoped by model/dim, and hydrates by trace id", async () => {
+    // Sibling traces in a distinct embedding space (model "sim-test", dim 3), isolated from the
+    // o1/o2 fixtures (model "text-embedding-3-small", dim 4).
+    await store.insertRows("traces", [
+      trace({ id: "t2", name: "Sim Two" }),
+      trace({ id: "t3", name: "Sim Three" }),
+      trace({ id: "t4", name: "Sim Four" }),
+    ]);
+    await store.insertRows("embeddings", [
+      embeddingRow({ observation_id: "oa", trace_id: "t2", model: "sim-test", dim: 3, vector: [1, 0, 0] }),
+      embeddingRow({ observation_id: "ob", trace_id: "t3", model: "sim-test", dim: 3, vector: [0.9, 0.1, 0] }), // close
+      embeddingRow({ observation_id: "ob2", trace_id: "t3", model: "sim-test", dim: 3, vector: [0, 1, 0] }), // far; MIN keeps close
+      embeddingRow({ observation_id: "oc", trace_id: "t4", model: "sim-test", dim: 3, vector: [-1, 0, 0] }), // opposite
+      // Same model, different dim — must NOT be compared when the seed space is dim 3.
+      embeddingRow({ observation_id: "od", trace_id: "t4", model: "sim-test", dim: 4, vector: [1, 0, 0, 0] }),
+    ]);
+
+    // Seed vectors for a trace carry model + dim.
+    const seed = await store.getTraceEmbeddings(P, "t2");
+    expect(seed).toHaveLength(1);
+    expect(seed[0]).toMatchObject({ observation_id: "oa", trace_id: "t2", model: "sim-test", dim: 3 });
+    expect(seed[0]!.vector[0]!).toBeCloseTo(1, 5);
+
+    // Exact cosine k-NN, computed in Doris. Seed = t2's [1,0,0]. Order: t3 (closest obs ~1.0) >
+    // t4 (-1). The seed trace is excluded; the dim-4 row never participates.
+    const ranked = await store.rankSimilarTraceIds(P, {
+      seedVectors: seed.map((s) => s.vector),
+      model: "sim-test",
+      dim: 3,
+      excludeTraceId: "t2",
+      limit: 10,
+    });
+    expect(ranked.map((r) => r.trace_id)).toEqual(["t3", "t4"]);
+    expect(ranked[0]!.similarity).toBeGreaterThan(0.98); // t3's closest obs ≈ 0.993
+    expect(ranked[1]!.similarity).toBeCloseTo(-1, 5); // t4 opposite
+    // A space with no rows returns nothing.
+    expect(
+      await store.rankSimilarTraceIds(P, {
+        seedVectors: [[1, 0, 0]],
+        model: "nope",
+        dim: 3,
+        excludeTraceId: "t2",
+        limit: 10,
+      }),
+    ).toHaveLength(0);
+
+    // Hydrating summaries by explicit id set (the similarity result → trace summaries step).
+    const summaries = await store.listTraces(P, { traceIds: ["t2", "t3"], limit: 10 });
+    expect(new Set(summaries.map((s) => s.id))).toEqual(new Set(["t2", "t3"]));
+    expect(await store.listTraces(P, { traceIds: ["t2"], limit: 10 })).toHaveLength(1);
+    expect(await store.listTraces(P, { traceIds: [], limit: 10 }).then((r) => r.length)).toBeGreaterThan(1); // empty set ⇒ no id filter
+
+    // Restore fixture state for the delete test below (cascades the sim-test embeddings).
+    await store.deleteTraces(P, ["t2", "t3", "t4"]);
+  });
+
   it("deletes by score id, by retention cutoff, and by trace ids", async () => {
     await store.insertRows("scores", [score({ id: "sc-del", event_ts: iso(2000) })]);
     await store.deleteScore(P, "sc-del");

@@ -30,6 +30,7 @@ import type {
   RetrievalDocumentDetail,
   TelemetryRowMap,
   TelemetryTable,
+  TraceEmbeddingRow,
   TraceFilters,
   TraceHeader,
   TraceIO,
@@ -105,9 +106,14 @@ export class DorisTelemetryStore implements TelemetryStore {
 
   /** Shared filter predicate for listTraces + countTraces (alias `t`), sans limit/offset. */
   private traceListWhere(projectId: string, filters: TraceFilters): { where: string; params: unknown[] } {
-    const { userId, sessionId, environment, search, tag, promptId, scoreName, level, days } = filters;
+    const { userId, sessionId, environment, search, tag, promptId, scoreName, level, days, traceIds } = filters;
     const conds: string[] = ["t.project_id = ?"];
     const params: unknown[] = [projectId];
+    if (traceIds && traceIds.length > 0) {
+      // Restrict to an explicit id set (mysql2 expands a single `?` bound to an array).
+      conds.push("t.id IN (?)");
+      params.push(traceIds);
+    }
     if (userId) {
       conds.push("t.user_id = ?");
       params.push(userId);
@@ -1084,6 +1090,85 @@ export class DorisTelemetryStore implements TelemetryStore {
       [projectId],
     );
     return rows[0]?.run_id ?? null;
+  }
+
+  async getTraceEmbeddings(projectId: string, traceId: string): Promise<TraceEmbeddingRow[]> {
+    const rows = await this.query<{
+      observation_id: string;
+      trace_id: string;
+      model: string;
+      dim: unknown;
+      vector: unknown;
+    }>(
+      `
+      SELECT observation_id, trace_id, model, dim, CAST(vector AS JSON) AS vector
+      FROM embeddings
+      WHERE project_id = ? AND trace_id = ? AND dim > 0
+      `,
+      [projectId, traceId],
+    );
+    return rows
+      .map((r) => ({
+        observation_id: r.observation_id,
+        trace_id: r.trace_id,
+        model: r.model ?? "",
+        dim: Number(r.dim ?? 0),
+        vector: parseVector(r.vector),
+      }))
+      .filter((r) => r.vector.length > 0);
+  }
+
+  async rankSimilarTraceIds(
+    projectId: string,
+    opts: {
+      seedVectors: number[][];
+      model: string;
+      dim: number;
+      excludeTraceId: string;
+      limit: number;
+      days?: number;
+    },
+  ): Promise<{ trace_id: string; similarity: number }[]> {
+    const { seedVectors, model, dim, excludeTraceId, limit, days } = opts;
+    if (seedVectors.length === 0) return [];
+
+    // Each seed vector becomes a cosine_distance(vector, [<literal>]) term; a candidate's
+    // distance is the SMALLEST across seeds (its closest match). Distance is computed on the
+    // BEs — exact, no ANN index (which Doris only allows on DUPLICATE KEY tables and which is
+    // approximate anyway). Only the top-k rows return; the raw vectors never leave Doris.
+    // Query-vector elements bind as per-element `?` placeholders (never CAST-from-string — the
+    // same ARRAY-safety rule as writes). SELECT placeholders bind before WHERE, so seed params
+    // come first.
+    const params: unknown[] = [];
+    const distTerms = seedVectors.map((v) => {
+      const arr = `[${v.map(() => "?").join(",")}]`;
+      params.push(...v);
+      return `cosine_distance(vector, ${arr})`;
+    });
+    const distExpr = distTerms.length === 1 ? distTerms[0] : `LEAST(${distTerms.join(", ")})`;
+
+    const conds = ["project_id = ?", "model = ?", "dim = ?", "dim > 0", "vector IS NOT NULL", "trace_id != ?"];
+    params.push(projectId, model, Math.floor(dim), excludeTraceId);
+    if (days && days > 0) {
+      conds.push("event_ts >= ?");
+      params.push(cutoffDaysAgo(days));
+    }
+    params.push(Math.floor(limit));
+
+    const rows = await this.query<{ trace_id: string; dist: unknown }>(
+      `
+      SELECT trace_id, MIN(${distExpr}) AS dist
+      FROM embeddings
+      WHERE ${conds.join(" AND ")}
+      GROUP BY trace_id
+      ORDER BY dist ASC
+      LIMIT ?
+      `,
+      params,
+    );
+    return rows
+      .filter((r) => r.trace_id && r.dist != null)
+      .map((r) => ({ trace_id: r.trace_id, similarity: 1 - Number(r.dist) }));
   }
 
   async listEmbeddingProjection(

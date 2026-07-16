@@ -28,6 +28,7 @@ import { CopyButton } from "./copy-button";
 import { EmptyState } from "./empty-state";
 import { KindBadge, type KindBadgeTone, toneForKind } from "./kind-badge";
 import { ProviderIcon } from "./provider-icon";
+import { SimilarTraces } from "./similar-traces";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "./ui/accordion";
 import { Badge } from "./ui/badge";
 import {
@@ -1459,6 +1460,8 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
           )}
         </CardContent>
       </Card>
+
+      <SimilarTraces traceId={trace.id} />
 
       <Comments traceId={trace.id} />
     </div>
