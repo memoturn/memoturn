@@ -2,6 +2,7 @@ import type { TraceDetail } from "@memoturn/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { EmptyState } from "../../components/empty-state";
+import { SideBySideDiff } from "../../components/side-by-side-diff";
 import { TraceDetailBody } from "../../components/trace-detail";
 import {
   Breadcrumb,
@@ -11,8 +12,11 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "../../components/ui/breadcrumb";
+import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Skeleton } from "../../components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { api } from "../../lib/api";
+import { normalizeJson } from "../../lib/diff";
 
 interface CompareSearch {
   a?: string;
@@ -43,6 +47,43 @@ function DeltaRow({ label, a, b, fmt }: { label: string; a: number; b: number; f
       <td className="px-3 py-1.5 text-right tabular-nums">{f(b)}</td>
       <td className={`px-3 py-1.5 text-right tabular-nums ${tone}`}>{delta === 0 ? "—" : `${sign}${f(delta)}`}</td>
     </tr>
+  );
+}
+
+/** Tabbed side-by-side content diff of the two traces' JSON payloads. */
+function ContentDiff({ a, b }: { a: TraceDetail; b: TraceDetail }) {
+  const fields = [
+    { key: "input", label: "Input", a: a.input, b: b.input },
+    { key: "output", label: "Output", a: a.output, b: b.output },
+    { key: "metadata", label: "Metadata", a: a.metadata, b: b.metadata },
+  ] as const;
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Content diff</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Tabs defaultValue="input">
+          <TabsList>
+            {fields.map((f) => (
+              <TabsTrigger key={f.key} value={f.key}>
+                {f.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          {fields.map((f) => (
+            <TabsContent key={f.key} value={f.key}>
+              <SideBySideDiff
+                left={normalizeJson(f.a ?? "")}
+                right={normalizeJson(f.b ?? "")}
+                leftLabel={`A · ${f.label}`}
+                rightLabel={`B · ${f.label}`}
+              />
+            </TabsContent>
+          ))}
+        </Tabs>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -96,8 +137,16 @@ function ComparePage() {
       ) : (
         <>
           <h1 className="text-2xl font-semibold tracking-tight">Compare traces</h1>
-          {qa.data && qb.data ? <CompareStrip a={qa.data} b={qb.data} /> : <Skeleton className="h-32 w-full" />}
+          {qa.data && qb.data ? (
+            <>
+              <CompareStrip a={qa.data} b={qb.data} />
+              <ContentDiff a={qa.data} b={qb.data} />
+            </>
+          ) : (
+            <Skeleton className="h-32 w-full" />
+          )}
 
+          <h2 className="pt-2 text-sm font-semibold text-muted-foreground">Full detail</h2>
           <div className="grid gap-4 lg:grid-cols-2">
             {[a, b].map((id, i) => (
               <div key={id} className="min-w-0 space-y-2">

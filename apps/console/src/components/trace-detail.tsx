@@ -792,7 +792,8 @@ type ScoreDataType = "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
 
 type AnnotationPatch = { value?: number; stringValue?: string };
 
-/** Numeric annotation via a native range slider; submits the value on pointer release. */
+/** Numeric annotation: discrete integer scales render one button per value; continuous scales
+ *  render quick-preset pills plus a precise number input (no slider). */
 function NumericReviewField({
   cfg,
   active,
@@ -806,29 +807,90 @@ function NumericReviewField({
 }) {
   const min = cfg.min ?? 0;
   const max = cfg.max ?? 1;
-  const step = max - min <= 1 ? 0.01 : 1;
-  const [val, setVal] = useState<number>(active?.value ?? min);
+  // Local text state for the continuous-scale number input (unused by the discrete branch, but
+  // the hook must run unconditionally — rules of hooks).
+  const [val, setVal] = useState<string>(active?.value != null ? String(active.value) : "");
+  // Small integer scales (e.g. 1–5, 0–10) → one button per value, like the categorical scale.
+  const discrete = Number.isInteger(min) && Number.isInteger(max) && max - min > 0 && max - min <= 10;
+
+  if (discrete) {
+    const values = Array.from({ length: max - min + 1 }, (_, i) => min + i);
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {values.map((v) => (
+          <Button
+            key={v}
+            variant={active?.value === v ? "default" : "outline"}
+            size="sm"
+            className="min-w-9 tabular-nums"
+            disabled={disabled}
+            onClick={() => onSubmit({ value: v })}
+          >
+            {v}
+          </Button>
+        ))}
+      </div>
+    );
+  }
+
+  // Continuous scale (e.g. 0–1) → quick presets + a precise number input. No dragging.
+  const round = (n: number) => Number(n.toFixed(2));
+  const presets = [
+    ...new Set([min, round(min + (max - min) * 0.25), round((min + max) / 2), round(min + (max - min) * 0.75), max]),
+  ];
+  const submit = () => {
+    const n = Number(val);
+    if (val !== "" && Number.isFinite(n) && n >= min && n <= max) onSubmit({ value: n });
+  };
   return (
-    <div className="flex items-center gap-3">
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={val}
-        disabled={disabled}
-        onChange={(e) => setVal(Number(e.target.value))}
-        onPointerUp={() => onSubmit({ value: val })}
-        onKeyUp={() => onSubmit({ value: val })}
-        className="h-1.5 flex-1 cursor-pointer accent-primary"
-        aria-label={`${cfg.name} score`}
-      />
-      <span className="w-10 text-right text-sm font-medium tabular-nums">{val}</span>
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1.5">
+        {presets.map((p) => (
+          <Button
+            key={p}
+            variant={active?.value === p ? "default" : "outline"}
+            size="sm"
+            className="min-w-11 tabular-nums"
+            disabled={disabled}
+            onClick={() => {
+              setVal(String(p));
+              onSubmit({ value: p });
+            }}
+          >
+            {p}
+          </Button>
+        ))}
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          type="number"
+          inputMode="decimal"
+          min={min}
+          max={max}
+          step={0.01}
+          value={val}
+          disabled={disabled}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          onBlur={submit}
+          placeholder="exact"
+          aria-label={`${cfg.name} score`}
+          className="h-8 w-24 tabular-nums"
+        />
+        <span className="text-xs text-muted-foreground">
+          {min}–{max}
+        </span>
+      </div>
     </div>
   );
 }
 
-/** One score-config row: category buttons, pass/fail, or a numeric slider. */
+/** One score-config row: category buttons, pass/fail, or numeric buttons + input. */
 function ReviewField({
   cfg,
   active,
