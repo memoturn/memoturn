@@ -5,20 +5,29 @@ import base64
 import json
 import os
 import re
+import urllib.parse
 import urllib.request
 from typing import Any, Optional
 
 _VAR = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
 
 
-def get_prompt(name: str, channel: str = "production", *, base_url: Optional[str] = None,
-               public_key: Optional[str] = None, secret_key: Optional[str] = None) -> dict[str, Any]:
+def get_prompt(name: str, channel: str = "production", *, bucket_key: Optional[str] = None,
+               base_url: Optional[str] = None, public_key: Optional[str] = None,
+               secret_key: Optional[str] = None) -> dict[str, Any]:
+    """Fetch a deployed prompt. If the channel runs an A/B split, pass ``bucket_key`` (a stable
+    session/user id) to stick this caller to one arm; the returned ``version`` is what you stamp
+    on the resulting generation."""
     base = (base_url or os.environ.get("MEMOTURN_BASE_URL", "http://localhost:3001")).rstrip("/")
     pk = public_key or os.environ.get("MEMOTURN_PUBLIC_KEY", "")
     sk = secret_key or os.environ.get("MEMOTURN_SECRET_KEY", "")
     auth = base64.b64encode(f"{pk}:{sk}".encode()).decode()
+    params = {"channel": channel}
+    if bucket_key:
+        params["bucketKey"] = bucket_key
+    query = urllib.parse.urlencode(params)
     req = urllib.request.Request(
-        f"{base}/v1/prompts/{name}?channel={channel}", headers={"authorization": f"Basic {auth}"}
+        f"{base}/v1/prompts/{urllib.parse.quote(name)}?{query}", headers={"authorization": f"Basic {auth}"}
     )
     return json.loads(urllib.request.urlopen(req, timeout=10).read())
 

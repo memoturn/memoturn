@@ -4,6 +4,7 @@ import type {
   EmbeddingPoint,
   ModelMetric,
   ObservationDetail,
+  PromptArmScore,
   PromptVersionCost,
   ScoreRow as ScoreDetail,
   SessionSummary,
@@ -103,6 +104,12 @@ export interface TelemetryStore {
   costBySession(projectId: string, opts?: { days?: number; limit?: number }): Promise<CostRollupRow[]>;
   /** Per-version spend for one prompt (observations grouped by prompt_version), ranked by cost. */
   costByPromptVersion(projectId: string, promptName: string, opts?: { days?: number }): Promise<PromptVersionCost[]>;
+  /**
+   * Per-version score means for one prompt — the A/B per-arm quality signal. A score is
+   * attributed to the version of the prompt used in its trace (join scores → the trace's
+   * observations that used this prompt). Grouped by (prompt_version, score name).
+   */
+  scoresByPromptVersion(projectId: string, promptName: string, opts?: { days?: number }): Promise<PromptArmScore[]>;
   /** Per-tool-name analytics over SPAN observations: calls, error rate, latency. */
   toolAnalytics(projectId: string, days: number): Promise<ToolAnalyticsRow[]>;
   /** Aggregate GENERATION metrics over a short trailing window (minutes) — for alert evaluation. */

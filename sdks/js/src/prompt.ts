@@ -9,13 +9,14 @@ export interface CompiledPrompt {
 }
 
 /**
- * Fetch a deployed prompt by name + channel (default "production"). Phase 4 adds a
- * zero-latency in-memory cache; for now this is a thin GET against the read API.
+ * Fetch a deployed prompt by name + channel (default "production"). If the channel is running
+ * an A/B split, pass `bucketKey` (a stable session/user id) to stick this caller to one arm
+ * across resolves — the returned `version` is what you stamp on the resulting generation.
  */
 export async function getPrompt(
   client: Pick<Memoturn, never> & { baseUrl?: string; publicKey?: string; secretKey?: string },
   name: string,
-  options: { channel?: string } = {},
+  options: { channel?: string; bucketKey?: string } = {},
 ): Promise<CompiledPrompt> {
   const baseUrl = (client.baseUrl ?? process.env.MEMOTURN_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
   const publicKey = client.publicKey ?? process.env.MEMOTURN_PUBLIC_KEY ?? "";
@@ -23,7 +24,9 @@ export async function getPrompt(
   const auth = Buffer.from(`${publicKey}:${secretKey}`).toString("base64");
   const channel = options.channel ?? "production";
 
-  const res = await fetch(`${baseUrl}/v1/prompts/${encodeURIComponent(name)}?channel=${encodeURIComponent(channel)}`, {
+  const params = new URLSearchParams({ channel });
+  if (options.bucketKey) params.set("bucketKey", options.bucketKey);
+  const res = await fetch(`${baseUrl}/v1/prompts/${encodeURIComponent(name)}?${params.toString()}`, {
     headers: { authorization: `Basic ${auth}` },
   });
   if (!res.ok) throw new Error(`getPrompt failed: ${res.status} ${await res.text()}`);

@@ -4,6 +4,7 @@ import type {
   EmbeddingPoint,
   ModelMetric,
   ObservationDetail,
+  PromptArmScore,
   PromptVersionCost,
   ScoreRow as ScoreDetail,
   SessionSummary,
@@ -751,6 +752,39 @@ export class DorisTelemetryStore implements TelemetryStore {
       observation_count: Number(r.observation_count),
       total_cost: Number(r.total_cost),
       total_tokens: Number(r.total_tokens),
+    }));
+  }
+
+  async scoresByPromptVersion(
+    projectId: string,
+    promptName: string,
+    opts: { days?: number } = {},
+  ): Promise<PromptArmScore[]> {
+    const { days = 0 } = opts;
+    // Attribute each score to the prompt version used in its trace: join scores → the DISTINCT
+    // (trace_id, prompt_version) of observations that used this prompt. Only numeric scores.
+    const dayCond = days > 0 ? "AND s.timestamp >= ?" : "";
+    const dayParam = days > 0 ? [cutoffDaysAgo(days)] : [];
+    const rows = await this.query<PromptArmScore>(
+      `
+      SELECT arm.prompt_version, s.name AS score_name, COUNT(s.id) AS score_count, AVG(s.value) AS avg_value
+      FROM scores s
+      JOIN (
+        SELECT DISTINCT trace_id, prompt_version
+        FROM observations
+        WHERE project_id = ? AND prompt_id = ?
+      ) arm ON arm.trace_id = s.trace_id
+      WHERE s.project_id = ? AND s.value IS NOT NULL ${dayCond}
+      GROUP BY arm.prompt_version, s.name
+      ORDER BY arm.prompt_version DESC, s.name ASC
+      `,
+      [projectId, promptName, projectId, ...dayParam],
+    );
+    return rows.map((r) => ({
+      prompt_version: r.prompt_version,
+      score_name: r.score_name,
+      score_count: Number(r.score_count),
+      avg_value: Number(r.avg_value),
     }));
   }
 
