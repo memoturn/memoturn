@@ -235,12 +235,9 @@ function AppSidebar({ email, initials }: { email: string; initials: string }) {
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  size="sm"
-                  isActive={isActivePath(pathname, "/dashboard")}
-                  tooltip="Dashboard"
-                >
+                {/* Default size (not sm) so it matches the primary nav items below, not the
+                    smaller secondary items pinned to the footer. */}
+                <SidebarMenuButton asChild isActive={isActivePath(pathname, "/dashboard")} tooltip="Dashboard">
                   <Link to="/dashboard">
                     <LayoutDashboard />
                     <span>Dashboard</span>
