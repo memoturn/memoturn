@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { DataTable } from "../components/data-table";
 import { EmptyState } from "../components/empty-state";
+import { HelpTip } from "../components/help-tip";
 import { KindBadge } from "../components/kind-badge";
 import { PageHeader } from "../components/page-header";
 import { Button } from "../components/ui/button";
@@ -100,6 +101,7 @@ function EvaluatorsPage() {
       <PageHeader
         title="Evaluators"
         description="LLM-as-judge evaluators. Run them over a trace's input/output to record an EVAL score."
+        help="Define an LLM that judges a trace's input and output and records the result as an EVAL score."
       />
 
       <Card>
@@ -200,7 +202,14 @@ function EvaluatorsPage() {
                   name="online"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Online</FormLabel>
+                      <FormLabel>
+                        <span className="inline-flex items-center gap-1">
+                          Online
+                          <HelpTip>
+                            Runs the evaluator automatically on sampled production traces as they arrive.
+                          </HelpTip>
+                        </span>
+                      </FormLabel>
                       <FormControl>
                         <div className="flex h-10 items-center gap-3">
                           <Switch checked={field.value} onCheckedChange={field.onChange} />
@@ -217,7 +226,14 @@ function EvaluatorsPage() {
                     name="samplingRate"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Sampling rate</FormLabel>
+                        <FormLabel>
+                          <span className="inline-flex items-center gap-1">
+                            Sampling rate
+                            <HelpTip>
+                              Fraction of traces evaluated, chosen by a stable hash per trace rather than at random.
+                            </HelpTip>
+                          </span>
+                        </FormLabel>
                         <FormControl>
                           <Input
                             type="number"
@@ -259,7 +275,12 @@ function EvaluatorsPage() {
       {analytics && analytics.summary.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Score trends</CardTitle>
+            <CardTitle className="flex items-center gap-1.5">
+              Score trends
+              <HelpTip>
+                Average EVAL score and the number of scores each evaluator produced over the last 30 days.
+              </HelpTip>
+            </CardTitle>
             <CardDescription>Average EVAL score and run count per evaluator over the last 30 days.</CardDescription>
           </CardHeader>
           <CardContent>

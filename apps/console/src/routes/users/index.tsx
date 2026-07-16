@@ -68,7 +68,11 @@ function UsersPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Users" description="Traces grouped by end-user id." />
+      <PageHeader
+        title="Users"
+        description="Traces grouped by end-user id."
+        help="Users are your traces grouped by the userId you set on them — one row per distinct end user."
+      />
 
       <Input
         type="search"
@@ -80,11 +84,17 @@ function UsersPage() {
 
       {(isLoading || (users && users.length > 0)) && (
         <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
-          <StatTile label="Users" value={users ? total : <Skeleton className="h-6 w-16" />} icon={Users} />
+          <StatTile
+            label="Users"
+            value={users ? total : <Skeleton className="h-6 w-16" />}
+            icon={Users}
+            help="Total distinct end-user ids in the selected time range."
+          />
           <StatTile
             label="Traces (page)"
             value={users ? users.reduce((a, u) => a + Number(u.trace_count), 0) : <Skeleton className="h-6 w-16" />}
             icon={Activity}
+            help="Sum of traces across the users shown on this page."
           />
           <StatTile
             label="Cost (page)"
@@ -92,6 +102,7 @@ function UsersPage() {
               users ? money(users.reduce((a, u) => a + Number(u.total_cost), 0)) : <Skeleton className="h-6 w-16" />
             }
             icon={DollarSign}
+            help="Estimated spend for the users on this page, from the model price table."
           />
         </div>
       )}

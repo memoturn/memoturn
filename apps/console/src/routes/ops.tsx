@@ -3,9 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
 import { HeartPulse } from "lucide-react";
+import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { DataTable } from "../components/data-table";
 import { EmptyState } from "../components/empty-state";
+import { HelpTip } from "../components/help-tip";
 import { KindBadge } from "../components/kind-badge";
 import { PageHeader } from "../components/page-header";
 import { Button } from "../components/ui/button";
@@ -31,10 +33,13 @@ const failureColumns: ColumnDef<FailedBatch>[] = [
   },
 ];
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, help }: { label: string; value: string; help?: ReactNode }) {
   return (
     <div className="rounded-lg border p-4">
-      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+        {label}
+        {help ? <HelpTip>{help}</HelpTip> : null}
+      </div>
       <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
     </div>
   );
@@ -66,16 +71,27 @@ function OpsPage() {
       <PageHeader
         title="Ingest health"
         description="The async ingest pipeline: dead-letter queue depth, insert latency, and error counters. Dead-lettered batches keep their blob key, so they can be replayed once the underlying cause is resolved."
+        help="Live view of the background pipeline that ingests telemetry — surfacing failed batches, insert speed, and worker status so you can spot and recover from problems."
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="DLQ depth" value={String(health?.dlqDepth ?? "—")} />
+        <Stat
+          label="DLQ depth"
+          value={String(health?.dlqDepth ?? "—")}
+          help="Batches in the dead-letter queue — jobs that exhausted their retries and are parked for inspection or replay."
+        />
         <Stat
           label="Insert latency (avg)"
           value={health?.insertLatencyMs != null ? `${Math.round(health.insertLatencyMs)}ms` : "—"}
+          help="Average time the worker takes to write a batch into the telemetry store."
         />
         <div className="rounded-lg border p-4">
-          <div className="text-xs text-muted-foreground">Worker</div>
+          <div className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+            Worker
+            <HelpTip>
+              Whether the background worker that drains the ingest queue is currently reachable and reporting health.
+            </HelpTip>
+          </div>
           <div className="mt-1">
             <KindBadge tone={health?.workerReachable ? "green" : "red"}>
               {health?.workerReachable ? "reachable" : "unreachable"}
@@ -96,7 +112,13 @@ function OpsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Error counters</CardTitle>
+          <CardTitle className="inline-flex items-center gap-1">
+            Error counters
+            <HelpTip>
+              Running tallies the worker keeps — events and rows ingested, evaluator runs, and errors — for spotting
+              failure spikes; they reset when the worker restarts.
+            </HelpTip>
+          </CardTitle>
           <CardDescription>Cumulative worker counters (reset on worker restart).</CardDescription>
         </CardHeader>
         <CardContent>

@@ -49,7 +49,11 @@ function DatasetsPage() {
 
   return (
     <div>
-      <PageHeader title="Datasets" description="Curated example collections for offline evals and experiments." />
+      <PageHeader
+        title="Datasets"
+        description="Curated example collections for offline evals and experiments."
+        help="Curated collections of input and expected-output examples you run models against offline to measure quality before shipping."
+      />
       {isLoading ? (
         <Skeleton className="h-64 w-full" />
       ) : error ? (
@@ -64,8 +68,18 @@ function DatasetsPage() {
         <div className="space-y-6">
           <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
             <StatTile label="Datasets" value={datasets.length} icon={Database} />
-            <StatTile label="Items" value={datasets.reduce((a, d) => a + Number(d.items), 0)} icon={Rows3} />
-            <StatTile label="Runs" value={datasets.reduce((a, d) => a + Number(d.runs), 0)} icon={FlaskConical} />
+            <StatTile
+              label="Items"
+              value={datasets.reduce((a, d) => a + Number(d.items), 0)}
+              icon={Rows3}
+              help="Total input/expected-output examples across all datasets."
+            />
+            <StatTile
+              label="Runs"
+              value={datasets.reduce((a, d) => a + Number(d.runs), 0)}
+              icon={FlaskConical}
+              help="A run executes a dataset's items through a model and links each result back to its trace."
+            />
           </div>
           <DataTable columns={columns} data={datasets} filterColumn="name" filterPlaceholder="Filter datasets…" />
         </div>

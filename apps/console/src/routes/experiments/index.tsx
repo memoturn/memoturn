@@ -4,6 +4,7 @@ import { Plus, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "../../components/empty-state";
+import { HelpTip } from "../../components/help-tip";
 import { KindBadge } from "../../components/kind-badge";
 import { PageHeader } from "../../components/page-header";
 import { Button } from "../../components/ui/button";
@@ -60,12 +61,18 @@ function ExperimentsPage() {
       <PageHeader
         title="Experiments"
         description="Run a prompt/model across a dataset and auto-score every item."
+        help="An experiment runs every item in a dataset through one prompt and model, then scores each result so you can compare configurations."
         actions={!readOnly ? <NewExperimentDialog defaultDataset={dataset} /> : undefined}
       />
 
       <Card>
         <CardHeader>
-          <CardTitle>All experiments</CardTitle>
+          <CardTitle className="inline-flex items-center gap-1">
+            All experiments
+            <HelpTip>
+              Each row is one run of a dataset through a model configuration, tracking its status and per-item progress.
+            </HelpTip>
+          </CardTitle>
         </CardHeader>
         <CardContent className={!experiments || experiments.length === 0 ? undefined : "px-0"}>
           {!experiments || experiments.length === 0 ? (

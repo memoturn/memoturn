@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { GitBranch, Radio, Tag } from "lucide-react";
 import { useState } from "react";
 import { EmptyState } from "../../components/empty-state";
+import { HelpTip } from "../../components/help-tip";
 import { KindBadge } from "../../components/kind-badge";
 import { PromptExperiments } from "../../components/prompt-experiments";
 import { StatTile } from "../../components/stat-tile";
@@ -42,7 +43,13 @@ function PromptUsage({ name }: { name: string }) {
     <>
       <Card>
         <CardHeader>
-          <CardTitle>Traces using this prompt{total > 0 ? ` (${total})` : ""}</CardTitle>
+          <CardTitle className="inline-flex items-center gap-1">
+            Traces using this prompt{total > 0 ? ` (${total})` : ""}
+            <HelpTip>
+              Live traces whose generations recorded this prompt's id, linking each production call back to the exact
+              prompt version that produced it.
+            </HelpTip>
+          </CardTitle>
           <CardDescription>Traces with a generation that referenced this prompt's id.</CardDescription>
           {total > 25 && (
             <CardAction>
@@ -126,7 +133,12 @@ function VersionDiff({ prompt }: { prompt: PromptDetail }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Compare versions</CardTitle>
+        <CardTitle className="inline-flex items-center gap-1">
+          Compare versions
+          <HelpTip>
+            Line-by-line diff between any two versions of this template so you can see exactly what changed.
+          </HelpTip>
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -274,7 +286,13 @@ function PromptDetailPage() {
       {prompt.channels.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Channels</CardTitle>
+            <CardTitle className="inline-flex items-center gap-1">
+              Channels
+              <HelpTip>
+                A named deployment pointer (like "production") that resolves to a specific version, so code can request
+                a channel instead of a fixed version number.
+              </HelpTip>
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-1.5">

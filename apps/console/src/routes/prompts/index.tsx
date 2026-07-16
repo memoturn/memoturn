@@ -5,6 +5,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { FileText, GitBranch, Radio } from "lucide-react";
 import { DataTable } from "../../components/data-table";
 import { EmptyState } from "../../components/empty-state";
+import { HelpTip } from "../../components/help-tip";
 import { KindBadge } from "../../components/kind-badge";
 import { PageHeader } from "../../components/page-header";
 import { StatTile } from "../../components/stat-tile";
@@ -37,7 +38,15 @@ const columns: ColumnDef<PromptListItem>[] = [
   { accessorKey: "versions", header: "Versions" },
   {
     id: "channels",
-    header: "Channels",
+    header: () => (
+      <span className="inline-flex items-center gap-1">
+        Channels
+        <HelpTip>
+          A named deployment pointer (like "production") that resolves to a specific version, so code can request a
+          channel instead of a fixed version number.
+        </HelpTip>
+      </span>
+    ),
     cell: ({ row }) => (
       <div className="flex flex-wrap gap-1">
         {row.original.channels.map((c) => (
@@ -68,7 +77,11 @@ function PromptsPage() {
 
   return (
     <div>
-      <PageHeader title="Prompts" description="Versioned prompt templates with deployment channels." />
+      <PageHeader
+        title="Prompts"
+        description="Versioned prompt templates with deployment channels."
+        help="Store prompt templates as versioned history and point named channels at specific versions so you can roll releases forward and back without changing code."
+      />
       {isLoading ? (
         <Skeleton className="h-64 w-full" />
       ) : error ? (

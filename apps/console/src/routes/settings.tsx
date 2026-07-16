@@ -19,6 +19,7 @@ import { z } from "zod";
 import { AccountSecurity } from "../components/account-security";
 import { DataTable } from "../components/data-table";
 import { EmptyState } from "../components/empty-state";
+import { HelpTip } from "../components/help-tip";
 import { KindBadge } from "../components/kind-badge";
 import { PageHeader } from "../components/page-header";
 import { ProjectAccess } from "../components/project-access";
@@ -759,6 +760,7 @@ function SettingsPage() {
       <PageHeader
         title="Settings"
         description="Project configuration: keys, providers, retention, automations, and pricing."
+        help="Per-project configuration for API keys, model providers, data handling, and alerting."
       />
 
       <Tabs defaultValue="api-keys">
@@ -848,7 +850,14 @@ function SettingsPage() {
                       name="rateLimitPerMinute"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Rate / min</FormLabel>
+                          <FormLabel>
+                            <span className="inline-flex items-center gap-1">
+                              Rate / min
+                              <HelpTip>
+                                Caps how many requests per minute this key may make; blank means unlimited.
+                              </HelpTip>
+                            </span>
+                          </FormLabel>
                           <FormControl>
                             <Input type="number" min="1" placeholder="unlimited" {...field} />
                           </FormControl>
@@ -862,7 +871,14 @@ function SettingsPage() {
                     name="scopes"
                     render={() => (
                       <FormItem>
-                        <FormLabel>Scopes</FormLabel>
+                        <FormLabel>
+                          <span className="inline-flex items-center gap-1">
+                            Scopes
+                            <HelpTip>
+                              read grants query access, write allows changes, and ingest permits sending telemetry.
+                            </HelpTip>
+                          </span>
+                        </FormLabel>
                         <div className="flex flex-wrap gap-4">
                           {["read", "write", "ingest"].map((s) => (
                             <FormField
@@ -940,7 +956,10 @@ function SettingsPage() {
         <TabsContent value="providers" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>LLM provider connections</CardTitle>
+              <CardTitle className="flex items-center gap-1.5">
+                LLM provider connections
+                <HelpTip>Provider keys are encrypted at rest and used by the playground and evaluators.</HelpTip>
+              </CardTitle>
               <CardDescription>
                 API keys are encrypted at rest and used by the playground + evaluators. The &quot;mock&quot; provider
                 needs no key.
@@ -1076,7 +1095,10 @@ function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="flex items-end gap-3">
                 <div className="space-y-2">
-                  <Label htmlFor="retention-days">Days</Label>
+                  <Label htmlFor="retention-days" className="inline-flex items-center gap-1">
+                    Days
+                    <HelpTip>Telemetry older than this many days is deleted daily; 0 keeps it forever.</HelpTip>
+                  </Label>
                   <Input
                     id="retention-days"
                     type="number"
@@ -1184,7 +1206,12 @@ function SettingsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Event sink (CDP forwarding)</CardTitle>
+              <CardTitle className="flex items-center gap-1.5">
+                Event sink (CDP forwarding)
+                <HelpTip>
+                  Forwards trace and score events to an external analytics/capture endpoint for funnels and retention.
+                </HelpTip>
+              </CardTitle>
               <CardDescription>
                 When enabled, the worker forwards <code>trace.created</code> and <code>score.created</code> events to
                 your product-analytics/CDP endpoint (PostHog-compatible capture API — also accepted by Segment, Jitsu,
@@ -1236,7 +1263,10 @@ function SettingsPage() {
         <TabsContent value="masking" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>PII masking</CardTitle>
+              <CardTitle className="flex items-center gap-1.5">
+                PII masking
+                <HelpTip>Redacts matching sensitive data from payloads at ingest, before anything is stored.</HelpTip>
+              </CardTitle>
               <CardDescription>
                 When enabled, the worker redacts matches from trace/observation input/output (and metadata) at ingest,
                 before they&apos;re stored. Built-in patterns plus your own regexes (one per line).
@@ -1255,7 +1285,12 @@ function SettingsPage() {
                 </Label>
               </div>
               <div className="space-y-2">
-                <Label>Built-in patterns</Label>
+                <Label className="inline-flex items-center gap-1">
+                  Built-in patterns
+                  <HelpTip>
+                    Ready-made detectors for common sensitive data like emails, credit cards, and phone numbers.
+                  </HelpTip>
+                </Label>
                 <div className="flex flex-wrap gap-4">
                   {(masking?.available ?? []).map((b) => (
                     <div key={b} className="flex items-center gap-2">
@@ -1273,7 +1308,10 @@ function SettingsPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="mask-redact">Redact with</Label>
+                <Label htmlFor="mask-redact" className="inline-flex items-center gap-1">
+                  Redact with
+                  <HelpTip>The placeholder text that replaces each matched value.</HelpTip>
+                </Label>
                 <Input
                   id="mask-redact"
                   className="w-48"
@@ -1282,7 +1320,10 @@ function SettingsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="mask-custom">Custom patterns</Label>
+                <Label htmlFor="mask-custom" className="inline-flex items-center gap-1">
+                  Custom patterns
+                  <HelpTip>Your own regexes, one per line, for values the built-ins don&apos;t catch.</HelpTip>
+                </Label>
                 <Textarea
                   id="mask-custom"
                   rows={3}
@@ -1302,7 +1343,12 @@ function SettingsPage() {
         <TabsContent value="webhooks" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Webhooks</CardTitle>
+              <CardTitle className="flex items-center gap-1.5">
+                Webhooks
+                <HelpTip>
+                  Sends a signed HTTP POST when a score is created; set a threshold to fire only on low scores.
+                </HelpTip>
+              </CardTitle>
               <CardDescription>
                 POST to a URL when a score is created. Set a threshold to only fire on low scores (value &lt;
                 threshold).
@@ -1394,7 +1440,12 @@ function SettingsPage() {
         <TabsContent value="automations" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Automations</CardTitle>
+              <CardTitle className="flex items-center gap-1.5">
+                Automations
+                <HelpTip>
+                  Runs an action, such as a webhook or chat message, whenever a chosen trigger event fires.
+                </HelpTip>
+              </CardTitle>
               <CardDescription>
                 Run an action when a trigger fires. Triggers: score.created, trace.created, eval.completed. Actions: a
                 generic webhook (POST JSON) or a Slack message (to an incoming-webhook URL). Threshold fires only on low
@@ -1838,7 +1889,12 @@ function SettingsPage() {
         <TabsContent value="pricing" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Model pricing</CardTitle>
+              <CardTitle className="flex items-center gap-1.5">
+                Model pricing
+                <HelpTip>
+                  Per-1M-token prices, matched to models by a name regex, that override defaults and recompute cost.
+                </HelpTip>
+              </CardTitle>
               <CardDescription>
                 Override token prices (USD per 1M tokens) for models matched by a name pattern (a case-insensitive
                 regex, e.g. <code>^my-model</code>). Overrides take precedence over the built-in defaults and apply to
