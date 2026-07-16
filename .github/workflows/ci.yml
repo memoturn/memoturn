@@ -5,7 +5,28 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege: CI only reads the repo (checkout, install, test, build) — no writes.
+permissions:
+  contents: read
+
 jobs:
+  # Go SDK is a standalone stdlib-only module — no infra, so it runs as its own fast job
+  # (in parallel with build) rather than bolted onto the heavy Postgres/Doris/MinIO pipeline.
+  go-sdk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: false # stdlib-only, no modules to cache
+      - name: Go SDK vet + test
+        working-directory: sdks/go
+        run: |
+          test -z "$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
+          go vet ./...
+          go test ./...
+
   build:
     runs-on: ubuntu-latest
 
