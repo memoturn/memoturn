@@ -10,6 +10,10 @@ concurrency:
   group: e2e-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege: e2e only reads the repo + runs tests (artifact upload needs no extra scope).
+permissions:
+  contents: read
+
 jobs:
   e2e:
     runs-on: ubuntu-latest
