@@ -48,6 +48,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/users` | Paginated end users `{ data, total }` (traces grouped by `userId`); paging: `page`, `pageSize` (or legacy `limit`); scoped by `days`; `search` filters by `userId` substring. |
 | GET | `/v1/metrics` | Cost/token/latency rollups by day and model (`days` query). |
 | GET | `/v1/metrics/tools` | Per-tool analytics — call volume, error rate, and p50/p95/avg latency by tool name (named SPAN observations) over `days`. The top agent-debugging view. |
+| GET | `/v1/metrics/cost-breakdown` | Top spenders: cost rolled up by end user or session, ranked by spend. Query: `by` (`user`\|`session`, default `user`), `days`, `limit`. |
 
 ### Prompts
 
@@ -149,6 +150,7 @@ Webhook and automation target URLs are SSRF-validated on write: private IP range
 | --- | --- | --- |
 | GET / POST | `/v1/webhooks` | List (includes `lastStatus`/`lastError`/`lastAttemptAt`/`failureCount` delivery tracking) / create a webhook (POSTs on an event; `score.created` supports a low-score threshold). `secret` returned once on `201`. |
 | DELETE | `/v1/webhooks/{id}` | Delete a webhook. |
+| GET | `/v1/webhooks/{id}/deliveries` | A webhook's recent delivery log (historical; newest first). Query: `limit` (≤200). |
 | GET / POST | `/v1/automations` | List / create a trigger→action automation (trigger: `score.created`/`trace.created`/`eval.completed`; action: `webhook`/`slack`). Target URL is SSRF-validated. |
 | DELETE | `/v1/automations/{id}` | Delete an automation. |
 | GET / POST | `/v1/alerts` | List / create a stateful alert rule. A worker cron evaluates `metric` (`error_rate`/`latency_p95`/`cost_per_day`/`ingest_volume`/`dlq_depth`) over a trailing `window` (minutes) against `threshold` per `comparator` (`gt`/`gte`/`lt`/`lte`), notifying `channels` (`[{ type, target }]`; type = `slack`/`webhook` (URL, SSRF-validated), `pagerduty` (Events-API routing key; auto-resolves), or `email` (address; needs an email transport configured)) once on firing and once on resolve. |
@@ -178,7 +180,7 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | POST | `/v1/retention/apply` | Apply retention now. |
 | GET / POST | `/v1/model-prices` | List / create-update custom model price overrides (matched by name pattern, override built-ins). |
 | DELETE | `/v1/model-prices/{id}` | Delete a model price override. |
-| GET | `/v1/exports/traces` | Download traces as NDJSON (`application/x-ndjson`, default) or CSV (`?format=csv`); honors the trace-list filters: `limit`, `environment`, `search`, `userId`, `tag`, `scoreName`, `level`, `days`. |
+| GET | `/v1/exports/traces` | Download traces as NDJSON (`application/x-ndjson`, default), CSV (`?format=csv`), or Parquet (`?format=parquet`, flat one-row-per-trace for BI); honors the trace-list filters: `limit`, `environment`, `search`, `userId`, `tag`, `scoreName`, `level`, `days`. |
 | GET / POST | `/v1/scheduled-exports` | Get / configure the recurring daily NDJSON export of traces to blob storage. |
 | POST | `/v1/scheduled-exports/run` | Run the export now and write the NDJSON to blob storage. |
 | GET / POST | `/v1/masking` | Get / configure the PII redaction policy (built-in + custom patterns) applied to trace input/output at ingest. |

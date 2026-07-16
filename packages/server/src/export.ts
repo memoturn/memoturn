@@ -1,3 +1,5 @@
+import { Writable } from "node:stream";
+import parquet from "@dsnp/parquetjs";
 import { type ExportFilters, telemetry } from "@memoturn/telemetry";
 
 /**
@@ -39,4 +41,51 @@ export async function exportTracesCsv(projectId: string, filters: ExportFilters 
       .join(","),
   );
   return [header, ...lines].join("\n") + (lines.length ? "\n" : "");
+}
+
+/**
+ * Export traces as Apache Parquet (flat, one row per trace) for BI / notebook use. Nested
+ * observations are summarized to a count plus rolled-up cost/tokens (Parquet is columnar).
+ * Returns the file bytes. The writer streams into an in-memory sink.
+ */
+export async function exportTracesParquet(projectId: string, filters: ExportFilters = {}): Promise<Buffer> {
+  const rows = await telemetry().exportTraces(projectId, filters);
+  const schema = new parquet.ParquetSchema({
+    id: { type: "UTF8" },
+    name: { type: "UTF8" },
+    timestamp: { type: "UTF8" },
+    user_id: { type: "UTF8" },
+    session_id: { type: "UTF8" },
+    environment: { type: "UTF8" },
+    observation_count: { type: "INT64" },
+    total_cost: { type: "DOUBLE" },
+    total_tokens: { type: "INT64" },
+    input: { type: "UTF8", optional: true },
+    output: { type: "UTF8", optional: true },
+  });
+  const chunks: Buffer[] = [];
+  const sink = new Writable({
+    write(chunk, _enc, cb) {
+      chunks.push(Buffer.from(chunk));
+      cb();
+    },
+  });
+  const writer = await parquet.ParquetWriter.openStream(schema, sink as never);
+  for (const r of rows) {
+    await writer.appendRow({
+      id: r.id,
+      name: r.name,
+      timestamp: r.timestamp,
+      user_id: r.user_id,
+      session_id: r.session_id,
+      environment: r.environment,
+      observation_count: r.observations.length,
+      total_cost: r.observations.reduce((s, o) => s + (o.total_cost ?? 0), 0),
+      total_tokens: r.observations.reduce((s, o) => s + (o.total_tokens ?? 0), 0),
+      input: typeof r.input === "string" ? r.input : JSON.stringify(r.input ?? null),
+      output: typeof r.output === "string" ? r.output : JSON.stringify(r.output ?? null),
+    });
+  }
+  await writer.close();
+  return Buffer.concat(chunks);
 }

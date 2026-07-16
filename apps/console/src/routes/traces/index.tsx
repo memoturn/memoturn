@@ -573,6 +573,10 @@ function TracesPage() {
                   CSV
                   <span className="ml-auto text-xs text-muted-foreground">.csv</span>
                 </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void downloadTracesExport("parquet", { ...listFilters, days })}>
+                  Parquet
+                  <span className="ml-auto text-xs text-muted-foreground">.parquet</span>
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </>

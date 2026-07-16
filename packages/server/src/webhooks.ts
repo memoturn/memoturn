@@ -59,6 +59,25 @@ export async function deleteWebhook(projectId: string, id: string) {
   return { deleted: true };
 }
 
+/** Recent delivery-log entries for one webhook (newest first). */
+export async function listWebhookDeliveries(projectId: string, webhookId: string, limit = 50) {
+  const rows = await prisma.webhookDelivery.findMany({
+    where: { projectId, webhookId },
+    orderBy: { createdAt: "desc" },
+    take: Math.min(200, Math.max(1, limit)),
+  });
+  return rows.map((d) => ({
+    id: d.id,
+    event: d.event,
+    status: d.status,
+    ok: d.ok,
+    error: d.error,
+    attempts: d.attempts,
+    durationMs: d.durationMs,
+    createdAt: d.createdAt.toISOString(),
+  }));
+}
+
 export interface ScoreEvent {
   traceId: string;
   name: string;
@@ -98,9 +117,12 @@ async function deliverWebhook(
   };
 
   // Up to 3 attempts; retry only on 5xx / network errors (4xx is the receiver's choice).
+  const startedAt = Date.now();
   let status: number | null = null;
   let error = "";
+  let attempts = 0;
   for (let attempt = 0; attempt < 3; attempt++) {
+    attempts = attempt + 1;
     try {
       const res = await fetch(h.url, { method: "POST", headers, body, signal: AbortSignal.timeout(5_000) });
       status = res.status;
@@ -118,18 +140,27 @@ async function deliverWebhook(
   }
 
   const ok = status != null && status >= 200 && status < 300;
-  // Record delivery outcome (best-effort — never throw into ingestion).
-  await prisma.webhook
-    .update({
-      where: { id: h.id },
-      data: {
-        lastStatus: status,
-        lastError: ok ? "" : error,
-        lastAttemptAt: new Date(),
-        failureCount: ok ? 0 : { increment: 1 },
-      },
-    })
-    .catch(() => {});
+  const durationMs = Date.now() - startedAt;
+  // Record delivery outcome (best-effort — never throw into ingestion): the Webhook row keeps
+  // the latest snapshot, and a WebhookDelivery row is appended to the historical log.
+  await Promise.all([
+    prisma.webhook
+      .update({
+        where: { id: h.id },
+        data: {
+          lastStatus: status,
+          lastError: ok ? "" : error,
+          lastAttemptAt: new Date(),
+          failureCount: ok ? 0 : { increment: 1 },
+        },
+      })
+      .catch(() => {}),
+    prisma.webhookDelivery
+      .create({
+        data: { webhookId: h.id, projectId, event, status, ok, error: ok ? "" : error, attempts, durationMs },
+      })
+      .catch(() => {}),
+  ]);
   return ok;
 }
 

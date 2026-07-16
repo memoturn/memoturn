@@ -239,6 +239,21 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(await store.countUsers(P, 0, "nope")).toBe(0);
   });
 
+  it("rolls up cost by user and session, ranked by spend", async () => {
+    // Seeded: 1 trace (user u1 / session s1) with 1 GENERATION — total_cost 0.003, tokens 300.
+    const byUser = await store.costByUser(P, {});
+    expect(byUser).toHaveLength(1);
+    expect(byUser[0]!).toMatchObject({ key: "u1", trace_count: 1, total_tokens: 300 });
+    expect(byUser[0]!.total_cost).toBeCloseTo(0.003, 6);
+
+    const bySession = await store.costBySession(P, { days: 7 });
+    expect(bySession).toHaveLength(1);
+    expect(bySession[0]!).toMatchObject({ key: "s1", trace_count: 1, total_tokens: 300 });
+
+    // The limit is honored.
+    expect(await store.costByUser(P, { limit: 0 })).toHaveLength(1); // floored to 1
+  });
+
   it("computes filter facets (environment / name / tags) with counts", async () => {
     const facets = await store.traceFacets(P, {});
     expect(facets.environments).toContainEqual({ value: "default", count: 1 });

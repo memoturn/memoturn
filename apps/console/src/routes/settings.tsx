@@ -34,6 +34,7 @@ import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Textarea } from "../components/ui/textarea";
+import { WebhookLogButton } from "../components/webhook-deliveries";
 import { api } from "../lib/api";
 import { useIsReadOnly } from "../lib/role";
 
@@ -358,14 +359,17 @@ function SettingsPage() {
       id: "actions",
       header: "",
       cell: ({ row }) => (
-        <Button
-          variant="destructive"
-          size="sm"
-          disabled={readOnly || removeWebhook.isPending}
-          onClick={() => removeWebhook.mutate(row.original.id)}
-        >
-          Delete
-        </Button>
+        <div className="flex justify-end gap-2">
+          <WebhookLogButton webhookId={row.original.id} url={row.original.url} />
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={readOnly || removeWebhook.isPending}
+            onClick={() => removeWebhook.mutate(row.original.id)}
+          >
+            Delete
+          </Button>
+        </div>
       ),
     },
   ];

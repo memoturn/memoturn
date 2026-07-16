@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const findMany = vi.fn();
 const update = vi.fn().mockResolvedValue({});
-vi.mock("@memoturn/db", () => ({ prisma: { webhook: { findMany, update } } }));
+const deliveryCreate = vi.fn().mockResolvedValue({});
+vi.mock("@memoturn/db", () => ({
+  prisma: { webhook: { findMany, update }, webhookDelivery: { create: deliveryCreate } },
+}));
 
 const { dispatchWebhooksBatch, signWebhook } = await import("./webhooks.js");
 
@@ -24,6 +27,7 @@ describe("dispatchWebhooksBatch", () => {
     process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS = "1";
     findMany.mockReset();
     update.mockClear();
+    deliveryCreate.mockClear();
     fetchMock.mockReset().mockResolvedValue(new Response("ok", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -73,6 +77,9 @@ describe("dispatchWebhooksBatch", () => {
     const headers = init.headers as Record<string, string>;
     expect(headers["x-memoturn-signature"]).toMatch(/^sha256=/);
     expect(update).toHaveBeenCalledTimes(1);
+    // The delivery is appended to the historical log with a successful outcome.
+    expect(deliveryCreate).toHaveBeenCalledTimes(1);
+    expect(deliveryCreate.mock.calls[0]![0].data).toMatchObject({ webhookId: "wh1", ok: true, event: "score.created" });
   });
 
   it("never throws when a receiver fails (best-effort)", async () => {

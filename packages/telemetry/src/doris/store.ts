@@ -1,4 +1,5 @@
 import type {
+  CostRollupRow,
   DailyMetric,
   EmbeddingPoint,
   ModelMetric,
@@ -663,6 +664,53 @@ export class DorisTelemetryStore implements TelemetryStore {
       generations: Number(r.generations),
       total_tokens: Number(r.total_tokens),
       total_cost: Number(r.total_cost),
+    }));
+  }
+
+  costByUser(projectId: string, opts: { days?: number; limit?: number } = {}): Promise<CostRollupRow[]> {
+    return this.costRollup(projectId, "user_id", opts);
+  }
+
+  costBySession(projectId: string, opts: { days?: number; limit?: number } = {}): Promise<CostRollupRow[]> {
+    return this.costRollup(projectId, "session_id", opts);
+  }
+
+  /** Shared cost rollup: sum observation cost/tokens onto traces, group by a trace key column. */
+  private async costRollup(
+    projectId: string,
+    keyCol: "user_id" | "session_id",
+    opts: { days?: number; limit?: number },
+  ): Promise<CostRollupRow[]> {
+    const { days = 0, limit = 20 } = opts;
+    // keyCol is a fixed allowlist (not user input), so it's safe to interpolate.
+    const dayCond = days > 0 ? "AND t.`timestamp` >= ?" : "";
+    const dayParam = days > 0 ? [cutoffDaysAgo(days)] : [];
+    const rows = await this.query<CostRollupRow>(
+      `
+      SELECT
+        t.${keyCol} AS \`key\`,
+        COUNT(t.id) AS trace_count,
+        COALESCE(SUM(o.total_cost), 0) AS total_cost,
+        COALESCE(SUM(o.total_tokens), 0) AS total_tokens
+      FROM traces t
+      LEFT JOIN (
+        SELECT trace_id, SUM(total_cost) AS total_cost, SUM(total_tokens) AS total_tokens
+        FROM observations
+        WHERE project_id = ?
+        GROUP BY trace_id
+      ) o ON o.trace_id = t.id
+      WHERE t.project_id = ? AND t.${keyCol} != '' ${dayCond}
+      GROUP BY t.${keyCol}
+      ORDER BY total_cost DESC
+      LIMIT ?
+      `,
+      [projectId, projectId, ...dayParam, Math.max(1, Math.floor(limit))],
+    );
+    return rows.map((r) => ({
+      key: r.key,
+      trace_count: Number(r.trace_count),
+      total_cost: Number(r.total_cost),
+      total_tokens: Number(r.total_tokens),
     }));
   }
 

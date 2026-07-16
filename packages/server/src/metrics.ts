@@ -1,4 +1,4 @@
-import type { DailyMetric, MetricsSummary, ModelMetric, ToolAnalyticsRow } from "@memoturn/contracts";
+import type { CostRollupRow, DailyMetric, MetricsSummary, ModelMetric, ToolAnalyticsRow } from "@memoturn/contracts";
 import { telemetry } from "@memoturn/telemetry";
 
 /**
@@ -31,4 +31,14 @@ export async function getMetrics(projectId: string, days = 30): Promise<MetricsS
 /** Per-tool (named SPAN) analytics — call volume, error rate, and latency over `days`. */
 export async function getToolAnalytics(projectId: string, days = 30): Promise<ToolAnalyticsRow[]> {
   return telemetry().toolAnalytics(projectId, days);
+}
+
+/** Top spenders: cost rolled up by end user or session over `days`, ranked by spend. */
+export async function getCostBreakdown(
+  projectId: string,
+  by: "user" | "session",
+  opts: { days?: number; limit?: number } = {},
+): Promise<CostRollupRow[]> {
+  const store = telemetry();
+  return by === "session" ? store.costBySession(projectId, opts) : store.costByUser(projectId, opts);
 }
