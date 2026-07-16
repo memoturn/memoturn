@@ -18,6 +18,7 @@ import type {
   Comment,
   CostBudget,
   CostRollupRow,
+  Dashboard,
   DatasetDetail,
   DatasetListItem,
   DatasetVersionDetail,
@@ -63,6 +64,7 @@ import type {
   Webhook,
   WebhookDelivery,
   Widget,
+  WidgetFilters,
 } from "@memoturn/contracts";
 
 // Re-export the contract types so route components keep importing from "../lib/api".
@@ -361,10 +363,20 @@ export const api = {
   createComment: (objectType: string, objectId: string, content: string) =>
     post(`/v1/comments`, { objectType, objectId, content }),
   deleteComment: (id: string) => del(`/v1/comments/${encodeURIComponent(id)}`),
-  listWidgets: () => get<{ data: Widget[] }>(`/v1/widgets`).then((r) => r.data),
-  createWidget: (body: { title: string; metric?: string; breakdown?: string; days?: number }) =>
-    post(`/v1/widgets`, body),
+  listWidgets: (dashboardId?: string) =>
+    get<{ data: Widget[] }>(`/v1/widgets${qs({ dashboardId })}`).then((r) => r.data),
+  createWidget: (body: {
+    title: string;
+    metric?: string;
+    breakdown?: string;
+    days?: number;
+    filters?: WidgetFilters;
+    dashboardId?: string | null;
+  }) => post(`/v1/widgets`, body),
   deleteWidget: (id: string) => del(`/v1/widgets/${encodeURIComponent(id)}`),
+  listDashboards: () => get<{ data: Dashboard[] }>(`/v1/dashboards`).then((r) => r.data),
+  createDashboard: (name: string) => post<Dashboard>(`/v1/dashboards`, { name }),
+  deleteDashboard: (id: string) => del(`/v1/dashboards/${encodeURIComponent(id)}`),
   listEvaluators: () => get<{ data: Evaluator[] }>(`/v1/evaluators`).then((r) => r.data),
   getEvaluatorAnalytics: (days = 30) => get<EvaluatorAnalytics>(`/v1/evaluators/analytics${qs({ days })}`),
   createEvaluator: (body: {

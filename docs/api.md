@@ -131,8 +131,10 @@ Server-executed experiments run a prompt/model across a dataset and auto-score e
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET / POST | `/v1/widgets` | List dashboard widgets (with computed data series) / create. |
+| GET / POST | `/v1/widgets` | List (with computed data series; `?dashboardId=` scopes to one dashboard, omitted = the Default) / create. Widget config: `metric` (cost\|tokens\|generations\|latency_p95\|error_rate\|score), `breakdown` (by_day\|by_model\|by_user\|by_session), `days`, `filters` ({environment?, model?, tag?}), `dashboardId?`. |
 | DELETE | `/v1/widgets/{id}` | Delete a dashboard widget. |
+| GET / POST | `/v1/dashboards` | List the project's named dashboards / create one (`{ name }`). The "Default" dashboard is implicit (widgets with a null dashboardId). |
+| DELETE | `/v1/dashboards/{id}` | Delete a dashboard (its widgets are removed too). |
 | GET / POST | `/v1/score-configs` | List / create-update a score config. |
 | DELETE | `/v1/score-configs/{id}` | Delete a score config. |
 | PATCH | `/v1/scores/{id}` | Correct a score's `value`/`stringValue`/`comment` (inserts a replacement row; audited). |

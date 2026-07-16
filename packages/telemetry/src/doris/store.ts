@@ -12,6 +12,7 @@ import type {
   TraceSummary,
   UserSummary,
   WidgetBreakdown,
+  WidgetFilters,
   WidgetMetric,
   WidgetPoint,
 } from "@memoturn/contracts";
@@ -828,27 +829,81 @@ export class DorisTelemetryStore implements TelemetryStore {
     metric: WidgetMetric,
     breakdown: WidgetBreakdown,
     days: number,
+    filters: WidgetFilters = {},
   ): Promise<WidgetPoint[]> {
-    // Fixed allowlist — the aggregate expression is never derived from user input.
-    const AGG: Record<WidgetMetric, string> = {
-      cost: "SUM(total_cost)",
-      tokens: "SUM(total_tokens)",
+    // All interpolated fragments (group column, aggregate) come from fixed allowlists, never
+    // raw input; every value is bound with `?`. A traces JOIN makes environment/tag filters and
+    // user/session breakdowns available (those columns live on `traces`, not `observations`).
+    const cutoff = cutoffMidnightDaysAgo(days);
+    // Trace-scoped filter conditions shared by both query shapes (env, tag).
+    const traceConds: string[] = [];
+    const traceParams: unknown[] = [];
+    if (filters.environment) {
+      traceConds.push("t.environment = ?");
+      traceParams.push(filters.environment);
+    }
+    if (filters.tag) {
+      traceConds.push("array_contains(t.tags, ?)");
+      traceParams.push(filters.tag);
+    }
+
+    if (metric === "score") {
+      // Score = average score value; scores live in their own table joined to traces.
+      const GROUP: Partial<Record<WidgetBreakdown, string>> = {
+        by_day: "DATE_FORMAT(s.`timestamp`, '%Y-%m-%d')",
+        by_user: "t.user_id",
+        by_session: "t.session_id",
+      };
+      const groupExpr = GROUP[breakdown] ?? GROUP.by_day!; // scores aren't model-scoped → by_day
+      const order = groupExpr.startsWith("DATE_FORMAT") ? "label ASC" : "value DESC";
+      const rows = await this.query<{ label: string; value: unknown }>(
+        `
+        SELECT ${groupExpr} AS label, AVG(s.\`value\`) AS value
+        FROM scores s
+        JOIN traces t ON t.id = s.trace_id AND t.project_id = s.project_id
+        WHERE s.project_id = ? AND s.\`timestamp\` >= ? AND s.\`value\` IS NOT NULL ${traceConds.map((c) => `AND ${c}`).join(" ")}
+        GROUP BY ${groupExpr}
+        ORDER BY ${order}
+        LIMIT 100
+        `,
+        [projectId, cutoff, ...traceParams],
+      );
+      return rows.map((r) => ({ label: r.label || "(unknown)", value: Number(r.value) }));
+    }
+
+    const AGG: Record<Exclude<WidgetMetric, "score">, string> = {
+      cost: "SUM(o.total_cost)",
+      tokens: "SUM(o.total_tokens)",
       generations: "COUNT(*)",
-      latency_p95: "PERCENTILE_APPROX(latency_ms, 0.95)",
+      latency_p95: "PERCENTILE_APPROX(o.latency_ms, 0.95)",
+      error_rate: "SUM(IF(o.level = 'ERROR', 1, 0)) / COUNT(*)",
+    };
+    const GROUP: Record<WidgetBreakdown, string> = {
+      by_day: "DATE_FORMAT(o.start_time, '%Y-%m-%d')",
+      by_model: "o.model",
+      by_user: "t.user_id",
+      by_session: "t.session_id",
     };
     const agg = AGG[metric] ?? AGG.cost;
-    const groupExpr = breakdown === "by_model" ? "model" : "DATE_FORMAT(start_time, '%Y-%m-%d')";
-    const order = breakdown === "by_model" ? "value DESC" : "label ASC";
+    const groupExpr = GROUP[breakdown] ?? GROUP.by_day;
+    const order = breakdown === "by_day" ? "label ASC" : "value DESC";
+    const conds = [...traceConds];
+    const params: unknown[] = [...traceParams];
+    if (filters.model) {
+      conds.push("o.model = ?");
+      params.push(filters.model);
+    }
     const rows = await this.query<{ label: string; value: unknown }>(
       `
       SELECT ${groupExpr} AS label, ${agg} AS value
-      FROM observations
-      WHERE project_id = ? AND type = 'GENERATION' AND start_time >= ?
+      FROM observations o
+      JOIN traces t ON t.id = o.trace_id AND t.project_id = o.project_id
+      WHERE o.project_id = ? AND o.type = 'GENERATION' AND o.start_time >= ? ${conds.map((c) => `AND ${c}`).join(" ")}
       GROUP BY ${groupExpr}
       ORDER BY ${order}
       LIMIT 100
       `,
-      [projectId, cutoffMidnightDaysAgo(days)],
+      [projectId, cutoff, ...params],
     );
     return rows.map((r) => ({ label: r.label || "(unknown)", value: Number(r.value) }));
   }

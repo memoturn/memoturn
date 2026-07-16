@@ -364,6 +364,24 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(widget).toHaveLength(1);
     expect(widget[0]!.value).toBe(300);
 
+    // v2: new metrics — error_rate (seeded obs is DEFAULT level) and score (avg of base score 0.8).
+    expect((await store.widgetSeries(P, "error_rate", "by_day", 7))[0]!.value).toBe(0);
+    const scoreDay = await store.widgetSeries(P, "score", "by_day", 7);
+    expect(scoreDay).toHaveLength(1);
+    // sc1 was corrected to 0.95 by the score-correction test earlier in this suite (LWW).
+    expect(scoreDay[0]!.value).toBeCloseTo(0.95, 6);
+    // v2: new breakdowns — cost by end user (joins observations onto traces).
+    const costByUser = await store.widgetSeries(P, "cost", "by_user", 7);
+    expect(costByUser[0]!.label).toBe("u1");
+    expect(costByUser[0]!.value).toBeCloseTo(0.003, 6);
+    // v2: per-widget filters (env / tag / model) — match vs miss.
+    expect(await store.widgetSeries(P, "tokens", "by_model", 7, { environment: "default" })).toHaveLength(1);
+    expect(await store.widgetSeries(P, "tokens", "by_model", 7, { environment: "nope" })).toHaveLength(0);
+    expect(await store.widgetSeries(P, "tokens", "by_model", 7, { tag: "alpha" })).toHaveLength(1);
+    expect(await store.widgetSeries(P, "tokens", "by_model", 7, { tag: "nope" })).toHaveLength(0);
+    expect(await store.widgetSeries(P, "cost", "by_model", 7, { model: "gpt-x" })).toHaveLength(1);
+    expect(await store.widgetSeries(P, "cost", "by_model", 7, { model: "nope" })).toHaveLength(0);
+
     await store.insertRows("scores", [
       score({ id: "sc-eval", source: "EVAL", name: "judge", value: 0.5, event_ts: iso(1000) }),
     ]);

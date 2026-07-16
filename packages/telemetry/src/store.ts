@@ -12,6 +12,7 @@ import type {
   TraceSummary,
   UserSummary,
   WidgetBreakdown,
+  WidgetFilters,
   WidgetMetric,
   WidgetPoint,
 } from "@memoturn/contracts";
@@ -114,6 +115,7 @@ export interface TelemetryStore {
     metric: WidgetMetric,
     breakdown: WidgetBreakdown,
     days: number,
+    filters?: WidgetFilters,
   ): Promise<WidgetPoint[]>;
   exportTraces(projectId: string, filters?: ExportFilters): Promise<ExportTraceRow[]>;
   countTracesOlderThan(projectId: string, days: number): Promise<number>;
