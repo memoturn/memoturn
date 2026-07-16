@@ -1,4 +1,4 @@
-import type { EmbeddingProjection } from "@memoturn/contracts";
+import type { EmbeddingProjection, SimilarTrace } from "@memoturn/contracts";
 import { isoNow, newId } from "@memoturn/core";
 import { prisma } from "@memoturn/db";
 import { type EmbeddingProjectionRow, telemetry } from "@memoturn/telemetry";
@@ -143,6 +143,86 @@ export async function runAllEmbeddingProjections(): Promise<{ projectId: string;
     }
   }
   return results;
+}
+
+// ── Semantic "find similar traces" (query-by-example) ───────────────────────────────
+//
+// memoturn never computes embeddings — customers send their own vectors, so the stored
+// (model, dim) varies per row and comparison is only valid inside ONE embedding space.
+// Given a seed trace, we take its dominant space and rank other traces by EXACT cosine
+// similarity computed IN Doris (`cosine_distance`, no ANN index — Doris allows ANN indexes
+// only on DUPLICATE KEY tables, and they're approximate and cosine-less anyway). Pushing the
+// scan to the engine keeps it parallel on the BEs and returns only the top-k ids, never the
+// raw vectors. Upgrade path if a single project's space grows past ~100k vectors and p95 gets
+// slow: a DUPLICATE KEY ANN mirror rebuilt off ingest (trading exactness for latency).
+
+// A trace can have many embedded observations; cap how many seed vectors we compare with (each
+// adds a cosine_distance term to the query). A handful captures the trace; more is diminishing.
+const SEED_VECTOR_CAP = Number(process.env.SIMILAR_TRACES_SEED_CAP ?? 8);
+
+export interface EmbeddingSpace {
+  model: string;
+  dim: number;
+}
+
+/**
+ * Pick the (model, dim) embedding space most represented among a trace's vectors — similarity
+ * is only meaningful inside a single space, and a trace may mix models. Pure → unit-tested.
+ */
+export function pickDominantSpace(rows: { model: string; dim: number }[]): EmbeddingSpace | null {
+  const spaces = new Map<string, { model: string; dim: number; count: number }>();
+  for (const r of rows) {
+    const key = `${r.model}::${r.dim}`;
+    const s = spaces.get(key) ?? { model: r.model, dim: r.dim, count: 0 };
+    s.count += 1;
+    spaces.set(key, s);
+  }
+  const top = [...spaces.values()].sort((a, b) => b.count - a.count)[0];
+  return top ? { model: top.model, dim: top.dim } : null;
+}
+
+/**
+ * Find traces semantically similar to `traceId` using stored embeddings. Returns trace
+ * summaries (ranked, most-similar first) with a `similarity` score in [-1, 1] (1 = identical).
+ * Empty if the seed trace has no embeddings.
+ */
+export async function findSimilarTraces(
+  projectId: string,
+  traceId: string,
+  opts: { limit?: number; days?: number } = {},
+): Promise<SimilarTrace[]> {
+  const store = telemetry();
+  const limit = Math.min(Math.max(Math.floor(opts.limit ?? 10), 1), 50);
+
+  const seedRows = await store.getTraceEmbeddings(projectId, traceId);
+  const space = pickDominantSpace(seedRows);
+  if (!space) return [];
+  const seedVectors = seedRows
+    .filter((r) => r.model === space.model && r.dim === space.dim)
+    .map((r) => r.vector)
+    .slice(0, SEED_VECTOR_CAP);
+
+  const ranked = await store.rankSimilarTraceIds(projectId, {
+    seedVectors,
+    model: space.model,
+    dim: space.dim,
+    excludeTraceId: traceId,
+    limit,
+    days: opts.days,
+  });
+  if (ranked.length === 0) return [];
+
+  const summaries = await store.listTraces(projectId, {
+    traceIds: ranked.map((r) => r.trace_id),
+    limit: ranked.length,
+  });
+  const byId = new Map(summaries.map((s) => [s.id, s]));
+  return ranked
+    .map((r) => {
+      const s = byId.get(r.trace_id);
+      return s ? { ...s, similarity: Number(r.similarity.toFixed(4)) } : null;
+    })
+    .filter((x): x is SimilarTrace => x !== null);
 }
 
 /** Read a projection for the scatter view, optionally coloring points by an eval score. */

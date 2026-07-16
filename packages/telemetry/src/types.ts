@@ -139,6 +139,7 @@ export interface TraceFilters {
   scoreName?: string; // trace has a score with this name
   level?: string; // trace has an observation at this level (e.g. ERROR / WARNING)
   days?: number; // only traces from the last N days
+  traceIds?: string[]; // restrict to this explicit set of trace ids (e.g. hydrate similarity results)
 }
 
 /**
@@ -255,6 +256,16 @@ export interface ProjectRowCounts {
 export interface EmbeddingVectorRow {
   observation_id: string;
   trace_id: string;
+  vector: number[];
+}
+
+/** An embedding vector carrying its model + dimension — for similarity search, which is only
+ *  valid within a single (model, dim) space. */
+export interface TraceEmbeddingRow {
+  observation_id: string;
+  trace_id: string;
+  model: string;
+  dim: number;
   vector: number[];
 }
 
