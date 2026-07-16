@@ -29,6 +29,8 @@ import type {
   ExperimentComparison,
   ExperimentDetail,
   ExperimentSummary,
+  GuardrailPolicy,
+  GuardrailVerdict,
   IngestHealth,
   MaskingPolicy,
   MetricsSummary,
@@ -273,6 +275,18 @@ export const api = {
     customPatterns?: string[];
     redactWith?: string;
   }) => post<MaskingPolicy>(`/v1/masking`, body),
+  getGuardrailPolicy: () => get<GuardrailPolicy>(`/v1/guardrails`),
+  setGuardrailPolicy: (body: {
+    enabled?: boolean;
+    pii?: boolean;
+    piiAction?: "redact" | "block";
+    builtins?: string[];
+    customPatterns?: string[];
+    redactWith?: string;
+    injection?: boolean;
+    blockedTerms?: string[];
+  }) => post<GuardrailPolicy>(`/v1/guardrails`, body),
+  checkGuardrails: (text: string) => post<GuardrailVerdict>(`/v1/guardrails/check`, { text }),
   getAnalyticsSink: () => get<AnalyticsSink>(`/v1/analytics-sink`),
   setAnalyticsSink: (body: { enabled?: boolean; host?: string; apiKey?: string }) =>
     post<AnalyticsSink>(`/v1/analytics-sink`, body),

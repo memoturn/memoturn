@@ -84,6 +84,7 @@ model Project {
   automations     Automation[]
   analyticsSink   AnalyticsSink?
   maskingPolicy   MaskingPolicy?
+  guardrailPolicy GuardrailPolicy?
   experiments     Experiment[]
   alertRules      AlertRule[]
   budget          CostBudget?
@@ -776,6 +777,27 @@ model MaskingPolicy {
   redactWith     String   @default("[REDACTED]")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+// Runtime guardrails: the request-time sibling of MaskingPolicy. An SDK-callable
+// endpoint (POST /v1/guardrails/check) scans text against this policy for PII, prompt
+// injection, and blocked terms, returning allow / redact / block. One row per project.
+model GuardrailPolicy {
+  id             String   @id @default(cuid())
+  projectId      String   @unique
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  enabled        Boolean  @default(false)
+  pii            Boolean  @default(true) // detect PII (uses the masking builtin patterns)
+  piiAction      String   @default("redact") // "redact" | "block"
+  builtins       String[] @default([])
+  customPatterns String[] @default([])
+  redactWith     String   @default("[REDACTED]")
+  injection      Boolean  @default(true) // detect prompt injection (always blocks on hit)
+  blockedTerms   String[] @default([]) // content-policy terms (case-insensitive; block on hit)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("guardrailPolicy")
 }
 
 // Product-analytics sink: forward trace/score events to PostHog for funnels.

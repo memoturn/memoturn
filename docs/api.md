@@ -182,6 +182,8 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | GET / POST | `/v1/scheduled-exports` | Get / configure the recurring daily NDJSON export of traces to blob storage. |
 | POST | `/v1/scheduled-exports/run` | Run the export now and write the NDJSON to blob storage. |
 | GET / POST | `/v1/masking` | Get / configure the PII redaction policy (built-in + custom patterns) applied to trace input/output at ingest. |
+| POST | `/v1/guardrails/check` | Runtime guardrails: scan `{ text }` for PII / prompt injection / blocked terms; returns `{ verdict: allow\|redact\|block, findings, redactedText? }`. Read-only compute. SDK: `checkGuardrails` / `check_guardrails`. |
+| GET / POST | `/v1/guardrails` | Get / configure the project's guardrail policy (PII action, prompt-injection detection, blocked terms). |
 | GET / POST | `/v1/analytics-sink` | Get / configure the event sink — forwarding trace/score events to a product-analytics/CDP endpoint (PostHog-compatible capture API). POST `host` URL is SSRF-validated (400 on private/loopback targets). |
 | GET / POST | `/v1/api-keys` | List project API keys (public key + hint) / mint a new pair (secret returned once). |
 | DELETE | `/v1/api-keys/{id}` | Revoke an API key. |
