@@ -35,6 +35,7 @@ export * from "./providers.js";
 export * from "./ratelimit.js";
 export * from "./retention.js";
 export * from "./review.js";
+export * from "./sampling.js";
 export * from "./savedviews.js";
 export * from "./scheduledexports.js";
 export * from "./scoreconfigs.js";

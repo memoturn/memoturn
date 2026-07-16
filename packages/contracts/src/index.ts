@@ -153,6 +153,10 @@ export const scheduledExportResult = z.object({
 });
 export type ScheduledExportResult = z.infer<typeof scheduledExportResult>;
 
+// Head-based ingest sampling: percent (0–100) of traces kept in the query store (100 = all).
+export const samplingPolicy = z.object({ rate: z.number() });
+export type SamplingPolicy = z.infer<typeof samplingPolicy>;
+
 export const maskingPolicy = z.object({
   enabled: z.boolean(),
   builtins: z.array(z.string()),

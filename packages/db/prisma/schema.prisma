@@ -75,6 +75,7 @@ model Project {
   auditLogs       AuditLog[]
   reviewQueues    ReviewQueue[]
   retention       RetentionPolicy?
+  samplingPolicy  SamplingPolicy?
   webhooks        Webhook[]
   webhookDeliveries WebhookDelivery[]
   widgets         Widget[]
@@ -622,6 +623,16 @@ model RetentionPolicy {
   projectId String   @unique
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   days      Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+// Per-project head-based ingest sampling: `rate` is the percent (0-100) of traces
+// KEPT in the query store (100 = keep all). Mirrors RetentionPolicy's shape.
+model SamplingPolicy {
+  id        String   @id @default(cuid())
+  projectId String   @unique
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  rate      Int      @default(100)
   updatedAt DateTime @updatedAt
 }
 
