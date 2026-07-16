@@ -1,37 +1,32 @@
 import type { LucideIcon } from "lucide-react";
 import type * as React from "react";
 
-import { Card, CardContent } from "@/components/ui/card";
 import { HelpTip } from "./help-tip";
 
-/** Compact metric tile used in detail-page and list-page summary strips. */
+/**
+ * Compact metric tile for list/detail summary strips: a bordered box with a muted label
+ * (plus an optional help tooltip) and a large tabular value. Numeric values are
+ * thousands-separated automatically; pass a preformatted string for anything else (e.g. cost).
+ */
 export function StatTile({
   label,
   value,
-  icon: Icon,
   help,
 }: {
   label: string;
   value: React.ReactNode;
-  icon?: LucideIcon;
   help?: React.ReactNode;
+  /** @deprecated No longer rendered — kept so existing `icon={…}` callers still type-check. */
+  icon?: LucideIcon;
 }) {
+  const display = typeof value === "number" ? value.toLocaleString() : value;
   return (
-    <Card size="sm" className="gap-1">
-      <CardContent className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            {label}
-            {help ? <HelpTip>{help}</HelpTip> : null}
-          </div>
-          <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
-        </div>
-        {Icon && (
-          <span className="flex size-7 shrink-0 items-center justify-center bg-muted text-muted-foreground">
-            <Icon className="size-3.5" />
-          </span>
-        )}
-      </CardContent>
-    </Card>
+    <div className="rounded-lg border p-4">
+      <div className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+        {label}
+        {help ? <HelpTip>{help}</HelpTip> : null}
+      </div>
+      <div className="mt-1 text-2xl font-semibold tabular-nums">{display}</div>
+    </div>
   );
 }
