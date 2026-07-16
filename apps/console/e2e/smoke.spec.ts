@@ -26,9 +26,9 @@ test("lists the seeded support-reply prompt", async ({ page }) => {
 });
 
 test("the project switcher shows the default project", async ({ page }) => {
-  // The switcher is now a shadcn Select (a combobox button) labelled "Active project";
-  // the selected project's text renders inside the trigger.
-  const switcher = page.getByRole("combobox", { name: "Active project" });
+  // The switcher is a DropdownMenu trigger button labelled "Switch project"; the active
+  // project's name renders inside the trigger.
+  const switcher = page.getByRole("button", { name: "Switch project" });
   await expect(switcher).toBeVisible();
   await expect(switcher).toContainText(/Default Project/);
 });
