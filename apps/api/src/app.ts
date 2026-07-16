@@ -53,6 +53,7 @@ import {
   exportTracesCsv,
   exportTracesJsonl,
   exportTracesParquet,
+  findSimilarTraces,
   getAnalyticsSink,
   getCostBreakdown,
   getCostBudget,
@@ -929,6 +930,35 @@ app.openapi(
     const trace = await getTrace(c.get("projectId"), c.req.valid("param").id);
     if (!trace) return c.json({ error: "not found" }, 404);
     return c.json(trace);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/traces/{id}/similar",
+    summary: "Find traces semantically similar to this one (nearest-neighbour over stored embeddings)",
+    tags: ["traces"],
+    security,
+    request: {
+      params: z.object({ id: z.string() }),
+      query: z.object({
+        limit: z.coerce.number().int().min(1).max(50).optional(),
+        days: z.coerce.number().int().min(1).optional(),
+      }),
+    },
+    responses: {
+      200: {
+        description: "Similar traces, most-similar first",
+        content: { "application/json": { schema: C.similarTraces } },
+      },
+    },
+  }),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const q = c.req.valid("query");
+    const data = await findSimilarTraces(c.get("projectId"), id, { limit: q.limit, days: q.days });
+    return c.json({ data });
   },
 );
 

@@ -28,6 +28,7 @@ import type {
   RetrievalDocumentDetail,
   TelemetryRowMap,
   TelemetryTable,
+  TraceEmbeddingRow,
   TraceFilters,
   TraceHeader,
   TraceIO,
@@ -143,6 +144,27 @@ export interface TelemetryStore {
   listEmbeddingProjection(projectId: string, opts?: { runId?: string; limit?: number }): Promise<EmbeddingPoint[]>;
   /** The most recent projection run id for a project, or null if none computed yet. */
   latestProjectionRunId(projectId: string): Promise<string | null>;
+  /** Seed vectors for a trace's observations (with model + dim), for similarity search. */
+  getTraceEmbeddings(projectId: string, traceId: string): Promise<TraceEmbeddingRow[]>;
+  /**
+   * Exact cosine k-NN: rank traces by how close their observation vectors are to any of the
+   * given `seedVectors`, within one comparable (model, dim) space. Distance is computed on the
+   * engine (Doris `cosine_distance`, no ANN index — exact, 100% recall) so only the top-k
+   * `{ trace_id, similarity }` cross the wire, never the raw vectors. A trace's similarity is
+   * its CLOSEST observation vector to any seed. `similarity` is `1 - cosine_distance` (1 =
+   * identical, 0 = orthogonal, -1 = opposite). Excludes `excludeTraceId`.
+   */
+  rankSimilarTraceIds(
+    projectId: string,
+    opts: {
+      seedVectors: number[][];
+      model: string;
+      dim: number;
+      excludeTraceId: string;
+      limit: number;
+      days?: number;
+    },
+  ): Promise<{ trace_id: string; similarity: number }[]>;
 
   // ── Writes ─────────────────────────────────────────────────────────────────────
   /**

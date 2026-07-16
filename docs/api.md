@@ -41,6 +41,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/traces/histogram` | Trace volume `{ interval, buckets }` bucketed by hour (ranges ≤ 2 days) or day; honors the trace-list filters (`environment`, `search`, `userId`, `tag`, `scoreName`, `level`, `days`). |
 | POST | `/v1/traces/batch` | Bulk action on selected traces: `delete`, `add-to-dataset`, or `review`. |
 | GET | `/v1/traces/{id}` | Assembled trace: observations + scores. |
+| GET | `/v1/traces/{id}/similar` | Traces semantically similar to this one (cosine over stored embeddings), most-similar first. Params: `limit` (≤ 50), `days`. Returns `{ data }` of trace summaries + `similarity`. |
 | POST | `/v1/traces/{id}/replay` | Re-run a stored trace's input through the LLM gateway and record the result as a new trace. Body: `{ provider?, model? }`. Audited. |
 | POST | `/v1/traces/{id}/annotate` | Add a manual ANNOTATION score to a trace. Body: `{ name, dataType, value?, stringValue?, comment? }`. Audited. |
 | POST | `/v1/traces/{id}/tags` | Replace a trace's tags (merge-on-write). Body: `{ tags: string[] }`. Audited. |

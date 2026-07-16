@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kmeans2d, pca2d } from "./embeddings.js";
+import { kmeans2d, pca2d, pickDominantSpace } from "./embeddings.js";
 
 describe("embedding reduction", () => {
   it("pca2d returns 2D coords, deterministically, one per input", () => {
@@ -36,5 +36,30 @@ describe("embedding reduction", () => {
     expect(pca2d([])).toEqual([]);
     expect(kmeans2d([], 3)).toEqual([]);
     expect(kmeans2d([[1, 1]], 3)).toEqual([0]);
+  });
+});
+
+describe("pickDominantSpace", () => {
+  it("picks the (model, dim) most represented among a trace's vectors", () => {
+    expect(
+      pickDominantSpace([
+        { model: "big", dim: 1536 },
+        { model: "big", dim: 1536 },
+        { model: "small", dim: 384 },
+      ]),
+    ).toEqual({ model: "big", dim: 1536 });
+  });
+
+  it("treats same model but different dim as distinct spaces", () => {
+    const space = pickDominantSpace([
+      { model: "m", dim: 3 },
+      { model: "m", dim: 4 },
+      { model: "m", dim: 4 },
+    ]);
+    expect(space).toEqual({ model: "m", dim: 4 });
+  });
+
+  it("returns null for no vectors", () => {
+    expect(pickDominantSpace([])).toBeNull();
   });
 });
