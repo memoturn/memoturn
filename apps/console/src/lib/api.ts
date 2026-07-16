@@ -35,6 +35,7 @@ import type {
   ModelPriceList,
   PlaygroundResponse,
   Project,
+  ProjectMember,
   PromptDetail,
   PromptListItem,
   ProviderConnection,
@@ -169,6 +170,16 @@ export interface PlaygroundRequest {
 export const api = {
   // Public — no session required (used by the login/signup pages).
   getAuthConfig: () => get<AuthConfig>(`/auth-config`),
+
+  // Project-level RBAC — operate on the active project (also sent as the x-memoturn-project header).
+  listProjectMembers: () =>
+    get<{ data: ProjectMember[] }>(`/v1/projects/${encodeURIComponent(getActiveProject())}/members`).then(
+      (r) => r.data,
+    ),
+  assignProjectMember: (userId: string, role: string) =>
+    put(`/v1/projects/${encodeURIComponent(getActiveProject())}/members/${encodeURIComponent(userId)}`, { role }),
+  removeProjectMember: (userId: string) =>
+    del(`/v1/projects/${encodeURIComponent(getActiveProject())}/members/${encodeURIComponent(userId)}`),
   listTraces: (filters: TraceFilters & { limit?: number } = {}) =>
     get<{ data: TraceSummary[] }>(`/v1/traces${qs(filters as Record<string, unknown>)}`).then((r) => r.data),
   listTracesPage: (filters: TraceFilters & { page?: number; pageSize?: number } = {}) =>

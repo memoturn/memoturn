@@ -87,8 +87,26 @@ model Project {
   experiments     Experiment[]
   alertRules      AlertRule[]
   budget          CostBudget?
+  projectMembers  ProjectMember[]
 
   @@unique([organizationId, slug])
+}
+
+// Project-level RBAC: a per-project role assignment that OVERRIDES the user's org-level
+// Member.role for this one project (elevate or restrict). Absence = inherit the org role.
+// The user must still belong to the project's organization.
+model ProjectMember {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, userId])
+  @@map("projectMember")
 }
 
 // ── Auth (Better Auth managed: User / Session / Account / Verification) ───────────
@@ -115,6 +133,7 @@ model User {
   oauthConsents     OauthConsent[]
   twoFactors        TwoFactor[]
   passkeys          Passkey[]
+  projectMembers    ProjectMember[]
 
   @@map("user")
 }

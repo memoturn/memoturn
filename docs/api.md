@@ -170,6 +170,9 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/v1/projects` | Projects the caller can access (with role). |
+| GET | `/v1/projects/{id}/members` | Project-level RBAC: the project's org members, each with any per-project role override. `{id}` must be the active project. |
+| PUT | `/v1/projects/{id}/members/{userId}` | Assign/update a user's role on this project (overrides their org role). OWNER/ADMIN only; audited. |
+| DELETE | `/v1/projects/{id}/members/{userId}` | Remove a user's per-project role override (revert to org role). OWNER/ADMIN only; audited. |
 | GET | `/v1/audit-logs` | Recent audit entries. |
 | GET / POST | `/v1/retention` | Get / set retention (days; 0 = keep forever). |
 | POST | `/v1/retention/apply` | Apply retention now. |

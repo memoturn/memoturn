@@ -27,6 +27,7 @@ export * from "./net.js";
 export * from "./otel.js";
 export * from "./payloads.js";
 export * from "./playground.js";
+export * from "./projectmembers.js";
 export * from "./prompts.js";
 export * from "./providers.js";
 export * from "./ratelimit.js";

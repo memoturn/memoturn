@@ -21,6 +21,7 @@ import { DataTable } from "../components/data-table";
 import { EmptyState } from "../components/empty-state";
 import { KindBadge } from "../components/kind-badge";
 import { PageHeader } from "../components/page-header";
+import { ProjectAccess } from "../components/project-access";
 import { ProviderIcon } from "../components/provider-icon";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -745,6 +746,7 @@ function SettingsPage() {
       <Tabs defaultValue="api-keys">
         <TabsList className="h-auto flex-wrap">
           <TabsTrigger value="api-keys">API Keys</TabsTrigger>
+          <TabsTrigger value="access">Access</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
           <TabsTrigger value="providers">Providers</TabsTrigger>
           <TabsTrigger value="retention">Data Retention</TabsTrigger>
@@ -756,6 +758,11 @@ function SettingsPage() {
           <TabsTrigger value="scores">Scores</TabsTrigger>
           <TabsTrigger value="pricing">Model Pricing</TabsTrigger>
         </TabsList>
+
+        {/* ── Access (per-project RBAC) ─────────────────────────────────── */}
+        <TabsContent value="access" className="space-y-6">
+          <ProjectAccess />
+        </TabsContent>
 
         {/* ── Security (per-user: 2FA + passkeys) ───────────────────────── */}
         <TabsContent value="security" className="space-y-6">
