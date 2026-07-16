@@ -24,6 +24,7 @@ import {
   createApiKey,
   createAutomation,
   createComment,
+  createDashboard,
   createDataset,
   createDatasetVersion,
   createEvaluator,
@@ -41,6 +42,7 @@ import {
   deleteAutomation,
   deleteComment,
   deleteCostBudget,
+  deleteDashboard,
   deleteModelPrice,
   deleteSavedView,
   deleteScore,
@@ -80,6 +82,7 @@ import {
   listAuditLogs,
   listAutomations,
   listComments,
+  listDashboards,
   listDatasets,
   listDatasetVersions,
   listEvaluators,
@@ -272,6 +275,8 @@ app.use("/v1/webhooks", requireAuth);
 app.use("/v1/webhooks/*", requireAuth);
 app.use("/v1/widgets", requireAuth);
 app.use("/v1/widgets/*", requireAuth);
+app.use("/v1/dashboards", requireAuth);
+app.use("/v1/dashboards/*", requireAuth);
 app.use("/v1/comments", requireAuth);
 app.use("/v1/comments/*", requireAuth);
 app.use("/v1/score-configs", requireAuth);
@@ -2333,9 +2338,11 @@ app.openapi(
     summary: "List dashboard widgets (with computed data series)",
     tags: ["platform"],
     security,
+    request: { query: z.object({ dashboardId: z.string().optional() }) },
     responses: { 200: { description: "Widget list", content: { "application/json": { schema: C.listOf(C.widget) } } } },
   }),
-  async (c) => c.json({ data: await listWidgets(c.get("projectId")) }),
+  // No dashboardId ⇒ the implicit "Default" dashboard (widgets with a null dashboardId).
+  async (c) => c.json({ data: await listWidgets(c.get("projectId"), c.req.valid("query").dashboardId) }),
 );
 
 app.openapi(
@@ -2354,6 +2361,8 @@ app.openapi(
               metric: C.widgetMetric.optional(),
               breakdown: C.widgetBreakdown.optional(),
               days: z.number().int().min(1).max(365).optional(),
+              filters: C.widgetFilters.optional(),
+              dashboardId: z.string().nullable().optional(),
             }),
           },
         },
@@ -2392,6 +2401,66 @@ app.openapi(
     const id = c.req.valid("param").id;
     const result = await deleteWidget(c.get("projectId"), id);
     await recordAudit(c.get("projectId"), c.get("actor"), "widget.delete", id);
+    return c.json(result);
+  },
+);
+
+// ── Dashboards (named groupings of widgets) ──────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/dashboards",
+    summary: "List the project's named dashboards (the 'Default' dashboard is implicit)",
+    tags: ["platform"],
+    security,
+    responses: {
+      200: { description: "Dashboards", content: { "application/json": { schema: C.listOf(C.dashboard) } } },
+    },
+  }),
+  async (c) => c.json({ data: await listDashboards(c.get("projectId")) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/dashboards",
+    summary: "Create a named dashboard",
+    tags: ["platform"],
+    security,
+    request: { body: { content: { "application/json": { schema: z.object({ name: z.string().min(1) }) } } } },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: C.dashboard } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const result = await createDashboard(c.get("projectId"), c.req.valid("json"));
+    await recordAudit(c.get("projectId"), c.get("actor"), "dashboard.create", result.id);
+    return c.json(result, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/dashboards/{id}",
+    summary: "Delete a dashboard (its widgets are removed too)",
+    tags: ["platform"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Deleted", content: { "application/json": { schema: z.object({ deleted: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const id = c.req.valid("param").id;
+    const result = await deleteDashboard(c.get("projectId"), id);
+    await recordAudit(c.get("projectId"), c.get("actor"), "dashboard.delete", id);
     return c.json(result);
   },
 );

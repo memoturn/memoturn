@@ -760,23 +760,42 @@ export const webhookDelivery = z.object({
 });
 export type WebhookDelivery = z.infer<typeof webhookDelivery>;
 
-export const widgetMetric = z.enum(["cost", "tokens", "generations", "latency_p95"]);
-export const widgetBreakdown = z.enum(["by_day", "by_model"]);
+export const widgetMetric = z.enum(["cost", "tokens", "generations", "latency_p95", "error_rate", "score"]);
+export const widgetBreakdown = z.enum(["by_day", "by_model", "by_user", "by_session"]);
 export type WidgetMetric = z.infer<typeof widgetMetric>;
 export type WidgetBreakdown = z.infer<typeof widgetBreakdown>;
+
+// Optional per-widget filters (all AND-ed). tag matches one of a trace's tags.
+export const widgetFilters = z.object({
+  environment: z.string().optional(),
+  model: z.string().optional(),
+  tag: z.string().optional(),
+});
+export type WidgetFilters = z.infer<typeof widgetFilters>;
 
 export const widgetPoint = z.object({ label: z.string(), value: z.number() });
 export type WidgetPoint = z.infer<typeof widgetPoint>;
 
 export const widget = z.object({
   id: z.string(),
+  dashboardId: z.string().nullable(),
   title: z.string(),
   metric: widgetMetric,
   breakdown: widgetBreakdown,
   days: z.number(),
+  filters: widgetFilters,
   data: z.array(widgetPoint),
 });
 export type Widget = z.infer<typeof widget>;
+
+// A named dashboard grouping widgets (null dashboardId = the implicit "Default" dashboard).
+export const dashboard = z.object({
+  id: z.string(),
+  name: z.string(),
+  position: z.number(),
+  createdAt: z.string(),
+});
+export type Dashboard = z.infer<typeof dashboard>;
 
 // ── Review queues ────────────────────────────────────────────────────────────────
 export const reviewQueue = z.object({

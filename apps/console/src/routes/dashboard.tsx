@@ -400,27 +400,64 @@ function DashboardPage() {
 
 const widgetSchema = z.object({
   title: z.string().min(1, "Title is required"),
-  metric: z.enum(["cost", "tokens", "generations", "latency_p95"]),
-  breakdown: z.enum(["by_day", "by_model"]),
+  metric: z.enum(["cost", "tokens", "generations", "latency_p95", "error_rate", "score"]),
+  breakdown: z.enum(["by_day", "by_model", "by_user", "by_session"]),
+  environment: z.string(),
+  model: z.string(),
+  tag: z.string(),
 });
 type WidgetForm = z.infer<typeof widgetSchema>;
+
+const METRIC_LABELS: Record<string, string> = {
+  cost: "cost",
+  tokens: "tokens",
+  generations: "generations",
+  latency_p95: "p95 latency",
+  error_rate: "error rate",
+  score: "avg score",
+};
+const BREAKDOWN_LABELS: Record<string, string> = {
+  by_day: "by day",
+  by_model: "by model",
+  by_user: "by user",
+  by_session: "by session",
+};
 
 function CustomWidgets() {
   const qc = useQueryClient();
   const readOnly = useIsReadOnly();
-  const { data: widgets } = useQuery({ queryKey: ["widgets"], queryFn: () => api.listWidgets() });
+  // null = the implicit "Default" dashboard (widgets with a null dashboardId).
+  const [dashboardId, setDashboardId] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+  const { data: dashboards } = useQuery({ queryKey: ["dashboards"], queryFn: () => api.listDashboards() });
+  const { data: widgets } = useQuery({
+    queryKey: ["widgets", dashboardId],
+    queryFn: () => api.listWidgets(dashboardId ?? undefined),
+  });
 
   const form = useForm<WidgetForm>({
     resolver: zodResolver(widgetSchema),
-    defaultValues: { title: "", metric: "cost", breakdown: "by_day" },
+    defaultValues: { title: "", metric: "cost", breakdown: "by_day", environment: "", model: "", tag: "" },
   });
 
   const add = useMutation({
-    mutationFn: (values: WidgetForm) => api.createWidget({ ...values, days: 30 }),
+    mutationFn: (v: WidgetForm) =>
+      api.createWidget({
+        title: v.title,
+        metric: v.metric,
+        breakdown: v.breakdown,
+        days: 30,
+        filters: {
+          environment: v.environment || undefined,
+          model: v.model || undefined,
+          tag: v.tag || undefined,
+        },
+        dashboardId,
+      }),
     onSuccess: () => {
       toast.success("Widget created");
       form.reset();
-      qc.invalidateQueries({ queryKey: ["widgets"] });
+      qc.invalidateQueries({ queryKey: ["widgets", dashboardId] });
     },
     onError: (e) => toast.error(`Failed to create widget: ${String(e)}`),
   });
@@ -428,86 +465,192 @@ function CustomWidgets() {
     mutationFn: (id: string) => api.deleteWidget(id),
     onSuccess: () => {
       toast.success("Widget deleted");
-      qc.invalidateQueries({ queryKey: ["widgets"] });
+      qc.invalidateQueries({ queryKey: ["widgets", dashboardId] });
     },
     onError: (e) => toast.error(`Failed to delete widget: ${String(e)}`),
+  });
+  const createDash = useMutation({
+    mutationFn: (name: string) => api.createDashboard(name),
+    onSuccess: (d) => {
+      toast.success("Dashboard created");
+      setNewName("");
+      setDashboardId(d.id);
+      qc.invalidateQueries({ queryKey: ["dashboards"] });
+    },
+    onError: (e) => toast.error(`Failed to create dashboard: ${String(e)}`),
+  });
+  const removeDash = useMutation({
+    mutationFn: (id: string) => api.deleteDashboard(id),
+    onSuccess: () => {
+      toast.success("Dashboard deleted");
+      setDashboardId(null);
+      qc.invalidateQueries({ queryKey: ["dashboards"] });
+    },
+    onError: (e) => toast.error(`Failed to delete dashboard: ${String(e)}`),
   });
 
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold tracking-tight">Custom widgets</h2>
 
+      {/* Dashboard tabs: the implicit Default plus any named dashboards. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant={dashboardId === null ? "default" : "outline"} size="sm" onClick={() => setDashboardId(null)}>
+          Default
+        </Button>
+        {(dashboards ?? []).map((d) => (
+          <Button
+            key={d.id}
+            variant={dashboardId === d.id ? "default" : "outline"}
+            size="sm"
+            onClick={() => setDashboardId(d.id)}
+          >
+            {d.name}
+          </Button>
+        ))}
+        {!readOnly && (
+          <form
+            className="flex items-center gap-1"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (newName.trim()) createDash.mutate(newName.trim());
+            }}
+          >
+            <Input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="New dashboard"
+              className="h-8 w-40"
+            />
+            <Button type="submit" size="sm" variant="ghost" disabled={createDash.isPending || !newName.trim()}>
+              + Add
+            </Button>
+          </form>
+        )}
+        {!readOnly && dashboardId !== null && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto text-destructive"
+            onClick={() => removeDash.mutate(dashboardId)}
+          >
+            Delete dashboard
+          </Button>
+        )}
+      </div>
+
       <Card>
         <CardHeader>
           <CardTitle>New widget</CardTitle>
-          <CardDescription>Pin a metric to your dashboard.</CardDescription>
+          <CardDescription>Pin a filtered metric to this dashboard.</CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
-            <form
-              onSubmit={form.handleSubmit((v) => add.mutate(v))}
-              className="grid items-end gap-4 sm:grid-cols-2 lg:grid-cols-4"
-            >
-              <FormField
-                control={form.control}
-                name="title"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Title</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Daily cost" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="metric"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Metric</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
+            <form onSubmit={form.handleSubmit((v) => add.mutate(v))} className="space-y-4">
+              <div className="grid items-end gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <FormField
+                  control={form.control}
+                  name="title"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Title</FormLabel>
                       <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
+                        <Input placeholder="Daily cost" {...field} />
                       </FormControl>
-                      <SelectContent>
-                        <SelectItem value="cost">cost</SelectItem>
-                        <SelectItem value="tokens">tokens</SelectItem>
-                        <SelectItem value="generations">generations</SelectItem>
-                        <SelectItem value="latency_p95">p95 latency</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="breakdown"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Breakdown</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="metric"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Metric</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {Object.entries(METRIC_LABELS).map(([v, label]) => (
+                            <SelectItem key={v} value={v}>
+                              {label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="breakdown"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Breakdown</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {Object.entries(BREAKDOWN_LABELS).map(([v, label]) => (
+                            <SelectItem key={v} value={v}>
+                              {label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <div className="grid items-end gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <FormField
+                  control={form.control}
+                  name="environment"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Environment (filter)</FormLabel>
                       <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
+                        <Input placeholder="any" {...field} />
                       </FormControl>
-                      <SelectContent>
-                        <SelectItem value="by_day">by day</SelectItem>
-                        <SelectItem value="by_model">by model</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <Button type="submit" disabled={readOnly || add.isPending}>
-                {add.isPending ? "Adding…" : "Add widget"}
-              </Button>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="model"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Model (filter)</FormLabel>
+                      <FormControl>
+                        <Input placeholder="any" {...field} />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="tag"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tag (filter)</FormLabel>
+                      <FormControl>
+                        <Input placeholder="any" {...field} />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                <Button type="submit" disabled={readOnly || add.isPending}>
+                  {add.isPending ? "Adding…" : "Add widget"}
+                </Button>
+              </div>
             </form>
           </Form>
         </CardContent>
@@ -516,8 +659,8 @@ function CustomWidgets() {
       {!widgets || widgets.length === 0 ? (
         <EmptyState
           icon={LayoutDashboard}
-          title="No custom widgets yet"
-          description="Create one above to pin a metric to the dashboard."
+          title="No widgets on this dashboard yet"
+          description="Create one above to pin a metric here."
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -534,7 +677,9 @@ function WidgetCard({ widget, onDelete, disabled }: { widget: Widget; onDelete: 
   const series = widget.data.map((p) => ({ label: p.label, value: Number(p.value) }));
   const isPeak = widget.metric === "latency_p95";
   const total = series.reduce((a, p) => a + p.value, 0);
+  const avg = series.length ? total / series.length : 0;
   const peak = Math.max(0, ...series.map((p) => p.value));
+  // error_rate / score aggregate as an average across buckets; the others sum.
   const headline =
     series.length === 0
       ? "—"
@@ -542,7 +687,15 @@ function WidgetCard({ widget, onDelete, disabled }: { widget: Widget; onDelete: 
         ? money(total)
         : isPeak
           ? `${peak} ms`
-          : Math.round(total).toLocaleString();
+          : widget.metric === "error_rate"
+            ? `${(avg * 100).toFixed(1)}%`
+            : widget.metric === "score"
+              ? avg.toFixed(2)
+              : Math.round(total).toLocaleString();
+  const activeFilters = Object.entries(widget.filters ?? {})
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(" · ");
   const config = { value: { label: widget.metric, color: "var(--chart-1)" } } satisfies ChartConfig;
   return (
     <Card size="sm" className="gap-3">
@@ -550,6 +703,7 @@ function WidgetCard({ widget, onDelete, disabled }: { widget: Widget; onDelete: 
         <CardTitle className="truncate">{widget.title}</CardTitle>
         <CardDescription className="text-[0.6875rem]">
           {widget.metric} · {widget.breakdown.replace("_", " ")} · {widget.days}d
+          {activeFilters ? ` · ${activeFilters}` : ""}
         </CardDescription>
         <CardAction>
           <Button

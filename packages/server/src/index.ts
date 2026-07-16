@@ -8,6 +8,7 @@ export * from "./batch.js";
 export * from "./betterauth.js";
 export * from "./comments.js";
 export * from "./concurrency.js";
+export * from "./dashboards.js";
 export * from "./datasets.js";
 export * from "./embeddings.js";
 export * from "./env.js";
