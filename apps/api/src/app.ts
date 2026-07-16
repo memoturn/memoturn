@@ -58,6 +58,7 @@ import {
   getEmbeddingProjection,
   getEvaluatorAnalytics,
   getExperiment,
+  getGuardrailPolicy,
   getIngestHealth,
   getMaskingPolicy,
   getMedia,
@@ -97,6 +98,7 @@ import {
   listUsers,
   listWebhooks,
   listWidgets,
+  loadGuardrailPolicy,
   mcpAuthorizationServerMetadata,
   mcpProtectedResourceMetadata,
   otlpToEvents,
@@ -113,8 +115,10 @@ import {
   runProjectionForProject,
   runScheduledExport,
   safeServeContentType,
+  scanGuardrails,
   setAnalyticsSink,
   setCostBudget,
+  setGuardrailPolicy,
   setMaskingPolicy,
   setRetention,
   setScheduledExport,
@@ -288,6 +292,8 @@ app.use("/v1/analytics-sink", requireAuth);
 app.use("/v1/api-keys", requireAuth);
 app.use("/v1/api-keys/*", requireAuth);
 app.use("/v1/masking", requireAuth);
+app.use("/v1/guardrails", requireAuth);
+app.use("/v1/guardrails/*", requireAuth);
 app.use("/v1/scores", requireAuth);
 app.use("/v1/scores/*", requireAuth);
 
@@ -3158,6 +3164,77 @@ app.openapi(
     if (denied) return denied;
     const result = await setMaskingPolicy(c.get("projectId"), c.req.valid("json"));
     await recordAudit(c.get("projectId"), c.get("actor"), "masking.set", `enabled:${result.enabled}`);
+    return c.json(result);
+  },
+);
+
+// ── Runtime guardrails ───────────────────────────────────────────────────────
+// SDK-callable content check + per-project policy config (sibling of masking).
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/guardrails/check",
+    summary: "Scan text for PII / prompt injection / blocked terms; returns allow/redact/block",
+    tags: ["platform"],
+    security,
+    request: { body: { content: { "application/json": { schema: z.object({ text: z.string() }) } } } },
+    responses: { 200: { description: "Verdict", content: { "application/json": { schema: C.guardrailVerdict } } } },
+  }),
+  // rbac-exempt: read-only compute, writes nothing (mirrors the dataset gate).
+  async (c) => {
+    const policy = await loadGuardrailPolicy(c.get("projectId"));
+    if (!policy) return c.json({ verdict: "allow" as const, findings: [] });
+    return c.json(scanGuardrails(c.req.valid("json").text, policy));
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/guardrails",
+    summary: "Get the project's guardrail policy (+ the available built-in PII patterns)",
+    tags: ["platform"],
+    security,
+    responses: { 200: { description: "Policy", content: { "application/json": { schema: C.guardrailPolicy } } } },
+  }),
+  async (c) => c.json(await getGuardrailPolicy(c.get("projectId"))),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/guardrails",
+    summary: "Configure the project's runtime guardrail policy",
+    tags: ["platform"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              enabled: z.boolean().optional(),
+              pii: z.boolean().optional(),
+              piiAction: z.enum(["redact", "block"]).optional(),
+              builtins: z.array(z.string()).optional(),
+              customPatterns: z.array(z.string()).optional(),
+              redactWith: z.string().optional(),
+              injection: z.boolean().optional(),
+              blockedTerms: z.array(z.string()).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Updated", content: { "application/json": { schema: C.guardrailPolicy } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const result = await setGuardrailPolicy(c.get("projectId"), c.req.valid("json"));
+    await recordAudit(c.get("projectId"), c.get("actor"), "guardrails.set", `enabled:${result.enabled}`);
     return c.json(result);
   },
 );

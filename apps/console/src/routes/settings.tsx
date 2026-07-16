@@ -22,6 +22,7 @@ import { EmptyState } from "../components/empty-state";
 import { KindBadge } from "../components/kind-badge";
 import { PageHeader } from "../components/page-header";
 import { ProjectAccess } from "../components/project-access";
+import { ProjectGuardrails } from "../components/project-guardrails";
 import { ProviderIcon } from "../components/provider-icon";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -752,6 +753,7 @@ function SettingsPage() {
           <TabsTrigger value="retention">Data Retention</TabsTrigger>
           <TabsTrigger value="exports">Exports &amp; Analytics</TabsTrigger>
           <TabsTrigger value="masking">Masking</TabsTrigger>
+          <TabsTrigger value="guardrails">Guardrails</TabsTrigger>
           <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
           <TabsTrigger value="automations">Automations</TabsTrigger>
           <TabsTrigger value="alerts">Alerts</TabsTrigger>
@@ -762,6 +764,11 @@ function SettingsPage() {
         {/* ── Access (per-project RBAC) ─────────────────────────────────── */}
         <TabsContent value="access" className="space-y-6">
           <ProjectAccess />
+        </TabsContent>
+
+        {/* ── Guardrails (runtime PII / injection / blocked terms) ──────── */}
+        <TabsContent value="guardrails" className="space-y-6">
+          <ProjectGuardrails />
         </TabsContent>
 
         {/* ── Security (per-user: 2FA + passkeys) ───────────────────────── */}
