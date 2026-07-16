@@ -50,6 +50,11 @@ function GithubIcon() {
 export function AuthPanel({ mode, redirect }: { mode: Mode; redirect?: string }) {
   const navigate = useNavigate();
   const dest = redirect?.startsWith("/") ? redirect : "/dashboard";
+  // Absolute console-origin URLs for flows that redirect through the API (social OAuth, magic
+  // link): after Better Auth's callback a relative path resolves to the API origin (:3001 in
+  // dev) and 404s, so anchor these to the console the user is actually on.
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const absDest = `${origin}${dest}`;
   const { data: cfg } = useQuery({ queryKey: ["auth-config"], queryFn: api.getAuthConfig, staleTime: 60_000 });
 
   const [email, setEmail] = useState("");
@@ -75,7 +80,7 @@ export function AuthPanel({ mode, redirect }: { mode: Mode; redirect?: string })
   async function social(provider: "google" | "github") {
     setBusy(provider);
     // Redirects the browser to the provider; on return Better Auth lands on callbackURL.
-    await authClient.signIn.social({ provider, callbackURL: dest, errorCallbackURL: "/login" });
+    await authClient.signIn.social({ provider, callbackURL: absDest, errorCallbackURL: `${origin}/login` });
   }
 
   async function passkeySignIn() {
@@ -89,7 +94,7 @@ export function AuthPanel({ mode, redirect }: { mode: Mode; redirect?: string })
   async function sendMagicLink() {
     if (!email) return fail("Enter your email first");
     setBusy("magic");
-    const res = await authClient.signIn.magicLink({ email, callbackURL: dest });
+    const res = await authClient.signIn.magicLink({ email, callbackURL: absDest });
     setBusy(null);
     if (res.error) return fail(res.error.message ?? "Could not send link");
     toast.success("Check your email for a sign-in link");
