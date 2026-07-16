@@ -53,6 +53,7 @@ import type {
   ScoreCorrected,
   SessionPage,
   SessionSummary,
+  SimilarTrace,
   ToolAnalyticsRow,
   TraceDetail,
   TraceFacets,
@@ -190,6 +191,10 @@ export const api = {
     get<{ data: TraceSummary[] }>(`/v1/traces${qs(filters as Record<string, unknown>)}`).then((r) => r.data),
   listTracesPage: (filters: TraceFilters & { page?: number; pageSize?: number } = {}) =>
     get<TracePage>(`/v1/traces${qs(filters as Record<string, unknown>)}`),
+  findSimilarTraces: (id: string, opts: { limit?: number; days?: number } = {}) =>
+    get<{ data: SimilarTrace[] }>(
+      `/v1/traces/${encodeURIComponent(id)}/similar${qs(opts as Record<string, unknown>)}`,
+    ).then((r) => r.data),
   traceFacets: (
     opts: {
       days?: number;

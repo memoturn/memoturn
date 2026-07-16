@@ -39,6 +39,13 @@ export const tracePage = z.object({
 });
 export type TracePage = z.infer<typeof tracePage>;
 
+// A trace returned by semantic similarity search — a trace summary plus its cosine similarity
+// (-1…1, where 1 = identical) to the seed trace's embedding. Higher = more alike.
+export const similarTrace = traceSummary.extend({ similarity: z.number() });
+export type SimilarTrace = z.infer<typeof similarTrace>;
+export const similarTraces = z.object({ data: z.array(similarTrace) });
+export type SimilarTraces = z.infer<typeof similarTraces>;
+
 // Result of annotating a trace (writing an ANNOTATION score); the score lands asynchronously.
 export const annotationResult = z.object({
   scoreId: z.string(),
