@@ -209,8 +209,11 @@ function AppSidebar({ email, initials }: { email: string; initials: string }) {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link to="/" className="gap-2.5">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-                  <Logo mono className="size-4.5" />
+                {/* Bare gradient brand mark (matching the auth pages + marketing/docs), sized to
+                    span both text rows. Wrapped in a div so the sidebar's [&>svg]:size-4 rule
+                    doesn't shrink it; the size-8 mark also fills the collapsed icon rail. */}
+                <div className="flex size-8 shrink-0 items-center justify-center">
+                  <Logo className="size-8" />
                 </div>
                 <div className="grid flex-1 text-left leading-tight">
                   <span className="truncate text-sm font-semibold tracking-wide">memoturn</span>
