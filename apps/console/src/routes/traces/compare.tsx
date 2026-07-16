@@ -1,6 +1,7 @@
-import type { TraceDetail } from "@memoturn/contracts";
+import type { ObservationDetail, TraceDetail } from "@memoturn/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { EmptyState } from "../../components/empty-state";
 import { SideBySideDiff } from "../../components/side-by-side-diff";
 import { TraceDetailBody } from "../../components/trace-detail";
@@ -12,11 +13,22 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "../../components/ui/breadcrumb";
+import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { api } from "../../lib/api";
 import { normalizeJson } from "../../lib/diff";
+
+type PayloadField = "input" | "output" | "metadata";
+const PAYLOAD_FIELDS: PayloadField[] = ["input", "output", "metadata"];
+
+/** Short label for an observation in a picker (name/type + model). */
+function obsLabel(o: ObservationDetail): string {
+  const base = o.name || o.type || o.id.slice(0, 8);
+  return o.model ? `${base} · ${o.model}` : base;
+}
 
 interface CompareSearch {
   a?: string;
@@ -50,7 +62,87 @@ function DeltaRow({ label, a, b, fmt }: { label: string; a: number; b: number; f
   );
 }
 
-/** Tabbed side-by-side content diff of the two traces' JSON payloads. */
+/** Pick one observation from each trace and diff a chosen payload field — span-level compare. */
+function ObservationDiff({ a, b }: { a: TraceDetail; b: TraceDetail }) {
+  const obsA = a.observations;
+  const obsB = b.observations;
+  // Default pairing: align by observation name (fall back to the first on the B side).
+  const matchB = (aObs: ObservationDetail | undefined) =>
+    (aObs && obsB.find((o) => o.name === aObs.name)?.id) || obsB[0]?.id || "";
+  const [aId, setAId] = useState(obsA[0]?.id ?? "");
+  const [bId, setBId] = useState(matchB(obsA[0]));
+  const [field, setField] = useState<PayloadField>("output");
+
+  if (obsA.length === 0 || obsB.length === 0) {
+    return <p className="py-4 text-sm text-muted-foreground">One of the traces has no observations to diff.</p>;
+  }
+  const selA = obsA.find((o) => o.id === aId) ?? obsA[0]!;
+  const selB = obsB.find((o) => o.id === bId) ?? obsB[0]!;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="space-y-1 text-xs">
+          <span className="text-muted-foreground">A · observation</span>
+          <Select
+            value={aId}
+            onValueChange={(v) => {
+              setAId(v);
+              setBId(matchB(obsA.find((o) => o.id === v))); // re-align B to the newly picked A
+            }}
+          >
+            <SelectTrigger className="h-8 w-64">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {obsA.map((o) => (
+                <SelectItem key={o.id} value={o.id}>
+                  {obsLabel(o)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1 text-xs">
+          <span className="text-muted-foreground">B · observation</span>
+          <Select value={bId} onValueChange={setBId}>
+            <SelectTrigger className="h-8 w-64">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {obsB.map((o) => (
+                <SelectItem key={o.id} value={o.id}>
+                  {obsLabel(o)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex gap-1">
+          {PAYLOAD_FIELDS.map((f) => (
+            <Button
+              key={f}
+              variant={field === f ? "default" : "outline"}
+              size="sm"
+              className="capitalize"
+              onClick={() => setField(f)}
+            >
+              {f}
+            </Button>
+          ))}
+        </div>
+      </div>
+      <SideBySideDiff
+        left={normalizeJson(selA[field] ?? "")}
+        right={normalizeJson(selB[field] ?? "")}
+        leftLabel={`A · ${obsLabel(selA)}`}
+        rightLabel={`B · ${obsLabel(selB)}`}
+      />
+    </div>
+  );
+}
+
+/** Tabbed side-by-side content diff — trace-level payloads plus a span-level observation diff. */
 function ContentDiff({ a, b }: { a: TraceDetail; b: TraceDetail }) {
   const fields = [
     { key: "input", label: "Input", a: a.input, b: b.input },
@@ -70,6 +162,7 @@ function ContentDiff({ a, b }: { a: TraceDetail; b: TraceDetail }) {
                 {f.label}
               </TabsTrigger>
             ))}
+            <TabsTrigger value="observations">Observations</TabsTrigger>
           </TabsList>
           {fields.map((f) => (
             <TabsContent key={f.key} value={f.key}>
@@ -81,6 +174,9 @@ function ContentDiff({ a, b }: { a: TraceDetail; b: TraceDetail }) {
               />
             </TabsContent>
           ))}
+          <TabsContent value="observations">
+            <ObservationDiff a={a} b={b} />
+          </TabsContent>
         </Tabs>
       </CardContent>
     </Card>
