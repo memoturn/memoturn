@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege: CI only reads the repo (checkout, install, test, build) — no writes.
+permissions:
+  contents: read
+
 jobs:
   # Go SDK is a standalone stdlib-only module — no infra, so it runs as its own fast job
   # (in parallel with build) rather than bolted onto the heavy Postgres/Doris/MinIO pipeline.
