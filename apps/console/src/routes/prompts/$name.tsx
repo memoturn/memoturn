@@ -181,6 +181,47 @@ function VersionDiff({ prompt }: { prompt: PromptDetail }) {
   );
 }
 
+/** Spend attributed to each version of this prompt — closes the loop between authoring and cost. */
+function VersionCosts({ name }: { name: string }) {
+  const { data: costs } = useQuery({
+    queryKey: ["prompt-costs", name],
+    queryFn: () => api.getPromptCosts(name, { days: 30 }),
+  });
+  if (!costs || costs.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Cost by version</CardTitle>
+        <CardDescription>Spend attributed to each version over the last 30 days, ranked by cost.</CardDescription>
+      </CardHeader>
+      <CardContent className="px-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="pl-6">Version</TableHead>
+              <TableHead className="text-right">Calls</TableHead>
+              <TableHead className="text-right">Tokens</TableHead>
+              <TableHead className="pr-6 text-right">Cost</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {costs.map((c) => (
+              <TableRow key={c.prompt_version || "unversioned"}>
+                <TableCell className="pl-6 font-medium">
+                  {c.prompt_version ? `v${c.prompt_version}` : "unversioned"}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">{c.observation_count.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums">{c.total_tokens.toLocaleString()}</TableCell>
+                <TableCell className="pr-6 text-right tabular-nums">{fmtCost(c.total_cost)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
+
 function PromptDetailPage() {
   const { name } = Route.useParams();
   const {
@@ -245,6 +286,8 @@ function PromptDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      <VersionCosts name={prompt.name} />
 
       {prompt.allVersions.length > 1 && <VersionDiff prompt={prompt} />}
 

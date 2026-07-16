@@ -4,6 +4,7 @@ import type {
   EmbeddingPoint,
   ModelMetric,
   ObservationDetail,
+  PromptVersionCost,
   ScoreRow as ScoreDetail,
   SessionSummary,
   ToolAnalyticsRow,
@@ -716,6 +717,38 @@ export class DorisTelemetryStore implements TelemetryStore {
     return rows.map((r) => ({
       key: r.key,
       trace_count: Number(r.trace_count),
+      total_cost: Number(r.total_cost),
+      total_tokens: Number(r.total_tokens),
+    }));
+  }
+
+  async costByPromptVersion(
+    projectId: string,
+    promptName: string,
+    opts: { days?: number } = {},
+  ): Promise<PromptVersionCost[]> {
+    const { days = 0 } = opts;
+    // Observations carry the prompt NAME in prompt_id (that's what the SDK sends and what the
+    // console filters by) plus a prompt_version string. Group one prompt's usage by version.
+    const dayCond = days > 0 ? "AND start_time >= ?" : "";
+    const dayParam = days > 0 ? [cutoffDaysAgo(days)] : [];
+    const rows = await this.query<PromptVersionCost>(
+      `
+      SELECT
+        prompt_version,
+        COUNT(id) AS observation_count,
+        COALESCE(SUM(total_cost), 0) AS total_cost,
+        COALESCE(SUM(total_tokens), 0) AS total_tokens
+      FROM observations
+      WHERE project_id = ? AND prompt_id = ? ${dayCond}
+      GROUP BY prompt_version
+      ORDER BY total_cost DESC
+      `,
+      [projectId, promptName, ...dayParam],
+    );
+    return rows.map((r) => ({
+      prompt_version: r.prompt_version,
+      observation_count: Number(r.observation_count),
       total_cost: Number(r.total_cost),
       total_tokens: Number(r.total_tokens),
     }));
