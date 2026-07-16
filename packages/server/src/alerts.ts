@@ -16,7 +16,7 @@ import { mapConcurrent } from "./concurrency.js";
 
 export const ALERT_METRICS = ["error_rate", "latency_p95", "cost_per_day", "ingest_volume", "dlq_depth"] as const;
 export type AlertMetric = (typeof ALERT_METRICS)[number];
-export const ALERT_COMPARATORS = ["gt", "gte", "lt", "lte"] as const;
+export const ALERT_COMPARATORS = ["gt", "gte", "lt", "lte", "anomaly_high", "anomaly_low"] as const;
 export type AlertComparator = (typeof ALERT_COMPARATORS)[number];
 
 const DISPATCH_CONCURRENCY = 8;
@@ -209,6 +209,53 @@ function breaches(value: number, comparator: string, threshold: number): boolean
   }
 }
 
+// Anomaly detection: instead of a fixed threshold, compare the current window to a rolling
+// baseline. `threshold` is reused as the z-score sensitivity (e.g. 3 = 3σ).
+const ANOMALY_BUCKETS = Number(process.env.ALERT_ANOMALY_BUCKETS ?? 12);
+const ANOMALY_MIN_BASELINE = Number(process.env.ALERT_ANOMALY_MIN_BASELINE ?? 5);
+
+export function isAnomalyComparator(comparator: string): boolean {
+  return comparator === "anomaly_high" || comparator === "anomaly_low";
+}
+
+/** Extract an alert metric's scalar from a window aggregate (null = not a window-based metric). */
+function metricFromWindow(metric: string, win: WindowMetric): number | null {
+  switch (metric) {
+    case "error_rate":
+      return win.generations > 0 ? win.errors / win.generations : 0;
+    case "latency_p95":
+      return win.p95_latency_ms;
+    case "cost_per_day":
+      return win.total_cost;
+    case "ingest_volume":
+      return win.trace_count;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Z-score the newest value (last element) against the rolling baseline (all prior buckets).
+ * Returns null — no fire — when there's too little history or the baseline is flat (stddev≈0),
+ * so a brand-new or perfectly-steady metric never false-positives. `sensitivity` is the z
+ * threshold; `anomaly_high` fires on spikes, `anomaly_low` on drops.
+ */
+export function anomalyBreach(
+  values: number[],
+  direction: "high" | "low",
+  sensitivity: number,
+): { breached: boolean; value: number; z: number } | null {
+  if (values.length < ANOMALY_MIN_BASELINE + 1) return null;
+  const current = values[values.length - 1]!;
+  const baseline = values.slice(0, -1);
+  const mean = baseline.reduce((a, b) => a + b, 0) / baseline.length;
+  const std = Math.sqrt(baseline.reduce((a, b) => a + (b - mean) ** 2, 0) / baseline.length);
+  if (std < 1e-9) return null;
+  const z = (current - mean) / std;
+  const breached = direction === "high" ? z >= sensitivity : z <= -sensitivity;
+  return { breached, value: current, z };
+}
+
 const windowKey = (projectId: string, window: number) => `${projectId}:${window}`;
 
 /**
@@ -247,18 +294,31 @@ function ruleValue(
   if (rule.metric === "dlq_depth") return ctx.dlqDepth ?? null; // global queue depth, injected by the worker
   const win = cache.get(windowKey(rule.projectId, rule.window));
   if (!win) return null; // fetch failed for this window → skip
-  switch (rule.metric) {
-    case "error_rate":
-      return win.generations > 0 ? win.errors / win.generations : 0;
-    case "latency_p95":
-      return win.p95_latency_ms;
-    case "cost_per_day":
-      return win.total_cost;
-    case "ingest_volume":
-      return win.trace_count;
-    default:
-      return null;
+  return metricFromWindow(rule.metric, win);
+}
+
+/**
+ * Prefetch the trailing metric series each anomaly rule needs (one per distinct project+window).
+ * Threshold rules don't use this. Kept separate from prefetchWindows so non-anomaly sweeps pay
+ * nothing.
+ */
+async function prefetchSeries(
+  rules: { projectId: string; metric: string; window: number; comparator: string }[],
+): Promise<Map<string, WindowMetric[]>> {
+  const targets = new Map<string, { projectId: string; window: number }>();
+  for (const r of rules) {
+    if (!isAnomalyComparator(r.comparator) || r.metric === "dlq_depth") continue;
+    targets.set(windowKey(r.projectId, r.window), { projectId: r.projectId, window: r.window });
   }
+  const cache = new Map<string, WindowMetric[]>();
+  await mapConcurrent([...targets.entries()], METRIC_FETCH_CONCURRENCY, async ([key, { projectId, window }]) => {
+    try {
+      cache.set(key, await telemetry().metricWindowSeries(projectId, window, ANOMALY_BUCKETS));
+    } catch (err) {
+      console.error(`[alerts] series ${window}m fetch failed:`, err instanceof Error ? err.message : err);
+    }
+  });
+  return cache;
 }
 
 function alertSlackText(rule: AlertRuleRow, projectId: string, value: number, firing: boolean): string {
@@ -305,13 +365,31 @@ export async function evaluateAllAlerts(
   ctx: { dlqDepth?: number } = {},
 ): Promise<{ evaluated: number; fired: number }> {
   const rules = await prisma.alertRule.findMany({ where: { enabled: true }, include: { state: true } });
-  const windows = await prefetchWindows(rules);
+  const [windows, seriesCache] = await Promise.all([prefetchWindows(rules), prefetchSeries(rules)]);
   let fired = 0;
   for (const rule of rules) {
     try {
-      const value = ruleValue(rule, windows, ctx);
-      if (value === null) continue;
-      const breached = breaches(value, rule.comparator, rule.threshold);
+      let value: number;
+      let breached: boolean;
+      if (isAnomalyComparator(rule.comparator)) {
+        const series = seriesCache.get(windowKey(rule.projectId, rule.window));
+        if (!series) continue; // fetch failed
+        const values = series.map((w) => metricFromWindow(rule.metric, w));
+        if (values.some((v) => v === null)) continue; // anomaly unsupported for this metric (e.g. dlq_depth)
+        const res = anomalyBreach(
+          values as number[],
+          rule.comparator === "anomaly_high" ? "high" : "low",
+          rule.threshold,
+        );
+        if (!res) continue; // insufficient history / flat baseline → no fire
+        value = res.value;
+        breached = res.breached;
+      } else {
+        const v = ruleValue(rule, windows, ctx);
+        if (v === null) continue;
+        value = v;
+        breached = breaches(value, rule.comparator, rule.threshold);
+      }
       const status = rule.state?.status ?? "ok";
       const channels = parseChannels(rule.channels);
       if (breached && status !== "firing") {

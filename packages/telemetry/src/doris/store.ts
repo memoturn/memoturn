@@ -897,6 +897,58 @@ export class DorisTelemetryStore implements TelemetryStore {
     return out;
   }
 
+  async metricWindowSeries(projectId: string, windowMinutes: number, buckets: number): Promise<WindowMetric[]> {
+    const win = Math.max(1, Math.floor(windowMinutes));
+    const n = Math.max(1, Math.floor(buckets));
+    const winSec = win * 60;
+    // Anchor n windows back; bucket index = FLOOR(seconds since anchor / window) → 0 (oldest) .. n-1.
+    const anchor = toDorisDateTime(new Date(Date.now() - n * win * 60_000).toISOString());
+    const obsBucket = "FLOOR(TIMESTAMPDIFF(SECOND, ?, start_time) / ?)";
+    const traceBucket = "FLOOR(TIMESTAMPDIFF(SECOND, ?, `timestamp`) / ?)";
+    const [gens, traces] = await Promise.all([
+      this.query<{
+        b: unknown;
+        generations: unknown;
+        errors: unknown;
+        total_tokens: unknown;
+        total_cost: unknown;
+        p50: unknown;
+        p95: unknown;
+      }>(
+        `
+        SELECT ${obsBucket} AS b,
+          COUNT(*) AS generations,
+          SUM(IF(level = 'ERROR', 1, 0)) AS errors,
+          SUM(total_tokens) AS total_tokens,
+          SUM(total_cost) AS total_cost,
+          PERCENTILE_APPROX(latency_ms, 0.5) AS p50,
+          PERCENTILE_APPROX(latency_ms, 0.95) AS p95
+        FROM observations
+        WHERE project_id = ? AND type = 'GENERATION' AND start_time >= ?
+        GROUP BY b
+        `,
+        [anchor, winSec, projectId, anchor],
+      ),
+      this.query<{ b: unknown; c: unknown }>(
+        `SELECT ${traceBucket} AS b, COUNT(*) AS c FROM traces WHERE project_id = ? AND \`timestamp\` >= ? GROUP BY b`,
+        [anchor, winSec, projectId, anchor],
+      ),
+    ]);
+    const clamp = (b: unknown) => Math.min(n - 1, Math.max(0, Math.floor(Number(b ?? 0))));
+    const series: WindowMetric[] = Array.from({ length: n }, () => zeroWindow());
+    for (const t of traces) series[clamp(t.b)]!.trace_count += Number(t.c ?? 0);
+    for (const g of gens) {
+      const w = series[clamp(g.b)]!;
+      w.generations += Number(g.generations ?? 0);
+      w.errors += Number(g.errors ?? 0);
+      w.total_tokens += Number(g.total_tokens ?? 0);
+      w.total_cost += Number(g.total_cost ?? 0);
+      w.p50_latency_ms = Math.round(Number(g.p50 ?? 0));
+      w.p95_latency_ms = Math.round(Number(g.p95 ?? 0));
+    }
+    return series; // oldest → newest; the last element is the current window
+  }
+
   async widgetSeries(
     projectId: string,
     metric: WidgetMetric,

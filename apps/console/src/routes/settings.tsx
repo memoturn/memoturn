@@ -1585,6 +1585,8 @@ function SettingsPage() {
                               <SelectItem value="gte">&ge;</SelectItem>
                               <SelectItem value="lt">&lt;</SelectItem>
                               <SelectItem value="lte">&le;</SelectItem>
+                              <SelectItem value="anomaly_high">anomaly ↑ (spike, σ)</SelectItem>
+                              <SelectItem value="anomaly_low">anomaly ↓ (drop, σ)</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
