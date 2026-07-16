@@ -71,7 +71,6 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: "Observability",
     items: [
-      { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { to: "/traces", label: "Traces", icon: Activity },
       { to: "/sessions", label: "Sessions", icon: MessagesSquare },
       { to: "/users", label: "Users", icon: Users },
@@ -147,7 +146,7 @@ function ProjectSwitcher() {
           aria-label="Switch project"
           className="flex h-11 w-full items-center gap-2 rounded-md border bg-background px-2 text-left text-sm shadow-xs transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none data-[state=open]:bg-accent/50"
         >
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-semibold text-primary-foreground">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-foreground">
             {initials(active?.name ?? "")}
           </span>
           <span className="grid min-w-0 flex-1 leading-tight">
@@ -227,6 +226,27 @@ function AppSidebar({ email, initials }: { email: string; initials: string }) {
       </SidebarHeader>
 
       <SidebarContent>
+        {/* Dashboard sits above the grouped nav as the project's home/overview, not one of many
+            observability surfaces. */}
+        <SidebarGroup className="pb-0">
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  size="sm"
+                  isActive={isActivePath(pathname, "/dashboard")}
+                  tooltip="Dashboard"
+                >
+                  <Link to="/dashboard">
+                    <LayoutDashboard />
+                    <span>Dashboard</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
         {NAV_GROUPS.map((group) => (
           <SidebarGroup key={group.label}>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
@@ -289,7 +309,9 @@ function AppSidebar({ email, initials }: { email: string; initials: string }) {
                   size="lg"
                   className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
                 >
-                  <Avatar className="size-8 rounded-md">
+                  {/* Match the rounded-md chip shape on the border ring too — the Avatar root's
+                      after:rounded-full ring isn't merged down by the rounded-md override. */}
+                  <Avatar className="size-8 rounded-md after:rounded-md">
                     <AvatarFallback className="rounded-md text-[0.625rem]">{initials}</AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left leading-tight">

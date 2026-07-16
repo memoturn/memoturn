@@ -31,3 +31,12 @@
   --font-heading: "Inter Tight Variable", "Manrope Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
+
+/* Console radius: the app's surfaces are squared (cards, tables, waterfall, and the
+ * command palette all use rounded-none), so pull the shared 6px token down to a crisp 2px.
+ * This unifies the remaining rounded primitives (buttons, inputs, the project switcher, the
+ * ⌘K search) with everything around them. Scoped to the console — the marketing/docs sites
+ * keep the shared 6px. Set to 0 for fully-square, or remove this block to restore 6px. */
+:root {
+  --radius: 0.125rem;
+}
