@@ -155,6 +155,33 @@ export const maskingPolicy = z.object({
 });
 export type MaskingPolicy = z.infer<typeof maskingPolicy>;
 
+// Runtime guardrails: the per-project policy config, and a single check's verdict.
+export const guardrailPolicy = z.object({
+  enabled: z.boolean(),
+  pii: z.boolean(),
+  piiAction: z.enum(["redact", "block"]),
+  builtins: z.array(z.string()),
+  customPatterns: z.array(z.string()),
+  redactWith: z.string(),
+  injection: z.boolean(),
+  blockedTerms: z.array(z.string()),
+  available: z.array(z.string()),
+});
+export type GuardrailPolicy = z.infer<typeof guardrailPolicy>;
+
+export const guardrailVerdict = z.object({
+  verdict: z.enum(["allow", "redact", "block"]),
+  findings: z.array(
+    z.object({
+      category: z.enum(["pii", "injection", "blocked_term"]),
+      type: z.string(),
+      count: z.number(),
+    }),
+  ),
+  redactedText: z.string().optional(),
+});
+export type GuardrailVerdict = z.infer<typeof guardrailVerdict>;
+
 export const analyticsSink = z.object({
   enabled: z.boolean(),
   type: z.string(),
