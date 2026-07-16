@@ -76,6 +76,7 @@ model Project {
   reviewQueues    ReviewQueue[]
   retention       RetentionPolicy?
   webhooks        Webhook[]
+  webhookDeliveries WebhookDelivery[]
   widgets         Widget[]
   comments        Comment[]
   savedViews      SavedView[]
@@ -634,8 +635,30 @@ model Webhook {
   lastAttemptAt DateTime? // when the most recent delivery was attempted
   failureCount  Int       @default(0) // consecutive failures since the last success
   createdAt     DateTime  @default(now())
+  deliveries    WebhookDelivery[]
 
   @@index([projectId, event])
+}
+
+// One row per webhook delivery attempt-set (the historical log; the Webhook row keeps only
+// the latest snapshot). Powers the delivery-log drill-in and debugging retries.
+model WebhookDelivery {
+  id         String   @id @default(cuid())
+  webhookId  String
+  webhook    Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  event      String
+  status     Int? // final HTTP status (null = network error / never responded)
+  ok         Boolean
+  error      String   @default("")
+  attempts   Int      @default(1) // how many attempts were made before the final outcome
+  durationMs Int? // total wall time across attempts
+  createdAt  DateTime @default(now())
+
+  @@index([webhookId, createdAt])
+  @@index([projectId, createdAt])
+  @@map("webhookDelivery")
 }
 
 // A trigger->action automation: when `trigger` fires (score.created / trace.created /

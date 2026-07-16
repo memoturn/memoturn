@@ -50,7 +50,9 @@ import {
   evaluateGate,
   exportTracesCsv,
   exportTracesJsonl,
+  exportTracesParquet,
   getAnalyticsSink,
+  getCostBreakdown,
   getCostBudget,
   getDatasetComparison,
   getDatasetDetail,
@@ -96,6 +98,7 @@ import {
   listTraces,
   listUserProjects,
   listUsers,
+  listWebhookDeliveries,
   listWebhooks,
   listWidgets,
   loadGuardrailPolicy,
@@ -379,7 +382,8 @@ app.get("/v1/payloads/*", async (c) => {
 app.get("/v1/exports/traces", async (c) => {
   const url = new URL(c.req.url);
   const q = url.searchParams;
-  const format = q.get("format") === "csv" ? "csv" : "jsonl";
+  const fmt = q.get("format");
+  const format = fmt === "csv" ? "csv" : fmt === "parquet" ? "parquet" : "jsonl";
   // Honor the same filters as the trace list so an export matches the on-screen view.
   const filters = {
     limit: Number(q.get("limit") ?? 1000),
@@ -396,6 +400,13 @@ app.get("/v1/exports/traces", async (c) => {
     return c.body(body, 200, {
       "content-type": "text/csv",
       "content-disposition": "attachment; filename=memoturn-traces.csv",
+    });
+  }
+  if (format === "parquet") {
+    const buf = await exportTracesParquet(c.get("projectId"), filters);
+    return c.body(new Uint8Array(buf), 200, {
+      "content-type": "application/vnd.apache.parquet",
+      "content-disposition": "attachment; filename=memoturn-traces.parquet",
     });
   }
   const body = await exportTracesJsonl(c.get("projectId"), filters);
@@ -866,6 +877,34 @@ app.openapi(
     },
   }),
   async (c) => c.json({ data: await getToolAnalytics(c.get("projectId"), c.req.valid("query").days ?? 30) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/metrics/cost-breakdown",
+    summary: "Top spenders: cost rolled up by end user or session, ranked by spend",
+    tags: ["metrics"],
+    security,
+    request: {
+      query: z.object({
+        by: z.enum(["user", "session"]).optional(),
+        days: z.coerce.number().int().min(1).max(365).optional(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+      }),
+    },
+    responses: {
+      200: { description: "Cost rollup", content: { "application/json": { schema: C.listOf(C.costRollupRow) } } },
+    },
+  }),
+  async (c) => {
+    const q = c.req.valid("query");
+    const data = await getCostBreakdown(c.get("projectId"), q.by ?? "user", {
+      days: q.days ?? 30,
+      limit: q.limit ?? 20,
+    });
+    return c.json({ data });
+  },
 );
 
 app.openapi(
@@ -2263,6 +2302,27 @@ app.openapi(
     await recordAudit(c.get("projectId"), c.get("actor"), "webhook.delete", `webhook:${c.req.valid("param").id}`);
     return c.json(result);
   },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/webhooks/{id}/deliveries",
+    summary: "A webhook's recent delivery log (newest first)",
+    tags: ["platform"],
+    security,
+    request: {
+      params: z.object({ id: z.string() }),
+      query: z.object({ limit: z.coerce.number().int().min(1).max(200).optional() }),
+    },
+    responses: {
+      200: { description: "Deliveries", content: { "application/json": { schema: C.listOf(C.webhookDelivery) } } },
+    },
+  }),
+  async (c) =>
+    c.json({
+      data: await listWebhookDeliveries(c.get("projectId"), c.req.valid("param").id, c.req.valid("query").limit ?? 50),
+    }),
 );
 
 // ── Dashboard widgets ────────────────────────────────────────────────────────────

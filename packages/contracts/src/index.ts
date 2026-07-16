@@ -407,6 +407,16 @@ export const metricsSummary = z.object({
 });
 export type MetricsSummary = z.infer<typeof metricsSummary>;
 
+// Cost rollup: spend grouped by a dimension (user or session), ranked by cost. `key` is the
+// user_id or session_id; empty keys are excluded upstream.
+export const costRollupRow = z.object({
+  key: z.string(),
+  trace_count: z.number(),
+  total_cost: z.number(),
+  total_tokens: z.number(),
+});
+export type CostRollupRow = z.infer<typeof costRollupRow>;
+
 // Per-tool (named SPAN observation) analytics: call volume, error rate, and latency —
 // the top agent-debugging view ("which tool/step is slow or failing").
 export const toolAnalyticsRow = z.object({
@@ -736,6 +746,19 @@ export const webhook = z.object({
   failureCount: z.number().optional(),
 });
 export type Webhook = z.infer<typeof webhook>;
+
+// One entry in a webhook's delivery log (historical; newest first).
+export const webhookDelivery = z.object({
+  id: z.string(),
+  event: z.string(),
+  status: z.number().nullable(),
+  ok: z.boolean(),
+  error: z.string(),
+  attempts: z.number(),
+  durationMs: z.number().nullable(),
+  createdAt: z.string(),
+});
+export type WebhookDelivery = z.infer<typeof webhookDelivery>;
 
 export const widgetMetric = z.enum(["cost", "tokens", "generations", "latency_p95"]);
 export const widgetBreakdown = z.enum(["by_day", "by_model"]);

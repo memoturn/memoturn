@@ -17,6 +17,7 @@ import type {
   ChatMessage,
   Comment,
   CostBudget,
+  CostRollupRow,
   DatasetDetail,
   DatasetListItem,
   DatasetVersionDetail,
@@ -60,6 +61,7 @@ import type {
   TraceTags,
   UserPage,
   Webhook,
+  WebhookDelivery,
   Widget,
 } from "@memoturn/contracts";
 
@@ -219,6 +221,8 @@ export const api = {
   getMetrics: (days = 30) => get<MetricsSummary>(`/v1/metrics${qs({ days })}`),
   getToolAnalytics: (days = 30) =>
     get<{ data: ToolAnalyticsRow[] }>(`/v1/metrics/tools${qs({ days })}`).then((r) => r.data),
+  getCostBreakdown: (by: "user" | "session", days = 30, limit = 20) =>
+    get<{ data: CostRollupRow[] }>(`/v1/metrics/cost-breakdown${qs({ by, days, limit })}`).then((r) => r.data),
   listPrompts: () => get<{ data: PromptListItem[] }>(`/v1/prompts`).then((r) => r.data),
   getPrompt: (name: string) => get<PromptDetail>(`/v1/prompts/${encodeURIComponent(name)}/detail`),
   listDatasets: () => get<{ data: DatasetListItem[] }>(`/v1/datasets`).then((r) => r.data),
@@ -298,6 +302,10 @@ export const api = {
   createWebhook: (body: { url: string; event?: string; threshold?: number | null }) =>
     post<Webhook>(`/v1/webhooks`, body),
   deleteWebhook: (id: string) => del(`/v1/webhooks/${encodeURIComponent(id)}`),
+  listWebhookDeliveries: (id: string, limit = 50) =>
+    get<{ data: WebhookDelivery[] }>(`/v1/webhooks/${encodeURIComponent(id)}/deliveries${qs({ limit })}`).then(
+      (r) => r.data,
+    ),
   listAutomations: () => get<{ data: Automation[] }>(`/v1/automations`).then((r) => r.data),
   createAutomation: (body: {
     name: string;
@@ -444,7 +452,7 @@ export async function streamPlayground(body: PlaygroundRequest, onDelta: (delta:
  * Honors the same filters as the trace list so the export matches the on-screen view.
  */
 export async function downloadTracesExport(
-  format: "jsonl" | "csv" = "jsonl",
+  format: "jsonl" | "csv" | "parquet" = "jsonl",
   filters: TraceFilters & { limit?: number } = {},
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/v1/exports/traces${qs({ format, ...filters })}`, { headers: headers() });

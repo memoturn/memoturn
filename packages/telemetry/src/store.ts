@@ -1,4 +1,5 @@
 import type {
+  CostRollupRow,
   DailyMetric,
   EmbeddingPoint,
   ModelMetric,
@@ -93,6 +94,10 @@ export interface TelemetryStore {
   evaluatorScoreTrend(projectId: string, days: number): Promise<EvalScoreTrendRow[]>;
   metricsByDay(projectId: string, days: number): Promise<DailyMetric[]>;
   metricsByModel(projectId: string, days: number): Promise<ModelMetric[]>;
+  /** Spend ranked by user_id (top spenders). Joins observation cost onto traces. */
+  costByUser(projectId: string, opts?: { days?: number; limit?: number }): Promise<CostRollupRow[]>;
+  /** Spend ranked by session_id (top spenders). Joins observation cost onto traces. */
+  costBySession(projectId: string, opts?: { days?: number; limit?: number }): Promise<CostRollupRow[]>;
   /** Per-tool-name analytics over SPAN observations: calls, error rate, latency. */
   toolAnalytics(projectId: string, days: number): Promise<ToolAnalyticsRow[]>;
   /** Aggregate GENERATION metrics over a short trailing window (minutes) — for alert evaluation. */

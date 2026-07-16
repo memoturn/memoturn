@@ -257,6 +257,16 @@ function DashboardPage() {
     refetchInterval: 10_000,
     placeholderData: keepPreviousData,
   });
+  const { data: costByUser } = useQuery({
+    queryKey: ["cost-by-user", days],
+    queryFn: () => api.getCostBreakdown("user", days, 10),
+    placeholderData: keepPreviousData,
+  });
+  const { data: costBySession } = useQuery({
+    queryKey: ["cost-by-session", days],
+    queryFn: () => api.getCostBreakdown("session", days, 10),
+    placeholderData: keepPreviousData,
+  });
 
   if (isLoading) return <DashboardSkeleton days={days} />;
   if (error) return <EmptyState title="Failed to load dashboard" description={String(error)} />;
@@ -318,6 +328,27 @@ function DashboardPage() {
             metric="Tokens"
             color="var(--chart-2)"
             footer={`${Math.round(totalModelTokens).toLocaleString()} tokens across ${tokensByModel.length} model${tokensByModel.length === 1 ? "" : "s"}`}
+          />
+        </div>
+      )}
+
+      {((costByUser && costByUser.length > 0) || (costBySession && costBySession.length > 0)) && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <ModelBarChart
+            title="Top users by cost"
+            description="Highest-spend end users"
+            data={(costByUser ?? []).map((r) => ({ model: r.key, value: r.total_cost }))}
+            metric="Cost"
+            color="var(--chart-3)"
+            footer={`${costByUser?.length ?? 0} user${(costByUser?.length ?? 0) === 1 ? "" : "s"}`}
+          />
+          <ModelBarChart
+            title="Top sessions by cost"
+            description="Highest-spend sessions"
+            data={(costBySession ?? []).map((r) => ({ model: r.key, value: r.total_cost }))}
+            metric="Cost"
+            color="var(--chart-4)"
+            footer={`${costBySession?.length ?? 0} session${(costBySession?.length ?? 0) === 1 ? "" : "s"}`}
           />
         </div>
       )}
