@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { DataTable } from "../components/data-table";
 import { EmptyState } from "../components/empty-state";
+import { HelpTip } from "../components/help-tip";
 import { KindBadge } from "../components/kind-badge";
 import { PageHeader } from "../components/page-header";
 import { StatTile } from "../components/stat-tile";
@@ -211,11 +212,15 @@ function ReviewPage() {
       <PageHeader
         title="Review queues"
         description="Human-in-the-loop annotation. Submitting a review writes an ANNOTATION score on the trace."
+        help="Route traces to people for manual scoring; each submitted review writes an ANNOTATION score on the trace."
       />
 
       {throughput && throughput.totals.total > 0 && (
         <div className="space-y-3">
-          <h2 className="text-lg font-semibold tracking-tight">Throughput</h2>
+          <h2 className="flex items-center gap-1.5 text-lg font-semibold tracking-tight">
+            Throughput
+            <HelpTip>Counts of review items still awaiting review, completed, and skipped across your queues.</HelpTip>
+          </h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <StatTile label="Total items" value={throughput.totals.total} icon={ListChecks} />
             <StatTile label="Pending" value={throughput.totals.pending} icon={Hourglass} />
@@ -279,7 +284,15 @@ function ReviewPage() {
                   name="scoreName"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Score name</FormLabel>
+                      <FormLabel>
+                        <span className="inline-flex items-center gap-1">
+                          Score name
+                          <HelpTip>
+                            Name of the score reviews write; a matching score config sets whether it is numeric or
+                            categorical.
+                          </HelpTip>
+                        </span>
+                      </FormLabel>
                       <FormControl>
                         <Input placeholder="human-rating" {...field} />
                       </FormControl>
@@ -323,8 +336,9 @@ function ReviewPage() {
             </h2>
             <div className="flex items-center gap-2">
               <Checkbox id="mine-only" checked={mineOnly} onCheckedChange={(c) => setMineOnly(c === true)} />
-              <Label htmlFor="mine-only" className="text-muted-foreground">
+              <Label htmlFor="mine-only" className="inline-flex items-center gap-1 text-muted-foreground">
                 assigned to me only
+                <HelpTip>Show only items assigned to you, so reviewers can split the queue without overlap.</HelpTip>
               </Label>
             </div>
           </div>

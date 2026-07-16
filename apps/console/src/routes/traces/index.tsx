@@ -20,6 +20,7 @@ import {
 import { Fragment, type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "../../components/empty-state";
+import { HelpTip } from "../../components/help-tip";
 import { KindBadge } from "../../components/kind-badge";
 import { PageHeader } from "../../components/page-header";
 import { ScoreBadges } from "../../components/score-badges";
@@ -341,6 +342,12 @@ function FacetSections({ days, environment, search, userId, tag, scoreName, leve
 function FacetPanel(props: FacetProps) {
   return (
     <aside className="sticky top-4 hidden max-h-[calc(100svh-2rem)] w-56 shrink-0 self-start overflow-y-auto lg:block">
+      <div className="mb-3 flex items-center gap-1.5 text-sm font-medium">
+        Filters
+        <HelpTip>
+          Click a value in any section to narrow the list; counts update to reflect the other active filters.
+        </HelpTip>
+      </div>
       <FacetSections {...props} />
     </aside>
   );
@@ -521,6 +528,7 @@ function TracesPage() {
     <div className="space-y-4">
       <PageHeader
         title="Traces"
+        help="A trace is one end-to-end request through your app, with all of its nested spans, tokens, cost, and scores."
         actions={
           <>
             <Select value={groupBy} onValueChange={(v) => setGroupBy(v as GroupKey)}>
@@ -536,6 +544,7 @@ function TracesPage() {
                 ))}
               </SelectContent>
             </Select>
+            <HelpTip>Cluster the rows on this page by name, user, environment, or session.</HelpTip>
             <Button
               variant={compact ? "default" : "outline"}
               size="sm"
@@ -546,6 +555,7 @@ function TracesPage() {
               <Rows2 />
               Compact
             </Button>
+            <HelpTip>Toggle denser rows to fit more traces on screen.</HelpTip>
             <ColumnsMenu order={order} hidden={hidden} toggle={toggleColumn} move={moveColumn} />
             <Button variant="outline" size="sm" onClick={promptSaveView} disabled={readOnly} className="gap-2">
               <Save />
@@ -585,11 +595,17 @@ function TracesPage() {
 
       {(isLoading || (traces && traces.length > 0)) && (
         <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
-          <StatTile label="Traces" value={traces ? total : <Skeleton className="h-6 w-16" />} icon={Activity} />
+          <StatTile
+            label="Traces"
+            value={traces ? total : <Skeleton className="h-6 w-16" />}
+            icon={Activity}
+            help="Total traces matching the current filters and time range."
+          />
           <StatTile
             label="Tokens (page)"
             value={traces ? traces.reduce((a, t) => a + Number(t.total_tokens), 0) : <Skeleton className="h-6 w-16" />}
             icon={Coins}
+            help="Sum of tokens for the traces shown on this page only."
           />
           <StatTile
             label="Cost (page)"
@@ -597,6 +613,7 @@ function TracesPage() {
               traces ? fmtCost(traces.reduce((a, t) => a + Number(t.total_cost), 0)) : <Skeleton className="h-6 w-16" />
             }
             icon={DollarSign}
+            help="Estimated spend for the traces on this page, from the model price table."
           />
         </div>
       )}
@@ -780,7 +797,16 @@ function TracesPage() {
                     </TableHead>
                     <TableHead>Name</TableHead>
                     {visibleCols.map((k) => (
-                      <TableHead key={k}>{COL_LABEL[k]}</TableHead>
+                      <TableHead key={k}>
+                        {k === "scores" ? (
+                          <span className="inline-flex items-center gap-1">
+                            {COL_LABEL[k]}
+                            <HelpTip>Evaluation scores attached to the trace by evaluators or human review.</HelpTip>
+                          </span>
+                        ) : (
+                          COL_LABEL[k]
+                        )}
+                      </TableHead>
                     ))}
                   </TableRow>
                 </TableHeader>

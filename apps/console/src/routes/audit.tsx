@@ -41,7 +41,11 @@ function AuditPage() {
 
   return (
     <div>
-      <PageHeader title="Audit log" description="Record of mutating actions across the project." />
+      <PageHeader
+        title="Audit log"
+        description="Record of mutating actions across the project."
+        help="An append-only trail of who changed what and when — every create, update, and delete action performed in this project."
+      />
       {isLoading ? (
         <Skeleton className="h-64 w-full" />
       ) : error ? (

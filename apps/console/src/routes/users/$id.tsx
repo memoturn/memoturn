@@ -65,7 +65,11 @@ function UserDetailPage() {
         </BreadcrumbList>
       </Breadcrumb>
 
-      <PageHeader title={`User ${id}`} description="Traces from this end user — click a row to preview." />
+      <PageHeader
+        title={`User ${id}`}
+        description="Traces from this end user — click a row to preview."
+        help="Every trace carrying this user id — the full activity for one end user."
+      />
 
       {isLoading ? (
         <Skeleton className="h-64 w-full" />
@@ -76,9 +80,19 @@ function UserDetailPage() {
       ) : (
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
-            <StatTile label="Traces" value={traces.length} icon={Activity} />
-            <StatTile label="Tokens" value={totalTokens} icon={Coins} />
-            <StatTile label="Cost" value={fmtCost(totalCost)} icon={DollarSign} />
+            <StatTile label="Traces" value={traces.length} icon={Activity} help="Number of traces from this user." />
+            <StatTile
+              label="Tokens"
+              value={totalTokens}
+              icon={Coins}
+              help="Total input plus output tokens across this user's traces."
+            />
+            <StatTile
+              label="Cost"
+              value={fmtCost(totalCost)}
+              icon={DollarSign}
+              help="Estimated spend for this user, from the model price table."
+            />
           </div>
 
           <div className="border">

@@ -68,7 +68,11 @@ function SessionsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Sessions" description="Grouped traces sharing a session id." />
+      <PageHeader
+        title="Sessions"
+        description="Grouped traces sharing a session id."
+        help="A session groups every trace that shares the same session id, letting you follow a full multi-turn conversation."
+      />
 
       <Input
         type="search"
@@ -84,6 +88,7 @@ function SessionsPage() {
             label="Sessions"
             value={sessions ? total : <Skeleton className="h-6 w-16" />}
             icon={MessageSquare}
+            help="Total sessions (distinct session ids) in the selected time range."
           />
           <StatTile
             label="Traces (page)"
@@ -91,6 +96,7 @@ function SessionsPage() {
               sessions ? sessions.reduce((a, s) => a + Number(s.trace_count), 0) : <Skeleton className="h-6 w-16" />
             }
             icon={Activity}
+            help="Sum of traces across the sessions shown on this page."
           />
           <StatTile
             label="Cost (page)"
@@ -102,6 +108,7 @@ function SessionsPage() {
               )
             }
             icon={DollarSign}
+            help="Estimated spend for the sessions on this page, from the model price table."
           />
         </div>
       )}

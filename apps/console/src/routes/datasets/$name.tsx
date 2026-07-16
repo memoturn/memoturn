@@ -4,6 +4,7 @@ import { Database, FlaskConical, GitBranch, Play } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "../../components/empty-state";
+import { HelpTip } from "../../components/help-tip";
 import { KindBadge } from "../../components/kind-badge";
 import { RunComparison } from "../../components/run-comparison";
 import { StatTile } from "../../components/stat-tile";
@@ -106,14 +107,30 @@ function DatasetDetailPage() {
       </div>
 
       <div className="grid grid-cols-3 gap-4 sm:max-w-lg">
-        <StatTile label="Runs" value={data.runs.length} icon={FlaskConical} />
-        <StatTile label="Items" value={data.items.length} icon={Database} />
+        <StatTile
+          label="Runs"
+          value={data.runs.length}
+          icon={FlaskConical}
+          help="A run executes this dataset's items through a model and links each result back to its trace."
+        />
+        <StatTile
+          label="Items"
+          value={data.items.length}
+          icon={Database}
+          help="Each item is one input paired with its expected output."
+        />
         <StatTile label="Versions" value={data.versions.length} icon={GitBranch} />
       </div>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-          <CardTitle>Runs ({data.runs.length})</CardTitle>
+          <CardTitle className="inline-flex items-center gap-1">
+            Runs ({data.runs.length})
+            <HelpTip>
+              Each run executes the dataset's items through a model and links every result back to its trace for
+              scoring.
+            </HelpTip>
+          </CardTitle>
           {data.versions.length > 0 && (
             <Select
               value={version === undefined ? "all" : String(version)}
@@ -184,7 +201,15 @@ function DatasetDetailPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Input</TableHead>
-                    <TableHead>Expected output</TableHead>
+                    <TableHead>
+                      <span className="inline-flex items-center gap-1">
+                        Expected output
+                        <HelpTip>
+                          The reference answer for this input — what a correct model response should match, used as the
+                          target when scoring runs.
+                        </HelpTip>
+                      </span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
