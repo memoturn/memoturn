@@ -21,6 +21,8 @@ import { createRootRoute, Link, Outlet, useLocation, useNavigate } from "@tansta
 import {
   Activity,
   Building2,
+  Check,
+  ChevronsUpDown,
   ClipboardCheck,
   Database,
   FlaskConical,
@@ -38,13 +40,14 @@ import {
   Terminal,
   Users,
 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { CommandPalette } from "../components/CommandPalette";
 import { KeyboardHelp } from "../components/keyboard-help";
 import { Logo } from "../components/logo";
 import { ModeToggle } from "../components/mode-toggle";
 import { TimeRangeSelect } from "../components/TimeRangeSelect";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../components/ui/command";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,9 +56,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { api, getActiveProject, setActiveProject } from "../lib/api";
 import { signOut, useSession } from "../lib/auth";
+import { cn } from "../lib/utils";
 
 export const Route = createRootRoute({ component: RootComponent });
 
@@ -106,31 +110,82 @@ function isActivePath(pathname: string, to: string): boolean {
   return pathname === to || pathname.startsWith(`${to}/`);
 }
 
+const initials = (name: string) =>
+  name
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 2)
+    .toUpperCase() || "··";
+
 function ProjectSwitcher() {
   const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
   const { data: projects } = useQuery({ queryKey: ["projects"], queryFn: () => api.listProjects() });
-  const active = getActiveProject() || projects?.[0]?.id || "";
+  const activeId = getActiveProject() || projects?.[0]?.id || "";
   if (!projects || projects.length === 0) return null;
+  const active = projects.find((p) => p.id === activeId) ?? projects[0];
+
+  // Group projects under their organization so multi-org users can scan by tenant.
+  const groups = new Map<string, typeof projects>();
+  for (const p of projects) {
+    const key = p.organization || "Projects";
+    const list = groups.get(key) ?? [];
+    list.push(p);
+    groups.set(key, list);
+  }
+
+  const select = (id: string) => {
+    setActiveProject(id);
+    setOpen(false);
+    qc.invalidateQueries(); // refetch all data for the newly selected project
+  };
+
   return (
-    <Select
-      value={active}
-      onValueChange={(value) => {
-        setActiveProject(value);
-        qc.invalidateQueries(); // refetch all data for the newly selected project
-      }}
-    >
-      <SelectTrigger size="sm" className="w-full" aria-label="Active project">
-        <SelectValue placeholder="Project" />
-      </SelectTrigger>
-      <SelectContent>
-        {projects.map((p) => (
-          <SelectItem key={p.id} value={p.id}>
-            {p.organization ? `${p.organization} / ` : ""}
-            {p.name} ({p.role.toLowerCase()})
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          role="combobox"
+          aria-expanded={open}
+          aria-label="Switch project"
+          className="flex h-9 w-full items-center gap-2 rounded-md border bg-background px-2 text-left text-sm shadow-xs transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          <span className="flex size-6 shrink-0 items-center justify-center rounded bg-primary/10 text-[0.625rem] font-semibold text-primary">
+            {initials(active?.name ?? "")}
+          </span>
+          <span className="grid min-w-0 flex-1 leading-tight">
+            <span className="truncate font-medium">{active?.name}</span>
+            {active?.organization && (
+              <span className="truncate text-[0.6875rem] text-muted-foreground">{active.organization}</span>
+            )}
+          </span>
+          <ChevronsUpDown className="size-3.5 shrink-0 opacity-50" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[--radix-popover-trigger-width] min-w-64 p-0">
+        <Command>
+          <CommandInput placeholder="Search projects…" className="h-9" />
+          <CommandList>
+            <CommandEmpty>No projects found.</CommandEmpty>
+            {[...groups.entries()].map(([org, ps]) => (
+              <CommandGroup key={org} heading={org}>
+                {ps.map((p) => (
+                  <CommandItem key={p.id} value={`${org} ${p.name}`} onSelect={() => select(p.id)} className="gap-2">
+                    <span className="flex size-6 shrink-0 items-center justify-center rounded bg-muted text-[0.625rem] font-semibold">
+                      {initials(p.name)}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                    <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+                      {p.role.toLowerCase()}
+                    </span>
+                    <Check className={cn("size-4 shrink-0", p.id === activeId ? "opacity-100" : "opacity-0")} />
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
