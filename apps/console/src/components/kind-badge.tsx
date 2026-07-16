@@ -16,8 +16,8 @@ const kindBadgeVariants = cva(
       tone: {
         neutral: "border-border bg-muted text-muted-foreground",
         blue: "border-blue-500/25 bg-blue-500/10 text-blue-600 dark:text-blue-400",
-        green: "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-        amber: "border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+        green: "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+        amber: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-400",
         red: "border-destructive/25 bg-destructive/10 text-destructive",
         violet: "border-violet-500/25 bg-violet-500/10 text-violet-600 dark:text-violet-400",
       },
