@@ -9,6 +9,7 @@ import {
   annotateTrace,
   applyRetention,
   assertPublicUrl,
+  assignProjectMember,
   assignReviewItem,
   auth,
   authMethods,
@@ -83,6 +84,7 @@ import {
   listEvaluatorVersions,
   listExperiments,
   listModelPrices,
+  listProjectMembers,
   listPrompts,
   listProviderConnections,
   listReviewItems,
@@ -100,6 +102,7 @@ import {
   otlpToEvents,
   recordAudit,
   recordRun,
+  removeProjectMember,
   replayDlq,
   replayTrace,
   resolvePrompt,
@@ -251,6 +254,7 @@ app.use("/v1/experiments", requireAuth);
 app.use("/v1/experiments/*", requireAuth);
 app.use("/v1/embeddings/*", requireAuth);
 app.use("/v1/projects", requireAuth);
+app.use("/v1/projects/*", requireAuth);
 app.use("/v1/audit-logs", requireAuth);
 app.use("/v1/review-queues", requireAuth);
 app.use("/v1/review-queues/*", requireAuth);
@@ -3228,6 +3232,91 @@ app.openapi(
     const result = await revokeApiKey(c.get("projectId"), id);
     await recordAudit(c.get("projectId"), c.get("actor"), "api-key.revoke", id);
     return c.json(result);
+  },
+);
+
+// ── Project-level RBAC ──────────────────────────────────────────────────────
+// Manage per-project role overrides. Operations target the caller's *active* project
+// (x-memoturn-project), so the path {id} must equal the resolved projectId — you manage the
+// project you're switched into. Writes require OWNER/ADMIN on that project.
+const wrongProject = (c: { req: { valid: (k: "param") => { id: string } }; get: (k: "projectId") => string }) =>
+  c.req.valid("param").id !== c.get("projectId");
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/projects/{id}/members",
+    summary: "List the project's org members, each with any per-project role override",
+    tags: ["platform"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Members", content: { "application/json": { schema: C.listOf(C.projectMember) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    if (wrongProject(c)) return c.json({ error: "forbidden: switch to this project to manage it" }, 403);
+    return c.json({ data: await listProjectMembers(c.get("projectId")) });
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "put",
+    path: "/v1/projects/{id}/members/{userId}",
+    summary: "Assign or update a user's role on this project (overrides their org role)",
+    tags: ["platform"],
+    security,
+    request: {
+      params: z.object({ id: z.string(), userId: z.string() }),
+      body: {
+        content: { "application/json": { schema: z.object({ role: z.enum(["owner", "admin", "member", "viewer"]) }) } },
+      },
+    },
+    responses: {
+      200: { description: "Assigned", content: { "application/json": { schema: z.object({ ok: z.boolean() }) } } },
+      400: { description: "Bad request (user not in this project's org, or invalid role)" },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c) ?? denyIfNotAdmin(c);
+    if (denied) return denied;
+    if (wrongProject(c)) return c.json({ error: "forbidden: switch to this project to manage it" }, 403);
+    const { userId } = c.req.valid("param");
+    const { role } = c.req.valid("json");
+    try {
+      await assignProjectMember(c.get("projectId"), userId, role);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "assign failed" }, 400);
+    }
+    await recordAudit(c.get("projectId"), c.get("actor"), "project-member.assign", userId, { role });
+    return c.json({ ok: true });
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/projects/{id}/members/{userId}",
+    summary: "Remove a user's per-project role override (revert to their org role)",
+    tags: ["platform"],
+    security,
+    request: { params: z.object({ id: z.string(), userId: z.string() }) },
+    responses: {
+      200: { description: "Removed", content: { "application/json": { schema: z.object({ ok: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c) ?? denyIfNotAdmin(c);
+    if (denied) return denied;
+    if (wrongProject(c)) return c.json({ error: "forbidden: switch to this project to manage it" }, 403);
+    const { userId } = c.req.valid("param");
+    await removeProjectMember(c.get("projectId"), userId);
+    await recordAudit(c.get("projectId"), c.get("actor"), "project-member.remove", userId);
+    return c.json({ ok: true });
   },
 );
 

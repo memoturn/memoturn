@@ -670,6 +670,17 @@ export const project = z.object({
 });
 export type Project = z.infer<typeof project>;
 
+// Project-level RBAC: an org member annotated with their per-project role override.
+// projectRole is null when they inherit their org role.
+export const projectMember = z.object({
+  userId: z.string(),
+  email: z.string(),
+  name: z.string(),
+  orgRole: z.string(),
+  projectRole: z.string().nullable(),
+});
+export type ProjectMember = z.infer<typeof projectMember>;
+
 export const auditEntry = z.object({
   actor: z.string(),
   action: z.string(),

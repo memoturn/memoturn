@@ -76,20 +76,37 @@ export interface ProjectAccess {
   organizationId: string;
 }
 
-/** List every project a user can access (across their org memberships), with role. */
-export async function listUserProjects(userId: string) {
-  const members = await prisma.member.findMany({
-    where: { userId },
-    include: { organization: { include: { projects: { orderBy: { createdAt: "asc" } } } } },
-    orderBy: { createdAt: "asc" },
+/**
+ * The user's effective role on a project: a per-project `ProjectMember` assignment overrides
+ * the org-level role (elevate or restrict) when present, else the org role is inherited.
+ */
+async function effectiveRole(userId: string, projectId: string, orgRole: string | null): Promise<WorkspaceRole> {
+  const override = await prisma.projectMember.findUnique({
+    where: { projectId_userId: { projectId, userId } },
+    select: { role: true },
   });
+  return toWorkspaceRole(override?.role ?? orgRole);
+}
+
+/** List every project a user can access (across their org memberships), with effective role. */
+export async function listUserProjects(userId: string) {
+  const [members, overrides] = await Promise.all([
+    prisma.member.findMany({
+      where: { userId },
+      include: { organization: { include: { projects: { orderBy: { createdAt: "asc" } } } } },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.projectMember.findMany({ where: { userId }, select: { projectId: true, role: true } }),
+  ]);
+  // Per-project role overrides win over the org role for the projects they name.
+  const overrideByProject = new Map(overrides.map((o) => [o.projectId, o.role]));
   return members.flatMap((m) =>
     m.organization.projects.map((p) => ({
       id: p.id,
       name: p.name,
       slug: p.slug,
       organization: m.organization.name,
-      role: toWorkspaceRole(m.role),
+      role: toWorkspaceRole(overrideByProject.get(p.id) ?? m.role),
     })),
   );
 }
@@ -111,7 +128,11 @@ export async function getUserProjectAccess(
         where: { organizationId_userId: { userId, organizationId: project.organizationId } },
       });
       if (member)
-        return { projectId: project.id, role: toWorkspaceRole(member.role), organizationId: project.organizationId };
+        return {
+          projectId: project.id,
+          role: await effectiveRole(userId, project.id, member.role),
+          organizationId: project.organizationId,
+        };
     }
   }
 
@@ -124,7 +145,11 @@ export async function getUserProjectAccess(
       orderBy: { createdAt: "asc" },
     });
     if (member && project)
-      return { projectId: project.id, role: toWorkspaceRole(member.role), organizationId: activeOrganizationId };
+      return {
+        projectId: project.id,
+        role: await effectiveRole(userId, project.id, member.role),
+        organizationId: activeOrganizationId,
+      };
   }
 
   const member = await prisma.member.findFirst({
@@ -134,7 +159,11 @@ export async function getUserProjectAccess(
   });
   const project = member?.organization.projects[0];
   if (!member || !project) return null;
-  return { projectId: project.id, role: toWorkspaceRole(member.role), organizationId: member.organizationId };
+  return {
+    projectId: project.id,
+    role: await effectiveRole(userId, project.id, member.role),
+    organizationId: member.organizationId,
+  };
 }
 
 /** @deprecated use getUserProjectAccess */
