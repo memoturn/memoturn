@@ -397,6 +397,15 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(win.trace_count).toBe(1);
     expect(win.p95_latency_ms).toBeGreaterThan(1000);
 
+    // Anomaly-baseline series: 2 windows of 180m each (covers 6h). The ~1h-old seeded
+    // generation lands in the NEWEST bucket (last element); the older bucket is zero-filled.
+    const series = await store.metricWindowSeries(P, 180, 2);
+    expect(series).toHaveLength(2);
+    expect(series[1]!.generations).toBe(1);
+    expect(series[1]!.trace_count).toBe(1);
+    expect(series[1]!.total_cost).toBeCloseTo(0.003, 6);
+    expect(series[0]!.generations).toBe(0); // no data in the older window
+
     // Batched variant (alert cron): one grouped query for many projects. The known project
     // matches; an unknown project is present with zeroed metrics (never absent).
     const batch = await store.metricsWindowByProjects([P, "proj-absent"], 7 * 24 * 60);

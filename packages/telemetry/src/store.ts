@@ -120,6 +120,12 @@ export interface TelemetryStore {
    * Projects with no rows in the window are present with zeroed metrics.
    */
   metricsWindowByProjects(projectIds: string[], sinceMinutes: number): Promise<Map<string, WindowMetric>>;
+  /**
+   * The metric over the last `buckets` consecutive `windowMinutes`-wide windows, oldest → newest
+   * (last element = the current window). Missing buckets are zero-filled. Feeds anomaly alerts:
+   * the baseline (all but the last) gives a rolling mean/stddev to z-score the current value.
+   */
+  metricWindowSeries(projectId: string, windowMinutes: number, buckets: number): Promise<WindowMetric[]>;
   countTracesSince(projectId: string, days: number): Promise<number>;
   widgetSeries(
     projectId: string,
