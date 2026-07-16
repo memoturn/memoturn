@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Skeleton } from "../../components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { api, type PromptDetail, type PromptVersionDetail } from "../../lib/api";
+import { diffLines } from "../../lib/diff";
 
 function fmtCost(n: number): string {
   return n > 0 ? `$${n.toFixed(6)}` : "—";
@@ -111,44 +112,6 @@ function versionText(v: PromptVersionDetail): string {
       ? `\n--- config ---\n${JSON.stringify(v.config, null, 2)}`
       : "";
   return renderContent(v) + config;
-}
-
-type DiffRow = { type: "same" | "add" | "del"; text: string };
-
-/** Line-level diff via longest-common-subsequence (dependency-free). */
-function diffLines(a: string, b: string): DiffRow[] {
-  const aL = a.split("\n");
-  const bL = b.split("\n");
-  const n = aL.length;
-  const m = bL.length;
-  const at = (xs: string[], k: number): string => xs[k] ?? "";
-  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
-  const cell = (i: number, j: number): number => dp[i]?.[j] ?? 0;
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      const row = dp[i];
-      if (row) row[j] = at(aL, i) === at(bL, j) ? cell(i + 1, j + 1) + 1 : Math.max(cell(i + 1, j), cell(i, j + 1));
-    }
-  }
-  const rows: DiffRow[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (at(aL, i) === at(bL, j)) {
-      rows.push({ type: "same", text: at(aL, i) });
-      i++;
-      j++;
-    } else if (cell(i + 1, j) >= cell(i, j + 1)) {
-      rows.push({ type: "del", text: at(aL, i) });
-      i++;
-    } else {
-      rows.push({ type: "add", text: at(bL, j) });
-      j++;
-    }
-  }
-  while (i < n) rows.push({ type: "del", text: at(aL, i++) });
-  while (j < m) rows.push({ type: "add", text: at(bL, j++) });
-  return rows;
 }
 
 function VersionDiff({ prompt }: { prompt: PromptDetail }) {

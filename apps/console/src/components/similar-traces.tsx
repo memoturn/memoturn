@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Sparkles } from "lucide-react";
+import { GitCompare, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { api } from "../lib/api";
 import { Button } from "./ui/button";
@@ -56,12 +56,8 @@ export function SimilarTraces({ traceId }: { traceId: string }) {
             {data.map((t) => {
               const pct = Math.max(0, Math.round(t.similarity * 100));
               return (
-                <li key={t.id}>
-                  <Link
-                    to="/traces/$id"
-                    params={{ id: t.id }}
-                    className="flex items-center gap-3 py-2 transition-colors hover:bg-accent/40"
-                  >
+                <li key={t.id} className="group flex items-center gap-3 py-2 transition-colors hover:bg-accent/40">
+                  <Link to="/traces/$id" params={{ id: t.id }} className="flex min-w-0 flex-1 items-center gap-3">
                     <span className="flex w-11 shrink-0 justify-center">
                       <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-primary">
                         {pct}%
@@ -75,6 +71,14 @@ export function SimilarTraces({ traceId }: { traceId: string }) {
                       <span className="block">{fmtCost(t.total_cost)}</span>
                       <span className="block">{t.observation_count} obs</span>
                     </span>
+                  </Link>
+                  <Link
+                    to="/traces/compare"
+                    search={{ a: traceId, b: t.id }}
+                    className="shrink-0 rounded border px-2 py-1 text-xs text-muted-foreground opacity-0 transition-opacity hover:bg-accent focus-visible:opacity-100 group-hover:opacity-100"
+                    aria-label={`Diff against ${t.name || t.id}`}
+                  >
+                    <GitCompare className="size-3.5" />
                   </Link>
                 </li>
               );
