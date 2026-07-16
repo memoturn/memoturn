@@ -12,7 +12,7 @@ import {
   Tag,
   Trash2,
 } from "lucide-react";
-import { type ReactNode, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   api,
@@ -30,7 +30,17 @@ import { HelpTip } from "./help-tip";
 import { KindBadge, type KindBadgeTone, toneForKind } from "./kind-badge";
 import { ProviderIcon } from "./provider-icon";
 import { SimilarTraces } from "./similar-traces";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "./ui/accordion";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "./ui/alert-dialog";
 import { Badge } from "./ui/badge";
 import {
   Breadcrumb,
@@ -72,6 +82,11 @@ function ms(t: string | null): number | null {
   return Number.isNaN(v) ? null : v;
 }
 
+/** Smooth scroll, but instant for users who prefer reduced motion. */
+function scrollBehavior(): ScrollBehavior {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+}
+
 /** Tone for a trace score source (EVAL / ANNOTATION / other). */
 function toneForSource(source: string): KindBadgeTone {
   if (source === "EVAL") return "blue";
@@ -89,34 +104,6 @@ function toneForLevel(level: string): KindBadgeTone {
 /** Score comments are meant for human notes; some evaluators stuff a JSON blob here — hide those inline. */
 function looksJson(comment: string): boolean {
   return /^\s*[[{]/.test(comment);
-}
-
-type ScoreLike = { source: string; name: string; value: number | null; string_value: string; comment: string };
-
-/** Collapse duplicate scores (same source+name) into one chip: numeric → avg, else latest category. */
-function aggregateTraceScores(scores: ScoreLike[]) {
-  const groups = new Map<
-    string,
-    { source: string; name: string; vals: number[]; str: string; comment: string; count: number }
-  >();
-  for (const s of scores) {
-    const key = `${s.source}::${s.name}`;
-    const g = groups.get(key) ?? { source: s.source, name: s.name, vals: [], str: "", comment: "", count: 0 };
-    g.count++;
-    if (s.value != null) g.vals.push(s.value);
-    else if (s.string_value) g.str = s.string_value;
-    if (!g.comment && s.comment && !looksJson(s.comment)) g.comment = s.comment;
-    groups.set(key, g);
-  }
-  return [...groups.values()].map((g) => ({
-    source: g.source,
-    name: g.name,
-    count: g.count,
-    comment: g.comment,
-    display: g.vals.length
-      ? Number((g.vals.reduce((a, b) => a + b, 0) / g.vals.length).toFixed(2)).toString()
-      : g.str || "—",
-  }));
 }
 
 const PRE_CLASS = "overflow-auto border bg-muted/50 p-3 text-xs max-h-80";
@@ -533,8 +520,17 @@ function TreeGuide({ kind, x }: { kind: GuideKind; x: number }) {
   );
 }
 
-function WaterfallRow({ obs, onSelect, onToggle }: { obs: Laid; onSelect?: () => void; onToggle?: () => void }) {
-  const label = `${obs.name || obs.id.slice(0, 8)}${obs.model ? ` · ${obs.model}` : ""}`;
+function WaterfallRow({
+  obs,
+  selected,
+  onSelect,
+  onToggle,
+}: {
+  obs: Laid;
+  selected?: boolean;
+  onSelect?: () => void;
+  onToggle?: () => void;
+}) {
   const collapsed = obs.hiddenCount > 0;
   // Errors/warnings tint the whole row so failures pop while scanning the waterfall.
   const tint =
@@ -546,13 +542,18 @@ function WaterfallRow({ obs, onSelect, onToggle }: { obs: Laid; onSelect?: () =>
   // Ancestor of a failure → accent the branch so you can trace the failing path (the ERROR row
   // itself already carries the red tint).
   const failAccent = obs.onFailedPath && obs.level !== "ERROR" ? "border-l-2 border-l-destructive/50" : "";
+  // Selection uses a ring (not a bg) so it reads on top of the error/warning tints too.
+  const selectedRing = selected ? "bg-muted/50 ring-1 ring-inset ring-primary/50" : "";
   const bar = obs.level === "ERROR" ? "bg-destructive" : barColor(obs.type);
+  const label = `${obs.name || obs.id.slice(0, 8)}${obs.model ? ` · ${obs.model}` : ""}`;
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: interactive only when onSelect is set, where role/tabIndex/onKeyDown are all provided
     <div
-      className={`group grid ${WATERFALL_COLS} items-center border-b transition-colors last:border-b-0 ${tint} ${failAccent} ${onSelect ? "cursor-pointer" : ""}`}
+      data-obs-row={obs.id}
+      className={`group grid ${WATERFALL_COLS} items-center border-b transition-colors last:border-b-0 ${tint} ${failAccent} ${selectedRing} ${onSelect ? "cursor-pointer focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none" : ""}`}
       role={onSelect ? "button" : undefined}
       tabIndex={onSelect ? 0 : undefined}
+      aria-current={selected || undefined}
       onClick={onSelect}
       onKeyDown={(e) => {
         if (onSelect && (e.key === "Enter" || e.key === " ")) {
@@ -587,16 +588,23 @@ function WaterfallRow({ obs, onSelect, onToggle }: { obs: Laid; onSelect?: () =>
             <span className="size-4 shrink-0" aria-hidden />
           )}
           <KindBadge tone={toneForKind(obs.type)}>{obs.type.toLowerCase()}</KindBadge>
-          <span className="truncate font-medium">{obs.name || obs.id.slice(0, 8)}</span>
+          {/* Name gets the full column width; the model sits on a muted second line so a long
+              model string ("claude-sonnet-4-6") never clips a short name ("step-2"). */}
+          <div className="flex min-w-0 flex-col justify-center">
+            <span className="truncate font-medium leading-tight">{obs.name || obs.id.slice(0, 8)}</span>
+            {obs.model && (
+              <span
+                className="flex min-w-0 items-center gap-1 text-[0.6875rem] leading-tight text-muted-foreground"
+                title={obs.model}
+              >
+                <ProviderIcon provider={obs.provider} model={obs.model} size={12} />
+                <span className="truncate">{obs.model}</span>
+              </span>
+            )}
+          </div>
           {collapsed && (
             <span className="shrink-0 rounded bg-muted px-1 text-[0.6875rem] tabular-nums text-muted-foreground">
               +{obs.hiddenCount}
-            </span>
-          )}
-          {obs.model && (
-            <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
-              <ProviderIcon provider={obs.provider} model={obs.model} size={13} />
-              {obs.model}
             </span>
           )}
           {obs.level !== "DEFAULT" && <KindBadge tone={toneForLevel(obs.level)}>{obs.level.toLowerCase()}</KindBadge>}
@@ -696,73 +704,72 @@ function AddToDatasetButton({ obs }: { obs: ObservationDetail }) {
   );
 }
 
-function ObservationDetailItem({
-  obs,
-  registerRef,
-}: {
-  obs: ObservationDetail;
-  registerRef?: (el: HTMLDivElement | null) => void;
-}) {
+/** The input/output/retrieval/status body for one observation — the master-detail pane's content. */
+function ObservationPayloadContent({ obs }: { obs: ObservationDetail }) {
   return (
-    <AccordionItem value={obs.id} ref={registerRef} className="scroll-mt-20">
-      <AccordionTrigger>
-        <div className="flex flex-wrap items-center gap-2">
-          <KindBadge tone={toneForKind(obs.type)}>{obs.type.toLowerCase()}</KindBadge>
-          <span className="font-medium">{obs.name || obs.id.slice(0, 8)}</span>
-          {obs.total_tokens > 0 && <span className="text-muted-foreground">· {obs.total_tokens} tok</span>}
-          {Number(obs.total_cost) > 0 && (
-            <span className="text-muted-foreground">· ${Number(obs.total_cost).toFixed(6)}</span>
-          )}
-          {obs.level !== "DEFAULT" && <KindBadge tone={toneForLevel(obs.level)}>{obs.level.toLowerCase()}</KindBadge>}
-          {obs.prompt_id && (
-            <Link
-              to="/prompts/$name"
-              params={{ name: obs.prompt_id }}
-              onClick={(e) => e.stopPropagation()}
-              className="inline-flex items-center gap-1 text-primary hover:underline"
-            >
-              <Tag className="size-3" />
-              {obs.prompt_id}
-              {obs.prompt_version ? ` v${obs.prompt_version}` : ""}
+    <div className="space-y-3">
+      {obs.type === "GENERATION" && obs.input && (
+        <div className="flex flex-wrap justify-end gap-2">
+          <AddToDatasetButton obs={obs} />
+          <Button asChild variant="outline" size="sm">
+            <Link to="/playground" onClick={() => writePlaygroundSeed(obs)}>
+              <FlaskConical className="size-3.5" />
+              Open in Playground
             </Link>
-          )}
+          </Button>
         </div>
-      </AccordionTrigger>
-      <AccordionContent className="space-y-3">
-        {obs.type === "GENERATION" && obs.input && (
-          <div className="flex justify-end gap-2">
-            <AddToDatasetButton obs={obs} />
-            <Button asChild variant="outline" size="sm">
-              <Link to="/playground" onClick={() => writePlaygroundSeed(obs)}>
-                <FlaskConical className="size-3.5" />
-                Open in Playground
-              </Link>
-            </Button>
-          </div>
+      )}
+      <MediaPreview raw={obs.input} />
+      <MediaPreview raw={obs.output} />
+      {obs.input && (
+        <div className="space-y-1">
+          <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Input</div>
+          <PayloadView raw={obs.input} />
+        </div>
+      )}
+      {obs.output && (
+        <div className="space-y-1">
+          <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Output</div>
+          <PayloadView raw={obs.output} />
+        </div>
+      )}
+      {obs.retrieval_documents.length > 0 && <RetrievalDocs docs={obs.retrieval_documents} />}
+      {obs.status_message && (
+        <div className="space-y-1">
+          <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Status</div>
+          <pre className={PRE_CLASS}>{obs.status_message}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The selected observation's payload with an identifying header — the detail half of the split. */
+function ObservationDetailPanel({ obs }: { obs: ObservationDetail }) {
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2 border-b pb-3">
+        <KindBadge tone={toneForKind(obs.type)}>{obs.type.toLowerCase()}</KindBadge>
+        <span className="font-medium">{obs.name || obs.id.slice(0, 8)}</span>
+        {obs.total_tokens > 0 && <span className="text-muted-foreground">· {obs.total_tokens} tok</span>}
+        {Number(obs.total_cost) > 0 && (
+          <span className="text-muted-foreground">· ${Number(obs.total_cost).toFixed(6)}</span>
         )}
-        <MediaPreview raw={obs.input} />
-        <MediaPreview raw={obs.output} />
-        {obs.input && (
-          <div className="space-y-1">
-            <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Input</div>
-            <PayloadView raw={obs.input} />
-          </div>
+        {obs.level !== "DEFAULT" && <KindBadge tone={toneForLevel(obs.level)}>{obs.level.toLowerCase()}</KindBadge>}
+        {obs.prompt_id && (
+          <Link
+            to="/prompts/$name"
+            params={{ name: obs.prompt_id }}
+            className="inline-flex items-center gap-1 text-primary hover:underline"
+          >
+            <Tag className="size-3" />
+            {obs.prompt_id}
+            {obs.prompt_version ? ` v${obs.prompt_version}` : ""}
+          </Link>
         )}
-        {obs.output && (
-          <div className="space-y-1">
-            <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Output</div>
-            <PayloadView raw={obs.output} />
-          </div>
-        )}
-        {obs.retrieval_documents.length > 0 && <RetrievalDocs docs={obs.retrieval_documents} />}
-        {obs.status_message && (
-          <div className="space-y-1">
-            <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Status</div>
-            <pre className={PRE_CLASS}>{obs.status_message}</pre>
-          </div>
-        )}
-      </AccordionContent>
-    </AccordionItem>
+      </div>
+      <ObservationPayloadContent obs={obs} />
+    </div>
   );
 }
 
@@ -905,15 +912,9 @@ function ReviewField({
 }) {
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium">{cfg.name}</span>
-        {active && (
-          <span className="text-xs text-muted-foreground">
-            current:{" "}
-            <span className="tabular-nums text-foreground">{active.value ?? (active.string_value || "—")}</span>
-          </span>
-        )}
-      </div>
+      {/* No standalone "current" value here: the highlighted button / pre-filled input already shows
+          the active selection, and the Scores list below is the source of truth for recorded values. */}
+      <span className="text-sm font-medium">{cfg.name}</span>
       {cfg.dataType === "CATEGORICAL" ? (
         <div className="flex flex-wrap gap-1.5">
           {cfg.categories.map((c) => (
@@ -978,9 +979,14 @@ function InlineReview({ traceId, scores }: { traceId: string; scores: ScoreRow[]
 
   if (!configs || configs.length === 0) return null;
 
-  // Latest ANNOTATION score per config name → the "current" value shown as active.
+  // Latest ANNOTATION per config name (by timestamp) → the active/highlighted button. Sorting by
+  // timestamp (not array order) makes "latest" well-defined and consistent with the Scores list.
   const current = new Map<string, ScoreRow>();
-  for (const s of scores) if (s.source === "ANNOTATION") current.set(s.name, s);
+  for (const s of scores) {
+    if (s.source !== "ANNOTATION") continue;
+    const prev = current.get(s.name);
+    if (!prev || s.timestamp > prev.timestamp) current.set(s.name, s);
+  }
 
   return (
     <Card>
@@ -1033,7 +1039,11 @@ function TagEditor({ traceId, tags }: { traceId: string; tags: string[] }) {
           {!readOnly && (
             <button
               type="button"
-              onClick={() => save.mutate(tags.filter((x) => x !== t))}
+              onClick={() => {
+                save.mutate(tags.filter((x) => x !== t));
+                // Removing a tag is trivially reversible, so offer undo rather than a confirm dialog.
+                toast(`Removed tag “${t}”`, { action: { label: "Undo", onClick: () => save.mutate(tags) } });
+              }}
               className="opacity-60 hover:opacity-100"
               aria-label={`Remove tag ${t}`}
             >
@@ -1281,23 +1291,41 @@ function MetricsGrid({ trace }: { trace: TraceDetail }) {
  * both stay in lockstep. `showBreadcrumb` is off in the drawer (its header carries context).
  */
 export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: string; showBreadcrumb?: boolean }) {
-  // Payloads accordion open state + scroll targets, so clicking a waterfall row jumps here.
-  const [openPayloads, setOpenPayloads] = useState<string[]>([]);
+  // Master-detail: the waterfall selects one observation; its payload shows in the detail pane.
+  const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   // Collapsed subgraphs in the waterfall (by observation id).
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const payloadRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const payloadPanelRef = useRef<HTMLDivElement | null>(null);
   const qc = useQueryClient();
   const readOnly = useIsReadOnly();
   const {
     data: trace,
     isLoading,
     error,
+    refetch,
   } = useQuery({
     queryKey: ["trace", traceId],
     queryFn: () => api.getTrace(traceId),
     // Keep the current trace on screen while the next one loads (smooth J/K stepping in the drawer).
     placeholderData: keepPreviousData,
   });
+
+  // Latest "jump to next error" handler, so the always-on keydown effect below (registered before
+  // the data-dependent early returns) can call it without re-subscribing every render.
+  const nextErrorRef = useRef<() => void>(undefined);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      if (e.key === "e" || e.key === "E") {
+        e.preventDefault();
+        nextErrorRef.current?.();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const replay = useMutation({
     mutationFn: () => api.replayTrace(traceId),
@@ -1324,12 +1352,35 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
         <Skeleton className="h-64 w-full" />
       </div>
     );
-  if (error) return <EmptyState title="Failed to load trace" description={String(error)} />;
-  if (!trace) return <EmptyState title="Trace not found" />;
+  if (error)
+    return (
+      <EmptyState
+        title="Couldn’t load this trace"
+        description={error instanceof Error ? error.message : String(error)}
+        action={
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RotateCcw className="size-3.5" />
+            Try again
+          </Button>
+        }
+      />
+    );
+  if (!trace) return <EmptyState title="Trace not found" description="It may have been deleted, or the id is wrong." />;
 
   const payloadObs = visibleObservations(trace.observations);
   const payloadIds = new Set(payloadObs.map((o) => o.id));
-  const errorCount = trace.observations.filter((o) => o.level === "ERROR").length;
+  // The detail pane defaults to the first failing observation (what you're usually here for),
+  // else the first payload-bearing one. A stale selection from a previous trace falls back here.
+  const effectiveSelected =
+    selectedId && payloadIds.has(selectedId)
+      ? selectedId
+      : (payloadObs.find((o) => o.level === "ERROR")?.id ?? payloadObs[0]?.id);
+  const selectedObs = payloadObs.find((o) => o.id === effectiveSelected);
+  // Scores are shown as individual records, newest first — no averaging, so a metric's value never
+  // disagrees with itself across panels (the top annotation row matches Human review's highlight).
+  const sortedScores = [...trace.scores].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  const errorObsIds = trace.observations.filter((o) => o.level === "ERROR").map((o) => o.id);
+  const errorCount = errorObsIds.length;
   const warningCount = trace.observations.filter((o) => o.level === "WARNING").length;
 
   // Waterfall collapse/expand + failed-path highlight (small traces → recompute per render).
@@ -1344,15 +1395,37 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
       return next;
     });
 
-  // Open (if collapsed) and scroll to an observation's payload — driven from the waterfall + graph.
+  // Select an observation's payload into the detail pane. `block: "nearest"` is a no-op when the
+  // pane is already on screen (wide, side-by-side) and scrolls it into view when it's stacked below.
   const selectObs = (id: string) => {
     if (!payloadIds.has(id)) return;
-    setOpenPayloads((prev) => (prev.includes(id) ? prev : [...prev, id]));
-    requestAnimationFrame(() => payloadRefs.current[id]?.scrollIntoView({ behavior: "smooth", block: "center" }));
+    setSelectedId(id);
+    requestAnimationFrame(() =>
+      payloadPanelRef.current?.scrollIntoView({ behavior: scrollBehavior(), block: "nearest" }),
+    );
   };
 
+  // Accelerator: step through failing observations (click the "N errors" badge or press E),
+  // selecting each into the detail pane and scrolling its waterfall row into view.
+  const jumpToNextError = () => {
+    if (errorObsIds.length === 0) return;
+    const cur = errorObsIds.indexOf(effectiveSelected ?? "");
+    const next = errorObsIds[(cur + 1) % errorObsIds.length]!;
+    setSelectedId(next);
+    requestAnimationFrame(() => {
+      document
+        .querySelector(`[data-obs-row="${CSS.escape(next)}"]`)
+        ?.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
+      payloadPanelRef.current?.scrollIntoView({ block: "nearest" });
+    });
+  };
+  nextErrorRef.current = jumpToNextError;
+
   return (
-    <div className="space-y-6">
+    // Cap the content width so cards stop sprawling on wide monitors (the value column of a
+    // key/value table shouldn't run 2000px from its label). Inert inside the peek drawer, which
+    // is already narrower than this cap.
+    <div className="mx-auto w-full max-w-[1600px] space-y-6">
       {showBreadcrumb && (
         <Breadcrumb>
           <BreadcrumbList>
@@ -1379,9 +1452,16 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
         </div>
         <div className="flex items-center gap-2">
           {errorCount > 0 && (
-            <KindBadge tone="red">
-              {errorCount} error{errorCount > 1 ? "s" : ""}
-            </KindBadge>
+            <button
+              type="button"
+              onClick={jumpToNextError}
+              title="Jump to next error (E)"
+              className="rounded-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              <KindBadge tone="red" className="cursor-pointer hover:bg-destructive/20">
+                {errorCount} error{errorCount > 1 ? "s" : ""}
+              </KindBadge>
+            </button>
           )}
           {warningCount > 0 && (
             <KindBadge tone="amber">
@@ -1407,7 +1487,7 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
           <CardDescription>Trace metadata and linked entities.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <dl className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-2.5 text-sm">
+          <dl className="grid max-w-3xl grid-cols-[120px_1fr] gap-x-4 gap-y-2.5 text-sm">
             {trace.user_id && (
               <>
                 <dt className="text-muted-foreground">User</dt>
@@ -1447,118 +1527,135 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
       <Card>
         <CardHeader>
           <CardTitle>Scores ({trace.scores.length})</CardTitle>
-          <CardDescription>Evaluations and annotations recorded on this trace.</CardDescription>
+          <CardDescription>Evaluations and annotations recorded on this trace, newest first.</CardDescription>
           <CardAction>
             <AnnotateButton traceId={trace.id} />
           </CardAction>
         </CardHeader>
-        <CardContent>
-          {trace.scores.length > 0 ? (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {aggregateTraceScores(trace.scores).map((s) => (
-                <div
-                  key={`${s.source}::${s.name}`}
-                  className="flex items-center justify-between gap-3 border bg-background p-3"
-                  title={s.comment || undefined}
-                >
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <KindBadge tone={toneForSource(s.source)}>{s.source.toLowerCase()}</KindBadge>
-                      <span className="truncate text-xs font-medium">{s.name}</span>
-                      {s.count > 1 && (
-                        <span className="border px-1 text-[0.625rem] tabular-nums text-muted-foreground">
-                          ×{s.count}
-                        </span>
-                      )}
-                    </div>
-                    {s.comment && <p className="truncate text-xs text-muted-foreground">{s.comment}</p>}
-                  </div>
-                  <span className="shrink-0 text-2xl font-semibold tabular-nums">{s.display}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
+        <CardContent className={sortedScores.length === 0 ? undefined : "px-0"}>
+          {sortedScores.length === 0 ? (
+            <p className="px-6 text-sm text-muted-foreground">
               No scores yet. Use <span className="font-medium">Annotate</span> to record human feedback.
             </p>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Observations ({trace.observation_count})</CardTitle>
-          <CardDescription>
-            Execution timeline for this trace — click a row to jump to its payload.
-            {errorCount > 0 && " Branches leading to a failure are accented in red."}
-          </CardDescription>
-          {collapsible.size > 0 && (
-            <CardAction>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(collapsible))}
-              >
-                {allCollapsed ? "Expand all" : "Collapse all"}
-              </Button>
-            </CardAction>
-          )}
-        </CardHeader>
-        <CardContent className="px-0">
-          {trace.observations.length === 0 ? (
-            <div className="px-6">
-              <EmptyState title="No observations." />
-            </div>
           ) : (
-            <div className="overflow-x-auto border-t">
-              <div
-                className={`grid ${WATERFALL_COLS} border-b bg-muted/30 py-1.5 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase`}
-              >
-                <span className="px-3">Observation</span>
-                <span className="inline-flex items-center gap-1">
-                  Timeline
-                  <HelpTip>
-                    Each bar's position is its start offset within the trace; its length is the duration.
-                  </HelpTip>
-                </span>
-                <span className="pr-3 text-right">Duration</span>
-              </div>
-              {layout(trace.observations, collapsed, failedPath).map((obs) => (
-                <WaterfallRow
-                  key={obs.id}
-                  obs={obs}
-                  onSelect={payloadIds.has(obs.id) ? () => selectObs(obs.id) : undefined}
-                  onToggle={() => toggleCollapse(obs.id)}
-                />
-              ))}
+            // One row per score record (not aggregated) so every value is shown with its own
+            // timestamp — nothing is averaged into a single number that could contradict itself.
+            <div className="max-h-96 overflow-auto border-t">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-muted/60 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+                  <tr>
+                    <th className="px-4 py-1.5 text-left font-medium">Source</th>
+                    <th className="px-2 py-1.5 text-left font-medium">Metric</th>
+                    <th className="px-2 py-1.5 text-right font-medium">Value</th>
+                    <th className="px-4 py-1.5 text-right font-medium">Recorded</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedScores.map((s, i) => {
+                    const value = s.value != null ? String(s.value) : s.string_value || "—";
+                    const comment = s.comment && !looksJson(s.comment) ? s.comment : "";
+                    return (
+                      <tr key={`${s.source}:${s.name}:${s.timestamp}:${i}`} className="border-t align-top">
+                        <td className="px-4 py-2">
+                          <KindBadge tone={toneForSource(s.source)}>{s.source.toLowerCase()}</KindBadge>
+                        </td>
+                        <td className="px-2 py-2">
+                          <div className="font-medium">{s.name}</div>
+                          {comment && (
+                            <div className="mt-0.5 max-w-md truncate text-xs text-muted-foreground" title={comment}>
+                              {comment}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-2 py-2 text-right font-medium tabular-nums whitespace-nowrap">{value}</td>
+                        <td className="px-4 py-2 text-right text-xs tabular-nums whitespace-nowrap text-muted-foreground">
+                          {s.timestamp.slice(0, 16).replace("T", " ")}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Payloads</CardTitle>
-          <CardDescription>Inputs and outputs captured per observation.</CardDescription>
-        </CardHeader>
-        <CardContent className={payloadObs.length === 0 ? undefined : "px-0"}>
-          {payloadObs.length === 0 ? (
-            <EmptyState title="No payloads to show." />
-          ) : (
-            <Accordion type="multiple" value={openPayloads} onValueChange={setOpenPayloads} className="border-t px-6">
-              {payloadObs.map((obs) => (
-                <ObservationDetailItem
-                  key={obs.id}
-                  obs={obs}
-                  registerRef={(el) => {
-                    payloadRefs.current[obs.id] = el;
-                  }}
-                />
-              ))}
-            </Accordion>
-          )}
-        </CardContent>
-      </Card>
+      {/* Timeline + payload as a master-detail split. The breakpoint is container-based (not
+          viewport) and set above the peek drawer's max width, so the drawer always stacks and only
+          the wide full-page route goes side-by-side. */}
+      <div className="@container">
+        <div className="grid grid-cols-1 gap-4 @6xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] @6xl:items-start">
+          <Card>
+            <CardHeader>
+              <CardTitle>Observations ({trace.observation_count})</CardTitle>
+              <CardDescription>
+                Execution timeline for this trace — select a row to inspect its payload.
+                {errorCount > 0 && " Branches leading to a failure are accented in red."}
+              </CardDescription>
+              {collapsible.size > 0 && (
+                <CardAction>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(collapsible))}
+                  >
+                    {allCollapsed ? "Expand all" : "Collapse all"}
+                  </Button>
+                </CardAction>
+              )}
+            </CardHeader>
+            <CardContent className="px-0">
+              {trace.observations.length === 0 ? (
+                <div className="px-6">
+                  <EmptyState title="No observations." />
+                </div>
+              ) : (
+                <div className="overflow-x-auto border-t">
+                  <div
+                    className={`grid ${WATERFALL_COLS} border-b bg-muted/30 py-1.5 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase`}
+                  >
+                    <span className="px-3">Observation</span>
+                    <span className="inline-flex items-center gap-1">
+                      Timeline
+                      <HelpTip>
+                        Each bar's position is its start offset within the trace; its length is the duration.
+                      </HelpTip>
+                    </span>
+                    <span className="pr-3 text-right">Duration</span>
+                  </div>
+                  {layout(trace.observations, collapsed, failedPath).map((obs) => (
+                    <WaterfallRow
+                      key={obs.id}
+                      obs={obs}
+                      selected={obs.id === effectiveSelected}
+                      onSelect={payloadIds.has(obs.id) ? () => selectObs(obs.id) : undefined}
+                      onToggle={() => toggleCollapse(obs.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Detail pane: sticky beside the timeline on wide screens, stacked below it otherwise. */}
+          <div ref={payloadPanelRef} className="scroll-mt-20 @6xl:sticky @6xl:top-16">
+            <Card className="@6xl:max-h-[calc(100dvh-6rem)] @6xl:overflow-auto">
+              <CardHeader>
+                <CardTitle>Payload</CardTitle>
+                <CardDescription>Input and output for the selected observation.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {selectedObs ? (
+                  <ObservationDetailPanel obs={selectedObs} />
+                ) : (
+                  <EmptyState title="No payloads to show." />
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
 
       <SimilarTraces traceId={trace.id} />
 
@@ -1607,16 +1704,33 @@ function Comments({ traceId }: { traceId: string }) {
                   <span>
                     {cm.author} · {cm.createdAt.slice(0, 19).replace("T", " ")}
                   </span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-6 text-muted-foreground hover:text-destructive"
-                    disabled={readOnly || remove.isPending}
-                    onClick={() => remove.mutate(cm.id)}
-                    aria-label="Delete comment"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-6 text-muted-foreground hover:text-destructive"
+                        disabled={readOnly || remove.isPending}
+                        aria-label="Delete comment"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete this comment?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This permanently deletes the comment. It can’t be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Keep comment</AlertDialogCancel>
+                        <AlertDialogAction variant="destructive" onClick={() => remove.mutate(cm.id)}>
+                          Delete comment
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
                 <div className="mt-1 text-sm">{cm.content}</div>
               </li>
