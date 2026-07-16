@@ -58,6 +58,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/prompts` | List prompts with channels + latest version. |
 | POST | `/v1/prompts` | Create a new version; `labels` point channels at it. |
 | GET | `/v1/prompts/{name}/detail` | All versions + channels. |
+| GET | `/v1/prompts/{name}/costs` | Spend attributed to each version (observations grouped by `prompt_version`), ranked by cost. Param: `days`. |
 | GET | `/v1/prompts/{name}?channel=` | Resolve a deployed prompt (SDK path). |
 
 ### Datasets & experiments

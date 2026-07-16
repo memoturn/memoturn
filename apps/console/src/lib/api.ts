@@ -42,6 +42,7 @@ import type {
   ProjectMember,
   PromptDetail,
   PromptListItem,
+  PromptVersionCost,
   ProviderConnection,
   ReviewAnalytics,
   ReviewItemsResponse,
@@ -232,6 +233,10 @@ export const api = {
     get<{ data: CostRollupRow[] }>(`/v1/metrics/cost-breakdown${qs({ by, days, limit })}`).then((r) => r.data),
   listPrompts: () => get<{ data: PromptListItem[] }>(`/v1/prompts`).then((r) => r.data),
   getPrompt: (name: string) => get<PromptDetail>(`/v1/prompts/${encodeURIComponent(name)}/detail`),
+  getPromptCosts: (name: string, opts: { days?: number } = {}) =>
+    get<{ data: PromptVersionCost[] }>(
+      `/v1/prompts/${encodeURIComponent(name)}/costs${qs(opts as Record<string, unknown>)}`,
+    ).then((r) => r.data),
   listDatasets: () => get<{ data: DatasetListItem[] }>(`/v1/datasets`).then((r) => r.data),
   getDataset: (name: string) => get<DatasetDetail>(`/v1/datasets/${encodeURIComponent(name)}`),
   getDatasetComparison: (name: string, version?: number) =>

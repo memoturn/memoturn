@@ -70,6 +70,7 @@ import {
   getMetrics,
   getOffloadedPayload,
   getPromptDetail,
+  getPromptVersionCosts,
   getRetention,
   getReviewAnalytics,
   getScheduledExport,
@@ -1173,6 +1174,34 @@ app.openapi(
     const resolved = await resolvePrompt(c.get("projectId"), c.req.valid("param").name, channel);
     if (!resolved) return c.json({ error: `prompt or channel '${channel}' not found` }, 404);
     return c.json(resolved);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/prompts/{name}/costs",
+    summary: "Spend attributed to each version of a prompt (observations grouped by prompt_version)",
+    tags: ["prompts"],
+    security,
+    request: {
+      params: z.object({ name: z.string() }),
+      query: z.object({ days: z.coerce.number().int().min(1).max(365).optional() }),
+    },
+    responses: {
+      200: {
+        description: "Per-version cost",
+        content: { "application/json": { schema: C.listOf(C.promptVersionCost) } },
+      },
+    },
+  }),
+  async (c) => {
+    const data = await getPromptVersionCosts(
+      c.get("projectId"),
+      c.req.valid("param").name,
+      c.req.valid("query").days ?? 30,
+    );
+    return c.json({ data });
   },
 );
 

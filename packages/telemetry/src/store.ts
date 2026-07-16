@@ -4,6 +4,7 @@ import type {
   EmbeddingPoint,
   ModelMetric,
   ObservationDetail,
+  PromptVersionCost,
   ScoreRow as ScoreDetail,
   SessionSummary,
   ToolAnalyticsRow,
@@ -100,6 +101,8 @@ export interface TelemetryStore {
   costByUser(projectId: string, opts?: { days?: number; limit?: number }): Promise<CostRollupRow[]>;
   /** Spend ranked by session_id (top spenders). Joins observation cost onto traces. */
   costBySession(projectId: string, opts?: { days?: number; limit?: number }): Promise<CostRollupRow[]>;
+  /** Per-version spend for one prompt (observations grouped by prompt_version), ranked by cost. */
+  costByPromptVersion(projectId: string, promptName: string, opts?: { days?: number }): Promise<PromptVersionCost[]>;
   /** Per-tool-name analytics over SPAN observations: calls, error rate, latency. */
   toolAnalytics(projectId: string, days: number): Promise<ToolAnalyticsRow[]>;
   /** Aggregate GENERATION metrics over a short trailing window (minutes) — for alert evaluation. */

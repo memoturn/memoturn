@@ -486,6 +486,17 @@ export type PromptVersionDetail = z.infer<typeof promptVersionDetail>;
 export const promptDetail = promptListItem.extend({ allVersions: z.array(promptVersionDetail) });
 export type PromptDetail = z.infer<typeof promptDetail>;
 
+// Spend attributed to one version of a prompt (observations grouped by prompt_version). Empty
+// prompt_version means the prompt was used without a pinned version. Closes the loop between the
+// prompt registry and cost: "did v3 get more expensive than v2?".
+export const promptVersionCost = z.object({
+  prompt_version: z.string(),
+  observation_count: z.number(),
+  total_cost: z.number(),
+  total_tokens: z.number(),
+});
+export type PromptVersionCost = z.infer<typeof promptVersionCost>;
+
 // ── Datasets ─────────────────────────────────────────────────────────────────────
 export const datasetListItem = z.object({
   name: z.string(),

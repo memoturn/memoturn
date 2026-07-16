@@ -254,6 +254,48 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(await store.costByUser(P, { limit: 0 })).toHaveLength(1); // floored to 1
   });
 
+  it("attributes spend to a prompt's versions, ranked by cost", async () => {
+    // Own trace + observations so this is isolated from the shared fixture (and cleaned up after).
+    await store.insertRows("traces", [trace({ id: "tc", name: "Cost Trace" })]);
+    await store.insertRows("observations", [
+      observation({
+        id: "oc1",
+        trace_id: "tc",
+        prompt_id: "cost-prompt",
+        prompt_version: "1",
+        total_cost: 0.01,
+        total_tokens: 100,
+      }),
+      observation({
+        id: "oc2",
+        trace_id: "tc",
+        prompt_id: "cost-prompt",
+        prompt_version: "2",
+        total_cost: 0.05,
+        total_tokens: 200,
+      }),
+      observation({
+        id: "oc3",
+        trace_id: "tc",
+        prompt_id: "cost-prompt",
+        prompt_version: "2",
+        total_cost: 0.02,
+        total_tokens: 50,
+      }),
+    ]);
+
+    const rows = await store.costByPromptVersion(P, "cost-prompt");
+    expect(rows).toHaveLength(2);
+    // v2 outspends v1 and aggregates its two uses; ranked by cost DESC.
+    expect(rows[0]!).toMatchObject({ prompt_version: "2", observation_count: 2, total_tokens: 250 });
+    expect(rows[0]!.total_cost).toBeCloseTo(0.07, 6);
+    expect(rows[1]!).toMatchObject({ prompt_version: "1", observation_count: 1, total_tokens: 100 });
+    // Unknown prompt → nothing.
+    expect(await store.costByPromptVersion(P, "nope")).toHaveLength(0);
+
+    await store.deleteTraces(P, ["tc"]); // restore fixture state for the delete test below
+  });
+
   it("computes filter facets (environment / name / tags) with counts", async () => {
     const facets = await store.traceFacets(P, {});
     expect(facets.environments).toContainEqual({ value: "default", count: 1 });

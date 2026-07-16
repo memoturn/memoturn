@@ -1,4 +1,6 @@
+import type { PromptVersionCost } from "@memoturn/contracts";
 import { type PromptType, prisma } from "@memoturn/db";
+import { telemetry } from "@memoturn/telemetry";
 
 /**
  * Prompt management. Each save creates a new immutable version; "channels" are
@@ -97,6 +99,11 @@ export async function listPrompts(projectId: string): Promise<PromptListItem[]> 
 
 export interface PromptDetail extends PromptListItem {
   allVersions: { version: number; type: PromptType; content: unknown; config: unknown; createdAt: string }[];
+}
+
+/** Spend attributed to each version of a prompt (telemetry rollup over observations). */
+export async function getPromptVersionCosts(projectId: string, name: string, days = 30): Promise<PromptVersionCost[]> {
+  return telemetry().costByPromptVersion(projectId, name, { days });
 }
 
 export async function getPromptDetail(projectId: string, name: string): Promise<PromptDetail | null> {
