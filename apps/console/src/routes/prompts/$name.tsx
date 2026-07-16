@@ -4,6 +4,7 @@ import { GitBranch, Radio, Tag } from "lucide-react";
 import { useState } from "react";
 import { EmptyState } from "../../components/empty-state";
 import { KindBadge } from "../../components/kind-badge";
+import { PromptExperiments } from "../../components/prompt-experiments";
 import { StatTile } from "../../components/stat-tile";
 import { TracePeekDrawer } from "../../components/trace-peek-drawer";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../../components/ui/accordion";
@@ -277,15 +278,23 @@ function PromptDetailPage() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-1.5">
-              {prompt.channels.map((c) => (
-                <KindBadge key={c.label} tone="blue">
-                  {c.label} → v{c.version}
-                </KindBadge>
-              ))}
+              {prompt.channels.map((c) =>
+                c.status === "experiment" && c.splitVersion != null ? (
+                  <KindBadge key={c.label} tone="violet">
+                    {c.label} → v{c.version} ({100 - c.splitWeight}%) / v{c.splitVersion} ({c.splitWeight}%)
+                  </KindBadge>
+                ) : (
+                  <KindBadge key={c.label} tone="blue">
+                    {c.label} → v{c.version}
+                  </KindBadge>
+                ),
+              )}
             </div>
           </CardContent>
         </Card>
       )}
+
+      <PromptExperiments prompt={prompt} />
 
       <VersionCosts name={prompt.name} />
 

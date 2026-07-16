@@ -296,6 +296,31 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     await store.deleteTraces(P, ["tc"]); // restore fixture state for the delete test below
   });
 
+  it("attributes scores to a prompt's A/B arms (per prompt_version)", async () => {
+    // Each trace resolves one arm; the score on that trace attributes to that arm's version.
+    await store.insertRows("traces", [trace({ id: "ta" }), trace({ id: "tb" }), trace({ id: "tc" })]);
+    await store.insertRows("observations", [
+      observation({ id: "oa", trace_id: "ta", prompt_id: "ab-prompt", prompt_version: "1" }),
+      observation({ id: "ob", trace_id: "tb", prompt_id: "ab-prompt", prompt_version: "2" }),
+      observation({ id: "oc", trace_id: "tc", prompt_id: "ab-prompt", prompt_version: "2" }),
+    ]);
+    await store.insertRows("scores", [
+      score({ id: "sa", trace_id: "ta", name: "quality", value: 0.9 }),
+      score({ id: "sb", trace_id: "tb", name: "quality", value: 0.5 }),
+      score({ id: "sc", trace_id: "tc", name: "quality", value: 0.7 }),
+    ]);
+
+    const rows = await store.scoresByPromptVersion(P, "ab-prompt");
+    expect(rows).toHaveLength(2); // v2, v1 (version DESC)
+    expect(rows[0]).toMatchObject({ prompt_version: "2", score_name: "quality", score_count: 2 });
+    expect(rows[0]!.avg_value).toBeCloseTo(0.6, 6); // (0.5 + 0.7) / 2
+    expect(rows[1]).toMatchObject({ prompt_version: "1", score_name: "quality", score_count: 1 });
+    expect(rows[1]!.avg_value).toBeCloseTo(0.9, 6);
+    expect(await store.scoresByPromptVersion(P, "nope")).toHaveLength(0);
+
+    await store.deleteTraces(P, ["ta", "tb", "tc"]); // restore fixture state
+  });
+
   it("computes filter facets (environment / name / tags) with counts", async () => {
     const facets = await store.traceFacets(P, {});
     expect(facets.environments).toContainEqual({ value: "default", count: 1 });

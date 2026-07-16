@@ -57,9 +57,12 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | --- | --- | --- |
 | GET | `/v1/prompts` | List prompts with channels + latest version. |
 | POST | `/v1/prompts` | Create a new version; `labels` point channels at it. |
-| GET | `/v1/prompts/{name}/detail` | All versions + channels. |
+| GET | `/v1/prompts/{name}/detail` | All versions + channels (incl. A/B split state per channel). |
 | GET | `/v1/prompts/{name}/costs` | Spend attributed to each version (observations grouped by `prompt_version`), ranked by cost. Param: `days`. |
-| GET | `/v1/prompts/{name}?channel=` | Resolve a deployed prompt (SDK path). |
+| GET | `/v1/prompts/{name}/arm-scores` | Per-A/B-arm score means (scores grouped by the prompt version that produced them). Param: `days`. |
+| POST | `/v1/prompts/{name}/experiment` | Start a weighted A/B split on a channel. Body: `{ channel, splitVersion, splitWeight }` (1–99%). Audited. |
+| POST | `/v1/prompts/{name}/experiment/stop` | Stop the experiment on a channel; `{ channel, promote? }` (promote makes the challenger live). Audited. |
+| GET | `/v1/prompts/{name}?channel=&bucketKey=` | Resolve a deployed prompt (SDK path). `bucketKey` (session/user id) sticks a caller to one A/B arm. |
 
 ### Datasets & experiments
 

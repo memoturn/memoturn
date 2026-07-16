@@ -69,6 +69,7 @@ import {
   getMedia,
   getMetrics,
   getOffloadedPayload,
+  getPromptArmScores,
   getPromptDetail,
   getPromptVersionCosts,
   getRetention,
@@ -132,6 +133,8 @@ import {
   setScheduledExport,
   setTraceTags,
   skipReviewItem,
+  startExperiment,
+  stopExperiment,
   storeDataUri,
   streamPlayground,
   submitBatch,
@@ -1163,15 +1166,20 @@ app.openapi(
     summary: "Resolve a deployed prompt by name + channel",
     tags: ["prompts"],
     security,
-    request: { params: z.object({ name: z.string() }), query: z.object({ channel: z.string().optional() }) },
+    request: {
+      params: z.object({ name: z.string() }),
+      // bucketKey (a session/user id) sticks a caller to one A/B arm across resolves.
+      query: z.object({ channel: z.string().optional(), bucketKey: z.string().optional() }),
+    },
     responses: {
       200: { description: "Compiled prompt", content: { "application/json": { schema: z.any() } } },
       404: { description: "Not found" },
     },
   }),
   async (c) => {
-    const channel = c.req.valid("query").channel ?? "production";
-    const resolved = await resolvePrompt(c.get("projectId"), c.req.valid("param").name, channel);
+    const q = c.req.valid("query");
+    const channel = q.channel ?? "production";
+    const resolved = await resolvePrompt(c.get("projectId"), c.req.valid("param").name, channel, q.bucketKey);
     if (!resolved) return c.json({ error: `prompt or channel '${channel}' not found` }, 404);
     return c.json(resolved);
   },
@@ -1202,6 +1210,105 @@ app.openapi(
       c.req.valid("query").days ?? 30,
     );
     return c.json({ data });
+  },
+);
+
+// ── Prompt A/B experiments: start a weighted split, read per-arm scores, stop/rollback ──
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/prompts/{name}/arm-scores",
+    summary: "Per-A/B-arm score means for a prompt (scores grouped by the prompt version that produced them)",
+    tags: ["prompts"],
+    security,
+    request: {
+      params: z.object({ name: z.string() }),
+      query: z.object({ days: z.coerce.number().int().min(1).max(365).optional() }),
+    },
+    responses: {
+      200: { description: "Per-arm scores", content: { "application/json": { schema: C.listOf(C.promptArmScore) } } },
+    },
+  }),
+  async (c) => {
+    const data = await getPromptArmScores(
+      c.get("projectId"),
+      c.req.valid("param").name,
+      c.req.valid("query").days ?? 30,
+    );
+    return c.json({ data });
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/prompts/{name}/experiment",
+    summary: "Start a weighted A/B split on a channel (route splitWeight% to a challenger version)",
+    tags: ["prompts"],
+    security,
+    request: {
+      params: z.object({ name: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              channel: z.string(),
+              splitVersion: z.number().int().positive(),
+              splitWeight: z.number().int().min(1).max(99),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Experiment started", content: { "application/json": { schema: z.any() } } },
+      400: { description: "Invalid channel or challenger version" },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const name = c.req.valid("param").name;
+    const body = c.req.valid("json");
+    const result = await startExperiment(c.get("projectId"), name, body);
+    if (!result) return c.json({ error: "channel or challenger version not found (or equals control)" }, 400);
+    await recordAudit(c.get("projectId"), c.get("actor"), "prompt.experiment.start", `prompt:${name}`, result);
+    return c.json(result, 200);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/prompts/{name}/experiment/stop",
+    summary: "Stop an A/B experiment on a channel; optionally promote the challenger to the live version",
+    tags: ["prompts"],
+    security,
+    request: {
+      params: z.object({ name: z.string() }),
+      body: {
+        content: { "application/json": { schema: z.object({ channel: z.string(), promote: z.boolean().optional() }) } },
+      },
+    },
+    responses: {
+      200: { description: "Experiment stopped", content: { "application/json": { schema: z.any() } } },
+      400: { description: "Channel not found" },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const name = c.req.valid("param").name;
+    const body = c.req.valid("json");
+    const result = await stopExperiment(c.get("projectId"), name, body);
+    if (!result) return c.json({ error: "channel not found" }, 400);
+    await recordAudit(c.get("projectId"), c.get("actor"), "prompt.experiment.stop", `prompt:${name}`, {
+      ...result,
+      promoted: body.promote ?? false,
+    });
+    return c.json(result, 200);
   },
 );
 

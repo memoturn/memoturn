@@ -461,8 +461,27 @@ export const evaluatorAnalytics = z.object({
 export type EvaluatorAnalytics = z.infer<typeof evaluatorAnalytics>;
 
 // ── Prompts ──────────────────────────────────────────────────────────────────────
-export const promptChannel = z.object({ label: z.string(), version: z.number() });
+// A channel is a deployment pointer. `version` is the live (control) version. When `status`
+// is "experiment", a weighted A/B split routes `splitWeight`% of resolves to `splitVersion`
+// (the challenger), sticky per bucketing key; the rest get `version`.
+export const promptChannel = z.object({
+  label: z.string(),
+  version: z.number(),
+  splitVersion: z.number().nullable(),
+  splitWeight: z.number(),
+  status: z.string(),
+});
 export type PromptChannel = z.infer<typeof promptChannel>;
+
+// One score's mean + count for a single prompt version — the per-arm quality signal that
+// tells you which A/B arm is winning. `prompt_version` empty = generations with no pinned version.
+export const promptArmScore = z.object({
+  prompt_version: z.string(),
+  score_name: z.string(),
+  score_count: z.number(),
+  avg_value: z.number(),
+});
+export type PromptArmScore = z.infer<typeof promptArmScore>;
 
 export const promptListItem = z.object({
   name: z.string(),

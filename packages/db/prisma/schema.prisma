@@ -351,6 +351,11 @@ model PromptChannel {
   prompt    Prompt   @relation(fields: [promptId], references: [id], onDelete: Cascade)
   label     String
   version   Int
+  // A/B experiment: version stays the control/fallback arm. splitVersion is the
+  // challenger; splitWeight (0-100) is the percent of traffic routed to it (0 = off).
+  splitVersion Int?
+  splitWeight  Int    @default(0)
+  status       String @default("stable") // "stable" | "experiment"
   updatedAt DateTime @updatedAt
 
   @@unique([promptId, label])

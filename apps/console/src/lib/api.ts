@@ -40,6 +40,7 @@ import type {
   PlaygroundResponse,
   Project,
   ProjectMember,
+  PromptArmScore,
   PromptDetail,
   PromptListItem,
   PromptVersionCost,
@@ -237,6 +238,14 @@ export const api = {
     get<{ data: PromptVersionCost[] }>(
       `/v1/prompts/${encodeURIComponent(name)}/costs${qs(opts as Record<string, unknown>)}`,
     ).then((r) => r.data),
+  getPromptArmScores: (name: string, opts: { days?: number } = {}) =>
+    get<{ data: PromptArmScore[] }>(
+      `/v1/prompts/${encodeURIComponent(name)}/arm-scores${qs(opts as Record<string, unknown>)}`,
+    ).then((r) => r.data),
+  startPromptExperiment: (name: string, body: { channel: string; splitVersion: number; splitWeight: number }) =>
+    post(`/v1/prompts/${encodeURIComponent(name)}/experiment`, body),
+  stopPromptExperiment: (name: string, body: { channel: string; promote?: boolean }) =>
+    post(`/v1/prompts/${encodeURIComponent(name)}/experiment/stop`, body),
   listDatasets: () => get<{ data: DatasetListItem[] }>(`/v1/datasets`).then((r) => r.data),
   getDataset: (name: string) => get<DatasetDetail>(`/v1/datasets/${encodeURIComponent(name)}`),
   getDatasetComparison: (name: string, version?: number) =>
