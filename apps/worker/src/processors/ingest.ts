@@ -7,6 +7,7 @@ import {
   dispatchAutomationsBatch,
   dispatchWebhooksBatch,
   forwardEvents,
+  getSamplingRate,
   listOnlineEvaluators,
   loadMaskingPolicy,
   loadProjectPriceOverrides,
@@ -18,6 +19,7 @@ import { type TelemetryRowMap, type TelemetryTable, telemetry } from "@memoturn/
 import type { Job } from "bullmq";
 import { mapEvents } from "../mappers.js";
 import { inc, logJson, observeInsert } from "../metrics.js";
+import { applyHeadSampling, sample } from "../sampling.js";
 
 /** True for errors worth retrying (rate limits / transient upstream failures). */
 function isTransient(err: unknown): boolean {
@@ -52,16 +54,6 @@ async function insertTable<T extends TelemetryTable>(table: T, values: Telemetry
     inc("ingest_errors_total", { table });
     throw err;
   }
-}
-
-/** Stable [0,1) hash of a seed string — for deterministic per-trace sampling. */
-function sample(seed: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < seed.length; i++) {
-    h ^= seed.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return ((h >>> 0) % 100000) / 100000;
 }
 
 /**
@@ -188,12 +180,14 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     observations: new Map(observationBases.map((r) => [r.id, r])),
   };
 
-  const { traces, observations, scores, retrieval_documents, embeddings } = mapEvents(
-    projectId,
-    parsed.batch,
-    priceOverrides,
-    bases,
-  );
+  const mapped = mapEvents(projectId, parsed.batch, priceOverrides, bases);
+
+  // Head-based sampling: keep only rate% of traces in the query store (whole traces, stable per
+  // id). The raw batch is already in blob, so dropped traces stay replayable. No-op at rate=100.
+  const rate = await getSamplingRate(projectId);
+  const { rows: sampled, dropped } = applyHeadSampling(rate, mapped);
+  if (dropped > 0) inc("ingest_sampled_out_total", undefined, dropped);
+  const { traces, observations, scores, retrieval_documents, embeddings } = sampled;
 
   // Insert each table independently so one table's failure is isolated and observable.
   // Re-insert on retry is safe — the store's last-writer-wins merge (event_ts) dedupes

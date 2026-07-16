@@ -74,6 +74,7 @@ import {
   getPromptVersionCosts,
   getRetention,
   getReviewAnalytics,
+  getSampling,
   getScheduledExport,
   getScoresByTraceIds,
   getToolAnalytics,
@@ -130,6 +131,7 @@ import {
   setGuardrailPolicy,
   setMaskingPolicy,
   setRetention,
+  setSampling,
   setScheduledExport,
   setTraceTags,
   skipReviewItem,
@@ -275,6 +277,7 @@ app.use("/v1/review-queues", requireAuth);
 app.use("/v1/review-queues/*", requireAuth);
 app.use("/v1/exports/*", requireAuth);
 app.use("/v1/retention", requireAuth);
+app.use("/v1/sampling", requireAuth);
 app.use("/v1/retention/*", requireAuth);
 app.use("/v1/webhooks", requireAuth);
 app.use("/v1/webhooks/*", requireAuth);
@@ -2334,6 +2337,44 @@ app.openapi(
     const result = await skipReviewItem(c.get("projectId"), name, itemId);
     if (!result) return c.json({ error: "queue or item not found" }, 404);
     await recordAudit(c.get("projectId"), c.get("actor"), "review.skip", `item:${itemId}`, { queue: name });
+    return c.json(result);
+  },
+);
+
+// ── Ingest sampling ──────────────────────────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/sampling",
+    summary: "Get the project's head-sampling rate (percent of traces kept in the query store; 100 = all)",
+    tags: ["platform"],
+    security,
+    responses: { 200: { description: "Policy", content: { "application/json": { schema: C.samplingPolicy } } } },
+  }),
+  async (c) => c.json(await getSampling(c.get("projectId"))),
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/sampling",
+    summary: "Set the project's head-sampling rate (0–100 percent of traces kept)",
+    tags: ["platform"],
+    security,
+    request: {
+      body: { content: { "application/json": { schema: z.object({ rate: z.number().int().min(0).max(100) }) } } },
+    },
+    responses: {
+      200: { description: "Updated", content: { "application/json": { schema: C.samplingPolicy } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const { rate } = c.req.valid("json");
+    const result = await setSampling(c.get("projectId"), rate);
+    await recordAudit(c.get("projectId"), c.get("actor"), "sampling.set", `rate:${rate}`);
     return c.json(result);
   },
 );

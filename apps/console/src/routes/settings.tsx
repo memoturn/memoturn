@@ -230,6 +230,19 @@ function SettingsPage() {
     onError: (e) => toast.error(`Failed to save retention: ${String(e)}`),
   });
 
+  // ── Ingest sampling ───────────────────────────────────────────────────────
+  const { data: sampling } = useQuery({ queryKey: ["sampling"], queryFn: () => api.getSampling() });
+  const [rate, setRate] = useState<number | null>(null);
+  const rateValue = rate ?? sampling?.rate ?? 100;
+  const saveSampling = useMutation({
+    mutationFn: () => api.setSampling(rateValue),
+    onSuccess: () => {
+      toast.success("Sampling saved");
+      qc.invalidateQueries({ queryKey: ["sampling"] });
+    },
+    onError: (e) => toast.error(`Failed to save sampling: ${String(e)}`),
+  });
+
   // ── Scheduled exports ─────────────────────────────────────────────────────
   const { data: schedExport } = useQuery({ queryKey: ["scheduled-export"], queryFn: () => api.getScheduledExport() });
   const [seEnabled, setSeEnabled] = useState<boolean | null>(null);
@@ -1075,6 +1088,36 @@ function SettingsPage() {
                 </div>
                 <Button disabled={readOnly || saveRetention.isPending} onClick={() => saveRetention.mutate()}>
                   {saveRetention.isPending ? "Saving…" : "Save retention"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Ingest sampling</CardTitle>
+              <CardDescription>
+                Keep only this percent of traces in the query store (100 = keep all). Dropped traces still land in blob
+                storage and stay replayable — this trims what's queryable to control volume, it doesn't lose data. The
+                decision is stable per trace, so whole traces are kept or dropped.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-end gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="sampling-rate">Keep %</Label>
+                  <Input
+                    id="sampling-rate"
+                    type="number"
+                    min="0"
+                    max="100"
+                    className="w-32"
+                    value={rateValue}
+                    onChange={(e) => setRate(Number(e.target.value))}
+                  />
+                </div>
+                <Button disabled={readOnly || saveSampling.isPending} onClick={() => saveSampling.mutate()}>
+                  {saveSampling.isPending ? "Saving…" : "Save sampling"}
                 </Button>
               </div>
             </CardContent>

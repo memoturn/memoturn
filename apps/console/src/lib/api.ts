@@ -285,6 +285,8 @@ export const api = {
     post(`/v1/providers`, body),
   getRetention: () => get<{ days: number }>(`/v1/retention`),
   setRetention: (days: number) => post<{ days: number }>(`/v1/retention`, { days }),
+  getSampling: () => get<{ rate: number }>(`/v1/sampling`),
+  setSampling: (rate: number) => post<{ rate: number }>(`/v1/sampling`, { rate }),
   listApiKeys: () => get<{ data: ApiKey[] }>(`/v1/api-keys`).then((r) => r.data),
   createApiKey: (body: {
     name?: string;
