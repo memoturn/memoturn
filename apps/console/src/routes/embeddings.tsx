@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "../components/empty-state";
+import { HelpTip } from "../components/help-tip";
 import { PageHeader } from "../components/page-header";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -148,6 +149,7 @@ function EmbeddingsPage() {
       <PageHeader
         title="Embeddings"
         description="2D projection of observation embeddings — clusters surface outliers; color by a score to find problem areas."
+        help="Flattens the high-dimensional embedding vectors your app logs (for retrieval and RAG) onto a 2D map so nearby points mean similar content and clusters reveal outliers."
         actions={
           !readOnly ? (
             <Button
@@ -164,7 +166,13 @@ function EmbeddingsPage() {
       />
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-          <CardTitle>Projection {data?.run_id ? `(${data.points.length} points)` : ""}</CardTitle>
+          <CardTitle className="inline-flex items-center gap-1">
+            Projection {data?.run_id ? `(${data.points.length} points)` : ""}
+            <HelpTip>
+              Each dot is one observation's embedding placed by similarity; points are grouped into clusters, and
+              coloring by a score highlights where quality drops.
+            </HelpTip>
+          </CardTitle>
           <Select value={colorBy} onValueChange={setColorBy}>
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="Color by" />

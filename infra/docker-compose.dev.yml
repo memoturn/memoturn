@@ -66,12 +66,14 @@ services:
     image: apache/doris:be-4.1.2
     restart: unless-stopped
     # Cap BE process memory for dev (default is ~90% of system memory, which assumes a
-    # dedicated host). 3G leaves room for the FE + the other dev containers in one VM.
+    # dedicated host). 6G is comfortable for the demo dataset while leaving room for the FE
+    # and the other dev containers; a lower cap OOMs analytical queries with MEM_ALLOC_FAILED.
+    # Override with DORIS_BE_MEM_LIMIT in .env (absolute like 4G, or a % of host memory).
     entrypoint:
       [
         "bash",
         "-c",
-        "grep -q '^mem_limit' /opt/apache-doris/be/conf/be.conf || echo 'mem_limit = 3G' >> /opt/apache-doris/be/conf/be.conf; exec bash /usr/local/bin/entry_point.sh",
+        "grep -q '^mem_limit' /opt/apache-doris/be/conf/be.conf || echo 'mem_limit = ${DORIS_BE_MEM_LIMIT:-6G}' >> /opt/apache-doris/be/conf/be.conf; exec bash /usr/local/bin/entry_point.sh",
       ]
     depends_on:
       doris-fe:

@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Play, Plus, Repeat, Save, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { HelpTip } from "../components/help-tip";
 import { PageHeader } from "../components/page-header";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../components/ui/card";
@@ -187,6 +188,7 @@ function PlaygroundPage() {
       <PageHeader
         title="Playground"
         description="Compare a prompt across models side by side."
+        help="Run one prompt against several models at once to compare their output, cost, and latency."
         actions={
           !readOnly ? (
             <SaveAsExperimentDialog columns={columns} messages={sharedMessages} disabled={anyBusy} />
@@ -202,7 +204,13 @@ function PlaygroundPage() {
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label>Mode</Label>
+              <Label className="inline-flex items-center gap-1">
+                Mode
+                <HelpTip>
+                  chat returns free-form text, structured forces JSON matching a schema, and tools lets the model call
+                  function definitions.
+                </HelpTip>
+              </Label>
               <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)}>
                 <TabsList className="w-full">
                   <TabsTrigger value="chat">chat</TabsTrigger>
@@ -213,8 +221,11 @@ function PlaygroundPage() {
             </div>
             <div className="flex items-end gap-2">
               <Switch id="pg-stream" checked={streaming} disabled={mode !== "chat"} onCheckedChange={setStreaming} />
-              <Label htmlFor="pg-stream" className="text-muted-foreground">
+              <Label htmlFor="pg-stream" className="inline-flex items-center gap-1 text-muted-foreground">
                 Stream {mode !== "chat" && "(chat only)"}
+                <HelpTip>
+                  Shows tokens as they generate; when off, the full response arrives at once. Chat mode only.
+                </HelpTip>
               </Label>
             </div>
           </div>
@@ -240,7 +251,10 @@ function PlaygroundPage() {
           </div>
           {mode === "structured" && (
             <div className="space-y-2">
-              <Label htmlFor="pg-schema">JSON schema</Label>
+              <Label htmlFor="pg-schema" className="inline-flex items-center gap-1">
+                JSON schema
+                <HelpTip>The model must return JSON conforming to this schema instead of free-form text.</HelpTip>
+              </Label>
               <Textarea
                 id="pg-schema"
                 className="font-mono text-xs"
@@ -252,7 +266,10 @@ function PlaygroundPage() {
           )}
           {mode === "tools" && (
             <div className="space-y-2">
-              <Label htmlFor="pg-tools">Tools (JSON)</Label>
+              <Label htmlFor="pg-tools" className="inline-flex items-center gap-1">
+                Tools (JSON)
+                <HelpTip>Function definitions the model may choose to call instead of replying with text.</HelpTip>
+              </Label>
               <Textarea
                 id="pg-tools"
                 className="font-mono text-xs"
@@ -368,15 +385,21 @@ function ColumnCard({
             placeholder="model"
             className="h-8"
           />
-          <Input
-            type="number"
-            step="0.1"
-            min="0"
-            max="2"
-            value={col.temperature}
-            onChange={(e) => onChange({ temperature: Number(e.target.value) })}
-            className="h-8"
-          />
+          <div className="relative">
+            <Input
+              type="number"
+              step="0.1"
+              min="0"
+              max="2"
+              value={col.temperature}
+              onChange={(e) => onChange({ temperature: Number(e.target.value) })}
+              className="h-8 pr-7"
+              aria-label="temperature"
+            />
+            <HelpTip side="left" className="absolute right-2 top-1/2 -translate-y-1/2">
+              Temperature: higher values make output more random, lower is more focused and deterministic.
+            </HelpTip>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="flex-1">

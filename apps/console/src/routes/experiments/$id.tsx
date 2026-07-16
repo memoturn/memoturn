@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { EmptyState } from "../../components/empty-state";
+import { HelpTip } from "../../components/help-tip";
 import { KindBadge } from "../../components/kind-badge";
 import { RunComparison } from "../../components/run-comparison";
 import { StatTile } from "../../components/stat-tile";
@@ -112,10 +113,18 @@ function ExperimentDetailPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <StatTile label="Total" value={data.totalItems} />
-        <StatTile label="Completed" value={data.completedItems} />
-        <StatTile label="Failed" value={data.failedItems} />
-        <StatTile label="Evaluators" value={data.evaluators.length} />
+        <StatTile label="Total" value={data.totalItems} help="Dataset items included in this run." />
+        <StatTile
+          label="Completed"
+          value={data.completedItems}
+          help="Items that ran through the model and were scored."
+        />
+        <StatTile label="Failed" value={data.failedItems} help="Items whose model call or scoring errored out." />
+        <StatTile
+          label="Evaluators"
+          value={data.evaluators.length}
+          help="Scorers applied to every item's output to grade quality."
+        />
       </div>
 
       {data.error && (
@@ -128,7 +137,10 @@ function ExperimentDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Items ({data.items.length})</CardTitle>
+          <CardTitle className="inline-flex items-center gap-1">
+            Items ({data.items.length})
+            <HelpTip>Each badge is one dataset item and its run status (pending, running, done, or failed).</HelpTip>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-1.5">

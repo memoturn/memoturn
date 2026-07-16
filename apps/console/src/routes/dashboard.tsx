@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { DataTable } from "../components/data-table";
 import { EmptyState } from "../components/empty-state";
+import { HelpTip } from "../components/help-tip";
 import { PageHeader } from "../components/page-header";
 import { ModelLabel, ProviderIcon } from "../components/provider-icon";
 import { Button } from "../components/ui/button";
@@ -107,7 +108,10 @@ function UsageChart({
     <Card className="gap-0 py-0">
       <CardHeader className="flex flex-col items-stretch space-y-0 border-b p-0 sm:flex-row">
         <div className="flex flex-1 flex-col justify-center gap-1.5 px-6 py-5">
-          <CardTitle>Usage over time</CardTitle>
+          <div className="flex items-center gap-1.5">
+            <CardTitle>Usage over time</CardTitle>
+            <HelpTip>Daily totals for the selected metric — click a tile above to switch metrics.</HelpTip>
+          </div>
           <CardDescription>
             Daily {usageConfig[active].label.toLowerCase()} over the last {days} days
           </CardDescription>
@@ -295,14 +299,43 @@ function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Dashboard" description={`Overview of the last ${days} days.`} />
+      <PageHeader
+        title="Dashboard"
+        description={`Overview of the last ${days} days.`}
+        help="A rollup of traces, generations, tokens, cost, and errors across the selected time range."
+      />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <Stat label="Traces" value={Number(data.total_traces).toLocaleString()} icon={Activity} />
-        <Stat label="Generations" value={Number(data.total_generations).toLocaleString()} icon={Sparkles} />
-        <Stat label="Errors" value={Number(data.total_errors).toLocaleString()} icon={TriangleAlert} />
-        <Stat label="Tokens" value={Number(data.total_tokens).toLocaleString()} icon={Coins} />
-        <Stat label="Cost" value={money(data.total_cost)} icon={DollarSign} />
+        <Stat
+          label="Traces"
+          value={Number(data.total_traces).toLocaleString()}
+          icon={Activity}
+          help="A trace is one end-to-end request through your app, including all of its nested spans."
+        />
+        <Stat
+          label="Generations"
+          value={Number(data.total_generations).toLocaleString()}
+          icon={Sparkles}
+          help="Generations are LLM calls (spans of type generation)."
+        />
+        <Stat
+          label="Errors"
+          value={Number(data.total_errors).toLocaleString()}
+          icon={TriangleAlert}
+          help="Spans recorded with an error level during this period."
+        />
+        <Stat
+          label="Tokens"
+          value={Number(data.total_tokens).toLocaleString()}
+          icon={Coins}
+          help="Total input plus output tokens across all generations."
+        />
+        <Stat
+          label="Cost"
+          value={money(data.total_cost)}
+          icon={DollarSign}
+          help="Estimated spend, computed from token counts and the model price table."
+        />
       </div>
 
       {data.byDay.length === 0 ? (
@@ -355,7 +388,10 @@ function DashboardPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>By model ({data.byModel.length})</CardTitle>
+          <div className="flex items-center gap-1.5">
+            <CardTitle>By model ({data.byModel.length})</CardTitle>
+            <HelpTip>Per-model breakdown; spend is estimated from token counts and the model price table.</HelpTip>
+          </div>
           <CardDescription>Generations, tokens, and spend per model.</CardDescription>
           {data.byModel.length > 0 && (
             <CardAction>
@@ -491,7 +527,10 @@ function CustomWidgets() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold tracking-tight">Custom widgets</h2>
+      <h2 className="flex items-center gap-1.5 text-lg font-semibold tracking-tight">
+        Custom widgets
+        <HelpTip>Pin your own filtered metric charts to a named dashboard for reuse.</HelpTip>
+      </h2>
 
       {/* Dashboard tabs: the implicit Default plus any named dashboards. */}
       <div className="flex flex-wrap items-center gap-2">
@@ -741,11 +780,26 @@ function WidgetCard({ widget, onDelete, disabled }: { widget: Widget; onDelete: 
   );
 }
 
-function Stat({ label, value, icon: Icon }: { label: string; value: string; icon: LucideIcon }) {
+function Stat({
+  label,
+  value,
+  icon: Icon,
+  help,
+}: {
+  label: string;
+  value: string;
+  icon: LucideIcon;
+  help?: ReactNode;
+}) {
   return (
     <Card>
       <CardHeader>
-        <CardDescription>{label}</CardDescription>
+        <CardDescription>
+          <span className="inline-flex items-center gap-1">
+            {label}
+            {help ? <HelpTip>{help}</HelpTip> : null}
+          </span>
+        </CardDescription>
         <CardTitle className="text-2xl tabular-nums">{value}</CardTitle>
         <CardAction>
           <span className="flex size-8 items-center justify-center bg-muted text-muted-foreground">

@@ -67,7 +67,11 @@ function SessionDetailPage() {
         </BreadcrumbList>
       </Breadcrumb>
 
-      <PageHeader title={`Session ${id}`} description="Traces sharing this session id — click a row to preview." />
+      <PageHeader
+        title={`Session ${id}`}
+        description="Traces sharing this session id — click a row to preview."
+        help="All traces that share this session id, ordered oldest-first so the session reads like a conversation."
+      />
 
       {isLoading ? (
         <Skeleton className="h-64 w-full" />
@@ -78,9 +82,19 @@ function SessionDetailPage() {
       ) : (
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
-            <StatTile label="Traces" value={ordered.length} icon={Activity} />
-            <StatTile label="Tokens" value={totalTokens} icon={Coins} />
-            <StatTile label="Cost" value={fmtCost(totalCost)} icon={DollarSign} />
+            <StatTile label="Traces" value={ordered.length} icon={Activity} help="Number of traces in this session." />
+            <StatTile
+              label="Tokens"
+              value={totalTokens}
+              icon={Coins}
+              help="Total input plus output tokens across this session's traces."
+            />
+            <StatTile
+              label="Cost"
+              value={fmtCost(totalCost)}
+              icon={DollarSign}
+              help="Estimated spend for this session, from the model price table."
+            />
           </div>
 
           <div className="border">
