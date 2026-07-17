@@ -14,6 +14,7 @@ Optional extras (discoverability only — the SDK itself never imports them at r
 pip install "memoturn[openai]"      # openai>=1.0 for wrap_openai
 pip install "memoturn[anthropic]"   # anthropic>=0.30 for wrap_anthropic
 pip install "memoturn[langchain]"   # langchain-core for MemoturnCallbackHandler
+pip install "memoturn[llamaindex]"  # llama-index-core for MemoturnLlamaIndexHandler
 pip install "memoturn[otel]"        # OTel SDK + OTLP/HTTP exporter for span_exporter/span_processor
 ```
 
@@ -161,6 +162,20 @@ chain.invoke(inputs, config={"callbacks": [MemoturnCallbackHandler()]})
 
 Records chains, LLM/chat-model calls (with token usage), and tools as a trace
 tree. Duck-typed — imports no LangChain packages.
+
+## LlamaIndex
+
+```python
+from memoturn import MemoturnLlamaIndexHandler
+from llama_index.core import Settings
+from llama_index.core.callbacks import CallbackManager
+
+Settings.callback_manager = CallbackManager([MemoturnLlamaIndexHandler()])
+```
+
+Records query/retrieve/synthesize/LLM/tool/agent steps as a nested trace tree
+(using LlamaIndex's own parent ids), including retrieved documents and embedding
+vectors. Duck-typed — imports no LlamaIndex packages.
 
 ## Prompts
 

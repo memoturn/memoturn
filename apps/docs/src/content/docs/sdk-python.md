@@ -59,6 +59,19 @@ from memoturn.langchain import MemoturnCallbackHandler
 chain.invoke(inputs, config={"callbacks": [MemoturnCallbackHandler()]})
 ```
 
+## LlamaIndex
+
+```python
+from memoturn.llamaindex import MemoturnLlamaIndexHandler
+from llama_index.core import Settings
+from llama_index.core.callbacks import CallbackManager
+
+Settings.callback_manager = CallbackManager([MemoturnLlamaIndexHandler()])
+```
+
+Records query/retrieve/synthesize/LLM/tool/agent steps as a nested trace tree (using
+LlamaIndex's own parent ids), including retrieved documents and embeddings.
+
 ## Prompts
 
 ```python

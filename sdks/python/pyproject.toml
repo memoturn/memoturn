@@ -5,7 +5,7 @@ description = "memoturn Python SDK — tracing, @observe, OpenAI wrapper, prompt
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
-keywords = ["memoturn", "llm", "observability", "tracing", "openai", "langchain", "evals", "opentelemetry"]
+keywords = ["memoturn", "llm", "observability", "tracing", "openai", "langchain", "llamaindex", "evals", "opentelemetry"]
 dependencies = []
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -26,6 +26,7 @@ openai = ["openai>=1.0"]
 anthropic = ["anthropic>=0.30"]
 otel = ["opentelemetry-sdk>=1.20", "opentelemetry-exporter-otlp-proto-http>=1.20"]
 langchain = ["langchain-core>=0.1"]
+llamaindex = ["llama-index-core>=0.10"]
 dev = ["pytest>=9.0.3"]
 
 [build-system]

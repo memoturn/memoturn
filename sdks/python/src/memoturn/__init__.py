@@ -5,6 +5,7 @@ from .dataset import add_dataset_items, create_dataset, evaluate_gate, get_datas
 from .decorator import configure, get_client, observe, set_trace_context
 from .guardrails import GuardrailBlockedError, check_guardrails, run_guarded
 from .langchain import MemoturnCallbackHandler
+from .llamaindex import MemoturnLlamaIndexHandler
 from .openai import wrap_openai
 from .otel import otlp_config, span_exporter, span_processor
 from .prompt import compile_prompt, get_prompt
@@ -22,6 +23,7 @@ __all__ = [
     "wrap_openai",
     "wrap_anthropic",
     "MemoturnCallbackHandler",
+    "MemoturnLlamaIndexHandler",
     "create_dataset",
     "add_dataset_items",
     "get_dataset",

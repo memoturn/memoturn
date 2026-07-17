@@ -38,7 +38,7 @@ Streamable HTTP with OAuth + per-tool RBAC; **`query_traces` / `get_trace` / `ge
 / `list_scores` reads + `run_evaluator` write**; **`mcp.method.name` / `mcp.session.id`
 semconv ingestion**) · provider gateway (Anthropic, OpenAI, **Gemini, Bedrock, Azure,
 OpenAI-compatible** for vLLM/Ollama/OpenRouter) · TypeScript + Python + **Go** SDKs (tracing,
-OpenAI, LangChain, prompts, **OTel exporter**).
+OpenAI, LangChain, prompts, OTel exporter, **LlamaIndex (Python)**).
 
 ## Horizon 2 — differentiators (launch wave)
 
