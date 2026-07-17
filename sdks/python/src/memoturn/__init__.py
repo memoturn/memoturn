@@ -3,6 +3,7 @@ from .anthropic import wrap_anthropic
 from .client import Memoturn, Span, Trace
 from .dataset import add_dataset_items, create_dataset, evaluate_gate, get_dataset, record_run
 from .decorator import configure, get_client, observe, set_trace_context
+from .gemini import wrap_gemini
 from .guardrails import GuardrailBlockedError, check_guardrails, run_guarded
 from .langchain import MemoturnCallbackHandler
 from .llamaindex import MemoturnLlamaIndexHandler
@@ -22,6 +23,7 @@ __all__ = [
     "compile_prompt",
     "wrap_openai",
     "wrap_anthropic",
+    "wrap_gemini",
     "MemoturnCallbackHandler",
     "MemoturnLlamaIndexHandler",
     "create_dataset",

@@ -13,6 +13,7 @@ Optional extras (discoverability only — the SDK itself never imports them at r
 ```bash
 pip install "memoturn[openai]"      # openai>=1.0 for wrap_openai
 pip install "memoturn[anthropic]"   # anthropic>=0.30 for wrap_anthropic
+pip install "memoturn[gemini]"      # google-genai>=1.0 for wrap_gemini
 pip install "memoturn[langchain]"   # langchain-core for MemoturnCallbackHandler
 pip install "memoturn[llamaindex]"  # llama-index-core for MemoturnLlamaIndexHandler
 pip install "memoturn[otel]"        # OTel SDK + OTLP/HTTP exporter for span_exporter/span_processor
@@ -151,6 +152,43 @@ The generation is closed with `level="ERROR"` on a mid-stream exception (partial
 still recorded, and the exception re-raises to the caller as normal) or with
 `level="WARNING"` if the stream is abandoned — closed early, garbage-collected, or idle
 for too long — before a terminal chunk/event arrives.
+
+## Gemini wrapper
+
+```python
+from google import genai
+from memoturn import wrap_gemini
+
+client = wrap_gemini(genai.Client())
+client.models.generate_content(
+    model="gemini-2.0-flash",
+    contents="2+2?",
+    config={"system_instruction": "be terse", "temperature": 0.2},
+)  # recorded: systemInstruction + contents as input, usage incl. cached tokens
+```
+
+Same `memoturn=`/`trace=` options as `wrap_openai`/`wrap_anthropic`. `config` is read
+duck-typed — a plain dict, a pydantic-like object (`model_dump()`), or a
+`SimpleNamespace` all work; `system_instruction`/`systemInstruction` is pulled out and
+nested alongside `contents` as the recorded input, and everything else in `config`
+becomes `modelParameters`.
+
+Gemini has no `stream=True` flag — streaming is a separate, always-streaming method,
+so it's wrapped independently:
+
+```python
+stream = client.models.generate_content_stream(model="gemini-2.0-flash", contents="2+2?")
+for chunk in stream:
+    ...  # unchanged — still native GenerateContentResponse chunks
+# generation is recorded once the stream is exhausted
+```
+
+Each chunk is a *full* `GenerateContentResponse` (not a delta type): `.text` per chunk
+is incremental and gets concatenated into the recorded `output`; `.usage_metadata` is
+cumulative, so the wrapper keeps only the latest non-null value instead of summing
+across chunks. As with the OpenAI/Anthropic streams, a mid-stream exception marks the
+generation `ERROR` with partial output and re-raises, and abandonment marks it
+`WARNING` with partial output.
 
 ## LangChain
 
