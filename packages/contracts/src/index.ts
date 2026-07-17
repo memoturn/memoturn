@@ -105,6 +105,111 @@ export const traceFacets = z.object({
 });
 export type TraceFacets = z.infer<typeof traceFacets>;
 
+// ── Structured filter model ──────────────────────────────────────────────────────
+// A single filter is a discriminated union on `type`; a filter set is an array of them.
+// `FILTER_OPERATORS` is the ONE source of truth mapping each value type to its allowed
+// operators — reused by the console (operator dropdown) and the telemetry SQL builder, so
+// the UI and the query engine can never drift. Shared by the trace list and the (future)
+// dashboard query engine.
+export const FILTER_OPERATORS = {
+  string: ["eq", "neq", "contains", "not_contains", "starts_with", "ends_with"],
+  number: ["eq", "neq", "gt", "lt", "gte", "lte"],
+  datetime: ["gt", "lt", "gte", "lte"],
+  boolean: ["eq", "neq"],
+  stringOptions: ["any_of", "none_of"], // scalar column ∈ a set
+  arrayOptions: ["any_of", "none_of", "all_of"], // the column itself is an array (e.g. tags)
+  stringObject: ["eq", "neq", "contains", "not_contains", "starts_with", "ends_with"], // key/value (metadata)
+  numberObject: ["eq", "neq", "gt", "lt", "gte", "lte"],
+  null: ["is_null", "is_not_null"],
+} as const;
+
+export type FilterValueType = keyof typeof FILTER_OPERATORS;
+
+export const singleFilter = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("string"),
+    column: z.string(),
+    operator: z.enum(FILTER_OPERATORS.string),
+    value: z.string(),
+  }),
+  z.object({
+    type: z.literal("number"),
+    column: z.string(),
+    operator: z.enum(FILTER_OPERATORS.number),
+    value: z.number(),
+  }),
+  z.object({
+    type: z.literal("datetime"),
+    column: z.string(),
+    operator: z.enum(FILTER_OPERATORS.datetime),
+    value: z.string(), // ISO 8601
+  }),
+  z.object({
+    type: z.literal("boolean"),
+    column: z.string(),
+    operator: z.enum(FILTER_OPERATORS.boolean),
+    value: z.boolean(),
+  }),
+  z.object({
+    type: z.literal("stringOptions"),
+    column: z.string(),
+    operator: z.enum(FILTER_OPERATORS.stringOptions),
+    value: z.array(z.string()),
+  }),
+  z.object({
+    type: z.literal("arrayOptions"),
+    column: z.string(),
+    operator: z.enum(FILTER_OPERATORS.arrayOptions),
+    value: z.array(z.string()),
+  }),
+  z.object({
+    type: z.literal("stringObject"),
+    column: z.string(),
+    key: z.string(), // arbitrary metadata key
+    operator: z.enum(FILTER_OPERATORS.stringObject),
+    value: z.string(),
+  }),
+  z.object({
+    type: z.literal("numberObject"),
+    column: z.string(),
+    key: z.string(),
+    operator: z.enum(FILTER_OPERATORS.numberObject),
+    value: z.number(),
+  }),
+  z.object({ type: z.literal("null"), column: z.string(), operator: z.enum(FILTER_OPERATORS.null) }),
+]);
+export type SingleFilter = z.infer<typeof singleFilter>;
+
+export const filterState = z.array(singleFilter);
+export type FilterState = z.infer<typeof filterState>;
+
+/** A filterable column exposed to the builder UI. The physical Doris mapping (uiId → column
+ * or subquery) lives server-side in packages/telemetry — the UI only knows id/label/type. */
+export interface FilterColumnDef {
+  id: string;
+  label: string;
+  type: FilterValueType;
+  /** Preset keys offered for object (key/value) columns; free-text when omitted. */
+  keyOptions?: string[];
+}
+
+export const TRACE_FILTER_COLUMNS: FilterColumnDef[] = [
+  { id: "name", label: "Name", type: "stringOptions" },
+  { id: "environment", label: "Environment", type: "stringOptions" },
+  { id: "type", label: "Type", type: "stringOptions" },
+  { id: "level", label: "Level", type: "stringOptions" },
+  { id: "tags", label: "Tags", type: "arrayOptions" },
+  { id: "userId", label: "User", type: "string" },
+  { id: "sessionId", label: "Session", type: "string" },
+  { id: "version", label: "Version", type: "string" },
+  { id: "release", label: "Release", type: "string" },
+  { id: "timestamp", label: "Timestamp", type: "datetime" },
+  { id: "tokens", label: "Tokens", type: "number" },
+  { id: "cost", label: "Cost (USD)", type: "number" },
+  { id: "latencyMs", label: "Latency (ms)", type: "number" },
+  { id: "metadata", label: "Metadata", type: "stringObject" },
+];
+
 /** Trace volume over the selected range, bucketed by hour (short ranges) or day. */
 export const traceHistogramBucket = z.object({ bucket: z.string(), count: z.number() });
 export type TraceHistogramBucket = z.infer<typeof traceHistogramBucket>;

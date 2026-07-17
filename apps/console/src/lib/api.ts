@@ -164,6 +164,9 @@ export interface TraceFilters {
   promptId?: string;
   scoreName?: string;
   level?: string;
+  type?: string;
+  /** JSON-encoded structured filter set (the power-path FilterBuilder); parsed server-side. */
+  filter?: string;
   days?: number;
 }
 export interface PlaygroundRequest {

@@ -41,6 +41,7 @@ import type {
   WindowMetric,
 } from "../types.js";
 import { closeDorisPool, dorisQuery } from "./client.js";
+import { buildTraceFilterSql } from "./filters.js";
 import { buildInserts, parseTags, parseVector, toDorisDateTime } from "./serialize.js";
 import { streamLoad, streamLoadEnabled } from "./streamload.js";
 
@@ -168,6 +169,13 @@ export class DorisTelemetryStore implements TelemetryStore {
     if (days && days > 0) {
       conds.push("t.`timestamp` >= ?");
       params.push(cutoffDaysAgo(days));
+    }
+    // Structured operator-based filters (the power-path builder) compile to additional
+    // AND-ed predicates; the faceted filters above remain the quick path.
+    if (filters.filters && filters.filters.length > 0) {
+      const compiled = buildTraceFilterSql(projectId, filters.filters);
+      conds.push(...compiled.conds);
+      params.push(...compiled.params);
     }
     return { where: conds.join(" AND "), params };
   }

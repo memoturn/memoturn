@@ -5,6 +5,8 @@
  * them to whatever the underlying store expects.
  */
 
+import type { SingleFilter } from "@memoturn/contracts";
+
 // ── Write rows (produced by apps/worker mappers + score corrections) ─────────────
 
 export interface TraceRow {
@@ -141,6 +143,7 @@ export interface TraceFilters {
   type?: string; // trace has an observation of this type (SPAN/GENERATION/TOOL/AGENT/EVENT)
   days?: number; // only traces from the last N days
   traceIds?: string[]; // restrict to this explicit set of trace ids (e.g. hydrate similarity results)
+  filters?: SingleFilter[]; // structured operator-based filter set (the power-path filter builder)
 }
 
 /**

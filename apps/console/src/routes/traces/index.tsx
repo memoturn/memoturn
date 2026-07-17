@@ -1,3 +1,4 @@
+import { filterState, type SingleFilter } from "@memoturn/contracts";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@memoturn/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -20,6 +21,7 @@ import {
 import { Fragment, type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "../../components/empty-state";
+import { FilterBuilder } from "../../components/filter-builder";
 import { HelpTip } from "../../components/help-tip";
 import { KindBadge, toneForKind } from "../../components/kind-badge";
 import { PageHeader } from "../../components/page-header";
@@ -55,6 +57,9 @@ interface TraceSearch {
   scoreName?: string;
   level?: string;
   type?: string;
+  // JSON-encoded structured filter set (the power-path FilterBuilder). Kept as a string in the
+  // URL; decoded to SingleFilter[] for the builder and passed verbatim to the API as `filter`.
+  filter?: string;
   // Open trace id — drives the deep-linkable peek drawer, separate from filters.
   peek?: string;
   // Pagination (1-based). Defaults (page 1 / size 50) are kept out of the URL to keep it clean.
@@ -81,6 +86,7 @@ export const Route = createFileRoute("/traces/")({
     scoreName: str(s.scoreName),
     level: str(s.level),
     type: str(s.type),
+    filter: str(s.filter),
     peek: str(s.peek),
     page: posInt(s.page),
     pageSize: posInt(s.pageSize),
@@ -417,6 +423,21 @@ function TracesPage() {
     navigate({ search: (prev) => ({ ...prev, [key]: value || undefined, page: undefined }) });
   };
 
+  // Structured (power-path) filter set — stored JSON-encoded in the URL, re-validated on decode.
+  const filterSet = useMemo<SingleFilter[]>(() => {
+    if (!filters.filter) return [];
+    try {
+      const parsed = filterState.safeParse(JSON.parse(filters.filter));
+      return parsed.success ? parsed.data : [];
+    } catch {
+      return [];
+    }
+  }, [filters.filter]);
+  const setFilterSet = (next: SingleFilter[]) =>
+    navigate({
+      search: (prev) => ({ ...prev, filter: next.length ? JSON.stringify(next) : undefined, page: undefined }),
+    });
+
   // Per-column cell renderers — the table header/body iterate `visibleCols` in the persisted order.
   const cellContent: Record<ColKey, (t: TraceSummary) => ReactNode> = {
     timestamp: (t) => t.timestamp,
@@ -455,7 +476,8 @@ function TracesPage() {
       filters.tag ||
       filters.scoreName ||
       filters.level ||
-      filters.type,
+      filters.type ||
+      filters.filter,
   );
 
   // Facet click toggles the matching filter (name facet maps to the `search`/name filter).
@@ -727,6 +749,8 @@ function TracesPage() {
           </KindBadge>
           Warnings
         </Button>
+        <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+        <FilterBuilder value={filterSet} onChange={setFilterSet} />
       </div>
 
       {savedViews && savedViews.length > 0 && (
