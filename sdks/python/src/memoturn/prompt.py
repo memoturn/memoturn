@@ -14,7 +14,7 @@ _VAR = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
 
 def get_prompt(name: str, channel: str = "production", *, bucket_key: Optional[str] = None,
                base_url: Optional[str] = None, public_key: Optional[str] = None,
-               secret_key: Optional[str] = None) -> dict[str, Any]:
+               secret_key: Optional[str] = None, timeout: float = 10.0) -> dict[str, Any]:
     """Fetch a deployed prompt. If the channel runs an A/B split, pass ``bucket_key`` (a stable
     session/user id) to stick this caller to one arm; the returned ``version`` is what you stamp
     on the resulting generation."""
@@ -29,7 +29,7 @@ def get_prompt(name: str, channel: str = "production", *, bucket_key: Optional[s
     req = urllib.request.Request(
         f"{base}/v1/prompts/{urllib.parse.quote(name)}?{query}", headers={"authorization": f"Basic {auth}"}
     )
-    return json.loads(urllib.request.urlopen(req, timeout=10).read())
+    return json.loads(urllib.request.urlopen(req, timeout=timeout).read())
 
 
 def compile_prompt(prompt: dict[str, Any], **variables: Any) -> Any:
