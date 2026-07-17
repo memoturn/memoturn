@@ -45,6 +45,7 @@ const DOC_FILES = [
   "docs/prompts.md",
   "docs/sdk-typescript.md",
   "docs/sdk-python.md",
+  "docs/sdk-go.md",
   "docs/roadmap.md",
   "docs/troubleshooting.md",
   ...SITE_DOC_FILES,
@@ -206,7 +207,94 @@ function checkClaudeRoster(): CheckResult {
   return { name: "Claude roster (.claude/agents,skills → .claude/README.md)", findings };
 }
 
-const checks = [checkScriptNames, checkCredentials, checkPorts, checkCrons, checkMcpTools, checkClaudeRoster];
+/** 7. The JS and Python SDK versions must agree everywhere they are declared. */
+function checkSdkVersions(): CheckResult {
+  const findings: Finding[] = [];
+  const js = (JSON.parse(read("sdks/js/package.json")) as { version: string }).version;
+  const pyToml = read("sdks/python/pyproject.toml").match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? "";
+  const pyInit = read("sdks/python/src/memoturn/__init__.py").match(/__version__\s*=\s*"([^"]+)"/)?.[1] ?? "";
+  if (pyToml !== pyInit) {
+    findings.push({
+      doc: "sdks/python/src/memoturn/__init__.py",
+      line: 0,
+      message: `__version__ \`${pyInit}\` ≠ pyproject.toml \`${pyToml}\``,
+    });
+  }
+  if (js !== pyToml) {
+    findings.push({
+      doc: "sdks/js/package.json",
+      line: 0,
+      message: `version \`${js}\` ≠ python \`${pyToml}\` — SDKs release in lockstep`,
+    });
+  }
+  return { name: "SDK versions (sdks/js ↔ sdks/python)", findings };
+}
+
+/** 8. All three SDK clients must default to the same base URL (the API port — 3000 is the console). */
+function checkSdkBaseUrl(): CheckResult {
+  const findings: Finding[] = [];
+  const defaults: { doc: string; value: string }[] = [
+    {
+      doc: "sdks/js/src/client.ts",
+      value: read("sdks/js/src/client.ts").match(/MEMOTURN_BASE_URL \?\? "([^"]+)"/)?.[1] ?? "",
+    },
+    {
+      doc: "sdks/python/src/memoturn/client.py",
+      value: read("sdks/python/src/memoturn/client.py").match(/MEMOTURN_BASE_URL",\s*"([^"]+)"/)?.[1] ?? "",
+    },
+    {
+      doc: "sdks/go/client.go",
+      value: read("sdks/go/client.go").match(/defaultBaseURL = "([^"]+)"/)?.[1] ?? "",
+    },
+  ];
+  for (const { doc, value } of defaults) {
+    if (value === "") findings.push({ doc, line: 0, message: "could not extract the default base URL" });
+    else if (value !== "http://localhost:3001") {
+      findings.push({
+        doc,
+        line: 0,
+        message: `default base URL \`${value}\` ≠ the API port \`http://localhost:3001\``,
+      });
+    }
+  }
+  return { name: "SDK default base URL (all clients → API port 3001)", findings };
+}
+
+/** 9. Every MEMOTURN_* env var an SDK reads must be documented on that SDK's docs page. */
+function checkSdkEnvVars(): CheckResult {
+  const findings: Finding[] = [];
+  const sdks: { srcDir: string; exclude: RegExp; doc: string }[] = [
+    { srcDir: "sdks/js/src", exclude: /\.test\.ts$|test-helpers/, doc: "docs/sdk-typescript.md" },
+    { srcDir: "sdks/python/src/memoturn", exclude: /^$/, doc: "docs/sdk-python.md" },
+    { srcDir: "sdks/go", exclude: /_test\.go$/, doc: "docs/sdk-go.md" },
+  ];
+  for (const { srcDir, exclude, doc } of sdks) {
+    const body = read(doc);
+    const vars = new Set<string>();
+    for (const file of readdirSync(join(ROOT, srcDir))) {
+      if (exclude.test(file) || !/\.(ts|py|go)$/.test(file)) continue;
+      for (const m of read(`${srcDir}/${file}`).matchAll(/MEMOTURN_[A-Z_]*[A-Z]/g)) vars.add(m[0]);
+    }
+    for (const v of [...vars].sort()) {
+      if (!body.includes(v)) {
+        findings.push({ doc, line: 0, message: `env var \`${v}\` (read by ${srcDir}) is not documented` });
+      }
+    }
+  }
+  return { name: "SDK env vars (sdk sources → docs/sdk-*.md)", findings };
+}
+
+const checks = [
+  checkScriptNames,
+  checkCredentials,
+  checkPorts,
+  checkCrons,
+  checkMcpTools,
+  checkClaudeRoster,
+  checkSdkVersions,
+  checkSdkBaseUrl,
+  checkSdkEnvVars,
+];
 
 let drift = 0;
 console.log("doc-drift check\n");

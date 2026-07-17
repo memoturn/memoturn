@@ -5,7 +5,9 @@ description: Tracing, prompts, datasets, and an OpenAI wrapper with @memoturn/sd
 
 The TypeScript SDK (`@memoturn/sdk` on npm) provides tracing, prompt management, and an OpenAI
 wrapper. Configure it via the constructor or the env vars `MEMOTURN_BASE_URL`,
-`MEMOTURN_PUBLIC_KEY`, `MEMOTURN_SECRET_KEY`.
+`MEMOTURN_PUBLIC_KEY`, `MEMOTURN_SECRET_KEY`, `MEMOTURN_ENVIRONMENT`,
+`MEMOTURN_MAX_BUFFER_SIZE` (buffered-event cap, default 10000), and `MEMOTURN_ALLOW_HTTP`
+(suppress the cleartext-http warning for non-local hosts).
 
 ## Tracing
 

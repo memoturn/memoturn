@@ -21,7 +21,10 @@ export default defineConfig({
     },
   },
   server: {
-    port: 3000,
+    // CONSOLE_PORT lets the e2e suite run on a dedicated port; strictPort keeps a taken
+    // port a loud failure instead of a silent auto-increment to the wrong port.
+    port: Number(process.env.CONSOLE_PORT ?? 3000),
+    strictPort: true,
     proxy: {
       "/api": {
         target: API_TARGET,
