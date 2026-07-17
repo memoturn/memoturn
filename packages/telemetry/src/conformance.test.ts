@@ -1,3 +1,4 @@
+import type { AnalyticsQuery } from "@memoturn/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { telemetry } from "./index.js";
 import type {
@@ -205,6 +206,51 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
 
     // Honors the trace-list filters (non-matching tag → no buckets).
     expect(await store.traceHistogram(P, { tag: "nope" }, "day")).toHaveLength(0);
+  });
+
+  it("runs analytics queries (total, breakdown, filter, time series)", async () => {
+    const range = { fromTimestamp: iso(-86_400_000), toTimestamp: iso(60_000) };
+    const q = (over: Partial<AnalyticsQuery>): AnalyticsQuery => ({
+      view: "observations",
+      metrics: [{ measure: "count", aggregation: "count" }],
+      dimensions: [],
+      filters: [],
+      timeDimension: null,
+      orderBy: [],
+      rowLimit: 100,
+      ...range,
+      ...over,
+    });
+
+    // Total count → a single aggregate row over the two seeded observations.
+    const total = await store.runAnalyticsQuery(P, q({}));
+    expect(total.rows).toHaveLength(1);
+    expect(Number(total.rows[0]!.count_count)).toBe(2);
+
+    // Sum cost broken down by model → the gpt-x generation carries the cost.
+    const byModel = await store.runAnalyticsQuery(
+      P,
+      q({
+        metrics: [{ measure: "cost", aggregation: "sum" }],
+        dimensions: [{ field: "model" }],
+        orderBy: [{ field: "sum_cost", direction: "desc" }],
+      }),
+    );
+    const gptx = byModel.rows.find((r) => r.model === "gpt-x");
+    expect(gptx).toBeTruthy();
+    expect(Number(gptx!.sum_cost)).toBeCloseTo(0.003, 6);
+
+    // A dimension filter narrows to the GENERATION observation only.
+    const gensOnly = await store.runAnalyticsQuery(
+      P,
+      q({ filters: [{ type: "stringOptions", column: "type", operator: "any_of", value: ["GENERATION"] }] }),
+    );
+    expect(Number(gensOnly.rows[0]!.count_count)).toBe(1);
+
+    // Time series → at least one day bucket, with an ISO-ish time label.
+    const ts = await store.runAnalyticsQuery(P, q({ timeDimension: { granularity: "day" } }));
+    expect(ts.rows.length).toBeGreaterThanOrEqual(1);
+    expect(String(ts.rows[0]!.time)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it("groups traces into sessions with counts, and paginates", async () => {
