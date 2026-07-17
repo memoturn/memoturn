@@ -53,6 +53,14 @@ import { ModeToggle } from "../components/mode-toggle";
 import { TimeRangeSelect } from "../components/TimeRangeSelect";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "../components/ui/breadcrumb";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
@@ -117,6 +125,51 @@ const NAV_SECONDARY: NavItem[] = [
   { to: "/organizations", label: "Organizations", icon: Building2 },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
+
+// Top-level path segment → human label, derived from the nav definitions.
+const SEGMENT_LABELS: Record<string, string> = Object.fromEntries([
+  ["dashboard", "Dashboard"],
+  ["assistant", "Assistant"],
+  ...[...NAV_GROUPS.flatMap((g) => g.items), ...NAV_SECONDARY].map((i) => [i.to.slice(1), i.label]),
+]);
+
+const crumbLabel = (segment: string): string => {
+  const decoded = decodeURIComponent(segment);
+  return decoded.length > 28 ? `${decoded.slice(0, 25)}…` : decoded;
+};
+
+/** Wayfinding for the topbar: "Traces / tr_abc123" with links on intermediate crumbs. */
+function HeaderBreadcrumbs() {
+  const { pathname } = useLocation();
+  const segments = pathname.split("/").filter(Boolean);
+  const crumbs =
+    segments.length === 0
+      ? [{ label: "Dashboard", to: "/dashboard" }]
+      : segments.map((seg, i) => ({
+          label: i === 0 ? (SEGMENT_LABELS[seg] ?? crumbLabel(seg)) : crumbLabel(seg),
+          to: `/${segments.slice(0, i + 1).join("/")}`,
+        }));
+
+  return (
+    <Breadcrumb>
+      <BreadcrumbList>
+        {crumbs.map((c, i) => (
+          <BreadcrumbItem key={c.to}>
+            {i > 0 && <BreadcrumbSeparator />}
+            {i === crumbs.length - 1 ? (
+              // Deep segments are ids — mono, and normal-case (ids are case-sensitive).
+              <BreadcrumbPage className={i > 0 ? "font-mono text-xs normal-case" : undefined}>{c.label}</BreadcrumbPage>
+            ) : (
+              <BreadcrumbLink asChild>
+                <Link to={c.to}>{c.label}</Link>
+              </BreadcrumbLink>
+            )}
+          </BreadcrumbItem>
+        ))}
+      </BreadcrumbList>
+    </Breadcrumb>
+  );
+}
 
 function isActivePath(pathname: string, to: string): boolean {
   if (to === "/dashboard") return pathname === "/" || pathname === "/dashboard" || pathname.startsWith("/dashboard/");
@@ -421,18 +474,20 @@ function RootComponent() {
         <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/70">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-1 !h-5" />
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2 text-muted-foreground"
-            onClick={() => window.dispatchEvent(new Event("memoturn:cmdk"))}
-          >
-            <Search />
-            <span className="hidden sm:inline">Search</span>
-            <kbd className="hidden rounded border bg-muted px-1 font-mono text-[0.625rem] sm:inline">⌘K</kbd>
-          </Button>
-          <AssistantDrawer />
+          <HeaderBreadcrumbs />
           <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 text-muted-foreground"
+              onClick={() => window.dispatchEvent(new Event("memoturn:cmdk"))}
+            >
+              <Search />
+              <span className="hidden sm:inline">Search</span>
+              <kbd className="hidden rounded border bg-muted px-1 font-mono text-[0.625rem] sm:inline">⌘K</kbd>
+            </Button>
+            <AssistantDrawer />
+            <Separator orientation="vertical" className="!h-5" />
             <TimeRangeSelect />
             <ModeToggle />
           </div>

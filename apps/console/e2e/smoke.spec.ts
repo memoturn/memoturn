@@ -5,9 +5,12 @@ test.beforeEach(async ({ page }) => {
   await login(page);
 });
 
-test("the topbar exposes the core navigation", async ({ page }) => {
+test("the sidebar exposes the core navigation", async ({ page }) => {
+  // Scoped to the sidebar: the topbar breadcrumb renders the current page with role="link"
+  // too, so an unscoped lookup is ambiguous for the active route's name.
+  const sidebar = page.locator('[data-slot="sidebar"]').first();
   for (const name of ["Dashboard", "Traces", "Prompts", "Datasets", "Playground"]) {
-    await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
+    await expect(sidebar.getByRole("link", { name, exact: true })).toBeVisible();
   }
 });
 
