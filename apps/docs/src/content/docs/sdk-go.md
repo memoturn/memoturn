@@ -5,7 +5,9 @@ description: Tracing, prompts, datasets, guardrails, and OpenTelemetry export wi
 
 The Go SDK (`github.com/memoturn/memoturn/sdks/go`) is dependency-free (stdlib only). Install
 with `go get github.com/memoturn/memoturn/sdks/go`. Configure it via `New(...)` options or the
-env vars `MEMOTURN_BASE_URL`, `MEMOTURN_PUBLIC_KEY`, `MEMOTURN_SECRET_KEY` — options win over
+env vars `MEMOTURN_BASE_URL`, `MEMOTURN_PUBLIC_KEY`, `MEMOTURN_SECRET_KEY`,
+`MEMOTURN_ENVIRONMENT`, `MEMOTURN_MAX_BUFFER_SIZE` (buffered-event cap, default 10000),
+and `MEMOTURN_ALLOW_HTTP` (suppress the cleartext-http warning) — options win over
 env vars.
 
 ## Tracing
