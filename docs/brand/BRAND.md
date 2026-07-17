@@ -10,6 +10,8 @@ Memoturn is an **open-source, self-hostable AI engineering platform — LLM obse
 
 We are not whimsical, but we are not cold either. The "island" metaphor in the brand (lagoon, palm, sand, foam, atoll) is intentional — it gives a developer-infrastructure product a warmer, more human aesthetic than the usual blue-and-grey enterprise template. We lean into it without becoming silly.
 
+**Audience:** individual developers running a single self-hosted box through enterprise platform teams running it at scale — self-hosting is the point, not a downmarket compromise. Compliance primitives (SSO, RBAC, audit logs, PII masking) ship in the Apache-2.0 core for everyone; don't write copy that implies they're an enterprise-only upsell.
+
 **Do**
 
 - Lead with what works ("See every LLM call, on infrastructure you own").

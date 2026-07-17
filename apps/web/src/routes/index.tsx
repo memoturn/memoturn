@@ -26,7 +26,7 @@ const FEATURES = [
   {
     eyebrow: "evaluation",
     title: "Evals, three ways",
-    body: "Offline experiments over datasets, online evaluators sampling production traces, and human review queues with assignment. Every score lands in ClickHouse and shows up on the trace it came from.",
+    body: "Offline experiments over datasets, online evaluators sampling production traces, and human review queues with assignment. Every score lands in Doris and shows up on the trace it came from.",
     tags: ["offline", "online", "human review"],
   },
   {
@@ -42,7 +42,7 @@ const FEATURES = [
 const CAPABILITIES = [
   {
     label: "metrics & dashboards",
-    body: "Cost, tokens, and latency (p50/p95) over a ClickHouse rollup, sliced by day and by model — plus custom widgets and saved views for the questions your team actually asks.",
+    body: "Cost, tokens, and latency (p50/p95) over a Doris rollup, sliced by day and by model — plus custom widgets and saved views for the questions your team actually asks.",
     tags: ["cost", "tokens", "p95"],
   },
   {
@@ -62,7 +62,7 @@ const CAPABILITIES = [
   },
   {
     label: "platform",
-    body: "Organizations and projects on Better Auth with RBAC and read-only viewers, SSO (OIDC/SAML), API-key management, per-project rate limits, PII masking at ingest, audit logs, retention policies, and scheduled NDJSON exports.",
+    body: "Organizations and projects on Better Auth with RBAC and read-only viewers, SSO (OIDC/SAML), API-key management, per-project rate limits, PII masking at ingest, audit logs, retention policies, and scheduled NDJSON exports — every one of these ships in the Apache-2.0 core, not an enterprise upsell.",
     tags: ["RBAC", "SSO", "PII masking"],
   },
   {
@@ -82,8 +82,8 @@ const USE_CASES = [
   },
   {
     label: "Track spend by model & feature",
-    body: "Cost, token, and latency rollups per day and per model out of ClickHouse — know what each feature costs before the invoice tells you.",
-    tags: ["cost", "ClickHouse"],
+    body: "Cost, token, and latency rollups per day and per model out of Doris — know what each feature costs before the invoice tells you.",
+    tags: ["cost", "Doris"],
   },
   {
     label: "Catch regressions before users do",
@@ -175,7 +175,7 @@ function Landing() {
             <div className="inline-flex items-center gap-1.5">
               <span aria-hidden className="size-1 rounded-full bg-primary/70" />
               <dt className="sr-only">Analytics store</dt>
-              <dd>ClickHouse-backed</dd>
+              <dd>Apache Doris-backed</dd>
             </div>
           </dl>
         </div>
@@ -218,7 +218,7 @@ function Landing() {
             </div>
             <p className="max-w-[44ch] text-pretty text-[0.9375rem] leading-[1.65] text-sea-ink-soft dark:text-muted-foreground">
               The observability stack the LLM SaaS vendors run — traces, eval pipelines, prompt registries — rebuilt on
-              open infrastructure: Postgres, ClickHouse, Redis, S3. One docker compose away, and your telemetry never
+              open infrastructure: Postgres, Apache Doris, Redis, S3. One docker compose away, and your telemetry never
               leaves your network.
             </p>
           </div>
