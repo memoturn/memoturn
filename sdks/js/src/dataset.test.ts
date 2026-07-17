@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { addDatasetItems, createDataset, getDataset } from "./dataset.js";
+import { addDatasetItems, createDataset, evaluateGate, getDataset } from "./dataset.js";
 import { decodeBasic, mockFetch } from "./test-helpers.js";
 
 // dataset.ts defaults baseUrl to :3001 (the API), unlike the tracing client (:3000).
@@ -52,6 +52,37 @@ describe("getDataset", () => {
     expect(post.method).toBe("POST");
     expect(post.url).toBe("http://api.test/v1/datasets/qa/runs");
     expect(post.body).toEqual({ runName: "baseline", links: [{ datasetItemId: "i1", traceId: "t1" }] });
+  });
+});
+
+describe("evaluateGate", () => {
+  it("POSTs thresholds to /v1/datasets/:name/runs/:run/gate and returns the gate result", async () => {
+    const gate = { passed: true, failures: [], scores: [{ name: "faithfulness", value: 0.9 }] };
+    active = mockFetch(() => ({ json: gate }));
+
+    const out = await evaluateGate(creds, "qa set", "run 1", { faithfulness: { min: 0.8 }, toxicity: { max: 0.1 } });
+    const req = active.calls[0];
+    expect(req.method).toBe("POST");
+    expect(req.url).toBe("http://api.test/v1/datasets/qa%20set/runs/run%201/gate");
+    expect(req.body).toEqual({ thresholds: { faithfulness: { min: 0.8 }, toxicity: { max: 0.1 } } });
+    expect(out).toEqual(gate);
+  });
+
+  it("includes baselineRun in the body only when provided", async () => {
+    active = mockFetch(() => ({ json: { passed: false, failures: [{}], scores: [] } }));
+
+    const out = await evaluateGate(
+      creds,
+      "qa",
+      "candidate",
+      { accuracy: { maxRegression: 0.05 } },
+      { baselineRun: "baseline" },
+    );
+    expect(active.calls[0].body).toEqual({
+      thresholds: { accuracy: { maxRegression: 0.05 } },
+      baselineRun: "baseline",
+    });
+    expect(out.passed).toBe(false);
   });
 });
 
