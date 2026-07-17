@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { TraceGraph } from "../features/trace-graph/TraceGraph";
 import {
   api,
   fetchOffloadedPayload,
@@ -1396,6 +1397,8 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   // Collapsed subgraphs in the waterfall (by observation id).
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Observations view: the waterfall timeline (default) or the agent-flow graph.
+  const [obsView, setObsView] = useState<"timeline" | "graph">("timeline");
   const payloadPanelRef = useRef<HTMLDivElement | null>(null);
   const qc = useQueryClient();
   const readOnly = useIsReadOnly();
@@ -1470,6 +1473,7 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
 
   const payloadObs = visibleObservations(trace.observations);
   const payloadIds = new Set(payloadObs.map((o) => o.id));
+  const showGraph = obsView === "graph";
   // The detail pane defaults to the first failing observation (what you're usually here for),
   // else the first payload-bearing one. A stale selection from a previous trace falls back here.
   const effectiveSelected =
@@ -1691,11 +1695,31 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
             <CardHeader>
               <CardTitle>Observations ({trace.observation_count})</CardTitle>
               <CardDescription>
-                Execution timeline for this trace — select a row to inspect its payload.
-                {errorCount > 0 && " Branches leading to a failure are accented in red."}
+                {showGraph
+                  ? "Agent-flow graph derived from the observation tree — nodes are colored by type."
+                  : "Execution timeline for this trace — select a row to inspect its payload."}
+                {!showGraph && errorCount > 0 && " Branches leading to a failure are accented in red."}
               </CardDescription>
-              {collapsible.size > 0 && (
-                <CardAction>
+              <CardAction className="flex items-center gap-2">
+                <div className="flex items-center gap-0.5 rounded-md border p-0.5">
+                  <Button
+                    variant={obsView === "timeline" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => setObsView("timeline")}
+                  >
+                    Timeline
+                  </Button>
+                  <Button
+                    variant={obsView === "graph" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => setObsView("graph")}
+                  >
+                    Graph
+                  </Button>
+                </div>
+                {!showGraph && collapsible.size > 0 && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -1703,11 +1727,13 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
                   >
                     {allCollapsed ? "Expand all" : "Collapse all"}
                   </Button>
-                </CardAction>
-              )}
+                )}
+              </CardAction>
             </CardHeader>
-            <CardContent className="px-0">
-              {trace.observations.length === 0 ? (
+            <CardContent className={showGraph ? undefined : "px-0"}>
+              {showGraph ? (
+                <TraceGraph observations={trace.observations} />
+              ) : trace.observations.length === 0 ? (
                 <div className="px-6">
                   <EmptyState title="No observations." />
                 </div>
