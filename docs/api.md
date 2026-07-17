@@ -84,6 +84,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | Method | Path | Description |
 | --- | --- | --- |
 | POST | `/v1/playground/chat` | One-shot completion. `trace:true` (default) records it as a trace. |
+| POST | `/v1/assistant/chat` | In-app assistant: a bounded agentic loop over the project's read-only MCP tools. Body: `provider`, `model`, `messages[]`; returns `{content, steps[]}`. Read-only. |
 | POST | `/v1/playground/stream` | Streaming completion (SSE: `data: {"delta":...}` then `[DONE]`). |
 
 ### Evaluators

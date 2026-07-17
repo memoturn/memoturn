@@ -1,6 +1,7 @@
 export * from "./alerts.js";
 export * from "./analytics.js";
 export * from "./apikeys.js";
+export * from "./assistant.js";
 export * from "./audit.js";
 export * from "./auth.js";
 export * from "./automations.js";

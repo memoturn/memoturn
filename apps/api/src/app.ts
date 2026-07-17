@@ -122,6 +122,7 @@ import {
   resolvePrompt,
   revokeApiKey,
   runAnalyticsQuery,
+  runAssistant,
   runBatchAction,
   runEvaluator,
   runPlayground,
@@ -269,6 +270,7 @@ app.use("/v1/datasets", requireAuth);
 app.use("/v1/datasets/*", requireAuth);
 app.use("/v1/providers", requireAuth);
 app.use("/v1/playground/*", requireAuth);
+app.use("/v1/assistant/*", requireAuth);
 app.use("/v1/evaluators", requireAuth);
 app.use("/v1/evaluators/*", requireAuth);
 app.use("/v1/experiments", requireAuth);
@@ -1793,6 +1795,45 @@ app.openapi(
       return c.json(result);
     } catch (err) {
       console.error(JSON.stringify({ level: "error", scope: "playground.run", message: String(err) }));
+      return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+    }
+  },
+);
+
+// In-app assistant — a read-only copilot that runs an agentic loop over the project's READ MCP
+// tools. POST (structured body) but read-only (only non-write tools are exposed), so VIEWERs may use it.
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/assistant/chat",
+    summary: "Ask the in-app assistant (agentic loop over read-only project tools)",
+    tags: ["playground"],
+    security,
+    // rbac-exempt: read-only — the assistant only exposes non-write MCP tools, never mutates.
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              provider: z.enum(RUN_PROVIDER_IDS),
+              model: z.string(),
+              messages: z.array(z.object({ role: z.enum(["system", "user", "assistant"]), content: z.string() })),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Assistant answer + tool steps", content: { "application/json": { schema: z.any() } } },
+      400: { description: "Error" },
+    },
+  }),
+  async (c) => {
+    try {
+      const result = await runAssistant(c.get("projectId"), c.req.valid("json"));
+      return c.json(result);
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", scope: "assistant.run", message: String(err) }));
       return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
     }
   },
