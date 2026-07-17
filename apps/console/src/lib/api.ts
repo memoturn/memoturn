@@ -28,6 +28,7 @@ import type {
   EmbeddingProjection,
   Evaluator,
   EvaluatorAnalytics,
+  EvaluatorGuard,
   EvaluatorTemplate,
   EvaluatorVersion,
   ExperimentComparison,
@@ -328,6 +329,11 @@ export const api = {
     redactWith?: string;
     injection?: boolean;
     blockedTerms?: string[];
+    sqlInjection?: boolean;
+    requireMatch?: string[];
+    requireValidJson?: boolean;
+    requiredJsonKeys?: string[];
+    evaluatorGuards?: EvaluatorGuard[];
   }) => post<GuardrailPolicy>(`/v1/guardrails`, body),
   checkGuardrails: (text: string) => post<GuardrailVerdict>(`/v1/guardrails/check`, { text }),
   getAnalyticsSink: () => get<AnalyticsSink>(`/v1/analytics-sink`),

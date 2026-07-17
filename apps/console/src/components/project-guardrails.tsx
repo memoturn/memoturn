@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import type { GuardrailVerdict } from "../lib/api";
+import type { EvaluatorGuard, GuardrailVerdict } from "../lib/api";
 import { api } from "../lib/api";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -19,6 +19,13 @@ const verdictTone: Record<string, "default" | "secondary" | "destructive" | "out
   block: "destructive",
 };
 
+const comparatorLabel: Record<EvaluatorGuard["comparator"], string> = {
+  gt: "score >",
+  gte: "score ≥",
+  lt: "score <",
+  lte: "score ≤",
+};
+
 /**
  * Runtime guardrails config for the active project + a live tester. Configure which checks
  * run (PII redaction/block, prompt-injection detection, blocked terms); the endpoint is
@@ -27,6 +34,7 @@ const verdictTone: Record<string, "default" | "secondary" | "destructive" | "out
 export function ProjectGuardrails() {
   const qc = useQueryClient();
   const { data: policy } = useQuery({ queryKey: ["guardrails"], queryFn: api.getGuardrailPolicy });
+  const { data: evaluators } = useQuery({ queryKey: ["evaluators"], queryFn: api.listEvaluators });
 
   const [enabled, setEnabled] = useState(false);
   const [pii, setPii] = useState(true);
@@ -36,6 +44,11 @@ export function ProjectGuardrails() {
   const [redactWith, setRedactWith] = useState("[REDACTED]");
   const [injection, setInjection] = useState(true);
   const [blockedTerms, setBlockedTerms] = useState("");
+  const [sqlInjection, setSqlInjection] = useState(false);
+  const [requireMatch, setRequireMatch] = useState("");
+  const [requireValidJson, setRequireValidJson] = useState(false);
+  const [requiredJsonKeys, setRequiredJsonKeys] = useState("");
+  const [evaluatorGuards, setEvaluatorGuards] = useState<EvaluatorGuard[]>([]);
 
   // Seed local state once the policy loads.
   useEffect(() => {
@@ -48,10 +61,27 @@ export function ProjectGuardrails() {
     setRedactWith(policy.redactWith);
     setInjection(policy.injection);
     setBlockedTerms(policy.blockedTerms.join("\n"));
+    setSqlInjection(policy.sqlInjection);
+    setRequireMatch(policy.requireMatch.join("\n"));
+    setRequireValidJson(policy.requireValidJson);
+    setRequiredJsonKeys(policy.requiredJsonKeys.join(", "));
+    setEvaluatorGuards(policy.evaluatorGuards);
   }, [policy]);
 
   const toggleBuiltin = (b: string) =>
     setBuiltins((prev) => (prev.includes(b) ? prev.filter((x) => x !== b) : [...prev, b]));
+
+  const addEvaluatorGuard = () => {
+    const firstName = evaluators?.[0]?.name;
+    if (!firstName) {
+      toast.error("Create an evaluator first — there's nothing to guard with yet.");
+      return;
+    }
+    setEvaluatorGuards((prev) => [...prev, { name: firstName, comparator: "lt", threshold: 0.5 }]);
+  };
+  const updateEvaluatorGuard = (i: number, patch: Partial<EvaluatorGuard>) =>
+    setEvaluatorGuards((prev) => prev.map((g, idx) => (idx === i ? { ...g, ...patch } : g)));
+  const removeEvaluatorGuard = (i: number) => setEvaluatorGuards((prev) => prev.filter((_, idx) => idx !== i));
 
   const save = useMutation({
     mutationFn: () =>
@@ -70,6 +100,17 @@ export function ProjectGuardrails() {
           .split("\n")
           .map((s) => s.trim())
           .filter(Boolean),
+        sqlInjection,
+        requireMatch: requireMatch
+          .split("\n")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        requireValidJson,
+        requiredJsonKeys: requiredJsonKeys
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        evaluatorGuards,
       }),
     onSuccess: () => {
       toast.success("Guardrail policy saved");
@@ -159,6 +200,109 @@ export function ProjectGuardrails() {
             <Textarea id="gr-blocked" rows={2} value={blockedTerms} onChange={(e) => setBlockedTerms(e.target.value)} />
           </div>
 
+          <div className="flex items-center justify-between border-t pt-4">
+            <div>
+              <Label htmlFor="gr-sql">Detect SQL injection</Label>
+              <p className="text-xs text-muted-foreground">Heuristic detector; blocks on a hit.</p>
+            </div>
+            <Switch id="gr-sql" checked={sqlInjection} onCheckedChange={setSqlInjection} />
+          </div>
+
+          <div className="space-y-1.5 border-t pt-4">
+            <Label htmlFor="gr-require-match">Require match (one regex per line; blocks when none match)</Label>
+            <Textarea
+              id="gr-require-match"
+              rows={2}
+              value={requireMatch}
+              onChange={(e) => setRequireMatch(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-3 border-t pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="gr-json">Require valid JSON</Label>
+                <p className="text-xs text-muted-foreground">Blocks if the text doesn't parse as JSON.</p>
+              </div>
+              <Switch id="gr-json" checked={requireValidJson} onCheckedChange={setRequireValidJson} />
+            </div>
+            {requireValidJson && (
+              <div className="space-y-1.5 pl-1">
+                <Label htmlFor="gr-json-keys">Required top-level keys (comma-separated, optional)</Label>
+                <Input
+                  id="gr-json-keys"
+                  className="w-64"
+                  value={requiredJsonKeys}
+                  onChange={(e) => setRequiredJsonKeys(e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3 border-t pt-4">
+            <div>
+              <Label>Evaluator guards</Label>
+              <p className="text-xs text-muted-foreground">
+                Block synchronously when an LLM-judge evaluator's score crosses a threshold. Runs in parallel with a
+                short timeout and fails open (never blocks) if the judge model errors or times out — layer on top of,
+                don't replace, the checks above for anything safety-critical.
+              </p>
+            </div>
+            {evaluatorGuards.length === 0 && (
+              <p className="text-sm text-muted-foreground">No evaluator guards configured.</p>
+            )}
+            {evaluatorGuards.map((g, i) => (
+              <div key={i} className="flex flex-wrap items-center gap-2">
+                <Select value={g.name} onValueChange={(v) => updateEvaluatorGuard(i, { name: v })}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(evaluators ?? []).map((ev) => (
+                      <SelectItem key={ev.name} value={ev.name}>
+                        {ev.name}
+                      </SelectItem>
+                    ))}
+                    {!evaluators?.some((ev) => ev.name === g.name) && (
+                      <SelectItem value={g.name}>{g.name} (deleted)</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={g.comparator}
+                  onValueChange={(v) => updateEvaluatorGuard(i, { comparator: v as EvaluatorGuard["comparator"] })}
+                >
+                  <SelectTrigger className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(comparatorLabel) as EvaluatorGuard["comparator"][]).map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {comparatorLabel[c]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  max={1}
+                  className="w-24"
+                  value={g.threshold}
+                  onChange={(e) => updateEvaluatorGuard(i, { threshold: Number(e.target.value) })}
+                />
+                <span className="text-sm text-muted-foreground">→ block</span>
+                <Button variant="ghost" size="sm" onClick={() => removeEvaluatorGuard(i)}>
+                  Remove
+                </Button>
+              </div>
+            ))}
+            <Button variant="outline" size="sm" onClick={addEvaluatorGuard}>
+              Add evaluator guard
+            </Button>
+          </div>
+
           <Button onClick={() => save.mutate()} disabled={save.isPending}>
             {save.isPending ? "Saving…" : "Save policy"}
           </Button>
@@ -205,7 +349,8 @@ function GuardrailTester() {
               <ul className="list-inside list-disc text-muted-foreground">
                 {result.findings.map((f) => (
                   <li key={`${f.category}:${f.type}`}>
-                    {f.category} — {f.type} (×{f.count})
+                    {f.category} — {f.type} (×{f.count}
+                    {f.score !== undefined ? `, score ${f.score.toFixed(2)}` : ""})
                   </li>
                 ))}
               </ul>
