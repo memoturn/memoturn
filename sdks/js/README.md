@@ -10,8 +10,10 @@ scores. Zero runtime dependencies. Node ≥ 18.
 ```bash
 npm install @memoturn/sdk
 # provider wrappers are optional peers
-npm install openai            # for wrapOpenAI
-npm install @anthropic-ai/sdk # for wrapAnthropic
+npm install openai                       # for wrapOpenAI
+npm install @anthropic-ai/sdk            # for wrapAnthropic
+npm install @google/genai                # for wrapGemini
+npm install @pinecone-database/pinecone  # for wrapPinecone
 ```
 
 ## Quickstart
@@ -43,6 +45,8 @@ Call `await memoturn.flush()` to push the buffer immediately (e.g. per request i
 | `@memoturn/sdk` | `Memoturn` client + types, `wrapOpenAI`, `MemoturnCallback`, `getPrompt`/`compilePrompt`, datasets (`createDataset`, `addDatasetItems`, `getDataset`, `evaluateGate`), `checkGuardrails`, `runGuarded`, `GuardrailBlockedError` |
 | `@memoturn/sdk/openai` | `wrapOpenAI` |
 | `@memoturn/sdk/anthropic` | `wrapAnthropic` |
+| `@memoturn/sdk/gemini` | `wrapGemini` |
+| `@memoturn/sdk/pinecone` | `wrapPinecone` |
 | `@memoturn/sdk/langchain` | `MemoturnCallback` |
 | `@memoturn/sdk/otel` | `memoturnOtlpConfig`, `memoturnTraceExporter`, `memoturnSpanProcessor` |
 | `@memoturn/sdk/observe` | `observe`, `configure`, `getClient`, `setTraceContext` — **Node-only**, not in the barrel |
@@ -138,6 +142,63 @@ tool-use `input_json_delta`, and thinking/signature deltas are accumulated per c
 (same shape as `result.content`) while every event is still yielded to the caller in real time
 — no buffering, no added latency. `{ streamTimeoutMs }` overrides the idle-stream abandonment
 backstop (default 120s).
+
+## Gemini wrapper
+
+```ts
+import { GoogleGenAI } from "@google/genai";
+import { wrapGemini } from "@memoturn/sdk/gemini";
+
+const gemini = wrapGemini(new GoogleGenAI({ apiKey }), memoturn);
+await gemini.models.generateContent({ model: "gemini-2.5-flash", contents, config: { temperature: 0.2 } });
+
+// Streaming is a completely separate, always-streaming method (no `stream: true` flag) —
+// each yielded chunk is a full response object; `.text` deltas are concatenated for `output`.
+const stream = await gemini.models.generateContentStream({ model: "gemini-2.5-flash", contents });
+for await (const chunk of stream) {
+  /* consume as usual */
+}
+```
+
+Records `generateContent`/`generateContentStream` as generations — model, `config` minus
+`systemInstruction` as `modelParameters` (everything else in `config`, mirroring OpenAI's
+exclusion approach rather than an allowlist, since Gemini's config surface is large and
+evolving), `systemInstruction` + `contents` as input (or bare `contents` when there's no system
+instruction), and usage mapped from `usageMetadata` (`promptTokenCount`/`candidatesTokenCount`,
+with `cachedContentTokenCount` included as `cacheReadTokens` when reported). Streaming chunks
+are yielded to the caller unchanged in real time; `.text` deltas are concatenated into `output`
+and the latest non-null `.usageMetadata` is taken as-is (Gemini's usage is cumulative, not
+per-chunk). `{ streamTimeoutMs }` overrides the idle-stream abandonment backstop (default 120s).
+
+## Pinecone wrapper
+
+```ts
+import { Pinecone } from "@pinecone-database/pinecone";
+import { wrapPinecone } from "@memoturn/sdk/pinecone";
+
+const pc = new Pinecone({ apiKey });
+const index = wrapPinecone(pc.index("my-index"), memoturn);
+await index.query({ vector: queryEmbedding, topK: 5 });
+
+// `.namespace(ns)` returns a new index-like object — the wrapper re-wraps it recursively so
+// namespaced queries are instrumented too, with the namespace recorded on the span.
+await index.namespace("prod").query({ vector: queryEmbedding, topK: 5 });
+```
+
+Wraps the **data-plane index handle** returned by `pinecone.index(name)` — not the
+control-plane client (`createIndex`/`listIndexes`). Each `.query()` call is recorded as a
+`RETRIEVER` span: the query vector as `embedding` (truncated to 4096 dims), and `matches` as
+`retrievedDocuments`. Pinecone's matches never include the original document text (only
+`id`/`score`/optional `metadata`), but memoturn's `retrievedDocument.content` is required — the
+wrapper extracts it **best-effort** from `metadata` (`text`, `content`, then `page_content`, in
+that order), falling back to the stringified metadata if none match. Pass `{ getContent }` to
+override the extraction for a non-standard metadata schema:
+
+```ts
+const index = wrapPinecone(pc.index("my-index"), memoturn, {
+  getContent: (match) => match.metadata?.body,
+});
+```
 
 ## LangChain
 
