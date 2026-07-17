@@ -40,6 +40,7 @@ import {
   Search,
   Settings as SettingsIcon,
   ShieldCheck,
+  Sparkles,
   Terminal,
   Users,
   Zap,
@@ -78,6 +79,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: "/sessions", label: "Sessions", icon: MessagesSquare },
       { to: "/users", label: "Users", icon: Users },
       { to: "/widgets", label: "Explore", icon: BarChart3 },
+      { to: "/assistant", label: "Assistant", icon: Sparkles },
     ],
   },
   {
@@ -229,7 +231,7 @@ function AppSidebar({ email, initials }: { email: string; initials: string }) {
                   <Logo className="size-8" />
                 </div>
                 <div className="grid flex-1 text-left leading-tight">
-                  <span className="truncate text-sm font-semibold tracking-wide">memoturn</span>
+                  <span className="truncate text-sm font-semibold uppercase tracking-[0.08em]">memoturn</span>
                   <span className="truncate text-xs text-muted-foreground">AI engineering</span>
                 </div>
               </Link>
