@@ -339,12 +339,18 @@ function SavedWidget({
   onDelete: () => void;
   onResize: (gridW: number) => void;
 }) {
-  // Merge dashboard-level filters into the stored query; the engine skips columns a view lacks.
-  const query = extraFilters.length
-    ? { ...widget.query, filters: [...widget.query.filters, ...extraFilters] }
-    : widget.query;
+  const days = useRangeDays();
+  // Recompute the time range live from the global picker (the stored absolute range would freeze),
+  // and merge dashboard-level filters (the engine skips columns a view lacks).
+  const now = Date.now();
+  const query = {
+    ...widget.query,
+    filters: extraFilters.length ? [...widget.query.filters, ...extraFilters] : widget.query.filters,
+    fromTimestamp: new Date(now - days * 86_400_000).toISOString(),
+    toTimestamp: new Date(now).toISOString(),
+  };
   const { data, error } = useQuery({
-    queryKey: ["query-widget", widget.id, extraFilters],
+    queryKey: ["query-widget", widget.id, days, extraFilters],
     queryFn: () => api.runAnalyticsQuery(query),
     retry: false,
   });

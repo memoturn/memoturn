@@ -56,6 +56,86 @@ async function main() {
     },
   });
 
+  // Curated "maintained" dashboard widgets — a few useful query-engine charts out of the box on
+  // the implicit Default dashboard. The stored time range is a placeholder; the console recomputes
+  // it live from the range picker at render. Idempotent via deterministic ids.
+  const wnow = Date.now();
+  const range = {
+    fromTimestamp: new Date(wnow - 30 * 86_400_000).toISOString(),
+    toTimestamp: new Date(wnow).toISOString(),
+  };
+  const templates = [
+    {
+      slug: "cost",
+      title: "Cost over time",
+      chartType: "line",
+      query: {
+        view: "observations",
+        metrics: [{ measure: "cost", aggregation: "sum" }],
+        dimensions: [],
+        filters: [],
+        timeDimension: { granularity: "day" },
+        orderBy: [],
+        rowLimit: 100,
+        ...range,
+      },
+    },
+    {
+      slug: "latency",
+      title: "Latency p95 over time",
+      chartType: "line",
+      query: {
+        view: "observations",
+        metrics: [{ measure: "latency", aggregation: "p95" }],
+        dimensions: [],
+        filters: [],
+        timeDimension: { granularity: "day" },
+        orderBy: [],
+        rowLimit: 100,
+        ...range,
+      },
+    },
+    {
+      slug: "cost-by-model",
+      title: "Cost by model",
+      chartType: "horizontal_bar",
+      query: {
+        view: "observations",
+        metrics: [{ measure: "cost", aggregation: "sum" }],
+        dimensions: [{ field: "model" }],
+        filters: [],
+        timeDimension: null,
+        orderBy: [{ field: "sum_cost", direction: "desc" }],
+        rowLimit: 20,
+        ...range,
+      },
+    },
+    {
+      slug: "traces",
+      title: "Traces over time",
+      chartType: "bar",
+      query: {
+        view: "traces",
+        metrics: [{ measure: "count", aggregation: "count" }],
+        dimensions: [],
+        filters: [],
+        timeDimension: { granularity: "day" },
+        orderBy: [],
+        rowLimit: 100,
+        ...range,
+      },
+    },
+  ];
+  for (const t of templates) {
+    const id = `${project.id}-tmpl-${t.slug}`;
+    const data = { title: t.title, query: t.query as object, chartType: t.chartType, gridW: 6 };
+    await prisma.widget.upsert({
+      where: { id },
+      update: data,
+      create: { id, projectId: project.id, dashboardId: null, ...data },
+    });
+  }
+
   // Sample prompt (chat) deployed to the "production" channel as v1.
   const prompt = await prisma.prompt.upsert({
     where: { projectId_name: { projectId: project.id, name: "support-reply" } },
@@ -108,6 +188,7 @@ async function main() {
   console.log(`  publicKey : ${DEV_PUBLIC_KEY}`);
   console.log(`  secretKey : ${DEV_SECRET_KEY}`);
   console.log(`  prompt    : support-reply (CHAT) @ production=v1`);
+  console.log(`  dashboard : 4 template charts (cost, latency p95, cost-by-model, traces)`);
   console.log("\nSet these in .env (already the defaults in .env.example).");
 
   await prisma.$disconnect();
