@@ -40,12 +40,12 @@ import {
   Search,
   Settings as SettingsIcon,
   ShieldCheck,
-  Sparkles,
   Terminal,
   Users,
   Zap,
 } from "lucide-react";
 import { useEffect } from "react";
+import { AssistantDrawer } from "../components/assistant-chat";
 import { CommandPalette } from "../components/CommandPalette";
 import { KeyboardHelp } from "../components/keyboard-help";
 import { Logo } from "../components/logo";
@@ -431,12 +431,7 @@ function RootComponent() {
             <span className="hidden sm:inline">Search</span>
             <kbd className="hidden rounded border bg-muted px-1 font-mono text-[0.625rem] sm:inline">⌘K</kbd>
           </Button>
-          <Button asChild variant="outline" size="sm" className="gap-2 text-muted-foreground">
-            <Link to="/assistant" aria-label="Ask AI">
-              <Sparkles className="text-primary" />
-              <span className="hidden sm:inline">Ask AI</span>
-            </Link>
-          </Button>
+          <AssistantDrawer />
           <div className="ml-auto flex items-center gap-2">
             <TimeRangeSelect />
             <ModeToggle />

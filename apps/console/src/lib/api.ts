@@ -289,7 +289,12 @@ export const api = {
   cancelExperiment: (id: string) =>
     post<{ id: string; status: string }>(`/v1/experiments/${encodeURIComponent(id)}/cancel`, {}),
   playgroundChat: (body: PlaygroundRequest) => post<PlaygroundResponse>(`/v1/playground/chat`, body),
-  assistantChat: (body: { provider: string; model: string; messages: { role: string; content: string }[] }) =>
+  assistantChat: (body: {
+    provider: string;
+    model: string;
+    messages: { role: string; content: string }[];
+    context?: { organization?: string; project?: string; page?: string; rangeDays?: number };
+  }) =>
     post<{ content: string; steps: { tool: string; args: unknown; result: unknown }[] }>(`/v1/assistant/chat`, body),
   listProviders: () => get<{ data: ProviderConnection[] }>(`/v1/providers`).then((r) => r.data),
   addProvider: (body: { provider: string; apiKey?: string; baseUrl?: string; region?: string }) =>

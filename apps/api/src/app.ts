@@ -1822,6 +1822,14 @@ app.openapi(
               provider: z.enum(RUN_PROVIDER_IDS),
               model: z.string(),
               messages: z.array(z.object({ role: z.enum(["system", "user", "assistant"]), content: z.string() })),
+              context: z
+                .object({
+                  organization: z.string().max(200).optional(),
+                  project: z.string().max(200).optional(),
+                  page: z.string().max(500).optional(),
+                  rangeDays: z.number().int().positive().max(3650).optional(),
+                })
+                .optional(),
             }),
           },
         },

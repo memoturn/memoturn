@@ -21,11 +21,38 @@ const SYSTEM_PROMPT = `You are memoturn's in-app assistant. You help an engineer
 const MAX_ITERATIONS = 6;
 const MAX_RESULT_CHARS = 4000; // cap each tool result fed back into the context
 
+/** Where the user currently is in the console — sent by the client, woven into the system prompt. */
+export interface AssistantContext {
+  organization?: string;
+  project?: string;
+  /** Console route the user is looking at, e.g. "/traces/tr_abc123". */
+  page?: string;
+  /** The console's global time-range selector, in days. */
+  rangeDays?: number;
+}
+
+export function buildContextBlock(ctx?: AssistantContext): string {
+  const parts = [`Current UTC time: ${new Date().toISOString()}.`];
+  if (ctx?.organization) parts.push(`Organization (workspace): ${JSON.stringify(ctx.organization)}.`);
+  if (ctx?.project)
+    parts.push(`Project: ${JSON.stringify(ctx.project)} — every tool is already scoped to this project.`);
+  if (ctx?.page)
+    parts.push(
+      `The user is currently viewing the console page "${ctx.page}". If that path embeds an entity id (e.g. /traces/<traceId>), questions like "this trace" refer to it — fetch it with the matching tool.`,
+    );
+  if (ctx?.rangeDays)
+    parts.push(
+      `The console's selected time range is the last ${ctx.rangeDays} day(s) — default to that window unless the user asks for another.`,
+    );
+  return `\n\nContext:\n${parts.map((p) => `- ${p}`).join("\n")}`;
+}
+
 export interface AssistantInput {
   provider: Provider;
   model: string;
   /** Conversation so far (user/assistant turns); the system prompt is prepended here. */
   messages: ChatMessage[];
+  context?: AssistantContext;
 }
 export interface AssistantStep {
   tool: string;
@@ -68,7 +95,10 @@ export async function runAssistant(projectId: string, input: AssistantInput): Pr
     description: t.description,
     parameters: t.inputSchema,
   }));
-  const messages: ChatMessage[] = [{ role: "system", content: SYSTEM_PROMPT }, ...input.messages];
+  const messages: ChatMessage[] = [
+    { role: "system", content: SYSTEM_PROMPT + buildContextBlock(input.context) },
+    ...input.messages,
+  ];
   const steps: AssistantStep[] = [];
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
