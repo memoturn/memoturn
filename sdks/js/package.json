@@ -27,6 +27,8 @@
     ".": "./src/index.ts",
     "./openai": "./src/openai.ts",
     "./anthropic": "./src/anthropic.ts",
+    "./gemini": "./src/gemini.ts",
+    "./pinecone": "./src/pinecone.ts",
     "./langchain": "./src/langchain.ts",
     "./otel": "./src/otel.ts",
     "./observe": "./src/observe.ts",
@@ -58,6 +60,14 @@
       "./anthropic": {
         "types": "./dist/anthropic.d.ts",
         "default": "./dist/anthropic.js"
+      },
+      "./gemini": {
+        "types": "./dist/gemini.d.ts",
+        "default": "./dist/gemini.js"
+      },
+      "./pinecone": {
+        "types": "./dist/pinecone.d.ts",
+        "default": "./dist/pinecone.js"
       },
       "./langchain": {
         "types": "./dist/langchain.d.ts",
@@ -96,6 +106,8 @@
   "peerDependencies": {
     "openai": ">=4",
     "@anthropic-ai/sdk": ">=0.30",
+    "@google/genai": ">=1.0",
+    "@pinecone-database/pinecone": ">=3",
     "@opentelemetry/exporter-trace-otlp-http": ">=0.50.0",
     "@opentelemetry/sdk-trace-base": ">=1.20.0"
   },
@@ -104,6 +116,12 @@
       "optional": true
     },
     "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "@google/genai": {
+      "optional": true
+    },
+    "@pinecone-database/pinecone": {
       "optional": true
     },
     "@opentelemetry/exporter-trace-otlp-http": {
