@@ -14,6 +14,7 @@ Optional extras (discoverability only — the SDK itself never imports them at r
 pip install "memoturn[openai]"      # openai>=1.0 for wrap_openai
 pip install "memoturn[anthropic]"   # anthropic>=0.30 for wrap_anthropic
 pip install "memoturn[gemini]"      # google-genai>=1.0 for wrap_gemini
+pip install "memoturn[pinecone]"    # pinecone>=5.0 for wrap_pinecone
 pip install "memoturn[langchain]"   # langchain-core for MemoturnCallbackHandler
 pip install "memoturn[llamaindex]"  # llama-index-core for MemoturnLlamaIndexHandler
 pip install "memoturn[otel]"        # OTel SDK + OTLP/HTTP exporter for span_exporter/span_processor
@@ -189,6 +190,30 @@ cumulative, so the wrapper keeps only the latest non-null value instead of summi
 across chunks. As with the OpenAI/Anthropic streams, a mid-stream exception marks the
 generation `ERROR` with partial output and re-raises, and abandonment marks it
 `WARNING` with partial output.
+
+## Pinecone wrapper
+
+```python
+from pinecone import Pinecone
+from memoturn import wrap_pinecone
+
+index = wrap_pinecone(Pinecone(api_key="...").Index("my-index"))
+index.query(vector=embedding, top_k=5, namespace="prod")  # recorded as a RETRIEVER span
+```
+
+Wraps a data-plane index handle (`pc.Index(name)`) — not the control-plane `Pinecone`
+client that does `create_index`/`list_indexes`. Only `index.query` is patched; same
+`memoturn=`/`trace=` options as the other wrappers.
+
+Pinecone's `matches` never include the original chunk text (only `id`/`score`/optional
+`values`/`metadata`), but memoturn's `retrievedDocument.content` is required. The
+wrapper extracts it best-effort from `metadata`, trying `text`, `content`, then
+`page_content` in that order, falling back to the stringified metadata blob if none
+match. For a non-standard metadata schema, override the extractor:
+
+```python
+index = wrap_pinecone(index, get_content=lambda match: match.metadata.get("chunk_text"))
+```
 
 ## LangChain
 

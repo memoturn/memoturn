@@ -13,6 +13,13 @@ All notable changes to the memoturn Python SDK.
   full `GenerateContentResponse`, so `.text` is concatenated as a delta while
   `.usage_metadata` takes the latest non-null value instead of being summed. Duck-typed,
   no `google-genai` dependency.
+- `wrap_pinecone(index)` — drop-in wrapper for a Pinecone data-plane index handle
+  (`pc.Index(name)`): records `index.query()` calls as `RETRIEVER` spans with the query
+  vector (truncated to 4096 dims), namespace/topK/filter metadata, and retrieved
+  documents. Since Pinecone matches never carry the original chunk text, `content` is
+  extracted best-effort from `metadata` (`text`/`content`/`page_content`, else
+  stringified metadata) — pass `get_content=` to override for a non-standard schema.
+  Duck-typed, no `pinecone` dependency.
 - Streaming capture for `wrap_openai` and `wrap_anthropic`: `stream=True` calls are no
   longer a silent passthrough — the returned stream is wrapped so chunks/events forward
   to the caller unchanged while being accumulated into the same output/usage shape a

@@ -25,6 +25,7 @@ Issues = "https://github.com/memoturn/memoturn/issues"
 openai = ["openai>=1.0"]
 anthropic = ["anthropic>=0.30"]
 gemini = ["google-genai>=1.0"]
+pinecone = ["pinecone>=5.0"]
 otel = ["opentelemetry-sdk>=1.20", "opentelemetry-exporter-otlp-proto-http>=1.20"]
 langchain = ["langchain-core>=0.1"]
 llamaindex = ["llama-index-core>=0.10"]

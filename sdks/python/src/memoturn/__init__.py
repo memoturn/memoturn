@@ -9,6 +9,7 @@ from .langchain import MemoturnCallbackHandler
 from .llamaindex import MemoturnLlamaIndexHandler
 from .openai import wrap_openai
 from .otel import otlp_config, span_exporter, span_processor
+from .pinecone import wrap_pinecone
 from .prompt import compile_prompt, get_prompt
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "wrap_openai",
     "wrap_anthropic",
     "wrap_gemini",
+    "wrap_pinecone",
     "MemoturnCallbackHandler",
     "MemoturnLlamaIndexHandler",
     "create_dataset",
