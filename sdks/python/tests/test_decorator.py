@@ -1,10 +1,12 @@
 """@observe builds a trace at the outermost call and nests inner calls as child spans."""
 from __future__ import annotations
 
+import logging
+
 import pytest
 from conftest import Capture
 
-from memoturn import Memoturn, configure, observe
+from memoturn import Memoturn, configure, observe, set_trace_context
 
 CREDS = dict(base_url="http://api.test", public_key="pk-mt-x", secret_key="sk-mt-y", flush_at=1000)
 
@@ -72,3 +74,44 @@ def test_error_path_records_error_and_reraises(capture: Capture) -> None:
     end = next(e for e in capture.batch() if e["type"] == "span-update")
     assert end["body"]["level"] == "ERROR"
     assert "nope" in end["body"]["statusMessage"]
+
+
+def test_set_trace_context_updates_the_active_trace(capture: Capture) -> None:
+    client = Memoturn(**CREDS)
+    configure(client)
+
+    @observe()
+    def inner() -> None:
+        set_trace_context(sessionId="s-1", userId="u-1")
+
+    @observe(name="root")
+    def outer() -> None:
+        inner()
+
+    outer()
+    client.flush()
+
+    # The @observe root's own closing trace.update(output=...) is enqueued after inner()
+    # returns, so it's not the sessionId/userId patch — find the trace-create event
+    # set_trace_context actually produced.
+    trace_creates = [e for e in capture.batch() if e["type"] == "trace-create"]
+    context_update = next(e for e in trace_creates if "sessionId" in e["body"])
+    assert context_update["body"]["sessionId"] == "s-1"
+    assert context_update["body"]["userId"] == "u-1"
+    # it patched the same trace the root opened, not a new one
+    assert context_update["body"]["id"] == trace_creates[0]["body"]["id"]
+
+
+def test_set_trace_context_outside_observe_is_a_noop_and_warns(
+    capture: Capture, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="memoturn"):
+        set_trace_context(sessionId="x")  # must not raise
+    assert any("set_trace_context" in r.getMessage() for r in caplog.records)
+    assert capture.requests == []  # nothing was flushed/sent — no event was captured
+
+
+def test_set_trace_context_is_exported_from_package_root() -> None:
+    from memoturn import set_trace_context as imported
+
+    assert imported is set_trace_context

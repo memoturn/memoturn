@@ -10,9 +10,11 @@ import json
 import os
 import urllib.error
 import urllib.request
-from typing import Any, Optional
+from typing import Any, Callable, Optional, TypeVar, Union
 
-from .client import _truncate
+from .client import _truncate, logger
+
+T = TypeVar("T")
 
 
 def _creds(base_url: Optional[str], public_key: Optional[str], secret_key: Optional[str]) -> tuple[str, str]:
@@ -44,3 +46,56 @@ def check_guardrails(
         return json.loads(urllib.request.urlopen(req, timeout=timeout).read())
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"guardrails check failed: {e.code} {_truncate(e.read().decode(errors='replace'))}") from e
+
+
+class GuardrailBlockedError(RuntimeError):
+    """Raised by :func:`run_guarded` when a guardrail verdict is ``"block"`` and
+    ``on_failure="raise"`` (the default)."""
+
+    def __init__(self, verdict: dict[str, Any]) -> None:
+        self.verdict = verdict
+        types = ", ".join(f.get("type", "") for f in verdict.get("findings", []))
+        super().__init__(f"memoturn: content blocked by guardrails ({types})")
+
+
+def run_guarded(
+    fn: Callable[[], T],
+    *,
+    extract_text: Callable[[T], str] = str,
+    on_failure: Union[str, Callable[[dict[str, Any]], T]] = "raise",
+    **creds: Any,
+) -> T:
+    """Run ``fn``, scan its result with :func:`check_guardrails`, and apply
+    ``on_failure`` semantics on a ``"block"`` verdict.
+
+    ``on_failure``:
+      - ``"raise"`` (default) — raise :class:`GuardrailBlockedError`.
+      - ``"log"`` — log a warning and return the original result unmodified.
+      - a callable — called with the verdict dict; its return value is returned instead
+        (a fallback response).
+
+    ``"allow"``/``"redact"`` verdicts always return the original result unmodified — call
+    :func:`check_guardrails` directly if you need the redacted text.
+
+    Compose two calls to guard input and output separately::
+
+        safe_input = run_guarded(lambda: user_input)
+        answer = run_guarded(lambda: call_model(safe_input))
+    """
+    result = fn()
+    text = extract_text(result)
+    verdict = check_guardrails(text, **creds)
+    if verdict.get("verdict") != "block":
+        return result
+
+    # `on_failure` defaults to "raise" deliberately — unlike this SDK's `mask` hook
+    # (which swallows errors by default to protect ingestion, a side-channel, from
+    # breaking), guardrails exist specifically to block unsafe content, so a silent
+    # default here would defeat the feature.
+    if on_failure == "raise":
+        raise GuardrailBlockedError(verdict)
+    if on_failure == "log":
+        types = ", ".join(f.get("type", "") for f in verdict.get("findings", []))
+        logger.warning("memoturn: guardrails blocked content (%s) — on_failure='log', returning original", types)
+        return result
+    return on_failure(verdict)

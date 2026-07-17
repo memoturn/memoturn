@@ -8,9 +8,12 @@ from __future__ import annotations
 import contextvars
 import functools
 import inspect
+import logging
 from typing import Any, Callable, Optional
 
 from .client import Memoturn, Span, Trace
+
+logger = logging.getLogger("memoturn")
 
 _default: Optional[Memoturn] = None
 _ctx: contextvars.ContextVar[Optional[tuple[Trace, Span]]] = contextvars.ContextVar("memoturn_ctx", default=None)
@@ -28,6 +31,28 @@ def get_client() -> Memoturn:
     if _default is None:
         _default = Memoturn()
     return _default
+
+
+def set_trace_context(**kwargs: Any) -> None:
+    """Update the current trace's userId/sessionId/tags/metadata from anywhere inside an
+    active @observe call stack. Delegates to Trace.update() (kwargs: userId, sessionId,
+    tags, metadata — same wire-field names as trace()/update()), so it has the same patch
+    semantics: omitted fields keep their previous value; tags/metadata are replaced
+    wholesale, not merged.
+
+    No-op (with a logger.warning) outside any active @observe context — there is no
+    trace to stamp. Never raises, matching @observe's own never-break-the-caller
+    exception handling.
+
+    Scoped to @observe-context only: code using Memoturn().trace(...) directly already
+    holds a Trace reference and should call trace.update(...) itself.
+    """
+    cur = _ctx.get()
+    if cur is None:
+        logger.warning("set_trace_context() called outside an active @observe context — ignored")
+        return
+    trace, _span = cur
+    trace.update(**kwargs)
 
 
 def _begin(name: str, as_type: str, inp: Any) -> tuple[Trace, Span, Any]:

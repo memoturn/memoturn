@@ -122,13 +122,159 @@ def test_error_marks_generation_and_reraises(capture: Capture) -> None:
     assert "overloaded" in update["body"]["statusMessage"]
 
 
-def test_stream_passes_through_without_recording(capture: Capture) -> None:
+# ── streaming ─────────────────────────────────────────────────────────────────────
+
+
+def _fake_stream_anthropic(events: list) -> SimpleNamespace:
+    return _fake_anthropic(lambda **kw: iter(events))
+
+
+def _event(type_: str, **kw: object) -> SimpleNamespace:
+    return SimpleNamespace(type=type_, **kw)
+
+
+def test_stream_accumulates_text_deltas_and_usage(capture: Capture) -> None:
     mt = Memoturn(**CREDS)
-    stream = iter(["chunk1", "chunk2"])
-    client = _fake_anthropic(lambda **kw: stream)
+    events = [
+        _event(
+            "message_start",
+            message=SimpleNamespace(
+                usage=SimpleNamespace(input_tokens=10, cache_read_input_tokens=7, cache_creation_input_tokens=2)
+            ),
+        ),
+        _event("content_block_start", index=0, content_block=SimpleNamespace(type="text", text="")),
+        _event("content_block_delta", index=0, delta=SimpleNamespace(type="text_delta", text="Hel")),
+        _event("content_block_delta", index=0, delta=SimpleNamespace(type="text_delta", text="lo")),
+        _event("content_block_stop", index=0),
+        _event("message_delta", usage=SimpleNamespace(output_tokens=3)),
+        _event("message_stop"),
+    ]
+    client = _fake_stream_anthropic(events)
     wrap_anthropic(client, mt)
 
-    res = client.messages.create(model="claude-sonnet-4-5", messages=[], max_tokens=8, stream=True)
-    assert res is stream
+    stream = client.messages.create(
+        model="claude-sonnet-4-5", messages=[{"role": "user", "content": "2+2?"}], max_tokens=64, stream=True
+    )
+    assert list(stream) == events  # forwarded unchanged
     mt.flush()
-    assert capture.requests == []  # nothing buffered, nothing sent
+
+    batch = capture.batch()
+    create = _find(batch, "generation-create")
+    update = _find(batch, "generation-update")
+    assert create["body"]["modelParameters"] == {"max_tokens": 64}
+    assert update["body"]["output"] == [{"type": "text", "text": "Hello"}]
+    assert update["body"]["usage"] == {
+        "promptTokens": 10,
+        "completionTokens": 3,
+        "totalTokens": 13,
+        "cacheReadTokens": 7,
+        "cacheCreationTokens": 2,
+    }
+
+
+def test_stream_accumulates_tool_use_input_json(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+    events = [
+        _event("message_start", message=SimpleNamespace(usage=SimpleNamespace(input_tokens=5))),
+        _event(
+            "content_block_start",
+            index=0,
+            content_block=SimpleNamespace(type="tool_use", id="tool_1", name="get_weather"),
+        ),
+        _event("content_block_delta", index=0, delta=SimpleNamespace(type="input_json_delta", partial_json='{"ci')),
+        _event(
+            "content_block_delta", index=0, delta=SimpleNamespace(type="input_json_delta", partial_json='ty":"SF"}')
+        ),
+        _event("content_block_stop", index=0),
+        _event("message_delta", usage=SimpleNamespace(output_tokens=4)),
+    ]
+    client = _fake_stream_anthropic(events)
+    wrap_anthropic(client, mt)
+
+    list(client.messages.create(model="claude-sonnet-4-5", messages=[], max_tokens=8, stream=True))
+    mt.flush()
+
+    output = _find(capture.batch(), "generation-update")["body"]["output"]
+    assert output == [{"type": "tool_use", "id": "tool_1", "name": "get_weather", "input": {"city": "SF"}}]
+
+
+def test_stream_input_json_delta_falls_back_to_raw_string_on_parse_error(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+    events = [
+        _event("content_block_start", index=0, content_block=SimpleNamespace(type="tool_use", id="t", name="f")),
+        _event("content_block_delta", index=0, delta=SimpleNamespace(type="input_json_delta", partial_json="not-json")),
+        _event("content_block_stop", index=0),
+    ]
+    client = _fake_stream_anthropic(events)
+    wrap_anthropic(client, mt)
+
+    list(client.messages.create(model="claude-sonnet-4-5", messages=[], max_tokens=8, stream=True))
+    mt.flush()
+
+    output = _find(capture.batch(), "generation-update")["body"]["output"]
+    assert output[0]["input"] == "not-json"  # never raises out of the accumulator
+
+
+def test_stream_mid_error_marks_generation_error_with_partial_output_and_reraises(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+
+    def create(**kw: object) -> object:
+        def gen():
+            yield _event("content_block_start", index=0, content_block=SimpleNamespace(type="text", text=""))
+            yield _event("content_block_delta", index=0, delta=SimpleNamespace(type="text_delta", text="partial"))
+            raise RuntimeError("overloaded mid-stream")
+
+        return gen()
+
+    client = _fake_anthropic(create)
+    wrap_anthropic(client, mt)
+
+    stream = client.messages.create(model="claude-sonnet-4-5", messages=[], max_tokens=8, stream=True)
+    with pytest.raises(RuntimeError, match="overloaded mid-stream"):
+        list(stream)
+    mt.flush()
+
+    update = _find(capture.batch(), "generation-update")
+    assert update["body"]["level"] == "ERROR"
+    assert "overloaded mid-stream" in update["body"]["statusMessage"]
+    assert update["body"]["output"] == [{"type": "text", "text": "partial"}]
+
+
+def test_stream_early_close_marks_generation_warning_with_partial_output(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+    events = [
+        _event("content_block_start", index=0, content_block=SimpleNamespace(type="text", text="")),
+        _event("content_block_delta", index=0, delta=SimpleNamespace(type="text_delta", text="partial")),
+        _event("content_block_delta", index=0, delta=SimpleNamespace(type="text_delta", text="-more")),
+    ]
+    client = _fake_stream_anthropic(events)
+    wrap_anthropic(client, mt)
+
+    stream = client.messages.create(model="claude-sonnet-4-5", messages=[], max_tokens=8, stream=True)
+    next(stream)
+    next(stream)
+    stream.close()
+    mt.flush()
+
+    update = _find(capture.batch(), "generation-update")
+    assert update["body"]["level"] == "WARNING"
+    assert update["body"]["statusMessage"] == "stream ended before completion"
+    assert update["body"]["output"] == [{"type": "text", "text": "partial"}]
+
+
+def test_synchronous_stream_start_failure_marks_error_and_reraises(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+
+    def boom(**kw: object) -> object:
+        raise RuntimeError("overloaded")
+
+    client = _fake_anthropic(boom)
+    wrap_anthropic(client, mt)
+
+    with pytest.raises(RuntimeError, match="overloaded"):
+        client.messages.create(model="claude-sonnet-4-5", messages=[], max_tokens=8, stream=True)
+    mt.flush()
+
+    update = _find(capture.batch(), "generation-update")
+    assert update["body"]["level"] == "ERROR"
+    assert "overloaded" in update["body"]["statusMessage"]

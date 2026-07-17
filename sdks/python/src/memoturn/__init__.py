@@ -2,8 +2,8 @@
 from .anthropic import wrap_anthropic
 from .client import Memoturn, Span, Trace
 from .dataset import add_dataset_items, create_dataset, evaluate_gate, get_dataset, record_run
-from .decorator import configure, get_client, observe
-from .guardrails import check_guardrails
+from .decorator import configure, get_client, observe, set_trace_context
+from .guardrails import GuardrailBlockedError, check_guardrails, run_guarded
 from .langchain import MemoturnCallbackHandler
 from .openai import wrap_openai
 from .otel import otlp_config, span_exporter, span_processor
@@ -16,6 +16,7 @@ __all__ = [
     "observe",
     "configure",
     "get_client",
+    "set_trace_context",
     "get_prompt",
     "compile_prompt",
     "wrap_openai",
@@ -27,6 +28,8 @@ __all__ = [
     "record_run",
     "evaluate_gate",
     "check_guardrails",
+    "run_guarded",
+    "GuardrailBlockedError",
     "otlp_config",
     "span_exporter",
     "span_processor",
