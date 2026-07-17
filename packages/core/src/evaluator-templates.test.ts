@@ -24,4 +24,13 @@ describe("evaluator templates", () => {
     expect(getEvaluatorTemplate("faithfulness")?.name).toBe("faithfulness");
     expect(getEvaluatorTemplate("nope")).toBeUndefined();
   });
+
+  it("ships the RAGAS retrieval-quality quartet + RAG dimensions", () => {
+    for (const key of ["faithfulness", "answer-relevance", "context-precision", "context-recall"]) {
+      expect(getEvaluatorTemplate(key), `missing ${key}`).toBeDefined();
+    }
+    // context-precision needs the question + retrieved context; recall needs the expected answer.
+    expect(getEvaluatorTemplate("context-precision")?.requires).toEqual(["input", "context"]);
+    expect(getEvaluatorTemplate("context-recall")?.requires).toEqual(["expectedOutput", "context"]);
+  });
 });
