@@ -143,6 +143,57 @@ describe("otlpToEvents (JSON)", () => {
     const span = otlpToEvents(p).find((e) => e.type === "span-create")?.body as Record<string, unknown>;
     expect(span.name).toBe("mcp:tools/list");
   });
+
+  // OpenInference (Phoenix + its framework instrumentors) semconv: openinference.span.kind.
+  const oiSpan = (attrs: { key: string; value: Record<string, unknown> }[]) => ({
+    resourceSpans: [
+      {
+        scopeSpans: [
+          {
+            spans: [
+              {
+                traceId: "2af7651916cd43dd8448eb211c80319c",
+                spanId: "d7ad6b7169203331",
+                name: "step",
+                startTimeUnixNano: "1700000000000000000",
+                endTimeUnixNano: "1700000000200000000",
+                attributes: attrs,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  it("classifies an OpenInference RETRIEVER span by its span kind", () => {
+    const span = otlpToEvents(oiSpan([{ key: "openinference.span.kind", value: { stringValue: "RETRIEVER" } }])).find(
+      (e) => e.type === "span-create",
+    )?.body as Record<string, unknown>;
+    expect(span.observationType).toBe("RETRIEVER");
+  });
+
+  it("maps an OpenInference LLM span to a generation, reading llm.* model + tokens + io", () => {
+    const events = otlpToEvents(
+      oiSpan([
+        { key: "openinference.span.kind", value: { stringValue: "LLM" } },
+        { key: "llm.model_name", value: { stringValue: "claude-sonnet-4-6" } },
+        { key: "llm.provider", value: { stringValue: "anthropic" } },
+        { key: "llm.token_count.prompt", value: { intValue: "120" } },
+        { key: "llm.token_count.completion", value: { intValue: "30" } },
+        { key: "input.value", value: { stringValue: "hi" } },
+        { key: "output.value", value: { stringValue: "hello" } },
+      ]),
+    );
+    const gen = events.find((e) => e.type === "generation-create")?.body as Record<string, unknown>;
+    expect(gen).toBeDefined();
+    expect(gen.model).toBe("claude-sonnet-4-6");
+    expect(gen.provider).toBe("anthropic");
+    expect(gen.input).toBe("hi");
+    expect(gen.output).toBe("hello");
+    expect((gen.usage as Record<string, number>).promptTokens).toBe(120);
+    expect((gen.usage as Record<string, number>).completionTokens).toBe(30);
+  });
 });
 
 // ── Minimal protobuf encoder (inverse of decodeOtlpTraces) for round-trip testing ─

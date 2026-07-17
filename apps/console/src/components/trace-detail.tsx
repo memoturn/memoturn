@@ -524,7 +524,11 @@ function barColor(type: string): string {
   if (type === "SPAN") return "bg-emerald-500";
   if (type === "TOOL") return "bg-amber-500";
   if (type === "AGENT") return "bg-violet-500";
-  return "bg-slate-400";
+  if (type === "RETRIEVER") return "bg-cyan-500";
+  if (type === "RERANKER") return "bg-teal-500";
+  if (type === "EMBEDDING") return "bg-indigo-500";
+  if (type === "GUARDRAIL") return "bg-rose-500";
+  return "bg-slate-400"; // CHAIN / EVENT / unknown
 }
 
 /** Human duration: sub-second in ms, otherwise seconds (2 sig figs). */

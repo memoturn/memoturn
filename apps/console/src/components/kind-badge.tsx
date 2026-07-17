@@ -20,6 +20,10 @@ const kindBadgeVariants = cva(
         amber: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-400",
         red: "border-destructive/25 bg-destructive/10 text-destructive",
         violet: "border-violet-500/25 bg-violet-500/10 text-violet-600 dark:text-violet-400",
+        cyan: "border-cyan-500/25 bg-cyan-500/10 text-cyan-700 dark:text-cyan-400",
+        teal: "border-teal-500/25 bg-teal-500/10 text-teal-700 dark:text-teal-400",
+        indigo: "border-indigo-500/25 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
+        rose: "border-rose-500/25 bg-rose-500/10 text-rose-600 dark:text-rose-400",
       },
     },
     defaultVariants: { tone: "neutral" },
@@ -39,6 +43,15 @@ export function toneForKind(kind: string | undefined | null): KindBadgeTone {
       return "amber";
     case "AGENT":
       return "violet";
+    case "RETRIEVER":
+      return "cyan";
+    case "RERANKER":
+      return "teal";
+    case "EMBEDDING":
+      return "indigo";
+    case "GUARDRAIL":
+      return "rose";
+    case "CHAIN":
     case "EVENT":
       return "neutral";
     case "ERROR":

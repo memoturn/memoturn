@@ -1,10 +1,12 @@
-import { type IngestEvent, newId } from "@memoturn/core";
+import { type IngestEvent, newId, type ObservationType } from "@memoturn/core";
 
 /**
- * Minimal OTLP/JSON → memoturn ingest mapping for GenAI spans. Accepts the standard
- * OTLP traces JSON payload and maps each span to an observation, emitting a
- * trace-create per distinct OTel traceId. Spans carrying `gen_ai.*` attributes become
- * GENERATIONs; everything else becomes a SPAN. (OTLP/protobuf support is Phase 2.)
+ * OTLP → memoturn ingest mapping. Accepts OTLP traces as JSON or protobuf (see
+ * decodeOtlpTraces) and maps each span to an observation, emitting a trace-create per
+ * distinct OTel traceId. Span classification spans two semconventions: OTLP GenAI
+ * (`gen_ai.*` → GENERATION) and OpenInference (`openinference.span.kind` → LLM→GENERATION,
+ * RETRIEVER/RERANKER/EMBEDDING/CHAIN/TOOL/AGENT/GUARDRAIL → the matching observation type);
+ * everything else is a plain SPAN.
  */
 
 interface OtlpAttr {
@@ -242,7 +244,20 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
 
         const start = nanoToIso(span.startTimeUnixNano) ?? new Date().toISOString();
         const end = nanoToIso(span.endTimeUnixNano);
-        const isGen = Object.keys(attrs).some((k) => k.startsWith("gen_ai."));
+        // OpenInference (openinference.span.kind) — the semconv Phoenix + its 30+ framework
+        // instrumentors emit. LLM spans become generations; the RAG/agent kinds map to our
+        // observation types. Non-OpenInference OTLP GenAI still routes via the gen_ai.* check.
+        const oiKind = str(attrs["openinference.span.kind"])?.toUpperCase();
+        const OI_TO_TYPE: Record<string, ObservationType> = {
+          RETRIEVER: "RETRIEVER",
+          RERANKER: "RERANKER",
+          EMBEDDING: "EMBEDDING",
+          CHAIN: "CHAIN",
+          TOOL: "TOOL",
+          AGENT: "AGENT",
+          GUARDRAIL: "GUARDRAIL",
+        };
+        const isGen = oiKind === "LLM" || Object.keys(attrs).some((k) => k.startsWith("gen_ai."));
         const level: "ERROR" | "DEFAULT" = span.status?.code === 2 ? "ERROR" : "DEFAULT";
         // MCP (Model Context Protocol) semconv: name the observation after the tool (for a
         // tools/call) or the method, so MCP calls are first-class in the waterfall AND land
@@ -283,9 +298,18 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
         };
 
         if (isGen) {
-          const promptTokens = Number(attrs["gen_ai.usage.input_tokens"] ?? attrs["gen_ai.usage.prompt_tokens"] ?? 0);
+          // Token/model/io fall back across OTLP GenAI (gen_ai.*) and OpenInference (llm.*).
+          const promptTokens = Number(
+            attrs["gen_ai.usage.input_tokens"] ??
+              attrs["gen_ai.usage.prompt_tokens"] ??
+              attrs["llm.token_count.prompt"] ??
+              0,
+          );
           const completionTokens = Number(
-            attrs["gen_ai.usage.output_tokens"] ?? attrs["gen_ai.usage.completion_tokens"] ?? 0,
+            attrs["gen_ai.usage.output_tokens"] ??
+              attrs["gen_ai.usage.completion_tokens"] ??
+              attrs["llm.token_count.completion"] ??
+              0,
           );
           events.push({
             id: newId(),
@@ -293,17 +317,41 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
             timestamp: end ?? start,
             body: {
               ...base,
-              model: String(attrs["gen_ai.response.model"] ?? attrs["gen_ai.request.model"] ?? ""),
-              provider: String(attrs["gen_ai.provider.name"] ?? attrs["gen_ai.system"] ?? ""),
+              model: String(
+                attrs["gen_ai.response.model"] ?? attrs["gen_ai.request.model"] ?? attrs["llm.model_name"] ?? "",
+              ),
+              provider: String(
+                attrs["gen_ai.provider.name"] ??
+                  attrs["gen_ai.system"] ??
+                  attrs["llm.provider"] ??
+                  attrs["llm.system"] ??
+                  "",
+              ),
               modelParameters: modelParameters(attrs),
               usage: { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens },
-              // Newer semconv uses gen_ai.input/output.messages; fall back to prompt/completion.
-              input: attrs["gen_ai.input.messages"] ?? attrs["gen_ai.prompt"],
-              output: attrs["gen_ai.output.messages"] ?? attrs["gen_ai.completion"],
+              // Newer semconv uses gen_ai.input/output.messages; fall back to prompt/completion, then OpenInference.
+              input:
+                attrs["gen_ai.input.messages"] ??
+                attrs["gen_ai.prompt"] ??
+                attrs["llm.input_messages"] ??
+                attrs["input.value"],
+              output:
+                attrs["gen_ai.output.messages"] ??
+                attrs["gen_ai.completion"] ??
+                attrs["llm.output_messages"] ??
+                attrs["output.value"],
             },
           });
         } else {
-          events.push({ id: newId(), type: "span-create", timestamp: end ?? start, body: base });
+          // Classify the span by its OpenInference kind (retriever/reranker/embedding/chain/
+          // tool/agent/guardrail); other kinds stay a plain SPAN.
+          const observationType = oiKind ? OI_TO_TYPE[oiKind] : undefined;
+          events.push({
+            id: newId(),
+            type: "span-create",
+            timestamp: end ?? start,
+            body: observationType ? { ...base, observationType } : base,
+          });
         }
       }
     }

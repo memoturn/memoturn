@@ -17,7 +17,21 @@ export const ISO_DATETIME = z.iso.datetime({ offset: true });
 export const ObservationLevel = z.enum(["DEBUG", "DEFAULT", "WARNING", "ERROR"]);
 export type ObservationLevel = z.infer<typeof ObservationLevel>;
 
-export const ObservationType = z.enum(["SPAN", "GENERATION", "EVENT", "TOOL", "AGENT"]);
+// The observation taxonomy. Beyond the base span/generation/event, agentic + RAG kinds
+// (tool/agent + retriever/reranker/embedding/chain/guardrail) mirror the OpenInference span
+// kinds so OpenInference-instrumented apps map cleanly (see packages/server/src/otel.ts).
+export const ObservationType = z.enum([
+  "SPAN",
+  "GENERATION",
+  "EVENT",
+  "TOOL",
+  "AGENT",
+  "RETRIEVER",
+  "RERANKER",
+  "EMBEDDING",
+  "CHAIN",
+  "GUARDRAIL",
+]);
 export type ObservationType = z.infer<typeof ObservationType>;
 
 export const ScoreDataType = z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]);

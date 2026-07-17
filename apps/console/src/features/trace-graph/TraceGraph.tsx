@@ -23,6 +23,10 @@ const NODE_TONE: Record<string, string> = {
   SPAN: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
   TOOL: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
   AGENT: "border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-300",
+  RETRIEVER: "border-cyan-500/40 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300",
+  RERANKER: "border-teal-500/40 bg-teal-500/10 text-teal-700 dark:text-teal-300",
+  EMBEDDING: "border-indigo-500/40 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300",
+  GUARDRAIL: "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300",
   SYSTEM: "border-border bg-muted font-medium text-muted-foreground",
 };
 const toneFor = (t: string) => NODE_TONE[t] ?? "border-slate-400/40 bg-slate-400/10 text-slate-600 dark:text-slate-300";
