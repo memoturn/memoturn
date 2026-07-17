@@ -13,6 +13,8 @@ Optional extras (discoverability only — the SDK itself never imports them at r
 ```bash
 pip install "memoturn[openai]"      # openai>=1.0 for wrap_openai
 pip install "memoturn[anthropic]"   # anthropic>=0.30 for wrap_anthropic
+pip install "memoturn[gemini]"      # google-genai>=1.0 for wrap_gemini
+pip install "memoturn[pinecone]"    # pinecone>=5.0 for wrap_pinecone
 pip install "memoturn[langchain]"   # langchain-core for MemoturnCallbackHandler
 pip install "memoturn[llamaindex]"  # llama-index-core for MemoturnLlamaIndexHandler
 pip install "memoturn[otel]"        # OTel SDK + OTLP/HTTP exporter for span_exporter/span_processor
@@ -151,6 +153,67 @@ The generation is closed with `level="ERROR"` on a mid-stream exception (partial
 still recorded, and the exception re-raises to the caller as normal) or with
 `level="WARNING"` if the stream is abandoned — closed early, garbage-collected, or idle
 for too long — before a terminal chunk/event arrives.
+
+## Gemini wrapper
+
+```python
+from google import genai
+from memoturn import wrap_gemini
+
+client = wrap_gemini(genai.Client())
+client.models.generate_content(
+    model="gemini-2.0-flash",
+    contents="2+2?",
+    config={"system_instruction": "be terse", "temperature": 0.2},
+)  # recorded: systemInstruction + contents as input, usage incl. cached tokens
+```
+
+Same `memoturn=`/`trace=` options as `wrap_openai`/`wrap_anthropic`. `config` is read
+duck-typed — a plain dict, a pydantic-like object (`model_dump()`), or a
+`SimpleNamespace` all work; `system_instruction`/`systemInstruction` is pulled out and
+nested alongside `contents` as the recorded input, and everything else in `config`
+becomes `modelParameters`.
+
+Gemini has no `stream=True` flag — streaming is a separate, always-streaming method,
+so it's wrapped independently:
+
+```python
+stream = client.models.generate_content_stream(model="gemini-2.0-flash", contents="2+2?")
+for chunk in stream:
+    ...  # unchanged — still native GenerateContentResponse chunks
+# generation is recorded once the stream is exhausted
+```
+
+Each chunk is a *full* `GenerateContentResponse` (not a delta type): `.text` per chunk
+is incremental and gets concatenated into the recorded `output`; `.usage_metadata` is
+cumulative, so the wrapper keeps only the latest non-null value instead of summing
+across chunks. As with the OpenAI/Anthropic streams, a mid-stream exception marks the
+generation `ERROR` with partial output and re-raises, and abandonment marks it
+`WARNING` with partial output.
+
+## Pinecone wrapper
+
+```python
+from pinecone import Pinecone
+from memoturn import wrap_pinecone
+
+index = wrap_pinecone(Pinecone(api_key="...").Index("my-index"))
+index.query(vector=embedding, top_k=5, namespace="prod")  # recorded as a RETRIEVER span
+```
+
+Wraps a data-plane index handle (`pc.Index(name)`) — not the control-plane `Pinecone`
+client that does `create_index`/`list_indexes`. Only `index.query` is patched; same
+`memoturn=`/`trace=` options as the other wrappers.
+
+Pinecone's `matches` never include the original chunk text (only `id`/`score`/optional
+`values`/`metadata`), but memoturn's `retrievedDocument.content` is required. The
+wrapper extracts it best-effort from `metadata`, trying `text`, `content`, then
+`page_content` in that order, falling back to the stringified metadata blob if none
+match. For a non-standard metadata schema, override the extractor:
+
+```python
+index = wrap_pinecone(index, get_content=lambda match: match.metadata.get("chunk_text"))
+```
 
 ## LangChain
 
