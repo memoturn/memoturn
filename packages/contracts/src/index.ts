@@ -1048,6 +1048,21 @@ export const widget = z.object({
 });
 export type Widget = z.infer<typeof widget>;
 
+// A saved query-engine widget (built in Explore) — carries its full AnalyticsQuery + chart type +
+// 12-col grid placement; the dashboard runs the query and renders it via the chart library.
+export const queryWidget = z.object({
+  id: z.string(),
+  dashboardId: z.string().nullable(),
+  title: z.string(),
+  query: analyticsQuery,
+  chartType: chartType,
+  gridX: z.number(),
+  gridY: z.number(),
+  gridW: z.number(),
+  gridH: z.number(),
+});
+export type QueryWidget = z.infer<typeof queryWidget>;
+
 // A named dashboard grouping widgets (null dashboardId = the implicit "Default" dashboard).
 export const dashboard = z.object({
   id: z.string(),

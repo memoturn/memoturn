@@ -5,16 +5,22 @@ import {
   type QueryAggregation,
   type QueryGranularity,
   type QueryView,
+  type QueryWidget,
   TIME_SERIES_CHARTS,
 } from "@memoturn/contracts";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
+import { EmptyState } from "../components/empty-state";
 import { PageHeader } from "../components/page-header";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Button } from "../components/ui/button";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { WidgetChart } from "../features/widgets/WidgetChart";
 import { api } from "../lib/api";
+import { useIsReadOnly } from "../lib/role";
 import { useRangeDays } from "../lib/timeRange";
 
 export const Route = createFileRoute("/widgets")({ component: WidgetBuilderPage });
@@ -101,6 +107,28 @@ function WidgetBuilderPage() {
     placeholderData: keepPreviousData,
     retry: false,
   });
+
+  const qc = useQueryClient();
+  const readOnly = useIsReadOnly();
+  const saved = useQuery({ queryKey: ["query-widgets"], queryFn: () => api.listQueryWidgets() });
+  const save = useMutation({
+    mutationFn: (title: string) => api.createQueryWidget({ title, query, chartType, gridW: 6 }),
+    onSuccess: () => {
+      toast.success("Chart saved");
+      qc.invalidateQueries({ queryKey: ["query-widgets"] });
+    },
+    onError: (e) => toast.error(`Failed to save: ${String(e)}`),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deleteWidget(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["query-widgets"] }),
+    onError: (e) => toast.error(`Failed to delete: ${String(e)}`),
+  });
+  const promptSave = () => {
+    if (!data) return;
+    const title = window.prompt("Name this chart", `${AGG_LABEL[aggregation]} of ${measureDef.label}`);
+    if (title) save.mutate(title);
+  };
 
   return (
     <div className="space-y-6">
@@ -215,6 +243,13 @@ function WidgetBuilderPage() {
               {catalog.label} · {AGG_LABEL[aggregation]} of {measureDef.label}
               {query.dimensions[0] ? ` by ${query.dimensions[0].field}` : ""} · last {days}d
             </CardDescription>
+            {!readOnly && (
+              <CardAction>
+                <Button size="sm" variant="outline" disabled={!data || !!error || save.isPending} onClick={promptSave}>
+                  {save.isPending ? "Saving…" : "Save to dashboard"}
+                </Button>
+              </CardAction>
+            )}
           </CardHeader>
           <CardContent>
             {error ? (
@@ -231,6 +266,60 @@ function WidgetBuilderPage() {
           </CardContent>
         </Card>
       </div>
+
+      <div className="space-y-3">
+        <h2 className="text-sm font-medium">Saved charts</h2>
+        {saved.data && saved.data.length > 0 ? (
+          <div className="grid grid-cols-12 gap-4">
+            {saved.data.map((w) => (
+              <SavedWidget key={w.id} widget={w} readOnly={readOnly} onDelete={() => remove.mutate(w.id)} />
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No saved charts yet" description="Build a chart above and “Save to dashboard”." />
+        )}
+      </div>
     </div>
+  );
+}
+
+/** One saved query-widget: runs its stored query and renders it, spanning `gridW` of 12 columns. */
+function SavedWidget({ widget, readOnly, onDelete }: { widget: QueryWidget; readOnly: boolean; onDelete: () => void }) {
+  const { data, error } = useQuery({
+    queryKey: ["query-widget", widget.id],
+    queryFn: () => api.runAnalyticsQuery(widget.query),
+    retry: false,
+  });
+  const span = Math.min(12, Math.max(2, widget.gridW));
+  return (
+    <Card className="col-span-12" style={{ gridColumn: `span ${span} / span ${span}` }}>
+      <CardHeader>
+        <CardTitle className="text-base">{widget.title}</CardTitle>
+        {!readOnly && (
+          <CardAction>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7 text-muted-foreground"
+              onClick={onDelete}
+              title="Delete chart"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </CardAction>
+        )}
+      </CardHeader>
+      <CardContent>
+        {error ? (
+          <div className="flex h-[200px] items-center justify-center text-sm text-destructive">
+            {error instanceof Error ? error.message : "Query failed"}
+          </div>
+        ) : data ? (
+          <WidgetChart query={widget.query} result={data} chartType={widget.chartType} height={220} />
+        ) : (
+          <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">Loading…</div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

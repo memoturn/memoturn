@@ -770,6 +770,7 @@ model Dashboard {
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   name      String
   position  Int      @default(0)
+  filters   Json     @default("[]") // dashboard-level structured filter set, applied to all widgets
   createdAt DateTime @default(now())
   widgets   Widget[]
 
@@ -783,10 +784,20 @@ model Widget {
   dashboardId String? // null = the implicit "Default" dashboard
   dashboard   Dashboard? @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
   title       String
+  // Legacy single-metric model (the original dashboard tiles).
   metric      String     @default("cost") // cost | tokens | generations | latency_p95 | error_rate | score
   breakdown   String     @default("by_day") // by_day | by_model | by_user | by_session
   days        Int        @default(30)
   filters     Json       @default("{}") // { environment?, model?, tag? }
+  // Generic query-engine model (widgets built in Explore): when `query` is set the widget renders
+  // via runAnalyticsQuery + the chart library instead of the legacy metric/breakdown path.
+  query       Json? // AnalyticsQuery
+  chartType   String? // line | bar | horizontal_bar | big_number | pie | table
+  // 12-column grid placement.
+  gridX       Int        @default(0)
+  gridY       Int        @default(0)
+  gridW       Int        @default(6)
+  gridH       Int        @default(4)
   position    Int        @default(0)
   createdAt   DateTime   @default(now())
 

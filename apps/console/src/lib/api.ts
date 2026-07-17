@@ -15,6 +15,7 @@ import type {
   ApiKeyCreated,
   AuditEntry,
   Automation,
+  ChartType,
   ChatMessage,
   Comment,
   CostBudget,
@@ -47,6 +48,7 @@ import type {
   PromptVersionCost,
   ProviderConnection,
   QueryResult,
+  QueryWidget,
   ReviewAnalytics,
   ReviewItemsResponse,
   ReviewQueue,
@@ -402,6 +404,10 @@ export const api = {
     dashboardId?: string | null;
   }) => post(`/v1/widgets`, body),
   deleteWidget: (id: string) => del(`/v1/widgets/${encodeURIComponent(id)}`),
+  listQueryWidgets: (dashboardId?: string) =>
+    get<{ data: QueryWidget[] }>(`/v1/widgets/query${qs({ dashboardId })}`).then((r) => r.data),
+  createQueryWidget: (body: { title: string; query: AnalyticsQuery; chartType: ChartType; gridW?: number }) =>
+    post<QueryWidget>(`/v1/widgets/query`, body),
   listDashboards: () => get<{ data: Dashboard[] }>(`/v1/dashboards`).then((r) => r.data),
   createDashboard: (name: string) => post<Dashboard>(`/v1/dashboards`, { name }),
   deleteDashboard: (id: string) => del(`/v1/dashboards/${encodeURIComponent(id)}`),
