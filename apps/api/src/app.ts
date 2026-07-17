@@ -119,6 +119,7 @@ import {
   replayTrace,
   resolvePrompt,
   revokeApiKey,
+  runAnalyticsQuery,
   runBatchAction,
   runEvaluator,
   runPlayground,
@@ -909,6 +910,35 @@ app.openapi(
   async (c) => {
     const data = await getMetrics(c.get("projectId"), c.req.valid("query").days ?? 30);
     return c.json(data);
+  },
+);
+
+// The dashboard/widget analytics engine — run a validated query and get result rows. A POST
+// (the query is a structured body) but read-only, so VIEWERs may run it.
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/metrics/query",
+    summary: "Run an analytics query (dashboard/widget engine)",
+    tags: ["metrics"],
+    security,
+    // rbac-exempt: read-only analytics query, writes nothing
+    request: { body: { content: { "application/json": { schema: C.analyticsQuery } } } },
+    responses: {
+      200: { description: "Query result rows", content: { "application/json": { schema: C.queryResult } } },
+      400: {
+        description: "Invalid query",
+        content: { "application/json": { schema: z.object({ error: z.string() }) } },
+      },
+    },
+  }),
+  async (c) => {
+    try {
+      const data = await runAnalyticsQuery(c.get("projectId"), c.req.valid("json"));
+      return c.json(data, 200);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+    }
   },
 );
 

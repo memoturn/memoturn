@@ -1,4 +1,12 @@
-import type { CostRollupRow, DailyMetric, MetricsSummary, ModelMetric, ToolAnalyticsRow } from "@memoturn/contracts";
+import type {
+  AnalyticsQuery,
+  CostRollupRow,
+  DailyMetric,
+  MetricsSummary,
+  ModelMetric,
+  QueryResult,
+  ToolAnalyticsRow,
+} from "@memoturn/contracts";
 import { telemetry } from "@memoturn/telemetry";
 
 /**
@@ -8,6 +16,11 @@ import { telemetry } from "@memoturn/telemetry";
  */
 
 export type { DailyMetric, MetricsSummary, ModelMetric, ToolAnalyticsRow };
+
+/** Run a dashboard/widget analytics query (view × metrics × dimensions × time × filters). */
+export async function runAnalyticsQuery(projectId: string, query: AnalyticsQuery): Promise<QueryResult> {
+  return telemetry().runAnalyticsQuery(projectId, query);
+}
 
 export async function getMetrics(projectId: string, days = 30): Promise<MetricsSummary> {
   const store = telemetry();

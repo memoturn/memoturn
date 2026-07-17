@@ -256,6 +256,12 @@ export const queryResult = z.object({
 });
 export type QueryResult = z.infer<typeof queryResult>;
 
+// Widget chart types. Time-series types (line/bar) require the query's `timeDimension`; the rest
+// are total-value shapes over a dimension breakdown (or a single aggregate for big_number).
+export const chartType = z.enum(["line", "bar", "horizontal_bar", "big_number", "pie", "table"]);
+export type ChartType = z.infer<typeof chartType>;
+export const TIME_SERIES_CHARTS: ChartType[] = ["line", "bar"];
+
 /** Trace volume over the selected range, bucketed by hour (short ranges) or day. */
 export const traceHistogramBucket = z.object({ bucket: z.string(), count: z.number() });
 export type TraceHistogramBucket = z.infer<typeof traceHistogramBucket>;

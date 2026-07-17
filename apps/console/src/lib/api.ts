@@ -8,6 +8,7 @@
 import type {
   AlertChannel,
   AlertRule,
+  AnalyticsQuery,
   AnalyticsSink,
   AnnotationResult,
   ApiKey,
@@ -45,6 +46,7 @@ import type {
   PromptListItem,
   PromptVersionCost,
   ProviderConnection,
+  QueryResult,
   ReviewAnalytics,
   ReviewItemsResponse,
   ReviewQueue,
@@ -232,6 +234,7 @@ export const api = {
   ) => post<AnnotationResult>(`/v1/traces/${encodeURIComponent(id)}/annotate`, body),
   setTraceTags: (id: string, tags: string[]) => post<TraceTags>(`/v1/traces/${encodeURIComponent(id)}/tags`, { tags }),
   getMetrics: (days = 30) => get<MetricsSummary>(`/v1/metrics${qs({ days })}`),
+  runAnalyticsQuery: (query: AnalyticsQuery) => post<QueryResult>(`/v1/metrics/query`, query),
   getToolAnalytics: (days = 30) =>
     get<{ data: ToolAnalyticsRow[] }>(`/v1/metrics/tools${qs({ days })}`).then((r) => r.data),
   getCostBreakdown: (by: "user" | "session", days = 30, limit = 20) =>
