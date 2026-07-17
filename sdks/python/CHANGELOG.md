@@ -2,9 +2,9 @@
 
 All notable changes to the memoturn Python SDK.
 
-## Unreleased
+## 0.3.0 — 2026-07-17
 
-### Features (0.3.0)
+### Features
 
 - `wrap_anthropic(client)` — drop-in Anthropic wrapper: records `messages.create`
   calls as generations with the system prompt captured alongside messages, a model-
@@ -20,7 +20,7 @@ All notable changes to the memoturn Python SDK.
   `memoturn[otel]`, `memoturn[langchain]` (runtime dependencies remain empty —
   the SDK stays stdlib-only).
 
-### Fixes (0.2.1)
+### Fixes — transport hardening
 
 - Transport hardening: `flush()` no longer loses the dequeued batch on network
   errors (`URLError` is caught and the batch re-buffered before re-raising).

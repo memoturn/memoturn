@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-07-17
 
-### 0.3.0 — feature parity (P1)
+### Features
 
 - **Observation taxonomy**: `ObservationType…` constants for all 10 kinds
   (SPAN/GENERATION/EVENT/TOOL/AGENT/RETRIEVER/RERANKER/EMBEDDING/CHAIN/GUARDRAIL),
@@ -22,7 +22,7 @@
   (`/v1/otel/v1/traces`) + Basic-auth header to wire into any OTLP span exporter —
   zero-dependency, matching the Python `otlp_config`.
 
-### 0.2.1 — hardening fixes (P0)
+### Fixes — transport hardening
 
 - Fix environment mistagging: trace handles now carry the resolved per-trace environment
   (child spans/generations/events/scores previously got the client environment).
