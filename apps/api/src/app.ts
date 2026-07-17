@@ -127,6 +127,7 @@ import {
   revokeApiKey,
   runAnalyticsQuery,
   runAssistant,
+  runAssistantStream,
   runBatchAction,
   runEvaluator,
   runPlayground,
@@ -1850,6 +1851,25 @@ app.openapi(
     }
   },
 );
+
+// Streaming assistant (SSE) — same loop as /v1/assistant/chat, but tool steps are emitted as
+// they execute and answer text arrives as deltas. Plain route (like /v1/playground/stream);
+// read-only, so VIEWERs may use it. Events: { delta } | { step } | { error }, then [DONE].
+app.post("/v1/assistant/stream", async (c) => {
+  // rbac-exempt: read-only — the assistant only exposes non-write MCP tools, never mutates.
+  const input = (await c.req.json()) as Parameters<typeof runAssistantStream>[1];
+  return streamSSE(c, async (s) => {
+    try {
+      for await (const event of runAssistantStream(c.get("projectId"), input)) {
+        await s.writeSSE({ data: JSON.stringify(event) });
+      }
+      await s.writeSSE({ data: "[DONE]" });
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", scope: "assistant.stream", message: String(err) }));
+      await s.writeSSE({ data: JSON.stringify({ error: String(err instanceof Error ? err.message : err) }) });
+    }
+  });
+});
 
 // ── Evaluators (LLM-as-judge) ────────────────────────────────────────────────────
 app.openapi(

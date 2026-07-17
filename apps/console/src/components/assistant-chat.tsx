@@ -1,8 +1,8 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "@tanstack/react-router";
 import { Sparkles } from "lucide-react";
 import { useState } from "react";
-import { api, getActiveProject } from "../lib/api";
+import { api, getActiveProject, streamAssistant } from "../lib/api";
 import { useRangeDays } from "../lib/timeRange";
 import {
   Conversation,
@@ -59,24 +59,36 @@ export function useAssistantChat() {
     rangeDays,
   };
 
-  const ask = useMutation({
-    mutationFn: ({ history, ctx }: { history: Msg[]; ctx: typeof context }) =>
-      api.assistantChat({
-        provider,
-        model,
-        messages: history.map((m) => ({ role: m.role, content: m.content })),
-        context: ctx,
-      }),
-    onSuccess: (res) => setMessages((prev) => [...prev, { role: "assistant", content: res.content, steps: res.steps }]),
-    onError: (e) => setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${String(e)}` }]),
-  });
+  const [pending, setPending] = useState(false);
 
-  const send = (text: string) => {
+  // Mutate the trailing assistant message in place as stream events arrive.
+  const patchLast = (patch: (last: Msg) => Msg) =>
+    setMessages((prev) => [...prev.slice(0, -1), patch(prev[prev.length - 1] as Msg)]);
+
+  const send = async (text: string) => {
     const q = text.trim();
-    if (!q || ask.isPending) return;
-    const next: Msg[] = [...messages, { role: "user", content: q }];
-    setMessages(next);
-    ask.mutate({ history: next, ctx: context });
+    if (!q || pending) return;
+    const history: Msg[] = [...messages, { role: "user", content: q }];
+    setMessages([...history, { role: "assistant", content: "", steps: [] }]);
+    setPending(true);
+    try {
+      await streamAssistant(
+        {
+          provider,
+          model,
+          messages: history.map((m) => ({ role: m.role, content: m.content })),
+          context,
+        },
+        {
+          onDelta: (delta) => patchLast((last) => ({ ...last, content: last.content + delta })),
+          onStep: (step) => patchLast((last) => ({ ...last, steps: [...(last.steps ?? []), step] })),
+        },
+      );
+    } catch (e) {
+      patchLast((last) => ({ ...last, content: `${last.content}\n\nError: ${String(e)}`.trim() }));
+    } finally {
+      setPending(false);
+    }
   };
 
   const onProvider = (p: string) => {
@@ -84,7 +96,7 @@ export function useAssistantChat() {
     setModel(defaultModel(p));
   };
 
-  return { provider, onProvider, model, setModel, messages, send, pending: ask.isPending, context };
+  return { provider, onProvider, model, setModel, messages, send, pending, context };
 }
 
 function AssistantSteps({ steps }: { steps: Step[] }) {
@@ -113,6 +125,9 @@ export function AssistantChat({ chat }: { chat: ReturnType<typeof useAssistantCh
     chat.send(text);
     setInput("");
   };
+  // Shimmer only until the first stream event lands; after that the growing message is the feedback.
+  const last = chat.messages[chat.messages.length - 1];
+  const thinking = chat.pending && last?.role === "assistant" && !last.content && !last.steps?.length;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -149,7 +164,7 @@ export function AssistantChat({ chat }: { chat: ReturnType<typeof useAssistantCh
                   </MessageContent>
                 </Message>
               ))}
-              {chat.pending && <p className="text-shimmer w-fit text-sm">Thinking…</p>}
+              {thinking && <p className="text-shimmer w-fit text-sm">Thinking…</p>}
             </>
           )}
         </ConversationContent>
