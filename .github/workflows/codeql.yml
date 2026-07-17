@@ -23,8 +23,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Interpreted languages need no build step; CodeQL scans the source directly.
-        language: [javascript-typescript, python]
+        # Interpreted languages need no build step; Go needs autobuild (this runner's
+        # CodeQL rejects build-mode none for Go) — it builds the sdks/go module itself.
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
+          - language: go
+            build-mode: autobuild
     steps:
       - uses: actions/checkout@v7
       # Default suite: real security vulnerabilities. The "security-and-quality" suite
@@ -34,7 +41,8 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
-          language: ${{ matrix.language }}
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
       - name: Analyze
         uses: github/codeql-action/analyze@v4
         with:

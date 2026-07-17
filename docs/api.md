@@ -183,6 +183,9 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/v1/projects` | Projects the caller can access (with role). |
+| POST | `/v1/projects` | Create a project in the caller's active organization. OWNER/ADMIN only; audited. |
+| PATCH | `/v1/projects/{id}` | Rename a project. `{id}` must be the active project. OWNER/ADMIN only; audited. |
+| DELETE | `/v1/projects/{id}` | Delete a project and its data (relational rows cascade; telemetry purged best-effort). The last project in an organization can't be deleted. `{id}` must be the active project. OWNER/ADMIN only; audited on the organization. |
 | GET | `/v1/projects/{id}/members` | Project-level RBAC: the project's org members, each with any per-project role override. `{id}` must be the active project. |
 | PUT | `/v1/projects/{id}/members/{userId}` | Assign/update a user's role on this project (overrides their org role). OWNER/ADMIN only; audited. |
 | DELETE | `/v1/projects/{id}/members/{userId}` | Remove a user's per-project role override (revert to org role). OWNER/ADMIN only; audited. |

@@ -141,6 +141,9 @@ them back through the `GET` route. Both routes require auth and are project-scop
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/v1/projects` | Projects the caller can access (with role). |
+| POST | `/v1/projects` | Create a project in the caller's active organization. OWNER/ADMIN only; audited. |
+| PATCH | `/v1/projects/{id}` | Rename a project. `{id}` must be the active project. OWNER/ADMIN only; audited. |
+| DELETE | `/v1/projects/{id}` | Delete a project and its data. The last project in an organization can't be deleted. OWNER/ADMIN only; audited. |
 | GET | `/v1/audit-logs` | Recent audit entries. |
 | GET / POST | `/v1/retention` | Get / set retention (days; 0 = keep forever). |
 | POST | `/v1/retention/apply` | Apply retention now. |
