@@ -25,7 +25,7 @@ export default function Header() {
           className="inline-flex items-center gap-2 rounded-sm font-heading font-bold text-[17px] tracking-[-0.025em] text-foreground no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           <BrandMark gradient className="size-6 shrink-0" />
-          <span>Memoturn</span>
+          <span className="text-base uppercase tracking-[0.08em]">Memoturn</span>
         </Link>
 
         <nav aria-label="Primary" className="ml-3 hidden items-center gap-1 md:flex">
