@@ -34,8 +34,11 @@ export const ObservationType = z.enum([
 ]);
 export type ObservationType = z.infer<typeof ObservationType>;
 
-export const ScoreDataType = z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]);
+export const ScoreDataType = z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN", "CORRECTION", "TEXT"]);
 export type ScoreDataType = z.infer<typeof ScoreDataType>;
+
+/** Max length for a TEXT-dataType score's stringValue (free-text, tighter than MAX_MESSAGE_LEN). */
+export const MAX_TEXT_SCORE_LEN = 500;
 
 export const ScoreSource = z.enum(["API", "EVAL", "ANNOTATION"]);
 export type ScoreSource = z.infer<typeof ScoreSource>;
@@ -156,20 +159,33 @@ export const eventBody = observationBase;
 export type EventBody = z.infer<typeof eventBody>;
 
 // ── Score ───────────────────────────────────────────────────────────────────────
-export const scoreBody = z.object({
-  id: z.string().min(1).max(MAX_IDENTIFIER_LEN),
-  traceId: z.string().min(1).max(MAX_IDENTIFIER_LEN),
-  observationId: z.string().max(MAX_IDENTIFIER_LEN).optional(),
-  name: z.string().min(1).max(MAX_IDENTIFIER_LEN),
-  timestamp: ISO_DATETIME.optional(),
-  environment: z.string().max(MAX_IDENTIFIER_LEN).default("default"),
-  source: ScoreSource.default("API"),
-  dataType: ScoreDataType.default("NUMERIC"),
-  value: z.number().optional(),
-  stringValue: z.string().max(MAX_MESSAGE_LEN).optional(),
-  comment: z.string().max(MAX_MESSAGE_LEN).optional(),
-  configId: z.string().max(MAX_IDENTIFIER_LEN).optional(),
-});
+export const scoreBody = z
+  .object({
+    id: z.string().min(1).max(MAX_IDENTIFIER_LEN),
+    traceId: z.string().min(1).max(MAX_IDENTIFIER_LEN),
+    observationId: z.string().max(MAX_IDENTIFIER_LEN).optional(),
+    name: z.string().min(1).max(MAX_IDENTIFIER_LEN),
+    timestamp: ISO_DATETIME.optional(),
+    environment: z.string().max(MAX_IDENTIFIER_LEN).default("default"),
+    source: ScoreSource.default("API"),
+    dataType: ScoreDataType.default("NUMERIC"),
+    value: z.number().optional(),
+    stringValue: z.string().max(MAX_MESSAGE_LEN).optional(),
+    comment: z.string().max(MAX_MESSAGE_LEN).optional(),
+    configId: z.string().max(MAX_IDENTIFIER_LEN).optional(),
+  })
+  .superRefine((body, ctx) => {
+    if (body.dataType === "BOOLEAN" && body.value !== undefined && body.value !== 0 && body.value !== 1) {
+      ctx.addIssue({ code: "custom", path: ["value"], message: "BOOLEAN score value must be 0 or 1" });
+    }
+    if (body.dataType === "TEXT" && body.stringValue !== undefined && body.stringValue.length > MAX_TEXT_SCORE_LEN) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["stringValue"],
+        message: `TEXT score stringValue exceeds the ${MAX_TEXT_SCORE_LEN}-char limit`,
+      });
+    }
+  });
 export type ScoreBody = z.infer<typeof scoreBody>;
 
 // ── Envelope ─────────────────────────────────────────────────────────────────────

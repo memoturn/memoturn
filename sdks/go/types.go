@@ -96,7 +96,7 @@ type ScoreInput struct {
 	Name          string   `json:"name"`
 	Value         *float64 `json:"value,omitempty"`
 	StringValue   string   `json:"stringValue,omitempty"`
-	DataType      string   `json:"dataType,omitempty"` // NUMERIC | CATEGORICAL | BOOLEAN
+	DataType      string   `json:"dataType,omitempty"` // NUMERIC | CATEGORICAL | BOOLEAN | CORRECTION | TEXT
 	Comment       string   `json:"comment,omitempty"`
 	ObservationID string   `json:"observationId,omitempty"`
 	ConfigID      string   `json:"configId,omitempty"`

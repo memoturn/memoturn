@@ -13,7 +13,7 @@ export interface CreateQueueInput {
   name: string;
   description?: string;
   scoreName: string;
-  dataType?: "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
+  dataType?: "NUMERIC" | "CATEGORICAL" | "BOOLEAN" | "TEXT";
 }
 
 export async function createReviewQueue(projectId: string, input: CreateQueueInput) {
@@ -171,7 +171,7 @@ export async function submitReviewScore(projectId: string, name: string, itemId:
           traceId: item.traceId,
           name: queue.scoreName,
           source: "ANNOTATION",
-          dataType: queue.dataType as "NUMERIC" | "CATEGORICAL" | "BOOLEAN",
+          dataType: queue.dataType as "NUMERIC" | "CATEGORICAL" | "BOOLEAN" | "TEXT",
           value: score.value,
           stringValue: score.stringValue,
           comment: score.comment,
@@ -189,7 +189,7 @@ export async function submitReviewScore(projectId: string, name: string, itemId:
 
 export interface AnnotateTraceInput {
   name: string;
-  dataType: "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
+  dataType: "NUMERIC" | "CATEGORICAL" | "BOOLEAN" | "CORRECTION" | "TEXT";
   value?: number;
   stringValue?: string;
   comment?: string;

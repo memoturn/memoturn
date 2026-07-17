@@ -211,6 +211,222 @@ describe("otlpToEvents (JSON)", () => {
     expect((gen.usage as Record<string, number>).promptTokens).toBe(120);
     expect((gen.usage as Record<string, number>).completionTokens).toBe(30);
   });
+
+  // gen_ai.evaluation.result: OTel GenAI semconv's span-event way of reporting an eval score.
+  const spanWithEvents = (
+    spanEvents: { name: string; attributes: { key: string; value: Record<string, unknown> }[] }[],
+  ) => ({
+    resourceSpans: [
+      {
+        scopeSpans: [
+          {
+            spans: [
+              {
+                traceId: "3af7651916cd43dd8448eb211c80319c",
+                spanId: "e7ad6b7169203331",
+                name: "chat",
+                startTimeUnixNano: "1700000000000000000",
+                endTimeUnixNano: "1700000000200000000",
+                attributes: [
+                  { key: "gen_ai.system", value: { stringValue: "openai" } },
+                  { key: "gen_ai.request.model", value: { stringValue: "gpt-4o-mini" } },
+                ],
+                events: spanEvents,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  it("maps a gen_ai.evaluation.result event with a numeric score to a NUMERIC score-create", () => {
+    const events = otlpToEvents(
+      spanWithEvents([
+        {
+          name: "gen_ai.evaluation.result",
+          attributes: [
+            { key: "gen_ai.evaluation.name", value: { stringValue: "relevance" } },
+            { key: "gen_ai.evaluation.score.value", value: { doubleValue: 0.87 } },
+            { key: "gen_ai.evaluation.explanation", value: { stringValue: "on topic" } },
+          ],
+        },
+      ]),
+    );
+    const score = events.find((e) => e.type === "score-create")?.body as Record<string, unknown>;
+    expect(score).toBeDefined();
+    expect(score.traceId).toBe("3af7651916cd43dd8448eb211c80319c");
+    expect(score.observationId).toBe("e7ad6b7169203331");
+    expect(score.name).toBe("relevance");
+    expect(score.source).toBe("EVAL");
+    expect(score.dataType).toBe("NUMERIC");
+    expect(score.value).toBe(0.87);
+    expect(score.comment).toBe("on topic");
+  });
+
+  it("maps a gen_ai.evaluation.result event with a label-only score to a CATEGORICAL score-create", () => {
+    const events = otlpToEvents(
+      spanWithEvents([
+        {
+          name: "gen_ai.evaluation.result",
+          attributes: [
+            { key: "gen_ai.evaluation.name", value: { stringValue: "toxicity" } },
+            { key: "gen_ai.evaluation.score.label", value: { stringValue: "not_toxic" } },
+          ],
+        },
+      ]),
+    );
+    const score = events.find((e) => e.type === "score-create")?.body as Record<string, unknown>;
+    expect(score).toBeDefined();
+    expect(score.dataType).toBe("CATEGORICAL");
+    expect(score.stringValue).toBe("not_toxic");
+    expect(score.value).toBeUndefined();
+  });
+
+  it("drops a malformed gen_ai.evaluation.result event without failing the rest of the span", () => {
+    const events = otlpToEvents(
+      spanWithEvents([
+        // missing gen_ai.evaluation.name entirely
+        {
+          name: "gen_ai.evaluation.result",
+          attributes: [{ key: "gen_ai.evaluation.score.value", value: { doubleValue: 1 } }],
+        },
+      ]),
+    );
+    expect(events.find((e) => e.type === "score-create")).toBeUndefined();
+    // the span's own generation event still mapped fine
+    expect(events.find((e) => e.type === "generation-create")).toBeDefined();
+  });
+
+  it("ignores span events that aren't gen_ai.evaluation.result", () => {
+    const events = otlpToEvents(spanWithEvents([{ name: "some.other.event", attributes: [] }]));
+    expect(events.find((e) => e.type === "score-create")).toBeUndefined();
+  });
+
+  // ── Span-kind mapping: Vercel AI SDK, Genkit, LiveKit Agents, Flue ──────────────
+  const spanNamed = (name: string | undefined, attrs: { key: string; value: Record<string, unknown> }[]) => ({
+    resourceSpans: [
+      {
+        scopeSpans: [
+          {
+            spans: [
+              {
+                traceId: "5af7651916cd43dd8448eb211c80319c",
+                spanId: "16ad6b7169203331",
+                name,
+                startTimeUnixNano: "1700000000000000000",
+                endTimeUnixNano: "1700000000300000000",
+                attributes: attrs,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const spanBody = (events: ReturnType<typeof otlpToEvents>) =>
+    (events.find((e) => e.type === "span-create" || e.type === "generation-create")?.body ?? {}) as Record<
+      string,
+      unknown
+    >;
+
+  it("classifies a Flue execute_tool span as TOOL via gen_ai.operation.name (not GENERATION)", () => {
+    // Regression case: this span carries a gen_ai.*-prefixed attribute (gen_ai.tool.name) but
+    // is NOT a model call — the naive "any gen_ai.* attr present" check used to misclassify it.
+    const events = otlpToEvents(
+      spanNamed("execute_tool search", [
+        { key: "gen_ai.operation.name", value: { stringValue: "execute_tool" } },
+        { key: "gen_ai.tool.name", value: { stringValue: "search" } },
+      ]),
+    );
+    expect(events.find((e) => e.type === "generation-create")).toBeUndefined();
+    expect(spanBody(events).observationType).toBe("TOOL");
+  });
+
+  it("classifies a Flue invoke_agent span as AGENT via gen_ai.operation.name", () => {
+    const events = otlpToEvents(
+      spanNamed("invoke_agent researcher", [
+        { key: "gen_ai.operation.name", value: { stringValue: "invoke_agent" } },
+        { key: "gen_ai.agent.name", value: { stringValue: "researcher" } },
+      ]),
+    );
+    expect(spanBody(events).observationType).toBe("AGENT");
+  });
+
+  it("classifies a gen_ai.operation.name=chat span as GENERATION (Flue / LiveKit / Vercel AI SDK v7+)", () => {
+    const events = otlpToEvents(
+      spanNamed("chat gpt-4o-mini", [{ key: "gen_ai.operation.name", value: { stringValue: "chat" } }]),
+    );
+    expect(events.find((e) => e.type === "generation-create")).toBeDefined();
+  });
+
+  it("classifies a gen_ai.tool.name span as TOOL without an operation.name (Pydantic AI style)", () => {
+    const events = otlpToEvents(spanNamed("tool", [{ key: "gen_ai.tool.name", value: { stringValue: "lookup" } }]));
+    expect(spanBody(events).observationType).toBe("TOOL");
+  });
+
+  it("classifies legacy Vercel AI SDK doGenerate/doEmbed/toolCall spans (pre-v7 ai.* namespace)", () => {
+    const gen = otlpToEvents(
+      spanNamed("ai.generateText.doGenerate", [
+        { key: "ai.operationId", value: { stringValue: "ai.generateText.doGenerate" } },
+        { key: "ai.model.id", value: { stringValue: "gpt-4o" } },
+        { key: "ai.model.provider", value: { stringValue: "openai.chat" } },
+      ]),
+    );
+    expect(gen.find((e) => e.type === "generation-create")).toBeDefined();
+    expect(spanBody(gen).model).toBe("gpt-4o");
+    expect(spanBody(gen).provider).toBe("openai.chat");
+
+    const embed = otlpToEvents(
+      spanNamed("ai.embed.doEmbed", [{ key: "ai.operationId", value: { stringValue: "ai.embed.doEmbed" } }]),
+    );
+    expect(spanBody(embed).observationType).toBe("EMBEDDING");
+
+    const tool = otlpToEvents(
+      spanNamed("ai.toolCall", [{ key: "ai.operationId", value: { stringValue: "ai.toolCall" } }]),
+    );
+    expect(spanBody(tool).observationType).toBe("TOOL");
+  });
+
+  it("classifies Genkit spans by genkit:metadata:subtype", () => {
+    const cases: [string, string][] = [
+      ["model", "GENERATION"],
+      ["embedder", "EMBEDDING"],
+      ["tool", "TOOL"],
+      ["retriever", "RETRIEVER"],
+      ["reranker", "RERANKER"],
+      ["agent", "AGENT"],
+      ["flow", "CHAIN"],
+    ];
+    for (const [subtype, expected] of cases) {
+      const events = otlpToEvents(
+        spanNamed("genkit-step", [{ key: "genkit:metadata:subtype", value: { stringValue: subtype } }]),
+      );
+      if (expected === "GENERATION") {
+        expect(
+          events.find((e) => e.type === "generation-create"),
+          subtype,
+        ).toBeDefined();
+      } else {
+        expect(spanBody(events).observationType, subtype).toBe(expected);
+      }
+    }
+  });
+
+  it("leaves a Genkit evaluator span unmapped (plain SPAN, not GUARDRAIL)", () => {
+    const events = otlpToEvents(
+      spanNamed("genkit-step", [{ key: "genkit:metadata:subtype", value: { stringValue: "evaluator" } }]),
+    );
+    expect(spanBody(events).observationType).toBeUndefined();
+  });
+
+  it("classifies LiveKit Agents spans by name (llm_request / function_tool)", () => {
+    const gen = otlpToEvents(spanNamed("llm_request", []));
+    expect(gen.find((e) => e.type === "generation-create")).toBeDefined();
+
+    const tool = otlpToEvents(spanNamed("function_tool", []));
+    expect(spanBody(tool).observationType).toBe("TOOL");
+  });
 });
 
 // ── Minimal protobuf encoder (inverse of decodeOtlpTraces) for round-trip testing ─
@@ -275,6 +491,30 @@ function encodeProtobuf(): Uint8Array {
   return new Uint8Array(lenDelim(1, [...resource, ...scopeSpans]));
 }
 
+// A span carrying one Span.Event (field 11) named gen_ai.evaluation.result, so the
+// hand-rolled protobuf decoder's brand-new span-events path gets a real round-trip test.
+function encodeProtobufWithEvalEvent(): Uint8Array {
+  const evalEventAttrs = [
+    ["gen_ai.evaluation.name", anyStr("relevance")],
+    ["gen_ai.evaluation.score.value", doubleVal(4, 0.75)], // AnyValue.double_value
+  ].flatMap(([k, v]) => lenDelim(3, kv(k as string, v as number[]))); // Span.Event.attributes → field 3
+  const evalEvent = [
+    ...fixed64(1, 1700000000500000000n), // Span.Event.time_unix_nano → field 1
+    ...strField(2, "gen_ai.evaluation.result"), // Span.Event.name → field 2
+    ...evalEventAttrs,
+  ];
+  const span = [
+    ...lenDelim(1, hexBytes("4af7651916cd43dd8448eb211c80319c")),
+    ...lenDelim(2, hexBytes("f7ad6b7169203331")),
+    ...strField(5, "chat"),
+    ...fixed64(7, 1700000000000000000n),
+    ...fixed64(8, 1700000000500000000n),
+    ...lenDelim(11, evalEvent), // Span.events → field 11
+  ];
+  const scopeSpans = lenDelim(2, lenDelim(2, span));
+  return new Uint8Array(lenDelim(1, scopeSpans));
+}
+
 describe("decodeOtlpTraces (protobuf)", () => {
   it("decodes an ExportTraceServiceRequest into the same mapped events as JSON", () => {
     const payload = decodeOtlpTraces(encodeProtobuf());
@@ -287,5 +527,21 @@ describe("decodeOtlpTraces (protobuf)", () => {
     expect(span?.traceId).toBe("0af7651916cd43dd8448eb211c80319c");
     expect(span?.spanId).toBe("b7ad6b7169203331");
     expect(span?.parentSpanId).toBe("0020000000000001");
+  });
+
+  it("decodes a Span.Event and maps gen_ai.evaluation.result to a NUMERIC score-create", () => {
+    const payload = decodeOtlpTraces(encodeProtobufWithEvalEvent());
+    const span = payload.resourceSpans?.[0]?.scopeSpans?.[0]?.spans?.[0];
+    expect(span?.events).toHaveLength(1);
+    expect(span?.events?.[0]?.name).toBe("gen_ai.evaluation.result");
+
+    const score = otlpToEvents(payload).find((e) => e.type === "score-create")?.body as Record<string, unknown>;
+    expect(score).toBeDefined();
+    expect(score.traceId).toBe("4af7651916cd43dd8448eb211c80319c");
+    expect(score.observationId).toBe("f7ad6b7169203331");
+    expect(score.name).toBe("relevance");
+    expect(score.dataType).toBe("NUMERIC");
+    expect(score.value).toBe(0.75);
+    expect(score.source).toBe("EVAL");
   });
 });

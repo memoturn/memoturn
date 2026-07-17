@@ -902,7 +902,7 @@ function RetrievalDocs({ docs }: { docs: ObservationDetail["retrieval_documents"
   );
 }
 
-type ScoreDataType = "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
+type ScoreDataType = "NUMERIC" | "CATEGORICAL" | "BOOLEAN" | "CORRECTION" | "TEXT";
 
 type AnnotationPatch = { value?: number; stringValue?: string };
 
@@ -1004,6 +1004,39 @@ function NumericReviewField({
   );
 }
 
+/** Free-text annotation (TEXT/CORRECTION dataTypes): a single text input, submitted on blur/Enter. */
+function TextReviewField({
+  active,
+  disabled,
+  onSubmit,
+}: {
+  active: ScoreRow | undefined;
+  disabled: boolean;
+  onSubmit: (patch: AnnotationPatch) => void;
+}) {
+  const [val, setVal] = useState<string>(active?.string_value ?? "");
+  const submit = () => {
+    if (val.trim() !== "") onSubmit({ stringValue: val.trim() });
+  };
+  return (
+    <Input
+      value={val}
+      disabled={disabled}
+      onChange={(e) => setVal(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          submit();
+        }
+      }}
+      onBlur={submit}
+      placeholder="add a note"
+      aria-label="score note"
+      className="h-8 w-64"
+    />
+  );
+}
+
 /** One score-config row: category buttons, pass/fail, or numeric buttons + input. */
 function ReviewField({
   cfg,
@@ -1054,6 +1087,8 @@ function ReviewField({
             Fail
           </Button>
         </div>
+      ) : cfg.dataType === "TEXT" ? (
+        <TextReviewField active={active} disabled={disabled} onSubmit={onSubmit} />
       ) : (
         <NumericReviewField cfg={cfg} active={active} disabled={disabled} onSubmit={onSubmit} />
       )}
@@ -1229,7 +1264,10 @@ function AnnotateButton({ traceId }: { traceId: string }) {
         name: name.trim(),
         dataType,
         value: dataType === "NUMERIC" ? Number(value) : dataType === "BOOLEAN" ? (value === "1" ? 1 : 0) : undefined,
-        stringValue: dataType === "CATEGORICAL" ? stringValue.trim() : undefined,
+        stringValue:
+          dataType === "CATEGORICAL" || dataType === "TEXT" || dataType === "CORRECTION"
+            ? stringValue.trim()
+            : undefined,
         comment: comment.trim() || undefined,
       }),
     onSuccess: () => {
@@ -1246,7 +1284,11 @@ function AnnotateButton({ traceId }: { traceId: string }) {
     onError: (e) => toast.error(`Annotation failed: ${String(e)}`),
   });
 
-  const valid = name.trim() !== "" && (dataType === "CATEGORICAL" ? stringValue.trim() !== "" : value !== "");
+  const valid =
+    name.trim() !== "" &&
+    (dataType === "CATEGORICAL" || dataType === "TEXT" || dataType === "CORRECTION"
+      ? stringValue.trim() !== ""
+      : value !== "");
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -1272,6 +1314,8 @@ function AnnotateButton({ traceId }: { traceId: string }) {
               <SelectItem value="NUMERIC">Numeric</SelectItem>
               <SelectItem value="CATEGORICAL">Categorical</SelectItem>
               <SelectItem value="BOOLEAN">Boolean</SelectItem>
+              <SelectItem value="TEXT">Text</SelectItem>
+              <SelectItem value="CORRECTION">Correction</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -1292,6 +1336,11 @@ function AnnotateButton({ traceId }: { traceId: string }) {
                 <SelectItem value="0">False</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+        ) : dataType === "TEXT" || dataType === "CORRECTION" ? (
+          <div className="space-y-1.5">
+            <Label>{dataType === "CORRECTION" ? "Corrected output" : "Text"}</Label>
+            <Input value={stringValue} onChange={(e) => setStringValue(e.target.value)} placeholder="e.g. good" />
           </div>
         ) : (
           <div className="space-y-1.5">

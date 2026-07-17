@@ -5,7 +5,7 @@ import { prisma } from "@memoturn/db";
  * categories (for CATEGORICAL) or a min/max range (for NUMERIC). They drive the review
  * form and document what scores mean.
  */
-export type ScoreDataType = "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
+export type ScoreDataType = "NUMERIC" | "CATEGORICAL" | "BOOLEAN" | "TEXT";
 
 export interface CreateScoreConfigInput {
   name: string;

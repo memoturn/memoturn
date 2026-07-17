@@ -1632,6 +1632,7 @@ function SettingsPage() {
                             <SelectItem value="NUMERIC">numeric</SelectItem>
                             <SelectItem value="CATEGORICAL">categorical</SelectItem>
                             <SelectItem value="BOOLEAN">boolean</SelectItem>
+                            <SelectItem value="TEXT">text</SelectItem>
                           </SelectContent>
                         </Select>
                         <FormMessage />

@@ -64,7 +64,7 @@ export type TraceTags = z.infer<typeof traceTags>;
 export const scoreConfig = z.object({
   id: z.string(),
   name: z.string(),
-  dataType: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]),
+  dataType: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN", "TEXT"]),
   categories: z.array(z.string()),
   min: z.number().nullable(),
   max: z.number().nullable(),

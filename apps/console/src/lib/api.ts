@@ -228,7 +228,7 @@ export const api = {
     id: string,
     body: {
       name: string;
-      dataType: "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
+      dataType: "NUMERIC" | "CATEGORICAL" | "BOOLEAN" | "CORRECTION" | "TEXT";
       value?: number;
       stringValue?: string;
       comment?: string;

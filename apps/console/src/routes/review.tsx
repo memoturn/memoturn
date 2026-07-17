@@ -50,12 +50,13 @@ function ReviewCard({
   onDone: () => void;
 }) {
   const categorical = config?.dataType === "CATEGORICAL" && config.categories.length > 0;
+  const text = config?.dataType === "TEXT";
   const [value, setValue] = useState(1);
   const [stringValue, setStringValue] = useState(config?.categories[0] ?? "");
   const [comment, setComment] = useState("");
   const submit = useMutation({
     mutationFn: () =>
-      api.submitReviewScore(queue, item.id, categorical ? { stringValue, comment } : { value, comment }),
+      api.submitReviewScore(queue, item.id, categorical || text ? { stringValue, comment } : { value, comment }),
     onSuccess: () => {
       toast.success("Score submitted");
       onDone();
@@ -126,6 +127,14 @@ function ReviewCard({
                 ))}
               </SelectContent>
             </Select>
+          ) : text ? (
+            <Input
+              value={stringValue}
+              onChange={(e) => setStringValue(e.target.value)}
+              className="w-56"
+              aria-label="score text"
+              placeholder="note"
+            />
           ) : (
             <Input
               type="number"

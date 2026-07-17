@@ -247,6 +247,55 @@ describe("mapEvents", () => {
     expect(retrieval_documents).toHaveLength(0);
     expect(embeddings).toHaveLength(0);
   });
+
+  it("maps TEXT and CORRECTION score dataTypes onto the score row unchanged", () => {
+    const events: IngestEvent[] = [
+      {
+        id: "t",
+        type: "trace-create",
+        timestamp: "2026-07-16T00:00:00.000Z",
+        body: { id: "tr", environment: "default" },
+      },
+      {
+        id: "s1",
+        type: "score-create",
+        timestamp: "2026-07-16T00:00:01.000Z",
+        body: {
+          id: "score-text",
+          traceId: "tr",
+          name: "reviewer-note",
+          dataType: "TEXT",
+          stringValue: "needs a citation",
+          environment: "default",
+          source: "API",
+        },
+      },
+      {
+        id: "s2",
+        type: "score-create",
+        timestamp: "2026-07-16T00:00:02.000Z",
+        body: {
+          id: "score-correction",
+          traceId: "tr",
+          name: "output",
+          dataType: "CORRECTION",
+          stringValue: "the corrected output",
+          environment: "default",
+          source: "API",
+        },
+      },
+    ];
+    const { scores } = mapEvents(PROJECT, events);
+    expect(scores).toHaveLength(2);
+    expect(scores.find((s) => s.id === "score-text")).toMatchObject({
+      data_type: "TEXT",
+      string_value: "needs a citation",
+    });
+    expect(scores.find((s) => s.id === "score-correction")).toMatchObject({
+      data_type: "CORRECTION",
+      string_value: "the corrected output",
+    });
+  });
 });
 
 // Integration: full round-trip through the telemetry store. Skipped if it isn't reachable.
