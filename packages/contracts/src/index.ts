@@ -210,6 +210,52 @@ export const TRACE_FILTER_COLUMNS: FilterColumnDef[] = [
   { id: "metadata", label: "Metadata", type: "stringObject" },
 ];
 
+// ── Analytics query model (dashboard/widget engine) ─────────────────────────────
+// A generic query over a declared "view" (traces/observations/scores): pick a metric
+// (measure × aggregation) broken down by dimension(s) and/or time, filtered with the shared
+// filter model. Compiled to parameterized Doris SQL by a view-declaration registry in
+// packages/telemetry. Presence of `timeDimension` makes it a time series.
+export const queryView = z.enum(["traces", "observations", "scores"]);
+export type QueryView = z.infer<typeof queryView>;
+
+export const queryAggregation = z.enum([
+  "count",
+  "sum",
+  "avg",
+  "min",
+  "max",
+  "p50",
+  "p75",
+  "p90",
+  "p95",
+  "p99",
+  "uniq",
+]);
+export type QueryAggregation = z.infer<typeof queryAggregation>;
+
+export const queryGranularity = z.enum(["minute", "hour", "day", "week", "month"]);
+export type QueryGranularity = z.infer<typeof queryGranularity>;
+
+export const analyticsQuery = z.object({
+  view: queryView,
+  metrics: z.array(z.object({ measure: z.string(), aggregation: queryAggregation })).min(1),
+  dimensions: z.array(z.object({ field: z.string() })).default([]),
+  filters: filterState.default([]),
+  timeDimension: z.object({ granularity: queryGranularity }).nullable().default(null),
+  fromTimestamp: z.string(), // ISO 8601 (inclusive)
+  toTimestamp: z.string(), // ISO 8601 (exclusive)
+  orderBy: z.array(z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) })).default([]),
+  rowLimit: z.number().int().min(1).max(1000).default(100),
+});
+export type AnalyticsQuery = z.infer<typeof analyticsQuery>;
+
+// Result rows are keyed by dimension field / "time" and by `${aggregation}_${measure}` metric
+// columns; values are strings (dimensions/time) or numbers (metrics), null when unmeasured.
+export const queryResult = z.object({
+  rows: z.array(z.record(z.string(), z.union([z.string(), z.number(), z.null()]))),
+});
+export type QueryResult = z.infer<typeof queryResult>;
+
 /** Trace volume over the selected range, bucketed by hour (short ranges) or day. */
 export const traceHistogramBucket = z.object({ bucket: z.string(), count: z.number() });
 export type TraceHistogramBucket = z.infer<typeof traceHistogramBucket>;
