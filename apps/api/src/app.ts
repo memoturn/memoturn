@@ -30,6 +30,7 @@ import {
   createEvaluator,
   createExperiment,
   createModelPrice,
+  createProject,
   createPromptVersion,
   createProviderConnection,
   createQueryWidget,
@@ -45,6 +46,7 @@ import {
   deleteCostBudget,
   deleteDashboard,
   deleteModelPrice,
+  deleteProject,
   deleteSavedView,
   deleteScore,
   deleteScoreConfig,
@@ -115,8 +117,10 @@ import {
   mcpProtectedResourceMetadata,
   otlpToEvents,
   recordAudit,
+  recordAuthAudit,
   recordRun,
   removeProjectMember,
+  renameProject,
   replayDlq,
   replayTrace,
   resolvePrompt,
@@ -2206,6 +2210,97 @@ app.openapi(
     return c.json({
       data: [{ id: c.get("projectId"), name: "(api-key project)", slug: "", organization: "", role: c.get("role") }],
     });
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/projects",
+    summary: "Create a project in the caller's active organization",
+    tags: ["platform"],
+    security,
+    request: {
+      body: { content: { "application/json": { schema: z.object({ name: z.string().min(1).max(120) }) } } },
+    },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: C.project } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c) ?? denyIfNotAdmin(c);
+    if (denied) return denied;
+    const { name } = c.req.valid("json");
+    const created = await createProject(c.get("organizationId"), name);
+    await recordAudit(created.id, c.get("actor"), "project.create", created.id, { name });
+    return c.json({ ...created, role: c.get("role") }, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "patch",
+    path: "/v1/projects/{id}",
+    summary: "Rename a project (path {id} must be the project you're switched into)",
+    tags: ["platform"],
+    security,
+    request: {
+      params: z.object({ id: z.string() }),
+      body: { content: { "application/json": { schema: z.object({ name: z.string().min(1).max(120) }) } } },
+    },
+    responses: {
+      200: { description: "Renamed", content: { "application/json": { schema: C.project } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c) ?? denyIfNotAdmin(c);
+    if (denied) return denied;
+    if (c.req.valid("param").id !== c.get("projectId"))
+      return c.json({ error: "forbidden: switch to this project to manage it" }, 403);
+    const { name } = c.req.valid("json");
+    const renamed = await renameProject(c.get("projectId"), name);
+    await recordAudit(c.get("projectId"), c.get("actor"), "project.rename", c.get("projectId"), { name });
+    return c.json({ ...renamed, role: c.get("role") });
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/projects/{id}",
+    summary: "Delete a project and its data (path {id} must be the project you're switched into)",
+    tags: ["platform"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Deleted", content: { "application/json": { schema: z.object({ ok: z.boolean() }) } } },
+      400: { description: "Bad request (last project in the organization)" },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c) ?? denyIfNotAdmin(c);
+    if (denied) return denied;
+    if (c.req.valid("param").id !== c.get("projectId"))
+      return c.json({ error: "forbidden: switch to this project to manage it" }, 403);
+    const projectId = c.get("projectId");
+    let deleted: { name: string; organizationId: string };
+    try {
+      deleted = await deleteProject(projectId);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "delete failed" }, 400);
+    }
+    // The project's own audit log died with it — record on the organization instead.
+    await recordAuthAudit({
+      organizationId: deleted.organizationId,
+      actor: c.get("actor"),
+      action: "project.delete",
+      target: projectId,
+      metadata: { name: deleted.name },
+    });
+    return c.json({ ok: true });
   },
 );
 

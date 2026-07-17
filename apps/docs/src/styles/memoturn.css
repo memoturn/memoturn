@@ -286,8 +286,9 @@ header.header > .header {
 .site-title span {
 	font-family: var(--font-heading-stack);
 	font-weight: 700;
-	font-size: 1.0625rem;
-	letter-spacing: -0.025em;
+	font-size: 1rem;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
 	color: var(--foreground);
 }
 

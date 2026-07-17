@@ -79,7 +79,6 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: "/sessions", label: "Sessions", icon: MessagesSquare },
       { to: "/users", label: "Users", icon: Users },
       { to: "/widgets", label: "Explore", icon: BarChart3 },
-      { to: "/assistant", label: "Assistant", icon: Sparkles },
     ],
   },
   {
@@ -431,6 +430,12 @@ function RootComponent() {
             <Search />
             <span className="hidden sm:inline">Search</span>
             <kbd className="hidden rounded border bg-muted px-1 font-mono text-[0.625rem] sm:inline">⌘K</kbd>
+          </Button>
+          <Button asChild variant="outline" size="sm" className="gap-2 text-muted-foreground">
+            <Link to="/assistant" aria-label="Ask AI">
+              <Sparkles className="text-primary" />
+              <span className="hidden sm:inline">Ask AI</span>
+            </Link>
           </Button>
           <div className="ml-auto flex items-center gap-2">
             <TimeRangeSelect />

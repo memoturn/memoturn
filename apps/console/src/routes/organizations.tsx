@@ -1,12 +1,24 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 import { EmptyState } from "../components/empty-state";
 import { KindBadge, type KindBadgeTone } from "../components/kind-badge";
 import { PageHeader } from "../components/page-header";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../components/ui/alert-dialog";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "../components/ui/form";
@@ -14,6 +26,7 @@ import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Textarea } from "../components/ui/textarea";
+import { api, getActiveProject, setActiveProject } from "../lib/api";
 import { authClient } from "../lib/auth";
 
 export const Route = createFileRoute("/organizations")({ component: OrganizationsPage });
@@ -63,6 +76,9 @@ const roleTone: Record<string, KindBadgeTone> = {
 
 const orgSchema = z.object({ name: z.string().min(1, "Organization name is required") });
 type OrgForm = z.infer<typeof orgSchema>;
+
+const projectSchema = z.object({ name: z.string().min(1, "Project name is required") });
+type ProjectForm = z.infer<typeof projectSchema>;
 
 const inviteSchema = z.object({
   email: z.string().email("Valid email required"),
@@ -152,6 +168,40 @@ function OrganizationsPage() {
 
   const members = active?.members ?? [];
   const invitations = (active?.invitations ?? []).filter((i) => i.status === "pending");
+
+  // Projects of the active organization (the Project contract carries the org *name*).
+  const { data: projects } = useQuery({ queryKey: ["projects"], queryFn: () => api.listProjects() });
+  const orgProjects = (projects ?? []).filter((p) => p.organization === active?.name);
+  const projectForm = useForm<ProjectForm>({ resolver: zodResolver(projectSchema), defaultValues: { name: "" } });
+  const createProject = useMutation({
+    mutationFn: (values: ProjectForm) => api.createProject(values.name),
+    onSuccess: () => {
+      toast.success("Project created");
+      projectForm.reset({ name: "" });
+      qc.invalidateQueries({ queryKey: ["projects"] });
+    },
+    onError: (e) => toast.error(`Failed to create project: ${String(e)}`),
+  });
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const renameProject = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => api.renameProject(id, name),
+    onSuccess: () => {
+      toast.success("Project renamed");
+      setRenamingId(null);
+      qc.invalidateQueries({ queryKey: ["projects"] });
+    },
+    onError: (e) => toast.error(`Rename failed: ${String(e)}`),
+  });
+  const deleteProject = useMutation({
+    mutationFn: (id: string) => api.deleteProject(id),
+    onSuccess: (_r, id) => {
+      toast.success("Project deleted");
+      if (getActiveProject() === id) setActiveProject(orgProjects.find((p) => p.id !== id)?.id ?? "");
+      qc.invalidateQueries(); // project-scoped data everywhere may reference the deleted project
+    },
+    onError: (e) => toast.error(`Delete failed: ${String(e)}`),
+  });
 
   const { data: ssoProviders } = useQuery({
     queryKey: ["sso-providers"],
@@ -279,6 +329,130 @@ function OrganizationsPage() {
 
       {active && (
         <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Projects in {active.name}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Form {...projectForm}>
+                <form
+                  onSubmit={projectForm.handleSubmit((v) => createProject.mutate(v))}
+                  className="flex flex-wrap items-start gap-3"
+                >
+                  <FormField
+                    control={projectForm.control}
+                    name="name"
+                    render={({ field }) => (
+                      <FormItem className="flex-1 min-w-60">
+                        <FormControl>
+                          <Input placeholder="New project name" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <Button type="submit" disabled={createProject.isPending}>
+                    {createProject.isPending ? "Creating…" : "Create project"}
+                  </Button>
+                </form>
+              </Form>
+
+              {orgProjects.length > 0 && (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Slug</TableHead>
+                      <TableHead>Role</TableHead>
+                      <TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {orgProjects.map((p) => (
+                      <TableRow key={p.id}>
+                        <TableCell className="font-medium">
+                          {renamingId === p.id ? (
+                            <form
+                              className="flex items-center gap-2"
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                const name = renameValue.trim();
+                                if (name) renameProject.mutate({ id: p.id, name });
+                              }}
+                            >
+                              <Input
+                                value={renameValue}
+                                onChange={(e) => setRenameValue(e.target.value)}
+                                className="h-8 w-56"
+                                autoFocus
+                              />
+                              <Button type="submit" size="sm" disabled={renameProject.isPending}>
+                                Save
+                              </Button>
+                              <Button type="button" size="sm" variant="ghost" onClick={() => setRenamingId(null)}>
+                                Cancel
+                              </Button>
+                            </form>
+                          ) : (
+                            <span className="inline-flex items-center gap-2">
+                              {p.name}
+                              {getActiveProject() === p.id && <KindBadge tone="green">active</KindBadge>}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">{p.slug}</TableCell>
+                        <TableCell>
+                          <KindBadge tone={roleTone[p.role.toLowerCase()] ?? "neutral"}>
+                            {p.role.toLowerCase()}
+                          </KindBadge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setRenamingId(p.id);
+                              setRenameValue(p.name);
+                            }}
+                          >
+                            rename
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-destructive hover:text-destructive"
+                                disabled={orgProjects.length <= 1}
+                              >
+                                delete
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete {p.name}?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This permanently deletes the project — its traces, prompts, datasets, evaluators, and
+                                  API keys. This cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => deleteProject.mutate(p.id)}>
+                                  Delete project
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Members of {active.name}</CardTitle>
