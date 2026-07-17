@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestFlushSendsBatch(t *testing.T) {
@@ -82,6 +83,202 @@ func TestFlushEmptyIsNoop(t *testing.T) {
 	mt := New(WithFlushInterval(0))
 	if err := mt.Flush(); err != nil {
 		t.Fatalf("empty flush should be nil, got %v", err)
+	}
+}
+
+// captureServer records every ingest batch and answers with a settable status.
+type captureServer struct {
+	mu      sync.Mutex
+	batches [][]envelope
+	status  int
+	srv     *httptest.Server
+}
+
+func newCaptureServer() *captureServer {
+	cs := &captureServer{status: http.StatusMultiStatus}
+	cs.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Batch []envelope `json:"batch"`
+		}
+		_ = json.Unmarshal(b, &payload)
+		cs.mu.Lock()
+		cs.batches = append(cs.batches, payload.Batch)
+		status := cs.status
+		cs.mu.Unlock()
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{"errors":[]}`))
+	}))
+	return cs
+}
+
+func (cs *captureServer) setStatus(code int) {
+	cs.mu.Lock()
+	cs.status = code
+	cs.mu.Unlock()
+}
+
+func (cs *captureServer) requestCount() int {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	return len(cs.batches)
+}
+
+func (cs *captureServer) lastBatch() []envelope {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if len(cs.batches) == 0 {
+		return nil
+	}
+	return cs.batches[len(cs.batches)-1]
+}
+
+func newTestClient(cs *captureServer, opts ...Option) *Client {
+	base := []Option{WithBaseURL(cs.srv.URL), WithCredentials("pk-test", "sk-test"), WithFlushInterval(0)}
+	return New(append(base, opts...)...)
+}
+
+func findByType(batch []envelope, typ string) *envelope {
+	for i := range batch {
+		if batch[i].Type == typ {
+			return &batch[i]
+		}
+	}
+	return nil
+}
+
+func TestTraceEnvironmentPropagatesToChildren(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.srv.Close()
+	mt := newTestClient(cs)
+
+	tr := mt.Trace(TraceInput{Name: "t", Environment: "prod"})
+	tr.Span(SpanInput{Name: "child"})
+	tr.Score(ScoreInput{Name: "quality", Value: Float(1)})
+	if err := mt.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	batch := cs.lastBatch()
+	for _, typ := range []string{"trace-create", "span-create", "score-create"} {
+		ev := findByType(batch, typ)
+		if ev == nil {
+			t.Fatalf("missing %s event", typ)
+		}
+		if ev.Body["environment"] != "prod" {
+			t.Errorf("%s environment = %v, want prod", typ, ev.Body["environment"])
+		}
+	}
+}
+
+func TestPermanent4xxDropsBatch(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.srv.Close()
+	cs.setStatus(http.StatusUnauthorized)
+	mt := newTestClient(cs)
+
+	mt.Trace(TraceInput{Name: "t"})
+	if err := mt.Flush(); err == nil {
+		t.Fatal("want error on 401")
+	}
+	// A permanent reject is not retried — the buffer stays empty.
+	cs.setStatus(http.StatusMultiStatus)
+	if err := mt.Flush(); err != nil {
+		t.Fatalf("second flush: %v", err)
+	}
+	if got := cs.requestCount(); got != 1 {
+		t.Errorf("requests = %d, want 1 (dropped batch must not be re-sent)", got)
+	}
+}
+
+func TestTransient5xxRebuffers(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.srv.Close()
+	cs.setStatus(http.StatusInternalServerError)
+	mt := newTestClient(cs)
+
+	mt.Trace(TraceInput{Name: "t"})
+	if err := mt.Flush(); err == nil {
+		t.Fatal("want error on 500")
+	}
+	cs.setStatus(http.StatusMultiStatus)
+	if err := mt.Flush(); err != nil {
+		t.Fatalf("retry flush: %v", err)
+	}
+	if got := cs.requestCount(); got != 2 {
+		t.Fatalf("requests = %d, want 2", got)
+	}
+	if got := len(cs.lastBatch()); got != 1 {
+		t.Errorf("retried batch len = %d, want 1 (nothing lost)", got)
+	}
+}
+
+func TestBufferCapDropsNewEvents(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.srv.Close()
+	mt := newTestClient(cs, WithMaxBufferSize(2))
+
+	mt.Trace(TraceInput{Name: "a"})
+	mt.Trace(TraceInput{Name: "b"})
+	mt.Trace(TraceInput{Name: "c"}) // dropped
+	if err := mt.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	if got := len(cs.lastBatch()); got != 2 {
+		t.Errorf("batch len = %d, want 2", got)
+	}
+}
+
+func TestMaskAppliedToRedactableFields(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.srv.Close()
+	mt := newTestClient(cs, WithMask(func(field string, v any) any {
+		if field == "input" {
+			return "[masked]"
+		}
+		return v
+	}))
+
+	mt.Trace(TraceInput{Name: "t", Input: map[string]any{"ssn": "123"}, Output: map[string]any{"ok": true}})
+	if err := mt.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	body := findByType(cs.lastBatch(), "trace-create").Body
+	if body["input"] != "[masked]" {
+		t.Errorf("input = %v, want masked", body["input"])
+	}
+	if out, ok := body["output"].(map[string]any); !ok || out["ok"] != true {
+		t.Errorf("output = %v, want untouched", body["output"])
+	}
+}
+
+func TestMaskPanicUsesSentinelNeverRawValue(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.srv.Close()
+	mt := newTestClient(cs, WithMask(func(field string, v any) any { panic("mask bug") }))
+
+	mt.Trace(TraceInput{Name: "t", Input: "raw secret"})
+	if err := mt.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	if got := findByType(cs.lastBatch(), "trace-create").Body["input"]; got != maskErrorSentinel {
+		t.Errorf("input = %v, want sentinel", got)
+	}
+}
+
+func TestSizeTriggeredFlushDelivers(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.srv.Close()
+	mt := newTestClient(cs, WithFlushAt(2))
+
+	mt.Trace(TraceInput{Name: "a"})
+	mt.Trace(TraceInput{Name: "b"}) // hits flushAt -> background single-flight flush
+	deadline := time.Now().Add(3 * time.Second)
+	for cs.requestCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if cs.requestCount() == 0 {
+		t.Fatal("size-triggered flush never delivered")
 	}
 }
 
