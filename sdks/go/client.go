@@ -323,6 +323,20 @@ func (t *Trace) Span(input SpanInput) *Span {
 	return &Span{client: t.client, traceID: t.ID, ID: id, env: t.env, kind: "span"}
 }
 
+// Tool starts a child span classified as a TOOL observation (a tool/function call made by
+// an agent). Equivalent to Span with input.ObservationType = ObservationTypeTool.
+func (t *Trace) Tool(input SpanInput) *Span {
+	input.ObservationType = ObservationTypeTool
+	return t.Span(input)
+}
+
+// Agent starts a child span classified as an AGENT observation (an agent step/turn).
+// Equivalent to Span with input.ObservationType = ObservationTypeAgent.
+func (t *Trace) Agent(input SpanInput) *Span {
+	input.ObservationType = ObservationTypeAgent
+	return t.Span(input)
+}
+
 // Generation starts a child generation (an LLM call).
 func (t *Trace) Generation(input GenerationInput) *Span {
 	id := orUUID(input.ID)
@@ -357,6 +371,36 @@ func (s *Span) Span(input SpanInput) *Span {
 		"id": id, "traceId": s.traceID, "parentObservationId": s.ID, "environment": s.env, "startTime": nowISO(),
 	}))
 	return &Span{client: s.client, traceID: s.traceID, ID: id, env: s.env, kind: "span"}
+}
+
+// Generation starts a nested child generation (an LLM call made inside this span).
+func (s *Span) Generation(input GenerationInput) *Span {
+	id := orUUID(input.ID)
+	s.client.enqueue("generation-create", body(input, kv{
+		"id": id, "traceId": s.traceID, "parentObservationId": s.ID, "environment": s.env, "startTime": nowISO(),
+	}))
+	return &Span{client: s.client, traceID: s.traceID, ID: id, env: s.env, kind: "generation"}
+}
+
+// Tool starts a nested child span classified as a TOOL observation (a tool/function call
+// made by an agent). Equivalent to Span with input.ObservationType = ObservationTypeTool.
+func (s *Span) Tool(input SpanInput) *Span {
+	input.ObservationType = ObservationTypeTool
+	return s.Span(input)
+}
+
+// Agent starts a nested child span classified as an AGENT observation (an agent step/turn).
+// Equivalent to Span with input.ObservationType = ObservationTypeAgent.
+func (s *Span) Agent(input SpanInput) *Span {
+	input.ObservationType = ObservationTypeAgent
+	return s.Span(input)
+}
+
+// Event records a point-in-time event nested under this span.
+func (s *Span) Event(input SpanInput) {
+	s.client.enqueue("event-create", body(input, kv{
+		"id": orUUID(input.ID), "traceId": s.traceID, "parentObservationId": s.ID, "environment": s.env, "startTime": nowISO(),
+	}))
 }
 
 // End updates and closes the observation. Pass Output and (for generations) Usage.

@@ -282,6 +282,134 @@ func TestSizeTriggeredFlushDelivers(t *testing.T) {
 	}
 }
 
+func TestTraceToolAndAgentSetObservationType(t *testing.T) {
+	tests := []struct {
+		name  string
+		start func(tr *Trace) *Span
+		want  string
+	}{
+		{"tool", func(tr *Trace) *Span { return tr.Tool(SpanInput{Name: "search"}) }, ObservationTypeTool},
+		{"agent", func(tr *Trace) *Span { return tr.Agent(SpanInput{Name: "planner"}) }, ObservationTypeAgent},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cs := newCaptureServer()
+			defer cs.srv.Close()
+			mt := newTestClient(cs)
+
+			tr := mt.Trace(TraceInput{Name: "t"})
+			sp := tt.start(tr)
+			if err := mt.Flush(); err != nil {
+				t.Fatalf("flush: %v", err)
+			}
+			ev := findByType(cs.lastBatch(), "span-create")
+			if ev == nil {
+				t.Fatal("missing span-create event")
+			}
+			if ev.Body["observationType"] != tt.want {
+				t.Errorf("observationType = %v, want %s", ev.Body["observationType"], tt.want)
+			}
+			if ev.Body["traceId"] != tr.ID || ev.Body["id"] != sp.ID {
+				t.Errorf("linkage = %v", ev.Body)
+			}
+		})
+	}
+}
+
+func TestSpanToolAndAgentSetObservationType(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.srv.Close()
+	mt := newTestClient(cs)
+
+	tr := mt.Trace(TraceInput{Name: "t"})
+	parent := tr.Span(SpanInput{Name: "outer"})
+	parent.Tool(SpanInput{Name: "search"})
+	parent.Agent(SpanInput{Name: "planner"})
+	if err := mt.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	batch := cs.lastBatch()
+	var got []string
+	for _, ev := range batch {
+		if ev.Type != "span-create" || ev.Body["parentObservationId"] != parent.ID {
+			continue
+		}
+		ot, _ := ev.Body["observationType"].(string)
+		got = append(got, ot)
+	}
+	if strings.Join(got, ",") != "TOOL,AGENT" {
+		t.Errorf("nested observationTypes = %v, want [TOOL AGENT]", got)
+	}
+}
+
+func TestSpanGenerationNestsAndEndsAsGeneration(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.srv.Close()
+	mt := newTestClient(cs)
+
+	tr := mt.Trace(TraceInput{Name: "t"})
+	parent := tr.Span(SpanInput{Name: "outer"})
+	gen := parent.Generation(GenerationInput{Model: "gpt-4o", SpanInput: SpanInput{Input: "hi"}})
+	gen.End(GenerationInput{SpanInput: SpanInput{Output: "hello"}, Usage: &Usage{TotalTokens: 12, CacheReadTokens: 5}})
+	if err := mt.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	batch := cs.lastBatch()
+	create := findByType(batch, "generation-create")
+	if create == nil {
+		t.Fatal("missing generation-create")
+	}
+	if create.Body["parentObservationId"] != parent.ID || create.Body["traceId"] != tr.ID {
+		t.Errorf("generation-create linkage = %v", create.Body)
+	}
+	if create.Body["model"] != "gpt-4o" {
+		t.Errorf("model = %v", create.Body["model"])
+	}
+	if _, ok := create.Body["startTime"]; !ok {
+		t.Error("generation-create missing startTime")
+	}
+	update := findByType(batch, "generation-update")
+	if update == nil {
+		t.Fatal("nested generation must End as generation-update, not span-update")
+	}
+	if update.Body["id"] != gen.ID {
+		t.Errorf("generation-update id = %v, want %s", update.Body["id"], gen.ID)
+	}
+	usage, ok := update.Body["usage"].(map[string]any)
+	if !ok || usage["cacheReadTokens"] != float64(5) {
+		t.Errorf("usage = %v, want cacheReadTokens 5", update.Body["usage"])
+	}
+}
+
+func TestSpanEventEmitsEventCreateWithParent(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.srv.Close()
+	mt := newTestClient(cs)
+
+	tr := mt.Trace(TraceInput{Name: "t", Environment: "prod"})
+	parent := tr.Span(SpanInput{Name: "outer"})
+	parent.Event(SpanInput{Name: "cache-hit"})
+	if err := mt.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	ev := findByType(cs.lastBatch(), "event-create")
+	if ev == nil {
+		t.Fatal("missing event-create")
+	}
+	if ev.Body["parentObservationId"] != parent.ID || ev.Body["traceId"] != tr.ID {
+		t.Errorf("event linkage = %v", ev.Body)
+	}
+	if ev.Body["environment"] != "prod" {
+		t.Errorf("environment = %v, want prod", ev.Body["environment"])
+	}
+	if _, ok := ev.Body["startTime"]; !ok {
+		t.Error("event-create missing startTime")
+	}
+}
+
 func TestGetPromptAndCompile(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("bucketKey"); got != "sess-1" {
@@ -304,5 +432,35 @@ func TestGetPromptAndCompile(t *testing.T) {
 	}
 	if got := p.CompileText(map[string]any{"name": "Ada"}); got != "Hi Ada!" {
 		t.Errorf("compiled = %q, want %q", got, "Hi Ada!")
+	}
+}
+
+func TestCompileChat(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"support","version":2,"type":"CHAT","content":[` +
+			`{"role":"system","content":"You help {{product}} users."},` +
+			`{"role":"user","content":"{{question}}"}],"config":{}}`))
+	}))
+	defer srv.Close()
+
+	mt := New(WithBaseURL(srv.URL), WithFlushInterval(0))
+	p, err := mt.GetPrompt("support")
+	if err != nil {
+		t.Fatalf("getPrompt: %v", err)
+	}
+	msgs := p.CompileChat(map[string]any{"product": "memoturn", "question": "How do I flush?"})
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %d, want 2", len(msgs))
+	}
+	if msgs[0]["role"] != "system" || msgs[0]["content"] != "You help memoturn users." {
+		t.Errorf("system message = %v", msgs[0])
+	}
+	if msgs[1]["role"] != "user" || msgs[1]["content"] != "How do I flush?" {
+		t.Errorf("user message = %v", msgs[1])
+	}
+	// A TEXT prompt's content is not a message array — CompileChat returns nil.
+	text := &CompiledPrompt{Type: "TEXT", Content: "Hi {{name}}!"}
+	if got := text.CompileChat(map[string]any{"name": "Ada"}); got != nil {
+		t.Errorf("CompileChat on TEXT prompt = %v, want nil", got)
 	}
 }
