@@ -125,3 +125,232 @@ def test_wrap_without_responses_is_noop(capture: Capture) -> None:
     client.chat.completions.create(model="gpt-4o", messages=[])
     mt.flush()
     assert _find(capture.batch(), "generation-create")["body"]["name"] == "openai.chat.completions"
+
+
+# ── streaming (chat.completions) ─────────────────────────────────────────────────
+
+
+def _delta(**kw: object) -> SimpleNamespace:
+    return SimpleNamespace(**kw)
+
+
+def _choice(index: int = 0, **kw: object) -> SimpleNamespace:
+    return SimpleNamespace(index=index, delta=_delta(**kw))
+
+
+def _stream_chunk(choices: list | None = None, usage: object | None = None) -> SimpleNamespace:
+    return SimpleNamespace(choices=choices or [], usage=usage)
+
+
+def _tool_call_delta(index: int, **kw: object) -> SimpleNamespace:
+    func = SimpleNamespace(name=kw.pop("name", None), arguments=kw.pop("arguments", None))
+    return SimpleNamespace(index=index, id=kw.pop("id_", None), type=kw.pop("type_", None), function=func)
+
+
+def _fake_stream_openai(chunks: list) -> SimpleNamespace:
+    return _fake_openai(lambda **kw: iter(chunks))
+
+
+def test_stream_forwards_chunks_unchanged_and_excludes_stream_kwargs_from_params(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+    chunks = [
+        _stream_chunk([_choice(role="assistant", content="")]),
+        _stream_chunk([_choice(content="Hel")]),
+        _stream_chunk([_choice(content="lo")]),
+        _stream_chunk(usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2, total_tokens=7)),
+    ]
+    client = _fake_stream_openai(chunks)
+    wrap_openai(client, mt)
+
+    stream = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": "hi"}], stream=True)
+    assert list(stream) == chunks  # forwarded unchanged
+    mt.flush()
+
+    batch = capture.batch()
+    create = _find(batch, "generation-create")
+    update = _find(batch, "generation-update")
+    assert create["body"]["modelParameters"] == {}  # model/messages/stream/stream_options excluded
+    assert update["body"]["output"] == {"role": "assistant", "content": "Hello"}
+    assert update["body"]["usage"] == {"promptTokens": 5, "completionTokens": 2, "totalTokens": 7}
+
+
+def test_stream_accumulates_tool_calls(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+    chunks = [
+        _stream_chunk(
+            [_choice(role="assistant", tool_calls=[_tool_call_delta(0, id_="call_1", type_="function", name="get_weather", arguments="")])]
+        ),
+        _stream_chunk([_choice(tool_calls=[_tool_call_delta(0, arguments='{"c')])]),
+        _stream_chunk([_choice(tool_calls=[_tool_call_delta(0, arguments='ity":"SF"}')])]),
+    ]
+    client = _fake_stream_openai(chunks)
+    wrap_openai(client, mt)
+
+    list(client.chat.completions.create(model="gpt-4o", messages=[], stream=True))
+    mt.flush()
+
+    output = _find(capture.batch(), "generation-update")["body"]["output"]
+    assert output["role"] == "assistant"
+    assert output["tool_calls"] == [
+        {"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": '{"city":"SF"}'}}
+    ]
+
+
+def test_stream_options_auto_injected_but_explicit_value_is_respected(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+    seen: dict = {}
+
+    def create(**kw: object) -> object:
+        seen.update(kw)
+        return iter([_stream_chunk(usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2))])
+
+    client = _fake_openai(create)
+    wrap_openai(client, mt)
+
+    list(client.chat.completions.create(model="gpt-4o", messages=[], stream=True))
+    assert seen["stream_options"] == {"include_usage": True}
+
+    seen.clear()
+    list(
+        client.chat.completions.create(
+            model="gpt-4o", messages=[], stream=True, stream_options={"include_usage": False}
+        )
+    )
+    assert seen["stream_options"] == {"include_usage": False}
+
+
+def test_stream_mid_error_marks_generation_error_with_partial_output_and_reraises(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+
+    def create(**kw: object) -> object:
+        def gen():
+            yield _stream_chunk([_choice(role="assistant", content="partial")])
+            raise RuntimeError("stream broke")
+
+        return gen()
+
+    client = _fake_openai(create)
+    wrap_openai(client, mt)
+
+    stream = client.chat.completions.create(model="gpt-4o", messages=[], stream=True)
+    with pytest.raises(RuntimeError, match="stream broke"):
+        list(stream)
+    mt.flush()
+
+    update = _find(capture.batch(), "generation-update")
+    assert update["body"]["level"] == "ERROR"
+    assert "stream broke" in update["body"]["statusMessage"]
+    assert update["body"]["output"] == {"role": "assistant", "content": "partial"}
+
+
+def test_stream_early_close_marks_generation_warning_with_partial_output(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+    chunks = [
+        _stream_chunk([_choice(role="assistant", content="partial")]),
+        _stream_chunk([_choice(content="more")]),
+    ]
+    client = _fake_stream_openai(chunks)
+    wrap_openai(client, mt)
+
+    stream = client.chat.completions.create(model="gpt-4o", messages=[], stream=True)
+    next(stream)
+    stream.close()
+    mt.flush()
+
+    update = _find(capture.batch(), "generation-update")
+    assert update["body"]["level"] == "WARNING"
+    assert update["body"]["statusMessage"] == "stream ended before completion"
+    assert update["body"]["output"] == {"role": "assistant", "content": "partial"}
+
+
+def test_synchronous_stream_start_failure_marks_error_and_reraises(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+
+    def boom(**kw: object) -> object:
+        raise RuntimeError("connection refused")
+
+    client = _fake_openai(boom)
+    wrap_openai(client, mt)
+
+    with pytest.raises(RuntimeError, match="connection refused"):
+        client.chat.completions.create(model="gpt-4o", messages=[], stream=True)
+    mt.flush()
+
+    update = _find(capture.batch(), "generation-update")
+    assert update["body"]["level"] == "ERROR"
+    assert "connection refused" in update["body"]["statusMessage"]
+
+
+# ── streaming (responses API) ────────────────────────────────────────────────────
+
+
+def _resp_event(type_: str, response: object | None = None) -> SimpleNamespace:
+    return SimpleNamespace(type=type_, response=response)
+
+
+def test_responses_stream_completed_records_output_and_usage(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+    resp = SimpleNamespace(
+        output_text="done", usage=SimpleNamespace(input_tokens=3, output_tokens=4, total_tokens=7)
+    )
+    chunks = [_resp_event("response.in_progress"), _resp_event("response.completed", response=resp)]
+    client = _fake_with_responses(lambda **kw: iter(chunks))
+    wrap_openai(client, mt)
+
+    stream = client.responses.create(model="gpt-4o", input="hi", stream=True)
+    assert list(stream) == chunks
+    mt.flush()
+
+    batch = capture.batch()
+    create = _find(batch, "generation-create")
+    update = _find(batch, "generation-update")
+    assert create["body"]["modelParameters"] == {}
+    assert update["body"]["output"] == "done"
+    assert update["body"]["usage"] == {"promptTokens": 3, "completionTokens": 4, "totalTokens": 7}
+
+
+def test_responses_stream_failed_marks_generation_error(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+    resp = SimpleNamespace(output_text="partial", usage=None)
+    chunks = [_resp_event("response.failed", response=resp)]
+    client = _fake_with_responses(lambda **kw: iter(chunks))
+    wrap_openai(client, mt)
+
+    list(client.responses.create(model="gpt-4o", input="hi", stream=True))
+    mt.flush()
+
+    update = _find(capture.batch(), "generation-update")
+    assert update["body"]["level"] == "ERROR"
+    assert update["body"]["statusMessage"] == "response.failed"
+    assert update["body"]["output"] == "partial"
+
+
+def test_responses_stream_without_terminal_event_marks_generation_error(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+    chunks = [_resp_event("response.in_progress")]
+    client = _fake_with_responses(lambda **kw: iter(chunks))
+    wrap_openai(client, mt)
+
+    list(client.responses.create(model="gpt-4o", input="hi", stream=True))
+    mt.flush()
+
+    update = _find(capture.batch(), "generation-update")
+    assert update["body"]["level"] == "ERROR"
+    assert "terminal" in update["body"]["statusMessage"]
+
+
+def test_responses_stream_early_close_marks_generation_warning(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+    resp = SimpleNamespace(output_text="partial", usage=None)
+    chunks = [_resp_event("response.output_text.delta"), _resp_event("response.completed", response=resp)]
+    client = _fake_with_responses(lambda **kw: iter(chunks))
+    wrap_openai(client, mt)
+
+    stream = client.responses.create(model="gpt-4o", input="hi", stream=True)
+    next(stream)
+    stream.close()
+    mt.flush()
+
+    update = _find(capture.batch(), "generation-update")
+    assert update["body"]["level"] == "WARNING"
+    assert update["body"]["statusMessage"] == "stream ended before completion"
