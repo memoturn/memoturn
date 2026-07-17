@@ -78,6 +78,30 @@ jobs:
         working-directory: sdks/python
         run: uv publish --trusted-publishing always
 
+  go:
+    name: Verify + tag Go SDK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # pushes the sdks/go/vX.Y.Z module tag
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: sdks/go/go.mod
+      - name: Vet + test
+        working-directory: sdks/go
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -race ./...
+      # Go modules in a subdirectory resolve versions from a path-prefixed tag
+      # (sdks/go/vX.Y.Z), so mirror the release tag onto the module path.
+      - name: Push module tag
+        if: ${{ github.ref_type == 'tag' && !inputs.dry_run }}
+        run: |
+          git tag "sdks/go/${GITHUB_REF_NAME}" "${GITHUB_SHA}"
+          git push origin "sdks/go/${GITHUB_REF_NAME}"
+
   images:
     name: Build + push ${{ matrix.service }} image
     runs-on: ubuntu-latest

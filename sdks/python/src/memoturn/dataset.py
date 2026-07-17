@@ -1,7 +1,7 @@
 """Datasets, experiment runs, and CI quality gates.
 
-Stdlib-only (urllib). Mirrors the JS SDK's dataset helpers so CI pipelines driven
-from Python agents can create runs and gate them on evaluator scores.
+Stdlib-only (urllib). Create datasets and items, link experiment runs to the traces
+they produced, and gate a run's evaluator scores against thresholds in CI.
 """
 from __future__ import annotations
 
@@ -12,6 +12,11 @@ import urllib.error
 import urllib.request
 from typing import Any, Optional
 
+from .client import _truncate
+
+#: Default per-request timeout in seconds.
+DEFAULT_TIMEOUT = 10.0
+
 
 def _creds(base_url: Optional[str], public_key: Optional[str], secret_key: Optional[str]) -> tuple[str, str]:
     base = (base_url or os.environ.get("MEMOTURN_BASE_URL", "http://localhost:3001")).rstrip("/")
@@ -21,16 +26,17 @@ def _creds(base_url: Optional[str], public_key: Optional[str], secret_key: Optio
     return base, auth
 
 
-def _request(method: str, url: str, auth: str, body: Optional[dict[str, Any]] = None) -> Any:
+def _request(method: str, url: str, auth: str, body: Optional[dict[str, Any]] = None,
+             timeout: float = DEFAULT_TIMEOUT) -> Any:
     data = json.dumps(body).encode() if body is not None else None
     headers = {"authorization": f"Basic {auth}"}
     if data is not None:
         headers["content-type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        return json.loads(urllib.request.urlopen(req, timeout=30).read())
+        return json.loads(urllib.request.urlopen(req, timeout=timeout).read())
     except urllib.error.HTTPError as e:
-        raise RuntimeError(f"{method} {url} failed: {e.code} {e.read().decode(errors='replace')}") from e
+        raise RuntimeError(f"{method} {url} failed: {e.code} {_truncate(e.read().decode(errors='replace'))}") from e
 
 
 def create_dataset(name: str, description: str = "", *, base_url: Optional[str] = None,

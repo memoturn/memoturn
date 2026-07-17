@@ -1,0 +1,34 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "App + SDK dependency updates. Dependabot (.github/dependabot.yml) covers GitHub Actions and Docker base images; Renovate owns the Bun lockfile, Python, and Go SDK deps, which Dependabot's npm ecosystem cannot update.",
+  "extends": ["config:recommended", ":semanticCommits", "group:monorepos"],
+  "timezone": "America/New_York",
+  "schedule": ["before 6am on monday"],
+  "prConcurrentLimit": 5,
+  "labels": ["dependencies"],
+  "postUpdateOptions": ["bunUpdateLockfile"],
+  "packageRules": [
+    {
+      "description": "Group all non-major app/workspace updates into one weekly PR",
+      "matchUpdateTypes": ["minor", "patch"],
+      "matchFileNames": ["package.json", "apps/**", "packages/**"],
+      "groupName": "app dependencies (non-major)"
+    },
+    {
+      "description": "SDK dependencies get their own PRs — published packages, review individually",
+      "matchFileNames": ["sdks/**"],
+      "groupName": null
+    },
+    {
+      "description": "Security updates land immediately regardless of schedule",
+      "matchUpdateTypes": ["patch"],
+      "isVulnerabilityAlert": true,
+      "schedule": ["at any time"],
+      "prPriority": 10
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security"]
+  }
+}

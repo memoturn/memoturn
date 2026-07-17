@@ -139,6 +139,10 @@ The `island-shell` utility class is the **default for branded containers** — c
 
 Plain `bg-card` or `bg-popover` is **only** for surfaces inside an `island-shell` (e.g., a sub-card inside a modal).
 
+## Wordmark
+
+In brand-mark/logo lockups (web header + footer, docs site title, console sidebar), the name is set in **all caps — MEMOTURN** — with positive letter-spacing (`0.08em`), heading font, bold. Implement it with `text-transform: uppercase` / Tailwind `uppercase` on text that reads "Memoturn", never by typing "MEMOTURN" literally (screen readers can spell out literal all-caps, and `aria-label`s / `<title>`s should stay "Memoturn"). In running prose the name stays "Memoturn" (sentence position: "memoturn" only in code/package identifiers).
+
 ## Decorative
 
 - **Topographic pattern** (`--pattern-topo`) — thin lagoon-deep concentric arcs, opacity 0.08. Used as a low-contrast decoration on hero backdrops, footer bands, CTA surfaces. Apply via the `.atoll-band` utility class.
