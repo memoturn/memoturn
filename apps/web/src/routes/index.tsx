@@ -170,7 +170,7 @@ function Landing() {
             <div className="inline-flex items-center gap-1.5">
               <span aria-hidden className="size-1 rounded-full bg-primary/70" />
               <dt className="sr-only">SDKs</dt>
-              <dd>TS + Python SDKs</dd>
+              <dd>TS + Python + Go SDKs</dd>
             </div>
             <div className="inline-flex items-center gap-1.5">
               <span aria-hidden className="size-1 rounded-full bg-primary/70" />
