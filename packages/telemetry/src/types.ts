@@ -31,7 +31,17 @@ export interface ObservationRow {
   id: string;
   trace_id: string;
   project_id: string;
-  type: "SPAN" | "GENERATION" | "EVENT" | "TOOL" | "AGENT";
+  type:
+    | "SPAN"
+    | "GENERATION"
+    | "EVENT"
+    | "TOOL"
+    | "AGENT"
+    | "RETRIEVER"
+    | "RERANKER"
+    | "EMBEDDING"
+    | "CHAIN"
+    | "GUARDRAIL";
   parent_observation_id: string;
   name: string;
   start_time: string;

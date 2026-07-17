@@ -71,6 +71,12 @@ describe("mapEvents", () => {
         body: { id: "sp-agent", traceId: "tr", environment: "default", observationType: "AGENT" },
       },
       {
+        id: "retr",
+        type: "span-create",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        body: { id: "sp-retr", traceId: "tr", environment: "default", observationType: "RETRIEVER" },
+      },
+      {
         id: "plain",
         type: "span-create",
         timestamp: "2026-07-15T00:00:00.000Z",
@@ -85,6 +91,7 @@ describe("mapEvents", () => {
     ];
     const byId = new Map(mapEvents(PROJECT, events).observations.map((o) => [o.id, o]));
     expect(byId.get("sp-agent")!.type).toBe("AGENT"); // override wins
+    expect(byId.get("sp-retr")!.type).toBe("RETRIEVER"); // OpenInference RAG kind
     expect(byId.get("sp-plain")!.type).toBe("SPAN"); // kind-derived default
     expect(byId.get("gn")!.type).toBe("GENERATION"); // kind-derived default
   });

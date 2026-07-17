@@ -42,7 +42,17 @@ export interface TraceInput {
 
 /** Observation type — the default derives from which method created it (span/generation/event);
  * pass `observationType` (or use the `tool()`/`agent()` helpers) to classify agentic spans. */
-export type ObservationType = "SPAN" | "GENERATION" | "EVENT" | "TOOL" | "AGENT";
+export type ObservationType =
+  | "SPAN"
+  | "GENERATION"
+  | "EVENT"
+  | "TOOL"
+  | "AGENT"
+  | "RETRIEVER"
+  | "RERANKER"
+  | "EMBEDDING"
+  | "CHAIN"
+  | "GUARDRAIL";
 
 export interface SpanInput {
   id?: string;
