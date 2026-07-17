@@ -1,4 +1,5 @@
 import type {
+  AnalyticsQuery,
   CostRollupRow,
   DailyMetric,
   EmbeddingPoint,
@@ -6,6 +7,7 @@ import type {
   ObservationDetail,
   PromptArmScore,
   PromptVersionCost,
+  QueryResult,
   ScoreRow as ScoreDetail,
   SessionSummary,
   ToolAnalyticsRow,
@@ -134,6 +136,8 @@ export interface TelemetryStore {
     days: number,
     filters?: WidgetFilters,
   ): Promise<WidgetPoint[]>;
+  /** Generic dashboard/widget analytics query (view × metrics × dimensions × time × filters). */
+  runAnalyticsQuery(projectId: string, query: AnalyticsQuery): Promise<QueryResult>;
   exportTraces(projectId: string, filters?: ExportFilters): Promise<ExportTraceRow[]>;
   countTracesOlderThan(projectId: string, days: number): Promise<number>;
   countProjectRows(projectId: string): Promise<ProjectRowCounts>;

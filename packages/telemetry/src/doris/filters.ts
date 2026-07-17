@@ -41,11 +41,11 @@ const TRACE_COLUMNS: Record<string, ColSpec> = {
 
 const NUMERIC_OP: Record<string, string> = { eq: "=", neq: "!=", gt: ">", lt: "<", gte: ">=", lte: "<=" };
 
-type Frag = { frag: string; params: unknown[] };
+export type Frag = { frag: string; params: unknown[] };
 const TRUE: Frag = { frag: "1=1", params: [] };
 
 /** Scalar predicate for string/number/datetime/boolean/stringOptions/null over a SQL expression. */
-function scalarPredicate(expr: string, f: SingleFilter): Frag {
+export function scalarPredicate(expr: string, f: SingleFilter): Frag {
   switch (f.type) {
     case "string":
     case "stringObject":
@@ -85,7 +85,7 @@ function scalarPredicate(expr: string, f: SingleFilter): Frag {
 }
 
 /** Array-column predicate (e.g. tags) via per-element array_contains — avoids ARRAY-literal binding. */
-function arrayPredicate(expr: string, f: Extract<SingleFilter, { type: "arrayOptions" }>): Frag {
+export function arrayPredicate(expr: string, f: Extract<SingleFilter, { type: "arrayOptions" }>): Frag {
   if (f.value.length === 0) return TRUE;
   const contains = f.value.map(() => `array_contains(${expr}, ?)`);
   if (f.operator === "all_of") return { frag: `(${contains.join(" AND ")})`, params: [...f.value] };

@@ -50,6 +50,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/metrics` | Cost/token/latency rollups by day and model (`days` query). |
 | GET | `/v1/metrics/tools` | Per-tool analytics — call volume, error rate, and p50/p95/avg latency by tool name (named SPAN observations) over `days`. The top agent-debugging view. |
 | GET | `/v1/metrics/cost-breakdown` | Top spenders: cost rolled up by end user or session, ranked by spend. Query: `by` (`user`\|`session`, default `user`), `days`, `limit`. |
+| POST | `/v1/metrics/query` | Run a dashboard/widget analytics query (view × metrics × dimensions × time × filters) from a JSON body; returns result rows. Read-only. |
 
 ### Prompts
 
@@ -137,7 +138,8 @@ Server-executed experiments run a prompt/model across a dataset and auto-score e
 | Method | Path | Description |
 | --- | --- | --- |
 | GET / POST | `/v1/widgets` | List (with computed data series; `?dashboardId=` scopes to one dashboard, omitted = the Default) / create. Widget config: `metric` (cost\|tokens\|generations\|latency_p95\|error_rate\|score), `breakdown` (by_day\|by_model\|by_user\|by_session), `days`, `filters` ({environment?, model?, tag?}), `dashboardId?`. |
-| DELETE | `/v1/widgets/{id}` | Delete a dashboard widget. |
+| GET / POST | `/v1/widgets/query` | List / create query-engine widgets (built in Explore). Create body: `title`, `query` (an analytics query), `chartType` (line\|bar\|horizontal_bar\|big_number\|pie\|table), `dashboardId?`, `gridW?`/`gridH?`. |
+| DELETE | `/v1/widgets/{id}` | Delete a dashboard widget (legacy or query-engine). |
 | GET / POST | `/v1/dashboards` | List the project's named dashboards / create one (`{ name }`). The "Default" dashboard is implicit (widgets with a null dashboardId). |
 | DELETE | `/v1/dashboards/{id}` | Delete a dashboard (its widgets are removed too). |
 | GET / POST | `/v1/score-configs` | List / create-update a score config. |

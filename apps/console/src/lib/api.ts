@@ -8,12 +8,14 @@
 import type {
   AlertChannel,
   AlertRule,
+  AnalyticsQuery,
   AnalyticsSink,
   AnnotationResult,
   ApiKey,
   ApiKeyCreated,
   AuditEntry,
   Automation,
+  ChartType,
   ChatMessage,
   Comment,
   CostBudget,
@@ -45,6 +47,8 @@ import type {
   PromptListItem,
   PromptVersionCost,
   ProviderConnection,
+  QueryResult,
+  QueryWidget,
   ReviewAnalytics,
   ReviewItemsResponse,
   ReviewQueue,
@@ -232,6 +236,7 @@ export const api = {
   ) => post<AnnotationResult>(`/v1/traces/${encodeURIComponent(id)}/annotate`, body),
   setTraceTags: (id: string, tags: string[]) => post<TraceTags>(`/v1/traces/${encodeURIComponent(id)}/tags`, { tags }),
   getMetrics: (days = 30) => get<MetricsSummary>(`/v1/metrics${qs({ days })}`),
+  runAnalyticsQuery: (query: AnalyticsQuery) => post<QueryResult>(`/v1/metrics/query`, query),
   getToolAnalytics: (days = 30) =>
     get<{ data: ToolAnalyticsRow[] }>(`/v1/metrics/tools${qs({ days })}`).then((r) => r.data),
   getCostBreakdown: (by: "user" | "session", days = 30, limit = 20) =>
@@ -399,6 +404,10 @@ export const api = {
     dashboardId?: string | null;
   }) => post(`/v1/widgets`, body),
   deleteWidget: (id: string) => del(`/v1/widgets/${encodeURIComponent(id)}`),
+  listQueryWidgets: (dashboardId?: string) =>
+    get<{ data: QueryWidget[] }>(`/v1/widgets/query${qs({ dashboardId })}`).then((r) => r.data),
+  createQueryWidget: (body: { title: string; query: AnalyticsQuery; chartType: ChartType; gridW?: number }) =>
+    post<QueryWidget>(`/v1/widgets/query`, body),
   listDashboards: () => get<{ data: Dashboard[] }>(`/v1/dashboards`).then((r) => r.data),
   createDashboard: (name: string) => post<Dashboard>(`/v1/dashboards`, { name }),
   deleteDashboard: (id: string) => del(`/v1/dashboards/${encodeURIComponent(id)}`),

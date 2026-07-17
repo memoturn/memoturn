@@ -210,6 +210,119 @@ export const TRACE_FILTER_COLUMNS: FilterColumnDef[] = [
   { id: "metadata", label: "Metadata", type: "stringObject" },
 ];
 
+// ── Analytics query model (dashboard/widget engine) ─────────────────────────────
+// A generic query over a declared "view" (traces/observations/scores): pick a metric
+// (measure × aggregation) broken down by dimension(s) and/or time, filtered with the shared
+// filter model. Compiled to parameterized Doris SQL by a view-declaration registry in
+// packages/telemetry. Presence of `timeDimension` makes it a time series.
+export const queryView = z.enum(["traces", "observations", "scores"]);
+export type QueryView = z.infer<typeof queryView>;
+
+export const queryAggregation = z.enum([
+  "count",
+  "sum",
+  "avg",
+  "min",
+  "max",
+  "p50",
+  "p75",
+  "p90",
+  "p95",
+  "p99",
+  "uniq",
+]);
+export type QueryAggregation = z.infer<typeof queryAggregation>;
+
+export const queryGranularity = z.enum(["minute", "hour", "day", "week", "month"]);
+export type QueryGranularity = z.infer<typeof queryGranularity>;
+
+export const analyticsQuery = z.object({
+  view: queryView,
+  metrics: z.array(z.object({ measure: z.string(), aggregation: queryAggregation })).min(1),
+  dimensions: z.array(z.object({ field: z.string() })).default([]),
+  filters: filterState.default([]),
+  timeDimension: z.object({ granularity: queryGranularity }).nullable().default(null),
+  fromTimestamp: z.string(), // ISO 8601 (inclusive)
+  toTimestamp: z.string(), // ISO 8601 (exclusive)
+  orderBy: z.array(z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) })).default([]),
+  rowLimit: z.number().int().min(1).max(1000).default(100),
+});
+export type AnalyticsQuery = z.infer<typeof analyticsQuery>;
+
+// Result rows are keyed by dimension field / "time" and by `${aggregation}_${measure}` metric
+// columns; values are strings (dimensions/time) or numbers (metrics), null when unmeasured.
+export const queryResult = z.object({
+  rows: z.array(z.record(z.string(), z.union([z.string(), z.number(), z.null()]))),
+});
+export type QueryResult = z.infer<typeof queryResult>;
+
+// Widget chart types. Time-series types (line/bar) require the query's `timeDimension`; the rest
+// are total-value shapes over a dimension breakdown (or a single aggregate for big_number).
+export const chartType = z.enum(["line", "bar", "horizontal_bar", "big_number", "pie", "table"]);
+export type ChartType = z.infer<typeof chartType>;
+export const TIME_SERIES_CHARTS: ChartType[] = ["line", "bar"];
+
+// UI-facing catalog of the analytics views: which measures (+ their valid aggregations) and
+// dimensions each view exposes. Mirrors the server-side view-declaration registry in
+// packages/telemetry (validateQuery is the authority; this drives the builder's dropdowns).
+export interface ViewMeasure {
+  id: string;
+  label: string;
+  aggregations: QueryAggregation[];
+}
+export interface ViewCatalog {
+  view: QueryView;
+  label: string;
+  measures: ViewMeasure[];
+  dimensions: { id: string; label: string }[];
+}
+
+export const ANALYTICS_VIEWS: ViewCatalog[] = [
+  {
+    view: "observations",
+    label: "Observations",
+    measures: [
+      { id: "count", label: "Count", aggregations: ["count"] },
+      { id: "cost", label: "Cost (USD)", aggregations: ["sum", "avg", "min", "max", "p50", "p95", "p99"] },
+      { id: "tokens", label: "Tokens", aggregations: ["sum", "avg", "max", "p95"] },
+      { id: "latency", label: "Latency (ms)", aggregations: ["avg", "p50", "p95", "p99", "max"] },
+    ],
+    dimensions: [
+      { id: "model", label: "Model" },
+      { id: "type", label: "Type" },
+      { id: "level", label: "Level" },
+      { id: "environment", label: "Environment" },
+      { id: "provider", label: "Provider" },
+      { id: "name", label: "Name" },
+    ],
+  },
+  {
+    view: "traces",
+    label: "Traces",
+    measures: [{ id: "count", label: "Count", aggregations: ["count"] }],
+    dimensions: [
+      { id: "environment", label: "Environment" },
+      { id: "userId", label: "User" },
+      { id: "sessionId", label: "Session" },
+      { id: "name", label: "Name" },
+    ],
+  },
+  {
+    view: "scores",
+    label: "Scores",
+    measures: [
+      { id: "count", label: "Count", aggregations: ["count"] },
+      { id: "value", label: "Value", aggregations: ["avg", "min", "max", "p50", "p95"] },
+    ],
+    dimensions: [
+      { id: "name", label: "Name" },
+      { id: "source", label: "Source" },
+      { id: "environment", label: "Environment" },
+      { id: "dataType", label: "Data type" },
+    ],
+  },
+];
+
 /** Trace volume over the selected range, bucketed by hour (short ranges) or day. */
 export const traceHistogramBucket = z.object({ bucket: z.string(), count: z.number() });
 export type TraceHistogramBucket = z.infer<typeof traceHistogramBucket>;
@@ -934,6 +1047,21 @@ export const widget = z.object({
   data: z.array(widgetPoint),
 });
 export type Widget = z.infer<typeof widget>;
+
+// A saved query-engine widget (built in Explore) — carries its full AnalyticsQuery + chart type +
+// 12-col grid placement; the dashboard runs the query and renders it via the chart library.
+export const queryWidget = z.object({
+  id: z.string(),
+  dashboardId: z.string().nullable(),
+  title: z.string(),
+  query: analyticsQuery,
+  chartType: chartType,
+  gridX: z.number(),
+  gridY: z.number(),
+  gridW: z.number(),
+  gridH: z.number(),
+});
+export type QueryWidget = z.infer<typeof queryWidget>;
 
 // A named dashboard grouping widgets (null dashboardId = the implicit "Default" dashboard).
 export const dashboard = z.object({

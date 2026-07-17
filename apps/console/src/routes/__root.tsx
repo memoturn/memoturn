@@ -20,6 +20,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createRootRoute, Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import {
   Activity,
+  BarChart3,
   Building2,
   Check,
   ChevronsUpDown,
@@ -76,6 +77,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: "/traces", label: "Traces", icon: Activity },
       { to: "/sessions", label: "Sessions", icon: MessagesSquare },
       { to: "/users", label: "Users", icon: Users },
+      { to: "/widgets", label: "Explore", icon: BarChart3 },
     ],
   },
   {

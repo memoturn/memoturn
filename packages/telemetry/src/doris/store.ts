@@ -1,4 +1,5 @@
 import type {
+  AnalyticsQuery,
   CostRollupRow,
   DailyMetric,
   EmbeddingPoint,
@@ -6,6 +7,7 @@ import type {
   ObservationDetail,
   PromptArmScore,
   PromptVersionCost,
+  QueryResult,
   ScoreRow as ScoreDetail,
   SessionSummary,
   ToolAnalyticsRow,
@@ -42,6 +44,7 @@ import type {
 } from "../types.js";
 import { closeDorisPool, dorisQuery } from "./client.js";
 import { buildTraceFilterSql } from "./filters.js";
+import { compileQuery, validateQuery } from "./query.js";
 import { buildInserts, parseTags, parseVector, toDorisDateTime } from "./serialize.js";
 import { streamLoad, streamLoadEnabled } from "./streamload.js";
 
@@ -1058,6 +1061,25 @@ export class DorisTelemetryStore implements TelemetryStore {
       [projectId, cutoff, ...params],
     );
     return rows.map((r) => ({ label: r.label || "(unknown)", value: Number(r.value) }));
+  }
+
+  async runAnalyticsQuery(projectId: string, query: AnalyticsQuery): Promise<QueryResult> {
+    const valid = validateQuery(query);
+    if (!valid.ok) throw new Error(`invalid analytics query: ${valid.error}`);
+    const { sql, params } = compileQuery(projectId, query);
+    const rows = await this.query<Record<string, unknown>>(sql, params);
+    // Metric columns (`${agg}_${measure}`) come back as strings from mysql2 — coerce to numbers at
+    // the store boundary; dimension/time columns stay strings.
+    const metricCols = new Set(query.metrics.map((m) => `${m.aggregation}_${m.measure}`));
+    return {
+      rows: rows.map((r) => {
+        const out: Record<string, string | number | null> = {};
+        for (const [k, v] of Object.entries(r)) {
+          out[k] = metricCols.has(k) ? (v == null ? null : Number(v)) : v == null ? null : String(v);
+        }
+        return out;
+      }),
+    };
   }
 
   async exportTraces(projectId: string, filters: ExportFilters = {}): Promise<ExportTraceRow[]> {
