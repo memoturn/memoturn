@@ -2,6 +2,30 @@
 
 All notable changes to the memoturn Python SDK.
 
+## Unreleased
+
+### Features
+
+- Streaming capture for `wrap_openai` and `wrap_anthropic`: `stream=True` calls are no
+  longer a silent passthrough — the returned stream is wrapped so chunks/events forward
+  to the caller unchanged while being accumulated into the same output/usage shape a
+  non-streaming call produces, and the generation is closed once the stream is
+  exhausted, errors, or is abandoned (early `close()`, garbage collection, or idle
+  timeout). `wrap_openai` auto-injects `stream_options={"include_usage": True}` on
+  chat-completions streams (never overriding an explicit value) so usage is captured;
+  the Responses API streaming path watches `response.completed` / `.failed` /
+  `.incomplete` events. Mid-stream errors mark the generation `ERROR` with partial
+  output and re-raise; abandonment marks it `WARNING` with partial output.
+- `run_guarded(fn, *, extract_text=str, on_failure="raise", **creds)` and
+  `GuardrailBlockedError`: compose `check_guardrails` around a call instead of
+  hand-rolling the check/act pattern. `on_failure` is `"raise"` (default — raises
+  `GuardrailBlockedError`), `"log"` (warns and returns the original result), or a
+  fallback callable invoked with the verdict.
+- `set_trace_context(**kwargs)`: update the current trace's `userId`/`sessionId`/
+  `tags`/`metadata` from anywhere inside an active `@observe` call stack, without
+  threading a `Trace` handle through the call. No-op (with a warning) outside any
+  `@observe` context.
+
 ## 0.3.0 — 2026-07-17
 
 ### Features

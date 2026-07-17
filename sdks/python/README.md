@@ -67,6 +67,11 @@ The outermost `@observe` opens a trace; nested calls (sync or async) become chil
 spans. `configure(client)` sets the default client; `get_client()` returns it
 (creating an env-configured one on first use).
 
+Call `set_trace_context(userId=..., sessionId=..., tags=..., metadata=...)` from
+anywhere inside an active `@observe` call stack to stamp the current trace once you
+know its user/session (e.g. after auth resolves mid-request) — same patch semantics
+as `trace.update()`. It's a no-op outside any `@observe` context.
+
 ## Low-level client
 
 ```python
@@ -124,8 +129,27 @@ client.messages.create(
 )  # recorded: system + messages as input, usage incl. cache read/creation tokens
 ```
 
-Same `memoturn=`/`trace=` options as `wrap_openai`. Streaming calls
-(`stream=True`) pass through unrecorded.
+Same `memoturn=`/`trace=` options as `wrap_openai`.
+
+### Streaming
+
+Both wrappers record `stream=True` calls too — the returned stream is unchanged for
+the caller to iterate, but is transparently wrapped so chunks/events are accumulated
+into the same output/usage shape a non-streaming call produces:
+
+```python
+stream = client.chat.completions.create(model="gpt-4o-mini", messages=[...], stream=True)
+for chunk in stream:
+    ...  # unchanged — still the SDK's native chunk objects
+# generation is recorded once the stream is exhausted
+```
+
+`wrap_openai` auto-injects `stream_options={"include_usage": True}` on chat-completions
+streams so usage is captured (it never overrides an explicit `stream_options` you pass).
+The generation is closed with `level="ERROR"` on a mid-stream exception (partial output
+still recorded, and the exception re-raises to the caller as normal) or with
+`level="WARNING"` if the stream is abandoned — closed early, garbage-collected, or idle
+for too long — before a terminal chunk/event arrives.
 
 ## LangChain
 
@@ -192,6 +216,19 @@ elif result["verdict"] == "redact":
 
 Scans text against the project's runtime guardrails (PII, prompt injection,
 blocked terms). Verdict is `"allow"`, `"redact"`, or `"block"`.
+
+`run_guarded(fn, *, extract_text=str, on_failure="raise", **creds)` wraps that
+check/act pattern: it calls `fn()`, scans the result, and on a `"block"` verdict
+either raises `GuardrailBlockedError` (default), logs a warning and returns the
+original result (`on_failure="log"`), or calls a fallback `on_failure(verdict)` you
+supply. Compose two calls to guard input and output separately:
+
+```python
+from memoturn import GuardrailBlockedError, run_guarded
+
+safe_input = run_guarded(lambda: user_input)
+answer = run_guarded(lambda: call_model(safe_input))
+```
 
 ## OpenTelemetry
 
