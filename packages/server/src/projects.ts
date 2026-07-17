@@ -5,7 +5,9 @@ const slugify = (name: string) =>
   name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
+    // Runs are already collapsed to a single "-", so a non-quantified trim suffices (avoids polynomial backtracking).
+    .replace(/^-/, "")
+    .replace(/-$/, "")
     .slice(0, 48) || "project";
 
 type ProjectInfo = { id: string; name: string; slug: string; organization: string };
