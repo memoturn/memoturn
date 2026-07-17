@@ -23,6 +23,9 @@ Issues = "https://github.com/memoturn/memoturn/issues"
 
 [project.optional-dependencies]
 openai = ["openai>=1.0"]
+anthropic = ["anthropic>=0.30"]
+otel = ["opentelemetry-sdk>=1.20", "opentelemetry-exporter-otlp-proto-http>=1.20"]
+langchain = ["langchain-core>=0.1"]
 dev = ["pytest>=9.0.3"]
 
 [build-system]

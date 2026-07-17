@@ -1,7 +1,7 @@
 """Datasets, experiment runs, and CI quality gates.
 
-Stdlib-only (urllib). Mirrors the JS SDK's dataset helpers so CI pipelines driven
-from Python agents can create runs and gate them on evaluator scores.
+Stdlib-only (urllib). Create datasets and items, link experiment runs to the traces
+they produced, and gate a run's evaluator scores against thresholds in CI.
 """
 from __future__ import annotations
 

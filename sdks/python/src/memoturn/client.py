@@ -128,7 +128,11 @@ class Memoturn:
 
     # ── public API ────────────────────────────────────────────────────────────
     def trace(self, **body: Any) -> "Trace":
-        """Start a trace. Returns a handle for adding child observations + scores."""
+        """Start a trace. Returns a handle for adding child observations + scores.
+
+        Accepted kwargs: ``id``, ``name``, ``userId``, ``sessionId``, ``input``,
+        ``output``, ``metadata``, ``tags``, ``environment``, ``release``, ``version``.
+        """
         tid = body.pop("id", None) or _id()
         env = body.setdefault("environment", self.environment)
         self._enqueue("trace-create", {**body, "id": tid})
@@ -267,9 +271,13 @@ class Trace:
         return self
 
     def span(self, **body: Any) -> "Span":
+        """Child span. Kwargs: ``id``, ``name``, ``input``, ``output``, ``metadata``,
+        ``level``, ``statusMessage``, ``retrievedDocuments``, ``embedding``."""
         return self._observe("span-create", "span", body)
 
     def generation(self, **body: Any) -> "Span":
+        """Child generation. Kwargs: span kwargs plus ``model``, ``provider``,
+        ``modelParameters``, ``usage``, ``promptId``, ``promptVersion``."""
         return self._observe("generation-create", "generation", body)
 
     def tool(self, **body: Any) -> "Span":

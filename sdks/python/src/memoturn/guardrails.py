@@ -1,7 +1,7 @@
 """Runtime guardrails: scan text for PII, prompt injection, and blocked terms.
 
-Stdlib-only (urllib). Mirrors the JS SDK's ``checkGuardrails``. Call before sending
-user content to an LLM, or before returning a model's output.
+Stdlib-only (urllib). Call before sending user content to an LLM, or before
+returning a model's output, and act on the returned verdict.
 """
 from __future__ import annotations
 
