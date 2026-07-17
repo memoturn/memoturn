@@ -1,5 +1,6 @@
 import { prisma } from "@memoturn/db";
 import { redisConnection } from "@memoturn/db/queue";
+import { judgeWithEvaluator, listEvaluators } from "./evaluators.js";
 import { applyMasking, BUILTIN_NAMES, BUILTIN_PATTERNS, compileMaskers } from "./masking.js";
 
 /**
@@ -35,13 +36,36 @@ const INJECTION_PATTERNS: { name: string; re: RegExp }[] = [
   { name: "jailbreak", re: /\b(?:jailbreak|DAN\s+mode|developer\s+mode)\b/i },
 ];
 
+// SQL-injection heuristics (case-insensitive). Same conservative, low-false-positive bias
+// as INJECTION_PATTERNS — these catch obviously malicious payloads, not every valid SQL
+// substring a legitimate user might type.
+const SQL_INJECTION_PATTERNS: { name: string; re: RegExp }[] = [
+  { name: "drop-table", re: /\bDROP\s+TABLE\b/i },
+  { name: "union-select", re: /\bUNION\s+(?:ALL\s+)?SELECT\b/i },
+  { name: "comment-terminator", re: /;\s*--/ },
+  { name: "stacked-query", re: /;\s*(?:DROP|DELETE|UPDATE|INSERT|ALTER)\s+/i },
+  { name: "xp-cmdshell", re: /\bxp_cmdshell\b/i },
+  { name: "tautology", re: /\bOR\s+['"]?1['"]?\s*=\s*['"]?1['"]?/i },
+  { name: "time-based", re: /\b(?:SLEEP|WAITFOR\s+DELAY)\s*\(/i },
+];
+
 export type GuardrailVerdict = "allow" | "redact" | "block";
 
 export interface GuardrailFinding {
-  category: "pii" | "injection" | "blocked_term";
+  category: "pii" | "injection" | "blocked_term" | "sql_injection" | "json_invalid" | "evaluator";
   /** Pattern/term name, e.g. "email", "ignore-instructions", or the blocked term itself. */
   type: string;
   count: number;
+  /** Judge score that caused an "evaluator" finding — see runEvaluatorGuards. */
+  score?: number;
+}
+
+export interface EvaluatorGuard {
+  /** Looked up by name, like runEvaluator. */
+  name: string;
+  comparator: "gt" | "gte" | "lt" | "lte";
+  /** The guard FAILS (blocks) when `score <comparator> threshold` is true. */
+  threshold: number;
 }
 
 export interface GuardrailPolicy {
@@ -53,6 +77,15 @@ export interface GuardrailPolicy {
   redactWith: string;
   injection: boolean;
   blockedTerms: string[];
+  sqlInjection: boolean;
+  /** Regexes that MUST match somewhere in the text; block if none do (inverse of blockedTerms). */
+  requireMatch: string[];
+  /** Require the text itself to parse as JSON. */
+  requireValidJson: boolean;
+  /** Top-level keys that must be present when the text parses as a JSON object. */
+  requiredJsonKeys: string[];
+  /** Opt-in LLM-judge guards, run only when the local scan hasn't already blocked. */
+  evaluatorGuards: EvaluatorGuard[];
 }
 
 export interface GuardrailResult {
@@ -130,11 +163,158 @@ export function scanGuardrails(text: string, policy: GuardrailPolicy): Guardrail
     }
   }
 
+  if (policy.sqlInjection) {
+    for (const { name, re } of SQL_INJECTION_PATTERNS) {
+      if (re.test(text)) {
+        findings.push({ category: "sql_injection", type: name, count: 1 });
+        block = true;
+      }
+    }
+  }
+
+  if (policy.requireMatch.length > 0) {
+    const matchedAny = policy.requireMatch.some((src) => {
+      try {
+        return new RegExp(src).test(text);
+      } catch {
+        return false; // an invalid regex never satisfies the requirement
+      }
+    });
+    if (!matchedAny) {
+      findings.push({ category: "blocked_term", type: "require_match", count: 1 });
+      block = true;
+    }
+  }
+
+  if (policy.requireValidJson || policy.requiredJsonKeys.length > 0) {
+    let parsed: unknown;
+    let validJson = true;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      validJson = false;
+    }
+    if (!validJson) {
+      if (policy.requireValidJson) {
+        findings.push({ category: "json_invalid", type: "invalid_json", count: 1 });
+        block = true;
+      }
+    } else if (policy.requiredJsonKeys.length > 0) {
+      const obj =
+        parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+      const missing = policy.requiredJsonKeys.filter((k) => !Object.hasOwn(obj, k));
+      if (missing.length > 0) {
+        findings.push({ category: "json_invalid", type: `missing_keys:${missing.join(",")}`, count: missing.length });
+        block = true;
+      }
+    }
+  }
+
   const verdict: GuardrailVerdict = block ? "block" : redactedText !== undefined ? "redact" : "allow";
   return { verdict, findings, ...(redactedText !== undefined ? { redactedText } : {}) };
 }
 
+const GUARD_TIMEOUT_MS = Number(process.env.GUARDRAIL_EVALUATOR_TIMEOUT_MS ?? 3000);
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
+/** True when the guard condition is violated (score fails the check → block). */
+function guardFails(score: number, comparator: EvaluatorGuard["comparator"], threshold: number): boolean {
+  switch (comparator) {
+    case "gt":
+      return score > threshold;
+    case "gte":
+      return score >= threshold;
+    case "lt":
+      return score < threshold;
+    case "lte":
+      return score <= threshold;
+  }
+}
+
+/**
+ * Run evaluator-backed guards in parallel and return findings for the ones that failed.
+ *
+ * Fails OPEN on timeout, error, or a missing evaluator (`judgeWithEvaluator` returns null):
+ * this mirrors the house invariant "online eval failures never fail ingestion" (see the
+ * worker's online-eval sampling in apps/worker/src/processors/ingest.ts), applied to the
+ * request path. A third-party LLM-judge-provider outage or slowness must not become a
+ * primary-product (guardrail-check) outage. The deterministic regex/local checks in
+ * scanGuardrails are the hard backstop and are unaffected by this tradeoff — only the
+ * opt-in evaluator guards degrade gracefully.
+ */
+export async function runEvaluatorGuards(
+  projectId: string,
+  text: string,
+  guards: EvaluatorGuard[],
+): Promise<GuardrailFinding[]> {
+  const settled = await Promise.allSettled(
+    guards.map((g) =>
+      withTimeout(judgeWithEvaluator(projectId, g.name, { input: text, output: text }), GUARD_TIMEOUT_MS),
+    ),
+  );
+
+  const findings: GuardrailFinding[] = [];
+  settled.forEach((result, i) => {
+    const g = guards[i] as EvaluatorGuard;
+    if (result.status === "fulfilled" && result.value !== null) {
+      const { score } = result.value;
+      if (guardFails(score, g.comparator, g.threshold)) {
+        findings.push({ category: "evaluator", type: g.name, count: 1, score });
+      }
+      return;
+    }
+    const error =
+      result.status === "rejected"
+        ? result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason)
+        : "evaluator not found";
+    console.error(JSON.stringify({ scope: "guardrails.evaluatorGuard", projectId, guard: g.name, error }));
+  });
+  return findings;
+}
+
+/**
+ * The orchestrator the /check endpoint calls: local `scanGuardrails` first (cheap,
+ * deterministic), then — only if the local scan hasn't already blocked and the policy has
+ * evaluator guards configured — the opt-in LLM-judge guards. This short-circuit avoids
+ * paying for an LLM call when a regex already settled the verdict.
+ */
+export async function checkGuardrails(projectId: string, text: string): Promise<GuardrailResult> {
+  const policy = await loadGuardrailPolicy(projectId);
+  if (!policy) return { verdict: "allow", findings: [] };
+
+  const local = scanGuardrails(text, policy);
+  if (local.verdict === "block" || policy.evaluatorGuards.length === 0) return local;
+
+  const evalFindings = await runEvaluatorGuards(projectId, text, policy.evaluatorGuards);
+  if (evalFindings.length === 0) return local;
+
+  return {
+    verdict: local.verdict === "redact" ? "redact" : "block",
+    findings: [...local.findings, ...evalFindings],
+    ...(local.redactedText !== undefined ? { redactedText: local.redactedText } : {}),
+  };
+}
+
 // Unconfigured projects scan with everything on, so the endpoint is useful out of the box.
+// Evaluator guards stay off by default even here — they're opt-in per-project config, not a
+// blanket default (there's no evaluator to run against until the project creates one).
 const SCAN_DEFAULT: GuardrailPolicy = {
   enabled: true,
   pii: true,
@@ -144,6 +324,11 @@ const SCAN_DEFAULT: GuardrailPolicy = {
   redactWith: "[REDACTED]",
   injection: true,
   blockedTerms: [],
+  sqlInjection: false,
+  requireMatch: [],
+  requireValidJson: false,
+  requiredJsonKeys: [],
+  evaluatorGuards: [],
 };
 
 // The starter config shown in the console when nothing is saved yet (disabled by default).
@@ -151,18 +336,7 @@ const CONFIG_DEFAULT: GuardrailPolicy = { ...SCAN_DEFAULT, enabled: false };
 
 export async function getGuardrailPolicy(projectId: string): Promise<GuardrailPolicy & { available: string[] }> {
   const p = await prisma.guardrailPolicy.findUnique({ where: { projectId } });
-  const policy: GuardrailPolicy = p
-    ? {
-        enabled: p.enabled,
-        pii: p.pii,
-        piiAction: p.piiAction === "block" ? "block" : "redact",
-        builtins: p.builtins,
-        customPatterns: p.customPatterns,
-        redactWith: p.redactWith,
-        injection: p.injection,
-        blockedTerms: p.blockedTerms,
-      }
-    : CONFIG_DEFAULT;
+  const policy: GuardrailPolicy = p ? toPolicy(p) : CONFIG_DEFAULT;
   return { ...policy, available: BUILTIN_NAMES };
 }
 
@@ -175,6 +349,35 @@ export interface SetGuardrailInput {
   redactWith?: string;
   injection?: boolean;
   blockedTerms?: string[];
+  sqlInjection?: boolean;
+  requireMatch?: string[];
+  requireValidJson?: boolean;
+  requiredJsonKeys?: string[];
+  evaluatorGuards?: EvaluatorGuard[];
+}
+
+const COMPARATORS = ["gt", "gte", "lt", "lte"] as const;
+
+/**
+ * Drop guards whose evaluator name doesn't exist for the project (a guard pointing at a
+ * deleted/renamed evaluator would otherwise silently fail-open forever), and clamp
+ * comparator/threshold to their valid ranges. Mirrors the defensive filtering
+ * setGuardrailPolicy already does for builtins/blockedTerms.
+ */
+async function validateEvaluatorGuards(projectId: string, guards: EvaluatorGuard[]): Promise<EvaluatorGuard[]> {
+  if (guards.length === 0) return [];
+  const known = new Set((await listEvaluators(projectId)).map((e) => e.name));
+  return guards
+    .filter((g) => g && typeof g.name === "string" && known.has(g.name))
+    .map((g) => {
+      const threshold = Number(g.threshold);
+      return {
+        name: g.name,
+        // Default to "lt" (quality-floor: block when below threshold) for malformed input.
+        comparator: (COMPARATORS as readonly string[]).includes(g.comparator) ? g.comparator : "lt",
+        threshold: Number.isFinite(threshold) ? Math.max(0, Math.min(1, threshold)) : 0,
+      };
+    });
 }
 
 export async function setGuardrailPolicy(projectId: string, input: SetGuardrailInput) {
@@ -187,6 +390,11 @@ export async function setGuardrailPolicy(projectId: string, input: SetGuardrailI
     redactWith: input.redactWith || "[REDACTED]",
     injection: input.injection ?? true,
     blockedTerms: (input.blockedTerms ?? []).map((t) => t.trim()).filter(Boolean),
+    sqlInjection: input.sqlInjection ?? false,
+    requireMatch: (input.requireMatch ?? []).map((s) => s.trim()).filter(Boolean),
+    requireValidJson: input.requireValidJson ?? false,
+    requiredJsonKeys: (input.requiredJsonKeys ?? []).map((k) => k.trim()).filter(Boolean),
+    evaluatorGuards: (await validateEvaluatorGuards(projectId, input.evaluatorGuards ?? [])) as object,
   };
   const p = await prisma.guardrailPolicy.upsert({ where: { projectId }, update: data, create: { projectId, ...data } });
   await bustCache(projectId);
@@ -223,6 +431,11 @@ function toPolicy(p: {
   redactWith: string;
   injection: boolean;
   blockedTerms: string[];
+  sqlInjection: boolean;
+  requireMatch: string[];
+  requireValidJson: boolean;
+  requiredJsonKeys: string[];
+  evaluatorGuards: unknown;
 }): GuardrailPolicy {
   return {
     enabled: p.enabled,
@@ -233,6 +446,11 @@ function toPolicy(p: {
     redactWith: p.redactWith,
     injection: p.injection,
     blockedTerms: p.blockedTerms,
+    sqlInjection: p.sqlInjection,
+    requireMatch: p.requireMatch,
+    requireValidJson: p.requireValidJson,
+    requiredJsonKeys: p.requiredJsonKeys,
+    evaluatorGuards: Array.isArray(p.evaluatorGuards) ? (p.evaluatorGuards as EvaluatorGuard[]) : [],
   };
 }
 
