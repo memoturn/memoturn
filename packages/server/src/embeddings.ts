@@ -60,6 +60,62 @@ export function pca2d(vectors: number[][]): [number, number][] {
   return centered.map((row) => [dot(row, pc1), dot(row, pc2)]);
 }
 
+/** Project vectors to 3D via PCA (top-3 principal components). One [x, y, z] per input row. */
+export function pca3d(vectors: number[][]): [number, number, number][] {
+  if (vectors.length === 0) return [];
+  const dim = vectors[0]?.length ?? 0;
+  if (dim === 0) return vectors.map(() => [0, 0, 0]);
+  const mean = new Array(dim).fill(0);
+  for (const v of vectors) for (let i = 0; i < dim; i++) mean[i] += (v[i] ?? 0) / vectors.length;
+  const centered = vectors.map((v) => v.map((x, i) => x - (mean[i] ?? 0)));
+  const pc1 = principalComponent(centered, dim);
+  const pc2 = principalComponent(centered, dim, [pc1]);
+  const pc3 = principalComponent(centered, dim, [pc1, pc2]);
+  return centered.map((row) => [dot(row, pc1), dot(row, pc2), dot(row, pc3)]);
+}
+
+/** Deterministic k-means over N-dimensional points → cluster id per point (evenly-spaced seeds). */
+export function kmeans(points: number[][], k: number): number[] {
+  const n = points.length;
+  if (n === 0) return [];
+  const dim = points[0]?.length ?? 0;
+  const kk = Math.max(1, Math.min(k, n));
+  let centers = Array.from({ length: kk }, (_, i) => [...(points[Math.floor((i * n) / kk)] ?? new Array(dim).fill(0))]);
+  const assign = new Array(n).fill(0);
+  for (let iter = 0; iter < 20; iter++) {
+    let moved = false;
+    for (let i = 0; i < n; i++) {
+      const p = points[i] ?? [];
+      let best = 0;
+      let bestD = Infinity;
+      for (let c = 0; c < kk; c++) {
+        const cc = centers[c] ?? [];
+        let d = 0;
+        for (let j = 0; j < dim; j++) d += ((p[j] ?? 0) - (cc[j] ?? 0)) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          best = c;
+        }
+      }
+      if (assign[i] !== best) {
+        assign[i] = best;
+        moved = true;
+      }
+    }
+    const sums = Array.from({ length: kk }, () => new Array(dim).fill(0));
+    const counts = new Array(kk).fill(0);
+    for (let i = 0; i < n; i++) {
+      const c = assign[i];
+      const p = points[i] ?? [];
+      for (let j = 0; j < dim; j++) sums[c]![j] += p[j] ?? 0;
+      counts[c]++;
+    }
+    centers = centers.map((old, c) => (counts[c] > 0 ? sums[c]!.map((s) => s / counts[c]) : old));
+    if (!moved) break;
+  }
+  return assign;
+}
+
 /** Deterministic k-means on 2D points → cluster id per point (seeded by evenly-spaced picks). */
 export function kmeans2d(points: [number, number][], k: number): number[] {
   const n = points.length;
@@ -110,8 +166,8 @@ export async function runProjectionForProject(projectId: string): Promise<{ runI
   const vectors = await store.listEmbeddingsForProjection(projectId, { days: DEFAULT_DAYS, limit: MAX_POINTS });
   if (vectors.length < 2) return null; // nothing meaningful to project
 
-  const coords = pca2d(vectors.map((v) => v.vector));
-  const clusters = kmeans2d(coords, CLUSTERS);
+  const coords = pca3d(vectors.map((v) => v.vector));
+  const clusters = kmeans(coords, CLUSTERS);
   const runId = newId().slice(0, 36);
   const ts = isoNow();
   const rows: EmbeddingProjectionRow[] = vectors.map((v, i) => ({
@@ -121,9 +177,9 @@ export async function runProjectionForProject(projectId: string): Promise<{ runI
     trace_id: v.trace_id,
     x: coords[i]?.[0] ?? 0,
     y: coords[i]?.[1] ?? 0,
-    z: null,
+    z: coords[i]?.[2] ?? 0,
     cluster_id: clusters[i] ?? -1,
-    method: "pca",
+    method: "pca3d",
     event_ts: ts,
   }));
   await store.insertRows("embedding_projections", rows);
