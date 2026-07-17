@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-07-17
 
-### 0.3.0 — features
+### Features
 
 - `wrapAnthropic` (`@memoturn/sdk/anthropic`): drop-in wrapper for the Anthropic SDK's `messages.create` — records generations with model, allowlisted params, output, and usage including prompt-cache tokens. Streaming calls pass through unrecorded.
 - `observe` / `configure` / `getClient` (`@memoturn/sdk/observe`, Node-only): higher-order function auto-instrumentation — the outermost observed call opens a trace, nested observed calls become child spans (via `AsyncLocalStorage`); supports sync and async functions and `asType: "generation"`.
@@ -11,7 +11,7 @@
 - `Usage.cacheReadTokens` / `Usage.cacheCreationTokens` for prompt-cache accounting; `TraceInput.public` for shareable traces; `ScoreInput.configId` to link scores to evaluator configs.
 - Package: subpath exports for `./anthropic`, `./observe`, `./prompt`, `./dataset`, `./guardrails`; optional `@anthropic-ai/sdk` peer dependency; `engines.node >= 18`; LICENSE shipped in the npm tarball.
 
-### 0.2.1 — fixes (transport hardening)
+### Fixes — transport hardening
 
 - Default base URL corrected to the API port (`:3001`; `:3000` is the console) in the client and `getPrompt`.
 - Per-trace environment fixed: child observations now inherit the trace's environment, not the client default.
