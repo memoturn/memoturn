@@ -15,13 +15,15 @@ export interface CompiledPrompt {
  * across resolves — the returned `version` is what you stamp on the resulting generation.
  */
 export async function getPrompt(
-  client: Pick<Memoturn, never> & { baseUrl?: string; publicKey?: string; secretKey?: string },
+  // Accepts a Memoturn client (whose key fields are private but present at runtime) or a plain creds object.
+  client: Memoturn | { baseUrl?: string; publicKey?: string; secretKey?: string },
   name: string,
   options: { channel?: string; bucketKey?: string; requestTimeout?: number } = {},
 ): Promise<CompiledPrompt> {
-  const baseUrl = (client.baseUrl ?? process.env.MEMOTURN_BASE_URL ?? "http://localhost:3001").replace(/\/$/, "");
-  const publicKey = client.publicKey ?? process.env.MEMOTURN_PUBLIC_KEY ?? "";
-  const secretKey = client.secretKey ?? process.env.MEMOTURN_SECRET_KEY ?? "";
+  const creds = client as { baseUrl?: string; publicKey?: string; secretKey?: string };
+  const baseUrl = (creds.baseUrl ?? process.env.MEMOTURN_BASE_URL ?? "http://localhost:3001").replace(/\/$/, "");
+  const publicKey = creds.publicKey ?? process.env.MEMOTURN_PUBLIC_KEY ?? "";
+  const secretKey = creds.secretKey ?? process.env.MEMOTURN_SECRET_KEY ?? "";
   const channel = options.channel ?? "production";
 
   const params = new URLSearchParams({ channel });
