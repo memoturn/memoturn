@@ -24,10 +24,11 @@ session, and a `tools/call` span is named after the tool (`mcp:<tool>`, or `mcp:
 and the by-tool analytics next to other tools. The raw `mcp.*` attributes stay in metadata.
 
 The first-party SDKs pre-wire the endpoint + auth so you don't hand-build the URL/header —
-JS `import { memoturnSpanProcessor, memoturnOtlpConfig } from "@memoturn/sdk/otel"` and
-Python `from memoturn.otel import span_processor, otlp_config`. Both resolve creds from
-`MEMOTURN_BASE_URL` / `MEMOTURN_PUBLIC_KEY` / `MEMOTURN_SECRET_KEY` (or explicit args); the
-OTel exporter packages are optional peer deps used only by the `span_processor` helpers.
+JS `import { memoturnSpanProcessor, memoturnOtlpConfig } from "@memoturn/sdk/otel"`, Python
+`from memoturn.otel import span_processor, otlp_config`, and Go `mt.OTLPConfig()` (see
+[Go SDK](./sdk-go.md#opentelemetry)). All three resolve creds from `MEMOTURN_BASE_URL` /
+`MEMOTURN_PUBLIC_KEY` / `MEMOTURN_SECRET_KEY` (or explicit args); the OTel exporter packages
+are optional peer deps used only by these helpers.
 
 ## OpenAI
 

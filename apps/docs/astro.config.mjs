@@ -46,6 +46,7 @@ export default defineConfig({
           items: [
             { label: "TypeScript", slug: "sdk-typescript" },
             { label: "Python", slug: "sdk-python" },
+            { label: "Go", slug: "sdk-go" },
           ],
         },
         {

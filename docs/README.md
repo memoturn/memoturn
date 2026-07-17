@@ -13,6 +13,7 @@ Bun-native.
 - [REST API](./api.md) — the `/v1` surface, auth, OpenAPI
 - [TypeScript SDK](./sdk-typescript.md)
 - [Python SDK](./sdk-python.md)
+- [Go SDK](./sdk-go.md)
 - [Integrations](./integrations.md) — OpenTelemetry, OpenAI, LangChain, LiteLLM
 - [MCP server](../apps/mcp/README.md) — prompts, datasets, and review queues as agent-IDE tools
 - [Prompt management](./prompts.md)
@@ -52,4 +53,4 @@ More: [evaluators](./images/evaluators.png) · [review queues](./images/review.p
 | Automations, webhooks, event sink / CDP forwarding | [api](./api.md#webhooks--automations) |
 | Custom model prices, scheduled blob exports | [api](./api.md#platform) |
 | MCP server (prompts / datasets / review queues for agent IDEs) | [apps/mcp](../apps/mcp/README.md) |
-| SDKs (TypeScript + Python) | [TS](./sdk-typescript.md), [Py](./sdk-python.md) |
+| SDKs (TypeScript + Python + Go) | [TS](./sdk-typescript.md), [Py](./sdk-python.md), [Go](./sdk-go.md) |
