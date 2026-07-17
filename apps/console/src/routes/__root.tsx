@@ -33,6 +33,7 @@ import {
   LogOut,
   MessagesSquare,
   Plus,
+  Radar,
   ScatterChart,
   ScrollText,
   Search,
@@ -40,6 +41,7 @@ import {
   ShieldCheck,
   Terminal,
   Users,
+  Zap,
 } from "lucide-react";
 import { useEffect } from "react";
 import { CommandPalette } from "../components/CommandPalette";
@@ -91,6 +93,15 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: "/experiments", label: "Experiments", icon: FlaskConical },
       { to: "/embeddings", label: "Embeddings", icon: ScatterChart },
       { to: "/review", label: "Review", icon: ClipboardCheck },
+    ],
+  },
+  {
+    // Operate — promote live monitoring + event-driven automation out of Settings into
+    // first-class surfaces.
+    label: "Operate",
+    items: [
+      { to: "/monitors", label: "Monitors", icon: Radar },
+      { to: "/automations", label: "Automations", icon: Zap },
     ],
   },
 ];

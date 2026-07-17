@@ -74,6 +74,7 @@ export async function traceFacets(
     tag?: string;
     scoreName?: string;
     level?: string;
+    type?: string;
   } = {},
 ): Promise<TraceFacets> {
   return telemetry().traceFacets(projectId, opts);

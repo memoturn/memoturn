@@ -17,6 +17,9 @@ export const ISO_DATETIME = z.iso.datetime({ offset: true });
 export const ObservationLevel = z.enum(["DEBUG", "DEFAULT", "WARNING", "ERROR"]);
 export type ObservationLevel = z.infer<typeof ObservationLevel>;
 
+export const ObservationType = z.enum(["SPAN", "GENERATION", "EVENT", "TOOL", "AGENT"]);
+export type ObservationType = z.infer<typeof ObservationType>;
+
 export const ScoreDataType = z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]);
 export type ScoreDataType = z.infer<typeof ScoreDataType>;
 
@@ -107,6 +110,9 @@ const observationBase = z.object({
   endTime: ISO_DATETIME.optional(),
   environment: z.string().max(MAX_IDENTIFIER_LEN).default("default"),
   level: ObservationLevel.optional(),
+  // Optional override letting a span/generation be classified as TOOL or AGENT
+  // (default derives from the event kind: span-create → SPAN, generation-create → GENERATION, …).
+  observationType: ObservationType.optional(),
   statusMessage: z.string().max(MAX_MESSAGE_LEN).optional(),
   metadata: Json.optional(),
   input: Json.optional(),

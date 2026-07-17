@@ -56,6 +56,39 @@ describe("mapEvents", () => {
     expect(o.latency_ms).toBe(1000); // endTime − startTime, computed by the mapper
   });
 
+  it("derives observation type from the event kind, honoring an observationType override", () => {
+    const events: IngestEvent[] = [
+      {
+        id: "t",
+        type: "trace-create",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        body: { id: "tr", environment: "default" },
+      },
+      {
+        id: "tool",
+        type: "span-create",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        body: { id: "sp-agent", traceId: "tr", environment: "default", observationType: "AGENT" },
+      },
+      {
+        id: "plain",
+        type: "span-create",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        body: { id: "sp-plain", traceId: "tr", environment: "default" },
+      },
+      {
+        id: "gen",
+        type: "generation-create",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        body: { id: "gn", traceId: "tr", environment: "default" },
+      },
+    ];
+    const byId = new Map(mapEvents(PROJECT, events).observations.map((o) => [o.id, o]));
+    expect(byId.get("sp-agent")!.type).toBe("AGENT"); // override wins
+    expect(byId.get("sp-plain")!.type).toBe("SPAN"); // kind-derived default
+    expect(byId.get("gn")!.type).toBe("GENERATION"); // kind-derived default
+  });
+
   it("maps prompt-cache usage onto the observation row", () => {
     const { observations } = mapEvents(PROJECT, [
       {

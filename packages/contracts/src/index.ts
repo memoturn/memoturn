@@ -101,6 +101,7 @@ export const traceFacets = z.object({
   tags: z.array(facetCount),
   scores: z.array(facetCount),
   levels: z.array(facetCount),
+  types: z.array(facetCount),
 });
 export type TraceFacets = z.infer<typeof traceFacets>;
 

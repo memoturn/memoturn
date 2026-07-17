@@ -40,6 +40,10 @@ export interface TraceInput {
   output?: JsonValue;
 }
 
+/** Observation type — the default derives from which method created it (span/generation/event);
+ * pass `observationType` (or use the `tool()`/`agent()` helpers) to classify agentic spans. */
+export type ObservationType = "SPAN" | "GENERATION" | "EVENT" | "TOOL" | "AGENT";
+
 export interface SpanInput {
   id?: string;
   name?: string;
@@ -49,6 +53,8 @@ export interface SpanInput {
   output?: JsonValue;
   level?: ObservationLevel;
   statusMessage?: string;
+  /** Classify this observation (e.g. TOOL for a tool call, AGENT for an agent step). */
+  observationType?: ObservationType;
   /** RAG: documents this span retrieved (retriever / vector-search spans). */
   retrievedDocuments?: RetrievedDocument[];
   /** Embedding vector for this observation (e.g. an embedding-model call). */

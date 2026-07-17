@@ -29,6 +29,46 @@ describe("ingestRequest", () => {
     expect(parsed.success).toBe(true);
   });
 
+  it("accepts a span body with an observationType override, and without one", () => {
+    const withOverride = ingestRequest.safeParse({
+      batch: [
+        {
+          id: "evt-1",
+          type: "span-create",
+          timestamp: "2026-06-25T00:00:00.000Z",
+          body: { id: "obs-1", traceId: "trace-1", environment: "default", observationType: "TOOL" },
+        },
+      ],
+    });
+    expect(withOverride.success).toBe(true);
+
+    const withoutOverride = ingestRequest.safeParse({
+      batch: [
+        {
+          id: "evt-2",
+          type: "span-create",
+          timestamp: "2026-06-25T00:00:00.000Z",
+          body: { id: "obs-2", traceId: "trace-1", environment: "default" },
+        },
+      ],
+    });
+    expect(withoutOverride.success).toBe(true);
+  });
+
+  it("rejects an invalid observationType override", () => {
+    const parsed = ingestRequest.safeParse({
+      batch: [
+        {
+          id: "evt-3",
+          type: "span-create",
+          timestamp: "2026-06-25T00:00:00.000Z",
+          body: { id: "obs-3", traceId: "trace-1", environment: "default", observationType: "ROBOT" },
+        },
+      ],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
   it("rejects an unknown event type", () => {
     const parsed = ingestRequest.safeParse({
       batch: [{ id: "x", type: "nope", timestamp: "2026-06-25T00:00:00.000Z", body: {} }],

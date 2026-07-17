@@ -680,6 +680,7 @@ app.openapi(
         promptId: z.string().optional(),
         scoreName: z.string().optional(),
         level: z.string().optional(),
+        type: z.string().optional(),
         days: z.coerce.number().int().min(1).max(365).optional(),
       }),
     },
@@ -688,12 +689,25 @@ app.openapi(
     },
   }),
   async (c) => {
-    const { limit, page, pageSize, userId, sessionId, environment, search, tag, promptId, scoreName, level, days } =
-      c.req.valid("query");
+    const {
+      limit,
+      page,
+      pageSize,
+      userId,
+      sessionId,
+      environment,
+      search,
+      tag,
+      promptId,
+      scoreName,
+      level,
+      type,
+      days,
+    } = c.req.valid("query");
     // `page`/`pageSize` drive pagination; `limit` stays as a legacy single-page cap (e.g. session view).
     const size = pageSize ?? limit ?? 50;
     const offset = page ? (page - 1) * size : 0;
-    const base = { userId, sessionId, environment, search, tag, promptId, scoreName, level, days };
+    const base = { userId, sessionId, environment, search, tag, promptId, scoreName, level, type, days };
     const [data, total] = await Promise.all([
       listTraces(c.get("projectId"), { ...base, limit: size, offset }),
       countTraces(c.get("projectId"), base),
@@ -732,6 +746,7 @@ app.openapi(
         tag: z.string().optional(),
         scoreName: z.string().optional(),
         level: z.string().optional(),
+        type: z.string().optional(),
       }),
     },
     responses: {
@@ -739,7 +754,7 @@ app.openapi(
     },
   }),
   async (c) => {
-    const { days, limit, environment, search, userId, tag, scoreName, level } = c.req.valid("query");
+    const { days, limit, environment, search, userId, tag, scoreName, level, type } = c.req.valid("query");
     const data = await traceFacets(c.get("projectId"), {
       days,
       limit,
@@ -749,6 +764,7 @@ app.openapi(
       tag,
       scoreName,
       level,
+      type,
     });
     return c.json(data);
   },
@@ -771,6 +787,7 @@ app.openapi(
         tag: z.string().optional(),
         scoreName: z.string().optional(),
         level: z.string().optional(),
+        type: z.string().optional(),
       }),
     },
     responses: {
@@ -778,7 +795,7 @@ app.openapi(
     },
   }),
   async (c) => {
-    const { days, environment, search, userId, tag, scoreName, level } = c.req.valid("query");
+    const { days, environment, search, userId, tag, scoreName, level, type } = c.req.valid("query");
     const data = await traceHistogram(c.get("projectId"), {
       days,
       environment,
@@ -787,6 +804,7 @@ app.openapi(
       tag,
       scoreName,
       level,
+      type,
     });
     return c.json(data);
   },

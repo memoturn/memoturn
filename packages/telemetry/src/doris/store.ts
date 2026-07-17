@@ -108,7 +108,7 @@ export class DorisTelemetryStore implements TelemetryStore {
 
   /** Shared filter predicate for listTraces + countTraces (alias `t`), sans limit/offset. */
   private traceListWhere(projectId: string, filters: TraceFilters): { where: string; params: unknown[] } {
-    const { userId, sessionId, environment, search, tag, promptId, scoreName, level, days, traceIds } = filters;
+    const { userId, sessionId, environment, search, tag, promptId, scoreName, level, type, days, traceIds } = filters;
     const conds: string[] = ["t.project_id = ?"];
     const params: unknown[] = [projectId];
     if (traceIds && traceIds.length > 0) {
@@ -159,6 +159,11 @@ export class DorisTelemetryStore implements TelemetryStore {
       // Trace has at least one observation at this level (e.g. ERROR / WARNING).
       conds.push("t.id IN (SELECT trace_id FROM observations WHERE project_id = ? AND level = ?)");
       params.push(projectId, level);
+    }
+    if (type) {
+      // Trace has at least one observation of this type (SPAN/GENERATION/TOOL/AGENT/EVENT).
+      conds.push("t.id IN (SELECT trace_id FROM observations WHERE project_id = ? AND type = ?)");
+      params.push(projectId, type);
     }
     if (days && days > 0) {
       conds.push("t.`timestamp` >= ?");
@@ -267,9 +272,10 @@ export class DorisTelemetryStore implements TelemetryStore {
       tag?: string;
       scoreName?: string;
       level?: string;
+      type?: string;
     } = {},
   ): Promise<TraceFacets> {
-    const { days = 0, limit = 25, environment, search, userId, tag, scoreName, level } = opts;
+    const { days = 0, limit = 25, environment, search, userId, tag, scoreName, level, type } = opts;
     const cap = Math.floor(limit);
 
     // Compose a WHERE from a chosen subset of the active filters. Each facet omits its own
@@ -281,6 +287,7 @@ export class DorisTelemetryStore implements TelemetryStore {
       tag?: boolean;
       score?: boolean;
       level?: boolean;
+      type?: boolean;
     }) => {
       const conds = ["project_id = ?"];
       const params: unknown[] = [projectId];
@@ -319,6 +326,10 @@ export class DorisTelemetryStore implements TelemetryStore {
         conds.push("id IN (SELECT trace_id FROM observations WHERE project_id = ? AND level = ?)");
         params.push(projectId, level);
       }
+      if (include.type && type) {
+        conds.push("id IN (SELECT trace_id FROM observations WHERE project_id = ? AND type = ?)");
+        params.push(projectId, type);
+      }
       return { where: conds.join(" AND "), params };
     };
 
@@ -330,15 +341,16 @@ export class DorisTelemetryStore implements TelemetryStore {
         rows.filter((r) => r.value != null && r.value !== "").map((r) => ({ value: r.value, count: Number(r.count) })),
       );
 
-    const envW = build({ name: true, user: true, tag: true, score: true, level: true });
-    const nameW = build({ env: true, user: true, tag: true, score: true, level: true });
-    const tagW = build({ env: true, name: true, user: true, score: true, level: true });
-    // Scores + levels facets each join their source table to the filtered trace set and exclude
-    // their own dimension, so a selected value still shows its alternatives.
-    const scoreW = build({ env: true, name: true, user: true, tag: true, level: true });
-    const levelW = build({ env: true, name: true, user: true, tag: true, score: true });
+    const envW = build({ name: true, user: true, tag: true, score: true, level: true, type: true });
+    const nameW = build({ env: true, user: true, tag: true, score: true, level: true, type: true });
+    const tagW = build({ env: true, name: true, user: true, score: true, level: true, type: true });
+    // Scores + levels + types facets each join their source table to the filtered trace set and
+    // exclude their own dimension, so a selected value still shows its alternatives.
+    const scoreW = build({ env: true, name: true, user: true, tag: true, level: true, type: true });
+    const levelW = build({ env: true, name: true, user: true, tag: true, score: true, type: true });
+    const typeW = build({ env: true, name: true, user: true, tag: true, score: true, level: true });
 
-    const [environments, names, tags, scores, levels] = await Promise.all([
+    const [environments, names, tags, scores, levels, types] = await Promise.all([
       facet(
         `SELECT environment AS value, COUNT(*) AS count FROM traces
          WHERE ${envW.where} GROUP BY environment ORDER BY count DESC LIMIT ?`,
@@ -369,9 +381,16 @@ export class DorisTelemetryStore implements TelemetryStore {
          GROUP BY o.level ORDER BY count DESC LIMIT ?`,
         [projectId, ...levelW.params, cap],
       ),
+      facet(
+        `SELECT o.type AS value, COUNT(DISTINCT o.trace_id) AS count
+         FROM observations o
+         WHERE o.project_id = ? AND o.trace_id IN (SELECT id FROM traces WHERE ${typeW.where})
+         GROUP BY o.type ORDER BY count DESC LIMIT ?`,
+        [projectId, ...typeW.params, cap],
+      ),
     ]);
 
-    return { environments, names, tags, scores, levels };
+    return { environments, names, tags, scores, levels, types };
   }
 
   async listSessions(

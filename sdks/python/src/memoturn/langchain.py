@@ -71,7 +71,7 @@ class MemoturnCallbackHandler:
     # ── tools ───────────────────────────────────────────────────────────────
     def on_tool_start(self, serialized: Any, input_str: str, *, run_id: UUID, **kwargs: Any) -> None:
         name = (serialized or {}).get("name", "tool")
-        self._spans[str(run_id)] = self._ensure_trace().span(name=name, input=input_str)
+        self._spans[str(run_id)] = self._ensure_trace().tool(name=name, input=input_str)
 
     def on_tool_end(self, output: Any, *, run_id: UUID, **kwargs: Any) -> None:
         self._end(run_id, output=output)

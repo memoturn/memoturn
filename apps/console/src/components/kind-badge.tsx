@@ -35,8 +35,12 @@ export function toneForKind(kind: string | undefined | null): KindBadgeTone {
       return "blue";
     case "SPAN":
       return "green";
-    case "EVENT":
+    case "TOOL":
       return "amber";
+    case "AGENT":
+      return "violet";
+    case "EVENT":
+      return "neutral";
     case "ERROR":
     case "FAILED":
       return "red";
