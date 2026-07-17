@@ -173,6 +173,23 @@ describe("otlpToEvents (JSON)", () => {
     expect(span.observationType).toBe("RETRIEVER");
   });
 
+  it("maps OpenInference retrieval.documents on a RETRIEVER span to ranked retrieved docs", () => {
+    const span = otlpToEvents(
+      oiSpan([
+        { key: "openinference.span.kind", value: { stringValue: "RETRIEVER" } },
+        { key: "retrieval.documents.0.document.content", value: { stringValue: "doc A" } },
+        { key: "retrieval.documents.0.document.score", value: { doubleValue: 0.91 } },
+        { key: "retrieval.documents.0.document.id", value: { stringValue: "a" } },
+        { key: "retrieval.documents.1.document.content", value: { stringValue: "doc B" } },
+        { key: "retrieval.documents.1.document.score", value: { doubleValue: 0.42 } },
+      ]),
+    ).find((e) => e.type === "span-create")?.body as Record<string, unknown>;
+    const docs = span.retrievedDocuments as { rank: number; content: string; score?: number; id?: string }[];
+    expect(docs).toHaveLength(2);
+    expect(docs[0]).toMatchObject({ rank: 0, content: "doc A", score: 0.91, id: "a" });
+    expect(docs[1]).toMatchObject({ rank: 1, content: "doc B", score: 0.42 });
+  });
+
   it("maps an OpenInference LLM span to a generation, reading llm.* model + tokens + io", () => {
     const events = otlpToEvents(
       oiSpan([
