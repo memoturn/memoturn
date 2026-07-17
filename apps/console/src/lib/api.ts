@@ -101,10 +101,10 @@ export function setActiveProject(id: string) {
 }
 
 function headers(extra: Record<string, string> = {}): Record<string, string> {
-  const h: Record<string, string> = { accept: "application/json", ...extra };
+  const h: Record<string, string> = { accept: "application/json" };
   const project = getActiveProject();
   if (project) h["x-memoturn-project"] = project; // active project for the switcher
-  return h;
+  return { ...h, ...extra }; // extra wins — callers may target a non-active project
 }
 
 async function get<T>(path: string): Promise<T> {
@@ -123,16 +123,16 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function del<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { method: "DELETE", headers: headers() });
+async function del<T>(path: string, extra: Record<string, string> = {}): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { method: "DELETE", headers: headers(extra) });
   if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
   return res.json() as Promise<T>;
 }
 
-async function patch<T>(path: string, body: unknown): Promise<T> {
+async function patch<T>(path: string, body: unknown, extra: Record<string, string> = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "PATCH",
-    headers: headers({ "content-type": "application/json" }),
+    headers: headers({ "content-type": "application/json", ...extra }),
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
@@ -447,6 +447,12 @@ export const api = {
   listUsersPage: (opts: { page?: number; pageSize?: number; days?: number; search?: string } = {}) =>
     get<UserPage>(`/v1/users${qs(opts as Record<string, unknown>)}`),
   listProjects: () => get<{ data: Project[] }>(`/v1/projects`).then((r) => r.data),
+  createProject: (name: string) => post<Project>(`/v1/projects`, { name }),
+  // Rename/delete resolve RBAC on the target project, so the header names it explicitly.
+  renameProject: (id: string, name: string) =>
+    patch<Project>(`/v1/projects/${encodeURIComponent(id)}`, { name }, { "x-memoturn-project": id }),
+  deleteProject: (id: string) =>
+    del<{ ok: boolean }>(`/v1/projects/${encodeURIComponent(id)}`, { "x-memoturn-project": id }),
   listAuditLogs: () => get<{ data: AuditEntry[] }>(`/v1/audit-logs`).then((r) => r.data),
   listReviewQueues: () => get<{ data: ReviewQueue[] }>(`/v1/review-queues`).then((r) => r.data),
   getReviewAnalytics: () => get<ReviewAnalytics>(`/v1/review-queues/analytics`),
