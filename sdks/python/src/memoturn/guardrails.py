@@ -12,6 +12,8 @@ import urllib.error
 import urllib.request
 from typing import Any, Optional
 
+from .client import _truncate
+
 
 def _creds(base_url: Optional[str], public_key: Optional[str], secret_key: Optional[str]) -> tuple[str, str]:
     base = (base_url or os.environ.get("MEMOTURN_BASE_URL", "http://localhost:3001")).rstrip("/")
@@ -27,6 +29,7 @@ def check_guardrails(
     base_url: Optional[str] = None,
     public_key: Optional[str] = None,
     secret_key: Optional[str] = None,
+    timeout: float = 10.0,
 ) -> dict[str, Any]:
     """Scan ``text`` against the project's runtime guardrails.
 
@@ -38,6 +41,6 @@ def check_guardrails(
     headers = {"authorization": f"Basic {auth}", "content-type": "application/json"}
     req = urllib.request.Request(f"{base}/v1/guardrails/check", data=body, headers=headers, method="POST")
     try:
-        return json.loads(urllib.request.urlopen(req, timeout=30).read())
+        return json.loads(urllib.request.urlopen(req, timeout=timeout).read())
     except urllib.error.HTTPError as e:
-        raise RuntimeError(f"guardrails check failed: {e.code} {e.read().decode(errors='replace')}") from e
+        raise RuntimeError(f"guardrails check failed: {e.code} {_truncate(e.read().decode(errors='replace'))}") from e

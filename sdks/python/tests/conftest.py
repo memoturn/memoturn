@@ -13,8 +13,9 @@ import pytest
 
 
 class _FakeResponse:
-    def __init__(self, payload: Any) -> None:
+    def __init__(self, payload: Any, status: int = 200) -> None:
         self._payload = payload
+        self.status = status
 
     def read(self) -> bytes:
         return json.dumps(self._payload).encode()
@@ -25,6 +26,7 @@ class Capture:
         self.requests: list[urllib.request.Request] = []
         self.responder: Callable[[urllib.request.Request], Any] = lambda _req: {}
         self.error: Optional[BaseException] = None
+        self.status: int = 200
 
     @property
     def last(self) -> urllib.request.Request:
@@ -54,7 +56,7 @@ def capture(monkeypatch: pytest.MonkeyPatch) -> Capture:
         cap.requests.append(req)
         if cap.error is not None:
             raise cap.error
-        return _FakeResponse(cap.responder(req))
+        return _FakeResponse(cap.responder(req), cap.status)
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     return cap
