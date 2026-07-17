@@ -38,3 +38,6 @@ sdks/python/dist/
 **/playwright-report/
 **/test-results/
 **/.playwright/
+
+# impeccable — local design-review snapshots
+.impeccable/
