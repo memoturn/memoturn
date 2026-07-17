@@ -49,6 +49,14 @@ export const EVALUATOR_TEMPLATES: EvaluatorTemplate[] = [
       "You are grading ANSWER RELEVANCE. Given the user's input and the output, judge how directly and completely the output answers what was asked. Score 1.0 when the output fully and directly addresses the request, 0.0 when it is off-topic or ignores the question. Do not reward correctness of unrelated information.",
   },
   {
+    key: "answer-completeness",
+    name: "answer-completeness",
+    description: "Does the output cover every part of a multi-part request, not just some?",
+    requires: ["input", "output"],
+    prompt:
+      "You are grading ANSWER COMPLETENESS. Given the user's input (which may ask several things) and the output, judge whether the output addresses ALL parts of the request, not just some. Score 1.0 when every part is covered, 0.0 when major parts are ignored; give partial credit proportional to coverage. This is distinct from relevance (being on-topic): a relevant answer can still be incomplete.",
+  },
+  {
     key: "context-relevance",
     name: "context-relevance",
     description: "Is the retrieved context relevant to the question (retrieval quality)?",
@@ -63,6 +71,14 @@ export const EVALUATOR_TEMPLATES: EvaluatorTemplate[] = [
     requires: ["expectedOutput", "context"],
     prompt:
       "You are grading CONTEXT RECALL. Given the expected answer and the retrieved context, judge whether the context contains the information required to produce the expected answer. Score 1.0 when all needed facts are present in the context, 0.0 when key facts are missing. This measures retrieval completeness.",
+  },
+  {
+    key: "context-precision",
+    name: "context-precision",
+    description: "Are the relevant retrieved chunks ranked ahead of irrelevant ones (low retrieval noise)?",
+    requires: ["input", "context"],
+    prompt:
+      "You are grading CONTEXT PRECISION for a retrieval step. Given the user's question and the retrieved context (an ordered list of chunks), judge the signal-to-noise of the retrieval: are the chunks relevant to the question ranked ahead of irrelevant ones, and is the context free of noise? Score 1.0 when relevant chunks appear first with little irrelevant material, 0.0 when relevant chunks are buried among or crowded out by irrelevant ones. This measures retrieval ranking quality, complementing context recall.",
   },
   {
     key: "hallucination",
