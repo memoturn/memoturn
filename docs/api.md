@@ -139,6 +139,7 @@ Server-executed experiments run a prompt/model across a dataset and auto-score e
 | --- | --- | --- |
 | GET / POST | `/v1/widgets` | List (with computed data series; `?dashboardId=` scopes to one dashboard, omitted = the Default) / create. Widget config: `metric` (cost\|tokens\|generations\|latency_p95\|error_rate\|score), `breakdown` (by_day\|by_model\|by_user\|by_session), `days`, `filters` ({environment?, model?, tag?}), `dashboardId?`. |
 | GET / POST | `/v1/widgets/query` | List / create query-engine widgets (built in Explore). Create body: `title`, `query` (an analytics query), `chartType` (line\|bar\|horizontal_bar\|big_number\|pie\|table), `dashboardId?`, `gridW?`/`gridH?`. |
+| PATCH | `/v1/widgets/{id}/grid` | Persist a widget's 12-col grid placement (`gridX`/`gridY`/`gridW`/`gridH`, all optional). |
 | DELETE | `/v1/widgets/{id}` | Delete a dashboard widget (legacy or query-engine). |
 | GET / POST | `/v1/dashboards` | List the project's named dashboards / create one (`{ name }`). The "Default" dashboard is implicit (widgets with a null dashboardId). |
 | DELETE | `/v1/dashboards/{id}` | Delete a dashboard (its widgets are removed too). |

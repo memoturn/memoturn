@@ -147,6 +147,7 @@ import {
   traceFacets,
   traceHistogram,
   updateAlertRule,
+  updateWidgetGrid,
 } from "@memoturn/server";
 import { Scalar } from "@scalar/hono-api-reference";
 import { bodyLimit } from "hono/body-limit";
@@ -2706,6 +2707,41 @@ app.openapi(
     const result = await createQueryWidget(c.get("projectId"), c.req.valid("json"));
     await recordAudit(c.get("projectId"), c.get("actor"), "widget.create", `widget:${result.id}`);
     return c.json(result, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "patch",
+    path: "/v1/widgets/{id}/grid",
+    summary: "Persist a widget's grid placement (drag/resize)",
+    tags: ["platform"],
+    security,
+    request: {
+      params: z.object({ id: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              gridX: z.number().int().min(0).max(11).optional(),
+              gridY: z.number().int().min(0).optional(),
+              gridW: z.number().int().min(1).max(12).optional(),
+              gridH: z.number().int().min(1).max(24).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Updated", content: { "application/json": { schema: z.object({ updated: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const result = await updateWidgetGrid(c.get("projectId"), c.req.param("id"), c.req.valid("json"));
+    return c.json(result, 200);
   },
 );
 

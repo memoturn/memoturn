@@ -124,6 +124,11 @@ function WidgetBuilderPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["query-widgets"] }),
     onError: (e) => toast.error(`Failed to delete: ${String(e)}`),
   });
+  const resize = useMutation({
+    mutationFn: ({ id, gridW }: { id: string; gridW: number }) => api.updateWidgetGrid(id, { gridW }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["query-widgets"] }),
+    onError: (e) => toast.error(`Failed to resize: ${String(e)}`),
+  });
   const promptSave = () => {
     if (!data) return;
     const title = window.prompt("Name this chart", `${AGG_LABEL[aggregation]} of ${measureDef.label}`);
@@ -272,7 +277,13 @@ function WidgetBuilderPage() {
         {saved.data && saved.data.length > 0 ? (
           <div className="grid grid-cols-12 gap-4">
             {saved.data.map((w) => (
-              <SavedWidget key={w.id} widget={w} readOnly={readOnly} onDelete={() => remove.mutate(w.id)} />
+              <SavedWidget
+                key={w.id}
+                widget={w}
+                readOnly={readOnly}
+                onDelete={() => remove.mutate(w.id)}
+                onResize={(gridW) => resize.mutate({ id: w.id, gridW })}
+              />
             ))}
           </div>
         ) : (
@@ -283,8 +294,26 @@ function WidgetBuilderPage() {
   );
 }
 
-/** One saved query-widget: runs its stored query and renders it, spanning `gridW` of 12 columns. */
-function SavedWidget({ widget, readOnly, onDelete }: { widget: QueryWidget; readOnly: boolean; onDelete: () => void }) {
+const WIDTHS = [
+  { value: "3", label: "¼" },
+  { value: "6", label: "½" },
+  { value: "9", label: "¾" },
+  { value: "12", label: "Full" },
+];
+
+/** One saved query-widget: runs its stored query and renders it, spanning `gridW` of 12 columns.
+ * The width control persists gridW (a lightweight resize; drag-and-drop reorder is a follow-up). */
+function SavedWidget({
+  widget,
+  readOnly,
+  onDelete,
+  onResize,
+}: {
+  widget: QueryWidget;
+  readOnly: boolean;
+  onDelete: () => void;
+  onResize: (gridW: number) => void;
+}) {
   const { data, error } = useQuery({
     queryKey: ["query-widget", widget.id],
     queryFn: () => api.runAnalyticsQuery(widget.query),
@@ -296,7 +325,19 @@ function SavedWidget({ widget, readOnly, onDelete }: { widget: QueryWidget; read
       <CardHeader>
         <CardTitle className="text-base">{widget.title}</CardTitle>
         {!readOnly && (
-          <CardAction>
+          <CardAction className="flex items-center gap-1">
+            <Select value={String(span)} onValueChange={(v) => onResize(Number(v))}>
+              <SelectTrigger className="h-7 w-16 text-xs" title="Widget width">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {WIDTHS.map((w) => (
+                  <SelectItem key={w.value} value={w.value}>
+                    {w.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button
               size="icon"
               variant="ghost"
