@@ -262,6 +262,67 @@ export const chartType = z.enum(["line", "bar", "horizontal_bar", "big_number", 
 export type ChartType = z.infer<typeof chartType>;
 export const TIME_SERIES_CHARTS: ChartType[] = ["line", "bar"];
 
+// UI-facing catalog of the analytics views: which measures (+ their valid aggregations) and
+// dimensions each view exposes. Mirrors the server-side view-declaration registry in
+// packages/telemetry (validateQuery is the authority; this drives the builder's dropdowns).
+export interface ViewMeasure {
+  id: string;
+  label: string;
+  aggregations: QueryAggregation[];
+}
+export interface ViewCatalog {
+  view: QueryView;
+  label: string;
+  measures: ViewMeasure[];
+  dimensions: { id: string; label: string }[];
+}
+
+export const ANALYTICS_VIEWS: ViewCatalog[] = [
+  {
+    view: "observations",
+    label: "Observations",
+    measures: [
+      { id: "count", label: "Count", aggregations: ["count"] },
+      { id: "cost", label: "Cost (USD)", aggregations: ["sum", "avg", "min", "max", "p50", "p95", "p99"] },
+      { id: "tokens", label: "Tokens", aggregations: ["sum", "avg", "max", "p95"] },
+      { id: "latency", label: "Latency (ms)", aggregations: ["avg", "p50", "p95", "p99", "max"] },
+    ],
+    dimensions: [
+      { id: "model", label: "Model" },
+      { id: "type", label: "Type" },
+      { id: "level", label: "Level" },
+      { id: "environment", label: "Environment" },
+      { id: "provider", label: "Provider" },
+      { id: "name", label: "Name" },
+    ],
+  },
+  {
+    view: "traces",
+    label: "Traces",
+    measures: [{ id: "count", label: "Count", aggregations: ["count"] }],
+    dimensions: [
+      { id: "environment", label: "Environment" },
+      { id: "userId", label: "User" },
+      { id: "sessionId", label: "Session" },
+      { id: "name", label: "Name" },
+    ],
+  },
+  {
+    view: "scores",
+    label: "Scores",
+    measures: [
+      { id: "count", label: "Count", aggregations: ["count"] },
+      { id: "value", label: "Value", aggregations: ["avg", "min", "max", "p50", "p95"] },
+    ],
+    dimensions: [
+      { id: "name", label: "Name" },
+      { id: "source", label: "Source" },
+      { id: "environment", label: "Environment" },
+      { id: "dataType", label: "Data type" },
+    ],
+  },
+];
+
 /** Trace volume over the selected range, bucketed by hour (short ranges) or day. */
 export const traceHistogramBucket = z.object({ bucket: z.string(), count: z.number() });
 export type TraceHistogramBucket = z.infer<typeof traceHistogramBucket>;
