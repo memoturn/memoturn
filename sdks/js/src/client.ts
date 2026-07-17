@@ -308,6 +308,42 @@ export class MemoturnSpan {
     return new MemoturnSpan(this.client, this.traceId, id, this.environment, "span");
   }
 
+  /** Nested child generation. */
+  generation(input: GenerationInput = {}): MemoturnSpan {
+    const id = input.id ?? uuid();
+    this.client.enqueue({
+      id: uuid(),
+      type: "generation-create",
+      timestamp: nowIso(),
+      body: {
+        ...input,
+        id,
+        traceId: this.traceId,
+        parentObservationId: this.id,
+        environment: this.environment,
+        startTime: nowIso(),
+      },
+    });
+    return new MemoturnSpan(this.client, this.traceId, id, this.environment, "generation");
+  }
+
+  /** Nested point-in-time event (no `.end()` — it is emitted immediately). */
+  event(input: SpanInput = {}): void {
+    this.client.enqueue({
+      id: uuid(),
+      type: "event-create",
+      timestamp: nowIso(),
+      body: {
+        ...input,
+        id: input.id ?? uuid(),
+        traceId: this.traceId,
+        parentObservationId: this.id,
+        environment: this.environment,
+        startTime: nowIso(),
+      },
+    });
+  }
+
   /** Nested tool-call span (classified TOOL). */
   tool(input: SpanInput = {}): MemoturnSpan {
     return this.span({ ...input, observationType: "TOOL" });

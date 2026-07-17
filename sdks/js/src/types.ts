@@ -7,6 +7,10 @@ export interface Usage {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  /** Tokens served from the provider's prompt cache (e.g. Anthropic `cache_read_input_tokens`). */
+  cacheReadTokens?: number;
+  /** Tokens written to the provider's prompt cache (e.g. Anthropic `cache_creation_input_tokens`). */
+  cacheCreationTokens?: number;
 }
 
 export type ObservationLevel = "DEBUG" | "DEFAULT" | "WARNING" | "ERROR";
@@ -38,6 +42,8 @@ export interface TraceInput {
   metadata?: JsonValue;
   input?: JsonValue;
   output?: JsonValue;
+  /** Mark the trace publicly shareable (viewable via a share link without auth). */
+  public?: boolean;
 }
 
 /** Observation type — the default derives from which method created it (span/generation/event);
@@ -88,6 +94,8 @@ export interface ScoreInput {
   dataType?: "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
   comment?: string;
   observationId?: string;
+  /** Link the score to the evaluator config that produced it. */
+  configId?: string;
 }
 
 export interface IngestEnvelope {

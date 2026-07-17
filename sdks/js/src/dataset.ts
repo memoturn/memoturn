@@ -45,8 +45,39 @@ export interface DatasetHandle {
   ): Promise<{ run: string; linked: number }>;
 }
 
+/** Per-score bounds for a CI gate. `maxRegression` compares against a baseline run. */
+export interface GateThreshold {
+  min?: number;
+  max?: number;
+  maxRegression?: number;
+}
+
+export interface GateResult {
+  passed: boolean;
+  failures: unknown[];
+  scores: unknown[];
+}
+
 export async function createDataset(creds: Creds, name: string, description?: string): Promise<void> {
   await req(creds, "POST", "/v1/datasets", { name, description });
+}
+
+/**
+ * Gate a run's evaluator scores against thresholds for CI, e.g.
+ * `{ faithfulness: { min: 0.8 }, toxicity: { max: 0.1 } }`. Each bound may set `min`,
+ * `max`, and/or `maxRegression` (the last requires `baselineRun`). Check `.passed` in CI.
+ */
+export async function evaluateGate(
+  creds: Creds,
+  name: string,
+  runName: string,
+  thresholds: Record<string, GateThreshold>,
+  options: { baselineRun?: string } = {},
+): Promise<GateResult> {
+  return req(creds, "POST", `/v1/datasets/${encodeURIComponent(name)}/runs/${encodeURIComponent(runName)}/gate`, {
+    thresholds,
+    ...(options.baselineRun ? { baselineRun: options.baselineRun } : {}),
+  });
 }
 
 export async function addDatasetItems(

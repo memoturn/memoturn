@@ -137,6 +137,32 @@ describe("event shapes", () => {
     expect(gen?.body.embedding).toEqual([0.1, 0.2, 0.3]);
   });
 
+  it("nested generation and event under a span carry parentObservationId and the right event types", async () => {
+    const m = setup();
+    const client = new Memoturn(creds);
+    const trace = client.trace();
+    const parent = trace.span({ name: "outer" });
+    const gen = parent.generation({ name: "llm", model: "gpt-4o" });
+    gen.end({ output: "hi", usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 } });
+    parent.event({ name: "cache-hit" });
+    await client.flush();
+
+    const batch = batchFrom(m);
+    const genCreate = batch.find((e) => e.type === "generation-create");
+    const genUpdate = batch.find((e) => e.type === "generation-update");
+    const event = batch.find((e) => e.type === "event-create");
+    expect(genCreate?.body).toMatchObject({
+      id: gen.id,
+      traceId: trace.id,
+      parentObservationId: parent.id,
+      model: "gpt-4o",
+    });
+    expect(genCreate?.body.startTime).toBeTypeOf("string");
+    expect(genUpdate?.body).toMatchObject({ id: gen.id, traceId: trace.id });
+    expect(event?.body).toMatchObject({ name: "cache-hit", traceId: trace.id, parentObservationId: parent.id });
+    expect(event?.body.startTime).toBeTypeOf("string");
+  });
+
   it("nested span sets parentObservationId to the parent span", async () => {
     const m = setup();
     const client = new Memoturn(creds);

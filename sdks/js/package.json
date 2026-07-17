@@ -26,13 +26,22 @@
   "exports": {
     ".": "./src/index.ts",
     "./openai": "./src/openai.ts",
+    "./anthropic": "./src/anthropic.ts",
     "./langchain": "./src/langchain.ts",
-    "./otel": "./src/otel.ts"
+    "./otel": "./src/otel.ts",
+    "./observe": "./src/observe.ts",
+    "./prompt": "./src/prompt.ts",
+    "./dataset": "./src/dataset.ts",
+    "./guardrails": "./src/guardrails.ts"
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
+  "engines": {
+    "node": ">=18"
+  },
   "publishConfig": {
     "access": "public",
     "main": "./dist/index.js",
@@ -46,6 +55,10 @@
         "types": "./dist/openai.d.ts",
         "default": "./dist/openai.js"
       },
+      "./anthropic": {
+        "types": "./dist/anthropic.d.ts",
+        "default": "./dist/anthropic.js"
+      },
       "./langchain": {
         "types": "./dist/langchain.d.ts",
         "default": "./dist/langchain.js"
@@ -53,6 +66,22 @@
       "./otel": {
         "types": "./dist/otel.d.ts",
         "default": "./dist/otel.js"
+      },
+      "./observe": {
+        "types": "./dist/observe.d.ts",
+        "default": "./dist/observe.js"
+      },
+      "./prompt": {
+        "types": "./dist/prompt.d.ts",
+        "default": "./dist/prompt.js"
+      },
+      "./dataset": {
+        "types": "./dist/dataset.d.ts",
+        "default": "./dist/dataset.js"
+      },
+      "./guardrails": {
+        "types": "./dist/guardrails.d.ts",
+        "default": "./dist/guardrails.js"
       }
     }
   },
@@ -66,11 +95,15 @@
   },
   "peerDependencies": {
     "openai": ">=4",
+    "@anthropic-ai/sdk": ">=0.30",
     "@opentelemetry/exporter-trace-otlp-http": ">=0.50.0",
     "@opentelemetry/sdk-trace-base": ">=1.20.0"
   },
   "peerDependenciesMeta": {
     "openai": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
       "optional": true
     },
     "@opentelemetry/exporter-trace-otlp-http": {
