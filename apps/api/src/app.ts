@@ -15,6 +15,7 @@ import {
   authMethods,
   builtinModelPrices,
   cancelExperiment,
+  checkGuardrails,
   checkRateLimit,
   correctScore,
   countSessions,
@@ -112,7 +113,6 @@ import {
   listWebhookDeliveries,
   listWebhooks,
   listWidgets,
-  loadGuardrailPolicy,
   mcpAuthorizationServerMetadata,
   mcpProtectedResourceMetadata,
   otlpToEvents,
@@ -134,7 +134,6 @@ import {
   runProjectionForProject,
   runScheduledExport,
   safeServeContentType,
-  scanGuardrails,
   setAnalyticsSink,
   setCostBudget,
   setGuardrailPolicy,
@@ -3830,18 +3829,16 @@ app.openapi(
   createRoute({
     method: "post",
     path: "/v1/guardrails/check",
-    summary: "Scan text for PII / prompt injection / blocked terms; returns allow/redact/block",
+    summary:
+      "Scan text for PII / prompt injection / SQL injection / blocked terms / JSON shape / evaluator guards; returns allow/redact/block",
     tags: ["platform"],
     security,
     request: { body: { content: { "application/json": { schema: z.object({ text: z.string() }) } } } },
     responses: { 200: { description: "Verdict", content: { "application/json": { schema: C.guardrailVerdict } } } },
   }),
-  // rbac-exempt: read-only compute, writes nothing (mirrors the dataset gate).
-  async (c) => {
-    const policy = await loadGuardrailPolicy(c.get("projectId"));
-    if (!policy) return c.json({ verdict: "allow" as const, findings: [] });
-    return c.json(scanGuardrails(c.req.valid("json").text, policy));
-  },
+  // rbac-exempt: read-only compute — the local scan writes nothing, and the opt-in
+  // evaluator-guard LLM calls (checkGuardrails) don't touch Postgres/Doris either.
+  async (c) => c.json(await checkGuardrails(c.get("projectId"), c.req.valid("json").text)),
 );
 
 app.openapi(
@@ -3876,6 +3873,11 @@ app.openapi(
               redactWith: z.string().optional(),
               injection: z.boolean().optional(),
               blockedTerms: z.array(z.string()).optional(),
+              sqlInjection: z.boolean().optional(),
+              requireMatch: z.array(z.string()).optional(),
+              requireValidJson: z.boolean().optional(),
+              requiredJsonKeys: z.array(z.string()).optional(),
+              evaluatorGuards: z.array(C.evaluatorGuard).optional(),
             }),
           },
         },
