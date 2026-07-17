@@ -78,7 +78,7 @@ export interface ScoreWriteRow {
   timestamp: string;
   environment: string;
   source: "API" | "EVAL" | "ANNOTATION";
-  data_type: "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
+  data_type: "NUMERIC" | "CATEGORICAL" | "BOOLEAN" | "CORRECTION" | "TEXT";
   value: number | null;
   string_value: string;
   comment: string;
@@ -203,7 +203,7 @@ export interface FullScoreRow {
   timestamp: string; // ISO-formatted
   environment: string;
   source: "API" | "EVAL" | "ANNOTATION";
-  data_type: "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
+  data_type: "NUMERIC" | "CATEGORICAL" | "BOOLEAN" | "CORRECTION" | "TEXT";
   value: number | null;
   string_value: string;
   comment: string;

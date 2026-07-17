@@ -1103,7 +1103,7 @@ app.openapi(
           "application/json": {
             schema: z.object({
               name: z.string().min(1),
-              dataType: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]).default("NUMERIC"),
+              dataType: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN", "CORRECTION", "TEXT"]).default("NUMERIC"),
               value: z.number().optional(),
               stringValue: z.string().optional(),
               comment: z.string().optional(),
@@ -2394,7 +2394,7 @@ app.openapi(
               name: z.string().min(1),
               description: z.string().optional(),
               scoreName: z.string().min(1),
-              dataType: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]).optional(),
+              dataType: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN", "TEXT"]).optional(),
             }),
           },
         },
@@ -3020,7 +3020,7 @@ app.openapi(
           "application/json": {
             schema: z.object({
               name: z.string().min(1),
-              dataType: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]).optional(),
+              dataType: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN", "TEXT"]).optional(),
               categories: z.array(z.string()).optional(),
               min: z.number().nullable().optional(),
               max: z.number().nullable().optional(),

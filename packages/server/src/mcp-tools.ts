@@ -295,7 +295,11 @@ export const tools: ToolDef[] = [
       properties: {
         name: { type: "string", description: "Queue name" },
         scoreName: { type: "string", description: "Score collected by this queue" },
-        dataType: { type: "string", enum: ["NUMERIC", "CATEGORICAL", "BOOLEAN"], description: "Score data type" },
+        dataType: {
+          type: "string",
+          enum: ["NUMERIC", "CATEGORICAL", "BOOLEAN", "TEXT"],
+          description: "Score data type",
+        },
         description: { type: "string", description: "Optional description" },
       },
       required: ["name", "scoreName"],

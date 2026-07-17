@@ -91,7 +91,7 @@ export interface ScoreInput {
   name: string;
   value?: number;
   stringValue?: string;
-  dataType?: "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
+  dataType?: "NUMERIC" | "CATEGORICAL" | "BOOLEAN" | "CORRECTION" | "TEXT";
   comment?: string;
   observationId?: string;
   /** Link the score to the evaluator config that produced it. */

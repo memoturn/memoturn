@@ -408,6 +408,30 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(scores[0]!.value).toBeCloseTo(0.8);
   });
 
+  it("round-trips TEXT and CORRECTION score dataTypes", async () => {
+    // Isolated project id: this project's score-row counts are asserted exactly elsewhere in this
+    // suite (e.g. countProjectRows), so inserting extra scores under P would break those assertions.
+    const P2 = `${P}-scoretypes`;
+    await store.insertRows("scores", [
+      score({ id: "sc-text", project_id: P2, data_type: "TEXT", value: null, string_value: "needs a citation" }),
+      score({
+        id: "sc-correction",
+        project_id: P2,
+        data_type: "CORRECTION",
+        value: null,
+        string_value: "the corrected output",
+      }),
+    ]);
+    expect(await store.getScoreById(P2, "sc-text")).toMatchObject({
+      data_type: "TEXT",
+      string_value: "needs a citation",
+    });
+    expect(await store.getScoreById(P2, "sc-correction")).toMatchObject({
+      data_type: "CORRECTION",
+      string_value: "the corrected output",
+    });
+  });
+
   it("overwrites on same id + newer event_ts and rejects stale writes (LWW)", async () => {
     await store.insertRows("scores", [score({ value: 0.95, comment: "corrected", event_ts: iso(60_000) })]);
     let s = await store.getScoreById(P, "sc1");

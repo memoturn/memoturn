@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ingestRequest } from "./events.js";
+import { ingestRequest, scoreBody } from "./events.js";
 import { computeCost } from "./models.js";
 
 describe("ingestRequest", () => {
@@ -74,6 +74,35 @@ describe("ingestRequest", () => {
       batch: [{ id: "x", type: "nope", timestamp: "2026-06-25T00:00:00.000Z", body: {} }],
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe("scoreBody", () => {
+  const base = { id: "score-1", traceId: "trace-1", name: "quality" };
+
+  it("accepts CORRECTION and TEXT data types", () => {
+    expect(scoreBody.safeParse({ ...base, dataType: "CORRECTION", stringValue: "fixed output" }).success).toBe(true);
+    expect(scoreBody.safeParse({ ...base, dataType: "TEXT", stringValue: "looks good" }).success).toBe(true);
+  });
+
+  it("accepts a BOOLEAN score with value 0 or 1", () => {
+    expect(scoreBody.safeParse({ ...base, dataType: "BOOLEAN", value: 0 }).success).toBe(true);
+    expect(scoreBody.safeParse({ ...base, dataType: "BOOLEAN", value: 1 }).success).toBe(true);
+  });
+
+  it("rejects a BOOLEAN score with a value other than 0 or 1", () => {
+    const parsed = scoreBody.safeParse({ ...base, dataType: "BOOLEAN", value: 2 });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("rejects a TEXT score exceeding the 500-char cap", () => {
+    const parsed = scoreBody.safeParse({ ...base, dataType: "TEXT", stringValue: "x".repeat(501) });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("accepts a TEXT score at exactly the 500-char cap", () => {
+    const parsed = scoreBody.safeParse({ ...base, dataType: "TEXT", stringValue: "x".repeat(500) });
+    expect(parsed.success).toBe(true);
   });
 });
 

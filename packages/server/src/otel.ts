@@ -3,15 +3,27 @@ import { type IngestEvent, newId, type ObservationType } from "@memoturn/core";
 /**
  * OTLP → memoturn ingest mapping. Accepts OTLP traces as JSON or protobuf (see
  * decodeOtlpTraces) and maps each span to an observation, emitting a trace-create per
- * distinct OTel traceId. Span classification spans two semconventions: OTLP GenAI
- * (`gen_ai.*` → GENERATION) and OpenInference (`openinference.span.kind` → LLM→GENERATION,
- * RETRIEVER/RERANKER/EMBEDDING/CHAIN/TOOL/AGENT/GUARDRAIL → the matching observation type);
- * everything else is a plain SPAN.
+ * distinct OTel traceId. Also reads OTLP span *events* (Span.events[], distinct from span
+ * attributes) for `gen_ai.evaluation.result`, mapped to an EVAL score-create.
+ *
+ * Span classification checks OpenInference (`openinference.span.kind`) first — the
+ * broadest-adopted, most explicit convention — then falls through classifySpan's chain:
+ * generic `gen_ai.operation.name` (covers Vercel AI SDK v7+, LiveKit Agents, Flue, and any
+ * other framework converging on the OTel GenAI semconv directly), legacy Vercel AI SDK
+ * (pre-v7 `ai.*` namespace), Genkit (`genkit:metadata:subtype`), and LiveKit Agents span
+ * names (weakest signal, checked last). Everything unclassified stays a plain SPAN.
  */
 
 interface OtlpAttr {
   key: string;
   value?: { stringValue?: string; intValue?: string; doubleValue?: number; boolValue?: boolean };
+}
+/** A span event (OTLP `Span.events[]`) — distinct from top-level span attributes. Used for
+ *  `gen_ai.evaluation.result`, the OTel GenAI semconv's way of reporting an eval score. */
+interface OtlpSpanEvent {
+  timeUnixNano?: string;
+  name?: string;
+  attributes?: OtlpAttr[];
 }
 interface OtlpSpan {
   traceId: string;
@@ -21,6 +33,7 @@ interface OtlpSpan {
   startTimeUnixNano?: string;
   endTimeUnixNano?: string;
   attributes?: OtlpAttr[];
+  events?: OtlpSpanEvent[];
   status?: { code?: number; message?: string };
 }
 interface OtlpResource {
@@ -114,9 +127,22 @@ function decodeKeyValue(b: Uint8Array): OtlpAttr {
   return { key, value };
 }
 
+function decodeSpanEvent(b: Uint8Array): OtlpSpanEvent {
+  const r = new PbReader(b);
+  const ev: OtlpSpanEvent = { attributes: [] };
+  while (!r.done) {
+    const { field, wire } = r.tag();
+    if (field === 1 && wire === 1) ev.timeUnixNano = r.fixed64u().toString();
+    else if (field === 2 && wire === 2) ev.name = r.string();
+    else if (field === 3 && wire === 2) ev.attributes?.push(decodeKeyValue(r.bytes()));
+    else r.skip(wire);
+  }
+  return ev;
+}
+
 function decodeSpan(b: Uint8Array): OtlpSpan {
   const r = new PbReader(b);
-  const span: OtlpSpan = { traceId: "", spanId: "", attributes: [] };
+  const span: OtlpSpan = { traceId: "", spanId: "", attributes: [], events: [] };
   while (!r.done) {
     const { field, wire } = r.tag();
     if (field === 1 && wire === 2) span.traceId = hex(r.bytes());
@@ -126,6 +152,7 @@ function decodeSpan(b: Uint8Array): OtlpSpan {
     else if (field === 7 && wire === 1) span.startTimeUnixNano = r.fixed64u().toString();
     else if (field === 8 && wire === 1) span.endTimeUnixNano = r.fixed64u().toString();
     else if (field === 9 && wire === 2) span.attributes?.push(decodeKeyValue(r.bytes()));
+    else if (field === 11 && wire === 2) span.events?.push(decodeSpanEvent(r.bytes()));
     else if (field === 15 && wire === 2) span.status = decodeStatus(r.bytes());
     else r.skip(wire);
   }
@@ -256,6 +283,76 @@ function openInferenceDocs(
     }));
 }
 
+// gen_ai.operation.name → observation type. This is the OTel GenAI semconv's own span-kind
+// discriminator, and what newer framework instrumentations (Vercel AI SDK v7+'s @ai-sdk/otel,
+// LiveKit Agents, Flue) converge on emitting directly — checking it generically covers all of
+// them without per-framework special-casing.
+const GEN_AI_OP_TO_TYPE: Record<string, ObservationType | "GENERATION"> = {
+  chat: "GENERATION",
+  generate_content: "GENERATION",
+  text_completion: "GENERATION",
+  generate: "GENERATION",
+  embeddings: "EMBEDDING",
+  execute_tool: "TOOL",
+  invoke_agent: "AGENT",
+  create_agent: "AGENT",
+  invoke_workflow: "CHAIN",
+};
+
+// Genkit (genkit:metadata:subtype, from its ActionType union) → observation type. `evaluator`
+// is intentionally left unmapped: it's a quality-scoring step, not a pass/fail safety check
+// like GUARDRAIL, and there's no EVALUATOR type in this taxonomy — adding one is a bigger
+// cross-stack change (enum + Doris column + console filters) than this mapping warrants.
+const GENKIT_SUBTYPE_TO_TYPE: Record<string, ObservationType | "GENERATION"> = {
+  model: "GENERATION",
+  "background-model": "GENERATION",
+  embedder: "EMBEDDING",
+  tool: "TOOL",
+  "tool.v2": "TOOL",
+  retriever: "RETRIEVER",
+  reranker: "RERANKER",
+  agent: "AGENT",
+  "agent-snapshot": "AGENT",
+  flow: "CHAIN",
+};
+
+/**
+ * Classifies a span beyond the OpenInference check done inline in otlpToEvents (highest
+ * priority, checked by the caller first since it's the broadest-adopted, most explicit
+ * convention). Priority here: generic gen_ai.operation.name → gen_ai.tool.name fallback (e.g.
+ * Pydantic AI, which sets the tool attrs without an operation.name) → legacy Vercel AI SDK
+ * (pre-v7 ai.* namespace) → Genkit → LiveKit Agents span names (weakest signal, name-based,
+ * so checked last).
+ */
+function classifySpan(
+  attrs: Record<string, unknown>,
+  spanName: string | undefined,
+): ObservationType | "GENERATION" | undefined {
+  const genAiOp = str(attrs["gen_ai.operation.name"])?.toLowerCase();
+  if (genAiOp && GEN_AI_OP_TO_TYPE[genAiOp]) return GEN_AI_OP_TO_TYPE[genAiOp];
+  if (attrs["gen_ai.tool.name"] !== undefined || attrs["gen_ai.tool.call.id"] !== undefined) return "TOOL";
+
+  // Vercel AI SDK, pre-v7 (opt-in experimental_telemetry, ai.* namespace). Only the inner
+  // *.doGenerate/*.doStream/*.doEmbed child spans represent an actual model call — the outer
+  // ai.generateText/streamText/embed spans are orchestration wrappers that would double-count
+  // cost/tokens per call if classified too.
+  const aiOp = str(attrs["operation.name"] ?? attrs["ai.operationId"]);
+  if (aiOp?.endsWith(".doGenerate") || aiOp?.endsWith(".doStream")) return "GENERATION";
+  if (aiOp?.endsWith(".doEmbed")) return "EMBEDDING";
+  if (aiOp === "ai.toolCall") return "TOOL";
+
+  const genkitSubtype = str(attrs["genkit:metadata:subtype"])?.toLowerCase();
+  if (genkitSubtype && GENKIT_SUBTYPE_TO_TYPE[genkitSubtype]) return GENKIT_SUBTYPE_TO_TYPE[genkitSubtype];
+
+  // LiveKit Agents — span-name-based (weaker signal than an attribute, so lowest priority; a
+  // name collision with an unrelated span using the same name is possible and accepted).
+  if (spanName === "llm_request") return "GENERATION";
+  if (spanName === "function_tool") return "TOOL";
+  if (spanName === "start_agent_activity") return "AGENT";
+
+  return undefined;
+}
+
 export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
   const events: IngestEvent[] = [];
   const seenTraces = new Set<string>();
@@ -288,7 +385,24 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
           AGENT: "AGENT",
           GUARDRAIL: "GUARDRAIL",
         };
-        const isGen = oiKind === "LLM" || Object.keys(attrs).some((k) => k.startsWith("gen_ai."));
+        // Classify via OpenInference first (highest priority), else the broader chain (generic
+        // gen_ai.operation.name, Vercel AI SDK, Genkit, LiveKit — see classifySpan). Falling
+        // back to "any gen_ai.*-prefixed attribute present" would misclassify e.g. a Flue
+        // execute_tool span (which carries gen_ai.tool.name) as a generation — so the legacy
+        // signal below is scoped to actual model-call attributes, not any gen_ai.* key.
+        const classified: ObservationType | "GENERATION" | undefined =
+          oiKind === "LLM"
+            ? "GENERATION"
+            : oiKind && OI_TO_TYPE[oiKind]
+              ? OI_TO_TYPE[oiKind]
+              : classifySpan(attrs, span.name);
+        const legacyGenAiSignal =
+          attrs["gen_ai.usage.input_tokens"] !== undefined ||
+          attrs["gen_ai.usage.prompt_tokens"] !== undefined ||
+          attrs["gen_ai.request.model"] !== undefined ||
+          attrs["gen_ai.response.model"] !== undefined;
+        const isGen = classified === "GENERATION" || (classified === undefined && legacyGenAiSignal);
+        const observationType = classified && classified !== "GENERATION" ? classified : undefined;
         const level: "ERROR" | "DEFAULT" = span.status?.code === 2 ? "ERROR" : "DEFAULT";
         // MCP (Model Context Protocol) semconv: name the observation after the tool (for a
         // tools/call) or the method, so MCP calls are first-class in the waterfall AND land
@@ -329,17 +443,20 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
         };
 
         if (isGen) {
-          // Token/model/io fall back across OTLP GenAI (gen_ai.*) and OpenInference (llm.*).
+          // Token/model/io fall back across OTLP GenAI (gen_ai.*), OpenInference (llm.*), and
+          // legacy Vercel AI SDK pre-v7 (ai.*).
           const promptTokens = Number(
             attrs["gen_ai.usage.input_tokens"] ??
               attrs["gen_ai.usage.prompt_tokens"] ??
               attrs["llm.token_count.prompt"] ??
+              attrs["ai.usage.promptTokens"] ??
               0,
           );
           const completionTokens = Number(
             attrs["gen_ai.usage.output_tokens"] ??
               attrs["gen_ai.usage.completion_tokens"] ??
               attrs["llm.token_count.completion"] ??
+              attrs["ai.usage.completionTokens"] ??
               0,
           );
           events.push({
@@ -349,13 +466,18 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
             body: {
               ...base,
               model: String(
-                attrs["gen_ai.response.model"] ?? attrs["gen_ai.request.model"] ?? attrs["llm.model_name"] ?? "",
+                attrs["gen_ai.response.model"] ??
+                  attrs["gen_ai.request.model"] ??
+                  attrs["llm.model_name"] ??
+                  attrs["ai.model.id"] ??
+                  "",
               ),
               provider: String(
                 attrs["gen_ai.provider.name"] ??
                   attrs["gen_ai.system"] ??
                   attrs["llm.provider"] ??
                   attrs["llm.system"] ??
+                  attrs["ai.model.provider"] ??
                   "",
               ),
               modelParameters: modelParameters(attrs),
@@ -374,10 +496,9 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
             },
           });
         } else {
-          // Classify the span by its OpenInference kind (retriever/reranker/embedding/chain/
-          // tool/agent/guardrail); other kinds stay a plain SPAN. RETRIEVER spans also carry
-          // their retrieved documents (retrieval.documents.*) → structured retrieval_documents.
-          const observationType = oiKind ? OI_TO_TYPE[oiKind] : undefined;
+          // observationType is whatever classifySpan (or the OpenInference check above) landed
+          // on, when it's not GENERATION; other kinds stay a plain SPAN. RETRIEVER spans also
+          // carry their retrieved documents (retrieval.documents.*) → structured retrieval_documents.
           const retrievedDocuments = openInferenceDocs(attrs);
           events.push({
             id: newId(),
@@ -387,6 +508,41 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
               ...base,
               ...(observationType && { observationType }),
               ...(retrievedDocuments && { retrievedDocuments }),
+            },
+          });
+        }
+
+        // gen_ai.evaluation.result: the OTel GenAI semconv's way of reporting an eval score,
+        // carried as a span event (not a span attribute) on the span it's scoring.
+        for (const ev of span.events ?? []) {
+          if (ev.name !== "gen_ai.evaluation.result") continue;
+          const evAttrs: Record<string, unknown> = {};
+          for (const a of ev.attributes ?? []) evAttrs[a.key] = attrValue(a);
+          const evalName = str(evAttrs["gen_ai.evaluation.name"]);
+          const scoreValue = evAttrs["gen_ai.evaluation.score.value"];
+          const scoreLabel = str(evAttrs["gen_ai.evaluation.score.label"]);
+          const explanation = str(evAttrs["gen_ai.evaluation.explanation"]);
+          // Defensive: /v1/otel/v1/traces validates the whole mapped batch atomically, so a
+          // malformed eval event must be dropped here rather than 400 the entire export.
+          if (!evalName || (scoreValue === undefined && !scoreLabel)) continue;
+          const comment = scoreLabel && explanation ? `${scoreLabel}: ${explanation}` : (explanation ?? scoreLabel);
+          events.push({
+            id: newId(),
+            type: "score-create",
+            timestamp: nanoToIso(ev.timeUnixNano) ?? end ?? start,
+            body: {
+              id: newId(),
+              traceId: span.traceId,
+              // The event lives on the span it's scoring — use the span's own id, NOT
+              // gen_ai.response.id (a provider-side response id, a different namespace).
+              observationId: span.spanId,
+              name: evalName,
+              environment,
+              source: "EVAL",
+              ...(scoreValue !== undefined
+                ? { dataType: "NUMERIC" as const, value: Number(scoreValue) }
+                : { dataType: "CATEGORICAL" as const, stringValue: scoreLabel as string }),
+              ...(comment !== undefined && { comment }),
             },
           });
         }
