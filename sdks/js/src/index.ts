@@ -1,8 +1,8 @@
 export { Memoturn, MemoturnSpan, MemoturnTrace } from "./client.js";
 export type { DatasetHandle, DatasetItem, GateResult, GateThreshold } from "./dataset.js";
 export { addDatasetItems, createDataset, evaluateGate, getDataset } from "./dataset.js";
-export type { GuardrailFinding, GuardrailVerdict } from "./guardrails.js";
-export { checkGuardrails } from "./guardrails.js";
+export type { GuardrailFinding, GuardrailVerdict, OnGuardFailure, RunGuardedOptions } from "./guardrails.js";
+export { checkGuardrails, GuardrailBlockedError, runGuarded } from "./guardrails.js";
 export { MemoturnCallback } from "./langchain.js";
 export { wrapOpenAI } from "./openai.js";
 export type { CompiledPrompt } from "./prompt.js";

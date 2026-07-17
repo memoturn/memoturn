@@ -5,6 +5,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Memoturn, type MemoturnSpan, type MemoturnTrace } from "./client.js";
+import type { TraceInput } from "./types.js";
 
 interface ObserveContext {
   trace: MemoturnTrace;
@@ -25,6 +26,28 @@ export function configure(client: Memoturn): Memoturn {
 export function getClient(): Memoturn {
   defaultClient ??= new Memoturn();
   return defaultClient;
+}
+
+/**
+ * Update the current trace's userId/sessionId/tags/metadata from anywhere inside an active
+ * observe()-wrapped call stack — no need to hold a reference to the trace/span. Delegates to
+ * MemoturnTrace.update(), so it has the same patch semantics: fields you omit keep their
+ * previous value; tags/metadata are replaced wholesale, not merged.
+ *
+ * No-op (with a one-time console.warn) when called outside any active observe() context —
+ * there is no trace to stamp. This deliberately never throws, matching observe()'s own
+ * policy that observability plumbing must never break the caller's application logic.
+ *
+ * Scoped to observe()-context only: code using the manual .trace()/.span() API directly
+ * already holds a MemoturnTrace reference and should call trace.update(...) itself.
+ */
+export function setTraceContext(input: Pick<TraceInput, "userId" | "sessionId" | "tags" | "metadata">): void {
+  const ctx = storage.getStore();
+  if (!ctx) {
+    console.warn("memoturn: setTraceContext() called outside an active observe() context — ignored");
+    return;
+  }
+  ctx.trace.update(input);
 }
 
 /**
