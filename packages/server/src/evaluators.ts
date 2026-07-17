@@ -171,7 +171,31 @@ function parseJudge(text: string): { score: number; reasoning: string } {
   }
 }
 
-export async function runEvaluator(projectId: string, name: string, input: RunEvaluatorInput) {
+export interface JudgeInput {
+  input: unknown;
+  output: unknown;
+  expectedOutput?: unknown;
+}
+
+export interface JudgeResult {
+  evaluator: string;
+  score: number;
+  reasoning: string;
+}
+
+/**
+ * Run an evaluator's judge prompt and return {score, reasoning} — no telemetry write.
+ * Used by `runEvaluator` (which adds the score-write) and by synchronous guard checks
+ * (`runEvaluatorGuards` in guardrails.ts), which must NOT write a score per invocation:
+ * a guard check can run many times per request with no natural traceId, and writing one
+ * would pollute evaluator score analytics with call-count noise. Returns null when the
+ * named evaluator doesn't exist for the project.
+ */
+export async function judgeWithEvaluator(
+  projectId: string,
+  name: string,
+  input: JudgeInput,
+): Promise<JudgeResult | null> {
   const ev = await prisma.evaluator.findUnique({ where: { projectId_name: { projectId, name } } });
   if (!ev) return null;
 
@@ -195,6 +219,16 @@ export async function runEvaluator(projectId: string, name: string, input: RunEv
 
   // mock provider can't actually judge — synthesize a deterministic score for testing.
   const judged = ev.provider === "mock" ? { score: 1, reasoning: result.content } : parseJudge(result.content);
+  return { evaluator: ev.name, ...judged };
+}
+
+export async function runEvaluator(projectId: string, name: string, input: RunEvaluatorInput) {
+  const judged = await judgeWithEvaluator(projectId, name, {
+    input: input.input,
+    output: input.output,
+    expectedOutput: input.expectedOutput,
+  });
+  if (!judged) return null;
 
   // Write the score back through the ingest pipeline (lands in the telemetry store, source=EVAL).
   await submitBatch(projectId, {
@@ -206,7 +240,7 @@ export async function runEvaluator(projectId: string, name: string, input: RunEv
         body: {
           id: newId(),
           traceId: input.traceId,
-          name: ev.name,
+          name: judged.evaluator,
           value: judged.score,
           source: "EVAL",
           dataType: "NUMERIC",
@@ -217,5 +251,5 @@ export async function runEvaluator(projectId: string, name: string, input: RunEv
     ],
   });
 
-  return { evaluator: ev.name, traceId: input.traceId, ...judged };
+  return { evaluator: judged.evaluator, traceId: input.traceId, score: judged.score, reasoning: judged.reasoning };
 }

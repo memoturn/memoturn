@@ -293,18 +293,20 @@
     },
     "sdks/js": {
       "name": "@memoturn/sdk",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "devDependencies": {
         "@types/node": "^26.0.1",
         "typescript": "^6.0.3",
         "vitest": "^4.1.9",
       },
       "peerDependencies": {
+        "@anthropic-ai/sdk": ">=0.30",
         "@opentelemetry/exporter-trace-otlp-http": ">=0.50.0",
         "@opentelemetry/sdk-trace-base": ">=1.20.0",
         "openai": ">=4",
       },
       "optionalPeers": [
+        "@anthropic-ai/sdk",
         "@opentelemetry/exporter-trace-otlp-http",
         "@opentelemetry/sdk-trace-base",
         "openai",

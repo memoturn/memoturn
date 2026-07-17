@@ -386,6 +386,13 @@ export const maskingPolicy = z.object({
 export type MaskingPolicy = z.infer<typeof maskingPolicy>;
 
 // Runtime guardrails: the per-project policy config, and a single check's verdict.
+export const evaluatorGuard = z.object({
+  name: z.string(),
+  comparator: z.enum(["gt", "gte", "lt", "lte"]),
+  threshold: z.number(),
+});
+export type EvaluatorGuard = z.infer<typeof evaluatorGuard>;
+
 export const guardrailPolicy = z.object({
   enabled: z.boolean(),
   pii: z.boolean(),
@@ -395,6 +402,11 @@ export const guardrailPolicy = z.object({
   redactWith: z.string(),
   injection: z.boolean(),
   blockedTerms: z.array(z.string()),
+  sqlInjection: z.boolean(),
+  requireMatch: z.array(z.string()),
+  requireValidJson: z.boolean(),
+  requiredJsonKeys: z.array(z.string()),
+  evaluatorGuards: z.array(evaluatorGuard),
   available: z.array(z.string()),
 });
 export type GuardrailPolicy = z.infer<typeof guardrailPolicy>;
@@ -403,9 +415,10 @@ export const guardrailVerdict = z.object({
   verdict: z.enum(["allow", "redact", "block"]),
   findings: z.array(
     z.object({
-      category: z.enum(["pii", "injection", "blocked_term"]),
+      category: z.enum(["pii", "injection", "blocked_term", "sql_injection", "json_invalid", "evaluator"]),
       type: z.string(),
       count: z.number(),
+      score: z.number().optional(),
     }),
   ),
   redactedText: z.string().optional(),
