@@ -40,12 +40,12 @@ Call `await memoturn.flush()` to push the buffer immediately (e.g. per request i
 
 | Import | Exposes |
 | --- | --- |
-| `@memoturn/sdk` | `Memoturn` client + types, `wrapOpenAI`, `MemoturnCallback`, `getPrompt`/`compilePrompt`, datasets (`createDataset`, `addDatasetItems`, `getDataset`, `evaluateGate`), `checkGuardrails` |
+| `@memoturn/sdk` | `Memoturn` client + types, `wrapOpenAI`, `MemoturnCallback`, `getPrompt`/`compilePrompt`, datasets (`createDataset`, `addDatasetItems`, `getDataset`, `evaluateGate`), `checkGuardrails`, `runGuarded`, `GuardrailBlockedError` |
 | `@memoturn/sdk/openai` | `wrapOpenAI` |
 | `@memoturn/sdk/anthropic` | `wrapAnthropic` |
 | `@memoturn/sdk/langchain` | `MemoturnCallback` |
 | `@memoturn/sdk/otel` | `memoturnOtlpConfig`, `memoturnTraceExporter`, `memoturnSpanProcessor` |
-| `@memoturn/sdk/observe` | `observe`, `configure`, `getClient` — **Node-only**, not in the barrel |
+| `@memoturn/sdk/observe` | `observe`, `configure`, `getClient`, `setTraceContext` — **Node-only**, not in the barrel |
 | `@memoturn/sdk/prompt` / `/dataset` / `/guardrails` | The same prompt/dataset/guardrail helpers as standalone subpaths |
 
 ## Client options
@@ -106,9 +106,19 @@ const openai = wrapOpenAI(new OpenAI(), memoturn);
 // (model, params, usage, latency, output)
 await openai.chat.completions.create({ model: "gpt-4o", messages });
 await openai.responses.create({ model: "gpt-4o", input: "hi" });
+
+// Streaming is recorded too — chunks are still yielded to you in real time (no buffering);
+// content/tool-call deltas and the final usage chunk are accumulated into one generation.
+const stream = await openai.chat.completions.create({ model: "gpt-4o", messages, stream: true });
+for await (const chunk of stream) {
+  /* consume as usual */
+}
 ```
 
-Pass `{ trace }` to nest calls under an existing trace; otherwise each call gets its own.
+Pass `{ trace }` to nest calls under an existing trace; otherwise each call gets its own. Pass
+`{ streamTimeoutMs }` to override the idle-stream abandonment backstop (default 120s) — if the
+caller stops consuming a stream without a `break`/error (e.g. an unhandled promise), the
+generation is closed as `WARNING` once the stream goes idle that long.
 
 ## Anthropic wrapper
 
@@ -123,7 +133,11 @@ await anthropic.messages.create({ model: "claude-sonnet-4-5", max_tokens: 1024, 
 Records `messages.create` as a generation — model, allowlisted params (`max_tokens`,
 `temperature`, `top_p`, `top_k`, `stop_sequences`), the system prompt + messages as input,
 `result.content` as output, and usage including `cache_read_input_tokens` /
-`cache_creation_input_tokens`. Streaming calls (`stream: true`) pass through unrecorded.
+`cache_creation_input_tokens`. Streaming calls (`stream: true`) are recorded too: text,
+tool-use `input_json_delta`, and thinking/signature deltas are accumulated per content block
+(same shape as `result.content`) while every event is still yielded to the caller in real time
+— no buffering, no added latency. `{ streamTimeoutMs }` overrides the idle-stream abandonment
+backstop (default 120s).
 
 ## LangChain
 
@@ -157,6 +171,24 @@ const answer = observe(async function answer(question: string) {
 
 await answer("why is the sky blue?"); // trace "answer" with nested spans
 ```
+
+Call `setTraceContext` from anywhere inside an active `observe()` call stack to stamp
+`userId`/`sessionId`/`tags`/`metadata` on the current trace, without threading a trace/span
+reference through your call stack:
+
+```ts
+import { setTraceContext } from "@memoturn/sdk/observe";
+
+const answer = observe(async function answer(question: string, userId: string) {
+  setTraceContext({ userId, sessionId: currentSessionId() });
+  return callModel(question);
+});
+```
+
+It has the same patch semantics as `MemoturnTrace.update()` (fields you omit keep their
+previous value); it's a no-op with a `console.warn` outside any active `observe()` context, and
+never throws. Manual `.trace()`/`.span()` code already holds a trace handle and should call
+`trace.update(...)` directly instead.
 
 ## OpenTelemetry
 
@@ -240,6 +272,22 @@ const verdict = await checkGuardrails(creds, userInput);
 if (verdict.verdict === "block") throw new Error("input blocked by guardrails");
 const safeInput = verdict.verdict === "redact" ? verdict.redactedText : userInput;
 ```
+
+`runGuarded` wraps that check/block decision around a function call — compose two calls to
+guard both input and output:
+
+```ts
+import { GuardrailBlockedError, runGuarded } from "@memoturn/sdk";
+
+const safeInput = await runGuarded(() => userInput, { creds });
+const answer = await runGuarded(() => callModel(safeInput), { creds });
+```
+
+`onFailure` controls what happens on a "block" verdict — default `"raise"` throws
+`GuardrailBlockedError` (deliberately not swallowed by default: guardrails exist to block).
+Pass `"log"` to warn and return the original result, or `{ fallback: value | (verdict) => value }`
+for a substitute. A "redact" verdict is returned as-is — content substitution via
+`redactedText` stays the caller's/server's decision.
 
 ## License
 

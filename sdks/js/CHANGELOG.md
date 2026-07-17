@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Streaming capture for `wrapOpenAI` and `wrapAnthropic`: `stream: true` calls are now recorded as generations. Chunks/events are still yielded to the caller in real time (no buffering, no added latency) via a new internal `tapStream` helper, while content/tool-call/thinking deltas and the final usage are accumulated into the same output/usage shape as a non-streaming call. `stream_options.include_usage` is auto-injected for OpenAI chat completions when the caller didn't set one. A generation is closed as `WARNING` (not `ERROR`) when the caller stops consuming a stream early (`break`, or an idle-timeout backstop — default 120s, `{ streamTimeoutMs }`) instead of exhausting it. `wrapOpenAI` and `wrapAnthropic` both gained a `streamTimeoutMs` option.
+- `runGuarded` (+ `GuardrailBlockedError`, `OnGuardFailure`) in `@memoturn/sdk/guardrails` (also exported from the barrel): run a function, scan its resolved value with `checkGuardrails`, and apply block/pass semantics — default `onFailure: "raise"` throws `GuardrailBlockedError`, or opt into `"log"` / `{ fallback }`. Compose two calls to guard input and output separately.
+- `setTraceContext` in `@memoturn/sdk/observe`: update the current trace's `userId`/`sessionId`/`tags`/`metadata` from anywhere inside an active `observe()` call stack without holding a trace/span reference. No-op with a `console.warn` outside an active `observe()` context.
+
+### Fixes
+
+- `wrapAnthropic` no longer passes streaming calls through unrecorded (previous limitation, documented in 0.3.0).
+
 ## 0.3.0 — 2026-07-17
 
 ### Features

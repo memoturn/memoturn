@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Memoturn } from "./client.js";
-import { configure, getClient, observe } from "./observe.js";
+import { configure, getClient, observe, setTraceContext } from "./observe.js";
 import { mockFetch } from "./test-helpers.js";
 import type { IngestEnvelope } from "./types.js";
 
@@ -125,5 +125,77 @@ describe("observe", () => {
     const rootSpan = batch.find((e) => e.type === "span-create" && e.body.name === "root");
     const b = batch.find((e) => e.type === "span-create" && e.body.name === "stepB");
     expect(b?.body.parentObservationId).toBe(rootSpan?.body.id);
+  });
+
+  it("is importable from ./observe.js", () => {
+    expect(typeof setTraceContext).toBe("function");
+  });
+
+  it("setTraceContext updates the current trace from a nested observe() call", async () => {
+    const { client } = setup();
+    const inner = observe(
+      async () => {
+        setTraceContext({ sessionId: "s-42", userId: "u-9", tags: ["vip"] });
+        return "inner-done";
+      },
+      { name: "inner" },
+    );
+    const outer = observe(async () => inner(), { name: "outer" });
+
+    await outer();
+    await client.flush();
+
+    // observe()'s own root finish() enqueues one more trace-create ({ output }) after the
+    // inner call resolves, so "last" here means the last trace-create carrying the patch
+    // setTraceContext actually produced — not the literal last envelope in the batch.
+    const batch = batchFrom(active!);
+    const traceCreates = batch.filter((e) => e.type === "trace-create");
+    const setContextUpdate = traceCreates.find((e) => e.body.sessionId === "s-42");
+    expect(setContextUpdate?.body).toMatchObject({ sessionId: "s-42", userId: "u-9", tags: ["vip"] });
+    // It's not the very first (root-create) envelope, and the trace is the same one observe() opened.
+    expect(setContextUpdate?.body.id).toBe(traceCreates[0]?.body.id);
+    expect(setContextUpdate).not.toBe(traceCreates[0]);
+  });
+
+  it("two sequential setTraceContext calls don't clobber each other's fields", async () => {
+    const { client } = setup();
+    const root = observe(
+      async () => {
+        setTraceContext({ sessionId: "s-1" });
+        setTraceContext({ userId: "u-1" });
+        return "done";
+      },
+      { name: "root" },
+    );
+
+    await root();
+    await client.flush();
+
+    const batch = batchFrom(active!);
+    const traceId = batch.find((e) => e.type === "trace-create")?.body.id;
+    const traceEvents = batch.filter((e) => e.type === "trace-create" && e.body.id === traceId);
+    // root create + two independent setTraceContext patches + observe()'s own finish({ output }) update
+    expect(traceEvents).toHaveLength(4);
+
+    const sessionUpdate = traceEvents.find((e) => e.body.sessionId === "s-1");
+    const userUpdate = traceEvents.find((e) => e.body.userId === "u-1");
+    expect(sessionUpdate).toBeDefined();
+    expect(userUpdate).toBeDefined();
+    // Each call's patch carries only its own field — the second call didn't fold in (or drop) the first's.
+    expect(sessionUpdate?.body.userId).toBeUndefined();
+    expect(userUpdate?.body.sessionId).toBeUndefined();
+  });
+
+  it("setTraceContext outside an active observe() context is a no-op that warns and enqueues nothing", async () => {
+    const { client } = setup();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(() => setTraceContext({ sessionId: "s-1" })).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("setTraceContext"));
+
+    await client.flush();
+    expect(active!.calls).toHaveLength(0); // nothing buffered, nothing flushed
+
+    warn.mockRestore();
   });
 });
