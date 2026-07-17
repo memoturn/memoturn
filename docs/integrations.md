@@ -43,7 +43,16 @@ generation with model, params, usage, latency, and errors.
 - **JS:** `new MemoturnCallback(mt)` passed in `callbacks`.
 - **Python:** `MemoturnCallbackHandler()` passed in `config={"callbacks": [...]}`.
 
-Chains, LLM/chat calls, and tools are recorded as a nested trace tree.
+Chains, LLM/chat calls, and tools are recorded as a flat trace tree (one trace per
+handler, siblings — LangChain's `parent_run_id` isn't used for nesting).
+
+## LlamaIndex
+
+- **Python:** `MemoturnLlamaIndexHandler()` passed to `CallbackManager([...])`.
+
+Query/retrieve/synthesize/LLM/tool/agent steps are recorded as a properly nested
+trace tree (using LlamaIndex's own parent ids), including retrieved documents and
+embedding vectors, with one trace per top-level operation. Python only.
 
 ## LiteLLM
 

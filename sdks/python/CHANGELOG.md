@@ -25,6 +25,10 @@ All notable changes to the memoturn Python SDK.
   `tags`/`metadata` from anywhere inside an active `@observe` call stack, without
   threading a `Trace` handle through the call. No-op (with a warning) outside any
   `@observe` context.
+- `MemoturnLlamaIndexHandler`: LlamaIndex callback integration recording
+  query/retrieve/synthesize/LLM/tool/agent events with real parent/child nesting (via
+  LlamaIndex's own `parent_id`), including retrieved documents and embedding vectors.
+  Duck-typed, no llama-index dependency.
 
 ## 0.3.0 — 2026-07-17
 
