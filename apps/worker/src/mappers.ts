@@ -35,7 +35,7 @@ export interface MappedRows {
   embeddings: EmbeddingRow[];
 }
 
-const OBS_TYPE: Record<string, "SPAN" | "GENERATION" | "EVENT"> = {
+const OBS_TYPE: Record<string, "SPAN" | "GENERATION" | "EVENT" | "TOOL" | "AGENT"> = {
   "span-create": "SPAN",
   "span-update": "SPAN",
   "generation-create": "GENERATION",
@@ -62,7 +62,7 @@ export function mapEvents(
   const traceAcc = new Map<string, { body: Record<string, unknown>; event_ts: string }>();
   const obsAcc = new Map<
     string,
-    { body: Record<string, unknown>; type: "SPAN" | "GENERATION" | "EVENT"; event_ts: string }
+    { body: Record<string, unknown>; type: "SPAN" | "GENERATION" | "EVENT" | "TOOL" | "AGENT"; event_ts: string }
   >();
   const scoreRows: ScoreWriteRow[] = [];
 
@@ -90,7 +90,15 @@ export function mapEvents(
         event_ts: event.timestamp,
       });
     } else {
-      const type = OBS_TYPE[event.type]!;
+      // The body-level `observationType` override wins over the kind-derived default so a
+      // span/generation can be classified as TOOL or AGENT. When an update also carries it,
+      // it overwrites too (last-writer-wins, mirroring the field-merge semantics below).
+      const type = ((event.body as { observationType?: string }).observationType ?? OBS_TYPE[event.type]!) as
+        | "SPAN"
+        | "GENERATION"
+        | "EVENT"
+        | "TOOL"
+        | "AGENT";
       const id = (event.body as { id: string }).id;
       const existing = obsAcc.get(id) ?? { body: {}, type, event_ts: event.timestamp };
       assign(existing.body, event.body);

@@ -164,6 +164,9 @@ export interface TraceFilters {
   promptId?: string;
   scoreName?: string;
   level?: string;
+  type?: string;
+  /** JSON-encoded structured filter set (the power-path FilterBuilder); parsed server-side. */
+  filter?: string;
   days?: number;
 }
 export interface PlaygroundRequest {
@@ -207,6 +210,7 @@ export const api = {
       tag?: string;
       scoreName?: string;
       level?: string;
+      type?: string;
     } = {},
   ) => get<TraceFacets>(`/v1/traces/facets${qs(opts as Record<string, unknown>)}`),
   traceHistogram: (opts: TraceFilters = {}) =>

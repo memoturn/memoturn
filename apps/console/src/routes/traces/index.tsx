@@ -1,3 +1,4 @@
+import { filterState, type SingleFilter } from "@memoturn/contracts";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@memoturn/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -20,8 +21,9 @@ import {
 import { Fragment, type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "../../components/empty-state";
+import { FilterBuilder } from "../../components/filter-builder";
 import { HelpTip } from "../../components/help-tip";
-import { KindBadge } from "../../components/kind-badge";
+import { KindBadge, toneForKind } from "../../components/kind-badge";
 import { PageHeader } from "../../components/page-header";
 import { ScoreBadges } from "../../components/score-badges";
 import { StatTile } from "../../components/stat-tile";
@@ -54,6 +56,10 @@ interface TraceSearch {
   tag?: string;
   scoreName?: string;
   level?: string;
+  type?: string;
+  // JSON-encoded structured filter set (the power-path FilterBuilder). Kept as a string in the
+  // URL; decoded to SingleFilter[] for the builder and passed verbatim to the API as `filter`.
+  filter?: string;
   // Open trace id — drives the deep-linkable peek drawer, separate from filters.
   peek?: string;
   // Pagination (1-based). Defaults (page 1 / size 50) are kept out of the URL to keep it clean.
@@ -79,6 +85,8 @@ export const Route = createFileRoute("/traces/")({
     tag: str(s.tag),
     scoreName: str(s.scoreName),
     level: str(s.level),
+    type: str(s.type),
+    filter: str(s.filter),
     peek: str(s.peek),
     page: posInt(s.page),
     pageSize: posInt(s.pageSize),
@@ -309,15 +317,16 @@ type FacetProps = {
   tag?: string;
   scoreName?: string;
   level?: string;
-  onPick: (key: "environment" | "search" | "tag" | "scoreName" | "level", value: string) => void;
+  type?: string;
+  onPick: (key: "environment" | "search" | "tag" | "scoreName" | "level" | "type", value: string) => void;
 };
 
 /** The facet sections — shared by the desktop rail and the mobile Filters sheet. */
-function FacetSections({ days, environment, search, userId, tag, scoreName, level, onPick }: FacetProps) {
+function FacetSections({ days, environment, search, userId, tag, scoreName, level, type, onPick }: FacetProps) {
   // Counts are facet-excluding server-side; passing the active filters makes them narrow live.
   const { data } = useQuery({
-    queryKey: ["trace-facets", days, environment, search, userId, tag, scoreName, level],
-    queryFn: () => api.traceFacets({ days, limit: 25, environment, search, userId, tag, scoreName, level }),
+    queryKey: ["trace-facets", days, environment, search, userId, tag, scoreName, level, type],
+    queryFn: () => api.traceFacets({ days, limit: 25, environment, search, userId, tag, scoreName, level, type }),
     refetchInterval: 15_000,
     // Keep the current counts on screen while the next set loads — no skeleton flash on select.
     placeholderData: keepPreviousData,
@@ -330,6 +339,7 @@ function FacetSections({ days, environment, search, userId, tag, scoreName, leve
         active={environment}
         onPick={(v) => onPick("environment", v)}
       />
+      <FacetSection title="Type" items={data?.types} active={type} onPick={(v) => onPick("type", v)} />
       <FacetSection title="Level" items={data?.levels} active={level} onPick={(v) => onPick("level", v)} />
       <FacetSection title="Name" items={data?.names} active={search} onPick={(v) => onPick("search", v)} />
       <FacetSection title="Scores" items={data?.scores} active={scoreName} onPick={(v) => onPick("scoreName", v)} />
@@ -413,6 +423,21 @@ function TracesPage() {
     navigate({ search: (prev) => ({ ...prev, [key]: value || undefined, page: undefined }) });
   };
 
+  // Structured (power-path) filter set — stored JSON-encoded in the URL, re-validated on decode.
+  const filterSet = useMemo<SingleFilter[]>(() => {
+    if (!filters.filter) return [];
+    try {
+      const parsed = filterState.safeParse(JSON.parse(filters.filter));
+      return parsed.success ? parsed.data : [];
+    } catch {
+      return [];
+    }
+  }, [filters.filter]);
+  const setFilterSet = (next: SingleFilter[]) =>
+    navigate({
+      search: (prev) => ({ ...prev, filter: next.length ? JSON.stringify(next) : undefined, page: undefined }),
+    });
+
   // Per-column cell renderers — the table header/body iterate `visibleCols` in the persisted order.
   const cellContent: Record<ColKey, (t: TraceSummary) => ReactNode> = {
     timestamp: (t) => t.timestamp,
@@ -445,11 +470,18 @@ function TracesPage() {
   const setPageSize = (s: number) =>
     navigate({ search: (prev) => ({ ...prev, pageSize: s !== DEFAULT_PAGE_SIZE ? s : undefined, page: undefined }) });
   const hasFilters = Boolean(
-    filters.search || filters.environment || filters.userId || filters.tag || filters.scoreName || filters.level,
+    filters.search ||
+      filters.environment ||
+      filters.userId ||
+      filters.tag ||
+      filters.scoreName ||
+      filters.level ||
+      filters.type ||
+      filters.filter,
   );
 
   // Facet click toggles the matching filter (name facet maps to the `search`/name filter).
-  const pickFacet = (key: "environment" | "search" | "tag" | "scoreName" | "level", value: string) => {
+  const pickFacet = (key: "environment" | "search" | "tag" | "scoreName" | "level" | "type", value: string) => {
     const current = filters[key];
     setFilter(key, current === value ? "" : value);
   };
@@ -640,6 +672,7 @@ function TracesPage() {
                 tag={filters.tag}
                 scoreName={filters.scoreName}
                 level={filters.level}
+                type={filters.type}
                 onPick={pickFacet}
               />
             </div>
@@ -678,11 +711,46 @@ function TracesPage() {
             <KindBadge tone="amber">level: {filters.level} ✕</KindBadge>
           </button>
         )}
+        {filters.type && (
+          <button type="button" onClick={() => setFilter("type", "")} title="Clear type filter">
+            <KindBadge tone={toneForKind(filters.type)}>type: {filters.type} ✕</KindBadge>
+          </button>
+        )}
         {hasFilters && (
           <Button variant="ghost" size="sm" onClick={() => navigate({ search: {} })}>
             Clear
           </Button>
         )}
+      </div>
+
+      {/* Quick-filter presets — one-click level filters. Slow/Costly presets await the Phase 2
+          latency/cost filter builder (the current filter set has no numeric range fields). */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-muted-foreground">Quick filters:</span>
+        <Button
+          variant={filters.level === "ERROR" ? "secondary" : "outline"}
+          size="sm"
+          className="h-7"
+          onClick={() => setFilter("level", filters.level === "ERROR" ? "" : "ERROR")}
+        >
+          <KindBadge tone="red" className="border-0 bg-transparent px-0">
+            ●
+          </KindBadge>
+          Errors
+        </Button>
+        <Button
+          variant={filters.level === "WARNING" ? "secondary" : "outline"}
+          size="sm"
+          className="h-7"
+          onClick={() => setFilter("level", filters.level === "WARNING" ? "" : "WARNING")}
+        >
+          <KindBadge tone="amber" className="border-0 bg-transparent px-0">
+            ●
+          </KindBadge>
+          Warnings
+        </Button>
+        <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+        <FilterBuilder value={filterSet} onChange={setFilterSet} />
       </div>
 
       {savedViews && savedViews.length > 0 && (
@@ -770,6 +838,7 @@ function TracesPage() {
           tag={filters.tag}
           scoreName={filters.scoreName}
           level={filters.level}
+          type={filters.type}
           onPick={pickFacet}
         />
         <div className="min-w-0 flex-1 space-y-3">

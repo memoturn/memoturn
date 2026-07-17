@@ -5,6 +5,8 @@
  * them to whatever the underlying store expects.
  */
 
+import type { SingleFilter } from "@memoturn/contracts";
+
 // ── Write rows (produced by apps/worker mappers + score corrections) ─────────────
 
 export interface TraceRow {
@@ -29,7 +31,7 @@ export interface ObservationRow {
   id: string;
   trace_id: string;
   project_id: string;
-  type: "SPAN" | "GENERATION" | "EVENT";
+  type: "SPAN" | "GENERATION" | "EVENT" | "TOOL" | "AGENT";
   parent_observation_id: string;
   name: string;
   start_time: string;
@@ -138,8 +140,10 @@ export interface TraceFilters {
   promptId?: string; // trace has an observation that used this prompt (by prompt_id)
   scoreName?: string; // trace has a score with this name
   level?: string; // trace has an observation at this level (e.g. ERROR / WARNING)
+  type?: string; // trace has an observation of this type (SPAN/GENERATION/TOOL/AGENT/EVENT)
   days?: number; // only traces from the last N days
   traceIds?: string[]; // restrict to this explicit set of trace ids (e.g. hydrate similarity results)
+  filters?: SingleFilter[]; // structured operator-based filter set (the power-path filter builder)
 }
 
 /**

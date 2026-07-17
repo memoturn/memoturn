@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { TraceGraph } from "../features/trace-graph/TraceGraph";
 import {
   api,
   fetchOffloadedPayload,
@@ -359,6 +360,11 @@ interface Laid extends ObservationDetail {
   hiddenCount: number;
   /** True when an ERROR observation lives at or below this node (highlight the failing branch). */
   onFailedPath: boolean;
+  /** Cost/tokens summed over this node and all its descendants (for the collapsed-subtree rollup). */
+  subtreeCost: number;
+  subtreeTokens: number;
+  /** This node's duration as a fraction of the trace's slowest node (0–1) — drives latency heat. */
+  heatFrac: number;
 }
 
 /**
@@ -424,6 +430,28 @@ function layout(observations: ObservationDetail[], collapsed: Set<string>, faile
     return n;
   };
 
+  // Subtree cost/token rollups (node + all descendants) — shown on collapsed parents so a folded
+  // subgraph still reports its aggregate spend. Memoized post-order over the same child map.
+  const rollupCache = new Map<string, { cost: number; tokens: number }>();
+  const rollup = (id: string): { cost: number; tokens: number } => {
+    const cached = rollupCache.get(id);
+    if (cached) return cached;
+    const self = byId.get(id);
+    let cost = Number(self?.total_cost ?? 0);
+    let tokens = Number(self?.total_tokens ?? 0);
+    for (const k of children.get(id) ?? []) {
+      const r = rollup(k.id);
+      cost += r.cost;
+      tokens += r.tokens;
+    }
+    const r = { cost, tokens };
+    rollupCache.set(id, r);
+    return r;
+  };
+
+  // Heat is relative to the slowest single node so one long generation doesn't wash out the rest.
+  const maxLatency = Math.max(1, ...observations.map((o) => Number(o.latency_ms)));
+
   const out: Laid[] = [];
   const visited = new Set<string>();
   const place = (node: ObservationDetail, depth: number, ancestorContinues: boolean[], isLast: boolean) => {
@@ -449,6 +477,9 @@ function layout(observations: ObservationDetail[], collapsed: Set<string>, faile
       hasChildren: kids.length > 0,
       hiddenCount: isCollapsed ? descCount(node.id) : 0,
       onFailedPath: failed.has(node.id),
+      subtreeCost: rollup(node.id).cost,
+      subtreeTokens: rollup(node.id).tokens,
+      heatFrac: Number(node.latency_ms) / maxLatency,
     });
     if (isCollapsed) {
       // Mark the hidden subtree visited so the orphan safety-net below doesn't re-add
@@ -487,16 +518,62 @@ function collapsibleIds(observations: ObservationDetail[]): Set<string> {
   return parents;
 }
 
-/** Bar hues match the KindBadge tones (blue = generation, emerald = span, amber = event). */
+/** Bar hues match the KindBadge tones: generation=blue, span=emerald, tool=amber, agent=violet, event=slate. */
 function barColor(type: string): string {
   if (type === "GENERATION") return "bg-blue-500";
   if (type === "SPAN") return "bg-emerald-500";
-  return "bg-amber-500";
+  if (type === "TOOL") return "bg-amber-500";
+  if (type === "AGENT") return "bg-violet-500";
+  return "bg-slate-400";
 }
 
 /** Human duration: sub-second in ms, otherwise seconds (2 sig figs). */
 function fmtDuration(msVal: number): string {
   return msVal >= 1000 ? `${(msVal / 1000).toFixed(2)}s` : `${msVal} ms`;
+}
+
+/** Latency heat: the slowest nodes tint red, medium amber, everything else stays muted. */
+function heatTone(frac: number): string {
+  if (frac >= 0.66) return "text-destructive";
+  if (frac >= 0.33) return "text-amber-600 dark:text-amber-400";
+  return "text-muted-foreground";
+}
+
+/** Compact cost for subtree rollups: cents get 2 dp, sub-cent gets 4 dp, zero elides. */
+function fmtCostCompact(v: number): string {
+  if (v <= 0) return "$0";
+  return v >= 0.01 ? `$${v.toFixed(2)}` : `$${v.toFixed(4)}`;
+}
+
+/** Compact token count (21931 → 21.9k). */
+function fmtTokensCompact(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+/**
+ * Parse an observation's metadata JSON into a few scalar key/value chips (matching the tree's
+ * inline-annotation style). Skips nested/array/long values so the chip row stays scannable; note
+ * these are per-observation metadata, not scores (memoturn scores attach to the trace, not spans).
+ */
+function metaChips(metadata: string, limit = 3): [string, string][] {
+  if (!metadata || metadata === "{}") return [];
+  try {
+    const obj = JSON.parse(metadata) as unknown;
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return [];
+    const out: [string, string][] = [];
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      if (v == null) continue;
+      const t = typeof v;
+      if (t !== "string" && t !== "number" && t !== "boolean") continue;
+      const s = String(v);
+      if (s.length > 32) continue;
+      out.push([k, s]);
+      if (out.length >= limit) break;
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 const WATERFALL_COLS = "grid-cols-[minmax(220px,300px)_1fr_5.5rem]";
@@ -532,6 +609,8 @@ function WaterfallRow({
   onToggle?: () => void;
 }) {
   const collapsed = obs.hiddenCount > 0;
+  const chips = metaChips(obs.metadata);
+  const showRollup = collapsed && (obs.subtreeCost > 0 || obs.subtreeTokens > 0);
   // Errors/warnings tint the whole row so failures pop while scanning the waterfall.
   const tint =
     obs.level === "ERROR"
@@ -609,6 +688,27 @@ function WaterfallRow({
           )}
           {obs.level !== "DEFAULT" && <KindBadge tone={toneForLevel(obs.level)}>{obs.level.toLowerCase()}</KindBadge>}
         </div>
+        {/* Inline annotations: a Σ cost/token rollup for collapsed subtrees, plus a few scalar
+            metadata chips so per-span context is visible without opening the payload pane. */}
+        {(showRollup || chips.length > 0) && (
+          <div className="mt-1 flex flex-wrap items-center gap-1 pl-5">
+            {showRollup && (
+              <span className="rounded bg-muted px-1 text-[0.625rem] tabular-nums text-muted-foreground">
+                Σ {fmtCostCompact(obs.subtreeCost)} · {fmtTokensCompact(obs.subtreeTokens)} tok
+              </span>
+            )}
+            {chips.map(([k, v]) => (
+              <span
+                key={k}
+                className="inline-flex max-w-[11rem] items-center gap-1 rounded border border-border/60 bg-muted/40 px-1 text-[0.625rem] text-muted-foreground"
+                title={`${k}: ${v}`}
+              >
+                <span className="shrink-0 font-medium text-foreground/70">{k}</span>
+                <span className="truncate tabular-nums">{v}</span>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
       <div className="relative mr-4 h-7" title={`+${Math.round(obs.startOffsetMs)} ms → ${obs.latency_ms} ms`}>
         {/* Time gridlines at 25/50/75% — align with the bar coordinate space. */}
@@ -620,7 +720,9 @@ function WaterfallRow({
           style={{ left: `${obs.offsetPct}%`, width: `${obs.widthPct}%` }}
         />
       </div>
-      <span className="py-2 pr-3 text-right text-xs tabular-nums text-muted-foreground">
+      {/* Duration tinted by latency heat (relative to the trace's slowest node) so slow spans
+          jump out while scanning. ERROR rows keep their red regardless. */}
+      <span className={`py-2 pr-3 text-right text-xs tabular-nums ${heatTone(obs.heatFrac)}`}>
         {fmtDuration(obs.latency_ms)}
       </span>
     </div>
@@ -1295,6 +1397,8 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   // Collapsed subgraphs in the waterfall (by observation id).
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Observations view: the waterfall timeline (default) or the agent-flow graph.
+  const [obsView, setObsView] = useState<"timeline" | "graph">("timeline");
   const payloadPanelRef = useRef<HTMLDivElement | null>(null);
   const qc = useQueryClient();
   const readOnly = useIsReadOnly();
@@ -1369,6 +1473,7 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
 
   const payloadObs = visibleObservations(trace.observations);
   const payloadIds = new Set(payloadObs.map((o) => o.id));
+  const showGraph = obsView === "graph";
   // The detail pane defaults to the first failing observation (what you're usually here for),
   // else the first payload-bearing one. A stale selection from a previous trace falls back here.
   const effectiveSelected =
@@ -1590,11 +1695,31 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
             <CardHeader>
               <CardTitle>Observations ({trace.observation_count})</CardTitle>
               <CardDescription>
-                Execution timeline for this trace — select a row to inspect its payload.
-                {errorCount > 0 && " Branches leading to a failure are accented in red."}
+                {showGraph
+                  ? "Agent-flow graph derived from the observation tree — nodes are colored by type."
+                  : "Execution timeline for this trace — select a row to inspect its payload."}
+                {!showGraph && errorCount > 0 && " Branches leading to a failure are accented in red."}
               </CardDescription>
-              {collapsible.size > 0 && (
-                <CardAction>
+              <CardAction className="flex items-center gap-2">
+                <div className="flex items-center gap-0.5 rounded-md border p-0.5">
+                  <Button
+                    variant={obsView === "timeline" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => setObsView("timeline")}
+                  >
+                    Timeline
+                  </Button>
+                  <Button
+                    variant={obsView === "graph" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => setObsView("graph")}
+                  >
+                    Graph
+                  </Button>
+                </div>
+                {!showGraph && collapsible.size > 0 && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -1602,11 +1727,13 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
                   >
                     {allCollapsed ? "Expand all" : "Collapse all"}
                   </Button>
-                </CardAction>
-              )}
+                )}
+              </CardAction>
             </CardHeader>
-            <CardContent className="px-0">
-              {trace.observations.length === 0 ? (
+            <CardContent className={showGraph ? undefined : "px-0"}>
+              {showGraph ? (
+                <TraceGraph observations={trace.observations} />
+              ) : trace.observations.length === 0 ? (
                 <div className="px-6">
                   <EmptyState title="No observations." />
                 </div>

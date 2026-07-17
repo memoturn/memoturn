@@ -61,7 +61,7 @@ export class MemoturnCallback {
   }
 
   handleToolStart(tool: any, input: string, runId: string): void {
-    const span = this.ensureTrace().span({ name: tool?.name ?? "tool", input });
+    const span = this.ensureTrace().tool({ name: tool?.name ?? "tool", input });
     this.spans.set(runId, span);
   }
 

@@ -98,6 +98,14 @@ class Trace:
     def generation(self, **body: Any) -> "Span":
         return self._observe("generation-create", "generation", body)
 
+    def tool(self, **body: Any) -> "Span":
+        """A tool-call span (classified TOOL)."""
+        return self._observe("span-create", "span", {**body, "observationType": "TOOL"})
+
+    def agent(self, **body: Any) -> "Span":
+        """An agent-step span (classified AGENT)."""
+        return self._observe("span-create", "span", {**body, "observationType": "AGENT"})
+
     def event(self, **body: Any) -> None:
         self._c._enqueue(
             "event-create",
@@ -134,6 +142,14 @@ class Span:
 
     def generation(self, **body: Any) -> "Span":
         return self._child("generation-create", "generation", body)
+
+    def tool(self, **body: Any) -> "Span":
+        """Nested tool-call span (classified TOOL)."""
+        return self._child("span-create", "span", {**body, "observationType": "TOOL"})
+
+    def agent(self, **body: Any) -> "Span":
+        """Nested agent-step span (classified AGENT)."""
+        return self._child("span-create", "span", {**body, "observationType": "AGENT"})
 
     def _child(self, type_: str, kind: str, body: dict[str, Any]) -> "Span":
         oid = body.pop("id", None) or _id()

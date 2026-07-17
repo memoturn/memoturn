@@ -659,6 +659,18 @@ app.openapi(
   },
 );
 
+/** Parse the JSON-encoded structured filter param; undefined for absent/malformed/empty input
+ * (a bad filter set is ignored, never a 500). */
+function parseTraceFilter(raw: string | undefined): C.SingleFilter[] | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = C.filterState.safeParse(JSON.parse(raw));
+    return parsed.success && parsed.data.length > 0 ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // ── Read: list + get traces ──────────────────────────────────────────────────────
 app.openapi(
   createRoute({
@@ -680,6 +692,9 @@ app.openapi(
         promptId: z.string().optional(),
         scoreName: z.string().optional(),
         level: z.string().optional(),
+        type: z.string().optional(),
+        // Structured operator-based filter set (the power-path builder), JSON-encoded.
+        filter: z.string().optional(),
         days: z.coerce.number().int().min(1).max(365).optional(),
       }),
     },
@@ -688,12 +703,28 @@ app.openapi(
     },
   }),
   async (c) => {
-    const { limit, page, pageSize, userId, sessionId, environment, search, tag, promptId, scoreName, level, days } =
-      c.req.valid("query");
+    const {
+      limit,
+      page,
+      pageSize,
+      userId,
+      sessionId,
+      environment,
+      search,
+      tag,
+      promptId,
+      scoreName,
+      level,
+      type,
+      filter,
+      days,
+    } = c.req.valid("query");
     // `page`/`pageSize` drive pagination; `limit` stays as a legacy single-page cap (e.g. session view).
     const size = pageSize ?? limit ?? 50;
     const offset = page ? (page - 1) * size : 0;
-    const base = { userId, sessionId, environment, search, tag, promptId, scoreName, level, days };
+    // Parse the JSON filter param defensively — a malformed set is ignored, never a 500.
+    const filters = parseTraceFilter(filter);
+    const base = { userId, sessionId, environment, search, tag, promptId, scoreName, level, type, filters, days };
     const [data, total] = await Promise.all([
       listTraces(c.get("projectId"), { ...base, limit: size, offset }),
       countTraces(c.get("projectId"), base),
@@ -732,6 +763,7 @@ app.openapi(
         tag: z.string().optional(),
         scoreName: z.string().optional(),
         level: z.string().optional(),
+        type: z.string().optional(),
       }),
     },
     responses: {
@@ -739,7 +771,7 @@ app.openapi(
     },
   }),
   async (c) => {
-    const { days, limit, environment, search, userId, tag, scoreName, level } = c.req.valid("query");
+    const { days, limit, environment, search, userId, tag, scoreName, level, type } = c.req.valid("query");
     const data = await traceFacets(c.get("projectId"), {
       days,
       limit,
@@ -749,6 +781,7 @@ app.openapi(
       tag,
       scoreName,
       level,
+      type,
     });
     return c.json(data);
   },
@@ -771,6 +804,7 @@ app.openapi(
         tag: z.string().optional(),
         scoreName: z.string().optional(),
         level: z.string().optional(),
+        type: z.string().optional(),
       }),
     },
     responses: {
@@ -778,7 +812,7 @@ app.openapi(
     },
   }),
   async (c) => {
-    const { days, environment, search, userId, tag, scoreName, level } = c.req.valid("query");
+    const { days, environment, search, userId, tag, scoreName, level, type } = c.req.valid("query");
     const data = await traceHistogram(c.get("projectId"), {
       days,
       environment,
@@ -787,6 +821,7 @@ app.openapi(
       tag,
       scoreName,
       level,
+      type,
     });
     return c.json(data);
   },

@@ -139,6 +139,16 @@ export class MemoturnTrace {
     return new MemoturnSpan(this.client, this.id, id, this.environment, "generation");
   }
 
+  /** A tool-call span (classified TOOL). */
+  tool(input: SpanInput = {}): MemoturnSpan {
+    return this.span({ ...input, observationType: "TOOL" });
+  }
+
+  /** An agent-step span (classified AGENT). */
+  agent(input: SpanInput = {}): MemoturnSpan {
+    return this.span({ ...input, observationType: "AGENT" });
+  }
+
   event(input: SpanInput = {}): void {
     this.client.enqueue({
       id: uuid(),
@@ -185,6 +195,16 @@ export class MemoturnSpan {
       },
     });
     return new MemoturnSpan(this.client, this.traceId, id, this.environment, "span");
+  }
+
+  /** Nested tool-call span (classified TOOL). */
+  tool(input: SpanInput = {}): MemoturnSpan {
+    return this.span({ ...input, observationType: "TOOL" });
+  }
+
+  /** Nested agent-step span (classified AGENT). */
+  agent(input: SpanInput = {}): MemoturnSpan {
+    return this.span({ ...input, observationType: "AGENT" });
   }
 
   /** Update + close the observation. Pass `output` and (for generations) `usage`. */
