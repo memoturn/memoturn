@@ -2,7 +2,9 @@
 
 Stdlib-only (no required dependencies). Install with `pip install memoturn` or
 `uv add memoturn`. Configure via constructor or `MEMOTURN_BASE_URL` /
-`MEMOTURN_PUBLIC_KEY` / `MEMOTURN_SECRET_KEY`.
+`MEMOTURN_PUBLIC_KEY` / `MEMOTURN_SECRET_KEY` / `MEMOTURN_ENVIRONMENT` /
+`MEMOTURN_MAX_BUFFER_SIZE` (buffered-event cap, default 10000) /
+`MEMOTURN_ALLOW_HTTP` (suppress the cleartext-http warning for non-local hosts).
 
 ## `@observe` decorator
 
