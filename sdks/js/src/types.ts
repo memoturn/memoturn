@@ -104,6 +104,18 @@ export interface IngestEnvelope {
   body: Record<string, unknown>;
 }
 
+/**
+ * Redact or transform a value before it is buffered for ingest. Applied to the
+ * `input`, `output`, and `metadata` fields of every event body — including events
+ * produced by the OpenAI wrapper and LangChain callback. If the function throws,
+ * the value is replaced with a sentinel string; the event is never dropped and the
+ * unmasked value is never sent.
+ */
+export type MaskFunction = (
+  value: unknown,
+  ctx: { field: "input" | "output" | "metadata"; type: IngestEnvelope["type"] },
+) => unknown;
+
 export interface MemoturnOptions {
   baseUrl?: string;
   publicKey?: string;
@@ -113,4 +125,16 @@ export interface MemoturnOptions {
   flushAt?: number;
   /** Flush at least this often (ms). Default 5000. */
   flushInterval?: number;
+  /** Hard cap on buffered events; incoming events are dropped (with a one-time
+   * warning) once reached. Default 10000, or `MEMOTURN_MAX_BUFFER_SIZE`. */
+  maxBufferSize?: number;
+  /** Per-request timeout (ms) for ingest calls. Default 10000. */
+  requestTimeout?: number;
+  /** Flush buffered events on Node `beforeExit`. Default true (no-op outside Node). */
+  flushOnExit?: boolean;
+  /** Suppress the cleartext-http warning for non-local `http://` base URLs
+   * (or set `MEMOTURN_ALLOW_HTTP=1`). */
+  allowInsecureHttp?: boolean;
+  /** Redaction hook applied to input/output/metadata of every event before buffering. */
+  mask?: MaskFunction;
 }

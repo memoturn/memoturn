@@ -1,9 +1,15 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Memoturn } from "./client.js";
 import { decodeBasic, mockFetch } from "./test-helpers.js";
 import type { IngestEnvelope } from "./types.js";
 
-const creds = { baseUrl: "http://api.test", publicKey: "pk-mt-x", secretKey: "sk-mt-y", flushAt: 1000 };
+const creds = {
+  baseUrl: "http://api.test",
+  publicKey: "pk-mt-x",
+  secretKey: "sk-mt-y",
+  flushAt: 1000,
+  allowInsecureHttp: true,
+};
 
 let active: ReturnType<typeof mockFetch> | undefined;
 afterEach(() => {
@@ -174,5 +180,155 @@ describe("shutdown", () => {
     client.trace();
     await client.shutdown();
     expect(m.calls).toHaveLength(1);
+  });
+});
+
+describe("transport hardening", () => {
+  it("drops the batch and throws on a permanent 4xx instead of retrying forever", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    setup(() => ({ status: 401, text: "unauthorized" }));
+    const client = new Memoturn(creds);
+    client.trace();
+    await expect(client.flush()).rejects.toThrow(/rejected: 401/);
+    expect(err).toHaveBeenCalledWith(expect.stringContaining("dropping 1 event(s)"));
+    active?.restore();
+    const ok = setup(() => ({ status: 207 }));
+    await client.flush(); // batch was dropped, not re-buffered -> no request
+    expect(ok.calls).toHaveLength(0);
+    err.mockRestore();
+  });
+
+  it("re-buffers on 429 backpressure and retries on the next flush", async () => {
+    setup(() => ({ status: 429, text: "slow down" }));
+    const client = new Memoturn(creds);
+    client.trace();
+    await expect(client.flush()).rejects.toThrow(/failed: 429/);
+    active?.restore();
+    const ok = setup(() => ({ status: 207 }));
+    await client.flush();
+    expect(ok.calls).toHaveLength(1);
+    expect((ok.calls[0].body as { batch: unknown[] }).batch).toHaveLength(1);
+  });
+
+  it("re-buffers when fetch itself rejects (network error), losing nothing", async () => {
+    const original = global.fetch;
+    global.fetch = (() => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch;
+    const client = new Memoturn(creds);
+    client.trace();
+    await expect(client.flush()).rejects.toThrow(/ECONNREFUSED/);
+    global.fetch = original;
+    const ok = setup(() => ({ status: 207 }));
+    await client.flush();
+    expect(ok.calls).toHaveLength(1);
+  });
+
+  it("truncates long server error bodies in thrown errors", async () => {
+    setup(() => ({ status: 500, text: "x".repeat(1000) }));
+    const client = new Memoturn(creds);
+    client.trace();
+    const err = await client.flush().then(
+      () => null,
+      (e: Error) => e,
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect(String(err?.message).length).toBeLessThan(300);
+  });
+
+  it("caps the buffer at maxBufferSize, dropping new events with a warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const m = setup(() => ({ status: 207 }));
+    const client = new Memoturn({ ...creds, maxBufferSize: 2 });
+    client.trace();
+    client.trace();
+    client.trace(); // third is dropped
+    await client.flush();
+    expect(batchFrom(m)).toHaveLength(2);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("buffer full"));
+    warn.mockRestore();
+  });
+});
+
+describe("mask hook", () => {
+  it("applies the mask to input/output/metadata before buffering", async () => {
+    const m = setup();
+    const client = new Memoturn({
+      ...creds,
+      mask: (value, ctx) => (ctx.field === "input" ? "[masked]" : value),
+    });
+    client.trace({ input: { ssn: "123-45-6789" }, output: { ok: true } });
+    await client.flush();
+    const [ev] = batchFrom(m);
+    expect(ev.body.input).toBe("[masked]");
+    expect(ev.body.output).toEqual({ ok: true });
+  });
+
+  it("covers child observations created via trace handles", async () => {
+    const m = setup();
+    const client = new Memoturn({ ...creds, mask: () => "[masked]" });
+    const trace = client.trace();
+    trace.generation({ name: "llm", input: [{ role: "user", content: "secret" }] });
+    await client.flush();
+    const gen = batchFrom(m).find((e) => e.type === "generation-create");
+    expect(gen?.body.input).toBe("[masked]");
+  });
+
+  it("replaces the value with a sentinel when the mask throws — never the raw value", async () => {
+    const m = setup();
+    const client = new Memoturn({
+      ...creds,
+      mask: () => {
+        throw new Error("mask bug");
+      },
+    });
+    client.trace({ input: "raw secret" });
+    await client.flush();
+    expect(batchFrom(m)[0].body.input).toBe("<memoturn: mask error>");
+  });
+});
+
+describe("environment resolution", () => {
+  it("child observations inherit the per-trace environment, not the client default", async () => {
+    const m = setup();
+    const client = new Memoturn({ ...creds, environment: "default" });
+    const trace = client.trace({ environment: "prod" });
+    trace.span({ name: "child" });
+    trace.score({ name: "quality", value: 1 });
+    await client.flush();
+    const batch = batchFrom(m);
+    const span = batch.find((e) => e.type === "span-create");
+    const score = batch.find((e) => e.type === "score-create");
+    expect(span?.body.environment).toBe("prod");
+    expect(score?.body.environment).toBe("prod");
+  });
+});
+
+describe("construction warnings", () => {
+  it("warns once when API keys go to a non-local http host", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    new Memoturn({ ...creds, baseUrl: "http://prod-collector.example:9999", allowInsecureHttp: false });
+    new Memoturn({ ...creds, baseUrl: "http://prod-collector.example:9999", allowInsecureHttp: false });
+    const insecure = warn.mock.calls.filter(([msg]) => String(msg).includes("cleartext http"));
+    expect(insecure).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it("does not warn for localhost or when allowInsecureHttp is set", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    new Memoturn({ ...creds, baseUrl: "http://localhost:3001" });
+    new Memoturn({ ...creds, baseUrl: "http://another-host.example:9999" }); // allowInsecureHttp via creds
+    expect(warn.mock.calls.filter(([msg]) => String(msg).includes("cleartext http"))).toHaveLength(0);
+    warn.mockRestore();
+  });
+
+  it("warns when no API keys are configured", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const saved = { pk: process.env.MEMOTURN_PUBLIC_KEY, sk: process.env.MEMOTURN_SECRET_KEY };
+    delete process.env.MEMOTURN_PUBLIC_KEY;
+    delete process.env.MEMOTURN_SECRET_KEY;
+    new Memoturn({ baseUrl: "http://localhost:3001" });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("no API keys"));
+    if (saved.pk) process.env.MEMOTURN_PUBLIC_KEY = saved.pk;
+    if (saved.sk) process.env.MEMOTURN_SECRET_KEY = saved.sk;
+    warn.mockRestore();
   });
 });
