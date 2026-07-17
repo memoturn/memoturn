@@ -225,6 +225,37 @@ function modelParameters(attrs: Record<string, unknown>): Record<string, unknown
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+// OpenInference flattens retrieved docs as `retrieval.documents.{i}.document.{content|score|id|
+// metadata}` attributes. Regroup them by index into memoturn's structured retrieval documents
+// (rank = list position), so a RETRIEVER span renders its ranked docs + relevance in the UI.
+const OI_DOC_RE = /^retrieval\.documents\.(\d+)\.document\.(content|score|id|metadata)$/;
+function openInferenceDocs(
+  attrs: Record<string, unknown>,
+): { rank: number; content: string; score?: number; id?: string; metadata?: unknown }[] | undefined {
+  const byIdx = new Map<number, { content?: string; score?: number; id?: string; metadata?: unknown }>();
+  for (const [k, v] of Object.entries(attrs)) {
+    const m = OI_DOC_RE.exec(k);
+    if (!m) continue;
+    const idx = Number(m[1]);
+    const d = byIdx.get(idx) ?? {};
+    if (m[2] === "content") d.content = String(v);
+    else if (m[2] === "score") d.score = Number(v);
+    else if (m[2] === "id") d.id = str(v);
+    else d.metadata = v;
+    byIdx.set(idx, d);
+  }
+  if (byIdx.size === 0) return undefined;
+  return [...byIdx.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([rank, d]) => ({
+      rank,
+      content: d.content ?? "",
+      ...(d.score !== undefined && !Number.isNaN(d.score) && { score: d.score }),
+      ...(d.id && { id: d.id }),
+      ...(d.metadata !== undefined && { metadata: d.metadata }),
+    }));
+}
+
 export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
   const events: IngestEvent[] = [];
   const seenTraces = new Set<string>();
@@ -344,13 +375,19 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
           });
         } else {
           // Classify the span by its OpenInference kind (retriever/reranker/embedding/chain/
-          // tool/agent/guardrail); other kinds stay a plain SPAN.
+          // tool/agent/guardrail); other kinds stay a plain SPAN. RETRIEVER spans also carry
+          // their retrieved documents (retrieval.documents.*) → structured retrieval_documents.
           const observationType = oiKind ? OI_TO_TYPE[oiKind] : undefined;
+          const retrievedDocuments = openInferenceDocs(attrs);
           events.push({
             id: newId(),
             type: "span-create",
             timestamp: end ?? start,
-            body: observationType ? { ...base, observationType } : base,
+            body: {
+              ...base,
+              ...(observationType && { observationType }),
+              ...(retrievedDocuments && { retrievedDocuments }),
+            },
           });
         }
       }
