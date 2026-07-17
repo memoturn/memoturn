@@ -289,7 +289,12 @@ export const api = {
   cancelExperiment: (id: string) =>
     post<{ id: string; status: string }>(`/v1/experiments/${encodeURIComponent(id)}/cancel`, {}),
   playgroundChat: (body: PlaygroundRequest) => post<PlaygroundResponse>(`/v1/playground/chat`, body),
-  assistantChat: (body: { provider: string; model: string; messages: { role: string; content: string }[] }) =>
+  assistantChat: (body: {
+    provider: string;
+    model: string;
+    messages: { role: string; content: string }[];
+    context?: { organization?: string; project?: string; page?: string; rangeDays?: number };
+  }) =>
     post<{ content: string; steps: { tool: string; args: unknown; result: unknown }[] }>(`/v1/assistant/chat`, body),
   listProviders: () => get<{ data: ProviderConnection[] }>(`/v1/providers`).then((r) => r.data),
   addProvider: (body: { provider: string; apiKey?: string; baseUrl?: string; region?: string }) =>
@@ -469,6 +474,52 @@ export const api = {
   skipReviewItem: (name: string, itemId: string) =>
     post(`/v1/review-queues/${encodeURIComponent(name)}/items/${encodeURIComponent(itemId)}/skip`, {}),
 };
+
+/** Stream an assistant conversation (SSE): tool steps as they execute, then answer deltas. */
+export async function streamAssistant(
+  body: {
+    provider: string;
+    model: string;
+    messages: { role: string; content: string }[];
+    context?: { organization?: string; project?: string; page?: string; rangeDays?: number };
+  },
+  handlers: {
+    onDelta: (delta: string) => void;
+    onStep: (step: { tool: string; args: unknown; result: unknown }) => void;
+  },
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/v1/assistant/stream`, {
+    method: "POST",
+    headers: headers({ "content-type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) throw new Error(`stream failed: ${res.status}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() ?? "";
+    for (const part of parts) {
+      const line = part.split("\n").find((l) => l.startsWith("data:"));
+      if (!line) continue;
+      const data = line.slice(5).trim();
+      if (data === "[DONE]") return;
+      let parsed: { delta?: string; step?: { tool: string; args: unknown; result: unknown }; error?: string };
+      try {
+        parsed = JSON.parse(data);
+      } catch {
+        continue; // non-JSON keepalive
+      }
+      if (parsed.error) throw new Error(parsed.error);
+      if (parsed.delta) handlers.onDelta(parsed.delta);
+      if (parsed.step) handlers.onStep(parsed.step);
+    }
+  }
+}
 
 /** Stream a playground completion (SSE), invoking onDelta for each text chunk. */
 export async function streamPlayground(body: PlaygroundRequest, onDelta: (delta: string) => void): Promise<void> {

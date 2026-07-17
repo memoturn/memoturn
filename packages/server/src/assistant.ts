@@ -1,4 +1,11 @@
-import { type ChatMessage, generate, type ToolDef as LlmToolDef, type Provider } from "@memoturn/llm";
+import {
+  type ChatMessage,
+  generate,
+  generateStream,
+  generateStreamWithTools,
+  type ToolDef as LlmToolDef,
+  type Provider,
+} from "@memoturn/llm";
 import { tools as mcpTools } from "./mcp-tools.js";
 import { resolveProviderConfig } from "./providers.js";
 
@@ -21,11 +28,38 @@ const SYSTEM_PROMPT = `You are memoturn's in-app assistant. You help an engineer
 const MAX_ITERATIONS = 6;
 const MAX_RESULT_CHARS = 4000; // cap each tool result fed back into the context
 
+/** Where the user currently is in the console — sent by the client, woven into the system prompt. */
+export interface AssistantContext {
+  organization?: string;
+  project?: string;
+  /** Console route the user is looking at, e.g. "/traces/tr_abc123". */
+  page?: string;
+  /** The console's global time-range selector, in days. */
+  rangeDays?: number;
+}
+
+export function buildContextBlock(ctx?: AssistantContext): string {
+  const parts = [`Current UTC time: ${new Date().toISOString()}.`];
+  if (ctx?.organization) parts.push(`Organization (workspace): ${JSON.stringify(ctx.organization)}.`);
+  if (ctx?.project)
+    parts.push(`Project: ${JSON.stringify(ctx.project)} — every tool is already scoped to this project.`);
+  if (ctx?.page)
+    parts.push(
+      `The user is currently viewing the console page "${ctx.page}". If that path embeds an entity id (e.g. /traces/<traceId>), questions like "this trace" refer to it — fetch it with the matching tool.`,
+    );
+  if (ctx?.rangeDays)
+    parts.push(
+      `The console's selected time range is the last ${ctx.rangeDays} day(s) — default to that window unless the user asks for another.`,
+    );
+  return `\n\nContext:\n${parts.map((p) => `- ${p}`).join("\n")}`;
+}
+
 export interface AssistantInput {
   provider: Provider;
   model: string;
   /** Conversation so far (user/assistant turns); the system prompt is prepended here. */
   messages: ChatMessage[];
+  context?: AssistantContext;
 }
 export interface AssistantStep {
   tool: string;
@@ -68,7 +102,10 @@ export async function runAssistant(projectId: string, input: AssistantInput): Pr
     description: t.description,
     parameters: t.inputSchema,
   }));
-  const messages: ChatMessage[] = [{ role: "system", content: SYSTEM_PROMPT }, ...input.messages];
+  const messages: ChatMessage[] = [
+    { role: "system", content: SYSTEM_PROMPT + buildContextBlock(input.context) },
+    ...input.messages,
+  ];
   const steps: AssistantStep[] = [];
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
@@ -110,4 +147,71 @@ export async function runAssistant(projectId: string, input: AssistantInput): Pr
   // Iteration cap hit — one final call WITHOUT tools to force a synthesized answer.
   const final = await generate({ provider: input.provider, model: input.model, messages, ...config });
   return { content: final.content, steps };
+}
+
+export type AssistantStreamEvent = { type: "delta"; delta: string } | { type: "step"; step: AssistantStep };
+
+/**
+ * Streaming variant of `runAssistant`: the same bounded agentic loop, but each executed tool
+ * call is emitted as a `step` event the moment it finishes, and answer text streams out as
+ * `delta` events (including any narration the model produces before calling tools). The
+ * event stream ends when the final answer is fully streamed.
+ */
+export async function* runAssistantStream(
+  projectId: string,
+  input: AssistantInput,
+): AsyncGenerator<AssistantStreamEvent> {
+  const config = await resolveProviderConfig(projectId, input.provider);
+  const llmTools: LlmToolDef[] = READ_TOOLS.map((t) => ({
+    name: t.name,
+    description: t.description,
+    parameters: t.inputSchema,
+  }));
+  const messages: ChatMessage[] = [
+    { role: "system", content: SYSTEM_PROMPT + buildContextBlock(input.context) },
+    ...input.messages,
+  ];
+
+  for (let i = 0; i < MAX_ITERATIONS; i++) {
+    let calls: ToolCall[] | null = null;
+    for await (const ev of generateStreamWithTools({
+      provider: input.provider,
+      model: input.model,
+      messages,
+      tools: llmTools,
+      ...config,
+    })) {
+      if (ev.type === "delta") yield { type: "delta", delta: ev.text };
+      else calls = ev.calls;
+    }
+    if (!calls || calls.length === 0) return; // final answer — fully streamed above
+
+    const summaries: string[] = [];
+    for (const call of calls) {
+      const tool = READ_TOOLS.find((t) => t.name === call.tool);
+      let out: unknown;
+      if (!tool) {
+        out = { error: `unknown or non-readable tool: ${call.tool}` };
+      } else {
+        try {
+          out = await tool.handler(projectId, call.arguments ?? {});
+        } catch (e) {
+          out = { error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+      yield { type: "step", step: { tool: call.tool, args: call.arguments ?? {}, result: out } };
+      summaries.push(`Tool ${call.tool} returned:\n${truncate(JSON.stringify(out))}`);
+    }
+    // Thread the tool-call turn + results back exactly like the non-streaming loop.
+    messages.push({ role: "assistant", content: JSON.stringify(calls) });
+    messages.push({
+      role: "user",
+      content: `${summaries.join("\n\n")}\n\nUse these results to answer the question, or call more tools if needed.`,
+    });
+  }
+
+  // Iteration cap hit — one final streamed call WITHOUT tools to force a synthesized answer.
+  for await (const delta of generateStream({ provider: input.provider, model: input.model, messages, ...config })) {
+    yield { type: "delta", delta };
+  }
 }

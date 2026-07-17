@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseToolCalls } from "./assistant.js";
+import { buildContextBlock, parseToolCalls } from "./assistant.js";
 
 describe("parseToolCalls", () => {
   it("parses a gateway tool-call array", () => {
@@ -20,5 +20,25 @@ describe("parseToolCalls", () => {
     expect(parseToolCalls(JSON.stringify({ answer: "hi" }))).toBeNull();
     expect(parseToolCalls(JSON.stringify([{ notATool: 1 }]))).toBeNull();
     expect(parseToolCalls(JSON.stringify([]))).toBeNull();
+  });
+});
+
+describe("buildContextBlock", () => {
+  it("includes org, project, page, and time range when provided", () => {
+    const block = buildContextBlock({
+      organization: "Acme Inc",
+      project: "Default Project",
+      page: "/traces/tr_abc123",
+      rangeDays: 7,
+    });
+    expect(block).toContain('"Acme Inc"');
+    expect(block).toContain('"Default Project"');
+    expect(block).toContain("/traces/tr_abc123");
+    expect(block).toContain("last 7 day(s)");
+  });
+
+  it("always stamps the current time, even with no context", () => {
+    expect(buildContextBlock()).toMatch(/Current UTC time: \d{4}-\d{2}-\d{2}T/);
+    expect(buildContextBlock()).not.toContain("Project:");
   });
 });

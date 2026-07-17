@@ -163,6 +163,64 @@ export async function generate(input: GenerateInput): Promise<GenerateResult> {
   return { provider, model, content: result.text, usage: usageOf(result.usage, promptText, result.text) };
 }
 
+/** A tool invocation requested by the model (streaming tool path). */
+export interface ToolCallRequest {
+  tool: string;
+  arguments: Record<string, unknown>;
+}
+
+export type StreamEvent = { type: "delta"; text: string } | { type: "tool_calls"; calls: ToolCallRequest[] };
+
+/**
+ * Streaming variant with tool support — yields text deltas as they arrive and, if the turn
+ * ends in tool calls, a final `tool_calls` event. Models may narrate before calling tools;
+ * that narration streams out as deltas. Mock: with tools it requests the first tool
+ * (deterministic, mirrors `generate`); without, it streams the canned reply word by word.
+ */
+export async function* generateStreamWithTools(input: GenerateInput): AsyncGenerator<StreamEvent> {
+  const { provider, model, messages, temperature, maxTokens, apiKey, baseUrl, region, tools } = input;
+
+  if (provider === "mock") {
+    const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+    if (tools && tools.length > 0) {
+      yield {
+        type: "tool_calls",
+        calls: [{ tool: tools[0]?.name ?? "", arguments: { query: lastUser.slice(0, 80) } }],
+      };
+      return;
+    }
+    const content = `[mock:${model}] ${lastUser.slice(0, 400)}`;
+    for (const word of content.split(" ")) {
+      yield { type: "delta", text: `${word} ` };
+      await sleep(15);
+    }
+    return;
+  }
+
+  const languageModel = languageModelFor(provider, model, { apiKey, baseUrl, region });
+  const toolMap =
+    tools && tools.length > 0
+      ? Object.fromEntries(
+          tools.map((t) => [t.name, tool({ description: t.description, inputSchema: jsonSchema(t.parameters) })]),
+        )
+      : undefined;
+  const result = streamText({
+    model: languageModel,
+    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    ...(toolMap ? { tools: toolMap } : {}),
+    temperature,
+    maxOutputTokens: maxTokens,
+  });
+  for await (const delta of result.textStream) yield { type: "delta", text: delta };
+  const calls = (await result.toolCalls) as unknown as { toolName: string; input?: unknown; args?: unknown }[];
+  if (calls.length > 0) {
+    yield {
+      type: "tool_calls",
+      calls: calls.map((c) => ({ tool: c.toolName, arguments: (c.input ?? c.args ?? {}) as Record<string, unknown> })),
+    };
+  }
+}
+
 /** Streaming variant — yields text deltas. Mock streams the canned reply word by word. */
 export async function* generateStream(input: GenerateInput): AsyncGenerator<string> {
   const { provider, model, messages, temperature, maxTokens, apiKey, baseUrl, region } = input;
