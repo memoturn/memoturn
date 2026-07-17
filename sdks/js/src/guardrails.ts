@@ -1,4 +1,5 @@
 import type { Creds } from "./dataset.js";
+import { basicAuth, DEFAULT_REQUEST_TIMEOUT_MS, truncate } from "./internal.js";
 
 export interface GuardrailFinding {
   category: "pii" | "injection" | "blocked_term";
@@ -23,12 +24,12 @@ export async function checkGuardrails(creds: Creds, text: string): Promise<Guard
   const baseUrl = (creds.baseUrl ?? process.env.MEMOTURN_BASE_URL ?? "http://localhost:3001").replace(/\/$/, "");
   const publicKey = creds.publicKey ?? process.env.MEMOTURN_PUBLIC_KEY ?? "";
   const secretKey = creds.secretKey ?? process.env.MEMOTURN_SECRET_KEY ?? "";
-  const auth = `Basic ${Buffer.from(`${publicKey}:${secretKey}`).toString("base64")}`;
   const res = await fetch(`${baseUrl}/v1/guardrails/check`, {
     method: "POST",
-    headers: { authorization: auth, "content-type": "application/json" },
+    headers: { authorization: basicAuth(publicKey, secretKey), "content-type": "application/json" },
     body: JSON.stringify({ text }),
+    signal: AbortSignal.timeout(creds.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT_MS),
   });
-  if (!res.ok) throw new Error(`guardrails check failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) throw new Error(`guardrails check failed: ${res.status} ${truncate(await res.text())}`);
   return res.json() as Promise<GuardrailVerdict>;
 }

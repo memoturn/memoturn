@@ -1,4 +1,5 @@
 import type { Memoturn } from "./client.js";
+import { basicAuth, DEFAULT_REQUEST_TIMEOUT_MS, truncate } from "./internal.js";
 
 export interface CompiledPrompt {
   name: string;
@@ -14,22 +15,24 @@ export interface CompiledPrompt {
  * across resolves — the returned `version` is what you stamp on the resulting generation.
  */
 export async function getPrompt(
-  client: Pick<Memoturn, never> & { baseUrl?: string; publicKey?: string; secretKey?: string },
+  // Accepts a Memoturn client (whose key fields are private but present at runtime) or a plain creds object.
+  client: Memoturn | { baseUrl?: string; publicKey?: string; secretKey?: string },
   name: string,
-  options: { channel?: string; bucketKey?: string } = {},
+  options: { channel?: string; bucketKey?: string; requestTimeout?: number } = {},
 ): Promise<CompiledPrompt> {
-  const baseUrl = (client.baseUrl ?? process.env.MEMOTURN_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
-  const publicKey = client.publicKey ?? process.env.MEMOTURN_PUBLIC_KEY ?? "";
-  const secretKey = client.secretKey ?? process.env.MEMOTURN_SECRET_KEY ?? "";
-  const auth = Buffer.from(`${publicKey}:${secretKey}`).toString("base64");
+  const creds = client as { baseUrl?: string; publicKey?: string; secretKey?: string };
+  const baseUrl = (creds.baseUrl ?? process.env.MEMOTURN_BASE_URL ?? "http://localhost:3001").replace(/\/$/, "");
+  const publicKey = creds.publicKey ?? process.env.MEMOTURN_PUBLIC_KEY ?? "";
+  const secretKey = creds.secretKey ?? process.env.MEMOTURN_SECRET_KEY ?? "";
   const channel = options.channel ?? "production";
 
   const params = new URLSearchParams({ channel });
   if (options.bucketKey) params.set("bucketKey", options.bucketKey);
   const res = await fetch(`${baseUrl}/v1/prompts/${encodeURIComponent(name)}?${params.toString()}`, {
-    headers: { authorization: `Basic ${auth}` },
+    headers: { authorization: basicAuth(publicKey, secretKey) },
+    signal: AbortSignal.timeout(options.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT_MS),
   });
-  if (!res.ok) throw new Error(`getPrompt failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) throw new Error(`getPrompt failed: ${res.status} ${truncate(await res.text())}`);
   return (await res.json()) as CompiledPrompt;
 }
 
