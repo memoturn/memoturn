@@ -408,6 +408,8 @@ export const api = {
     get<{ data: QueryWidget[] }>(`/v1/widgets/query${qs({ dashboardId })}`).then((r) => r.data),
   createQueryWidget: (body: { title: string; query: AnalyticsQuery; chartType: ChartType; gridW?: number }) =>
     post<QueryWidget>(`/v1/widgets/query`, body),
+  updateWidgetGrid: (id: string, grid: { gridX?: number; gridY?: number; gridW?: number; gridH?: number }) =>
+    patch<{ updated: boolean }>(`/v1/widgets/${encodeURIComponent(id)}/grid`, grid),
   listDashboards: () => get<{ data: Dashboard[] }>(`/v1/dashboards`).then((r) => r.data),
   createDashboard: (name: string) => post<Dashboard>(`/v1/dashboards`, { name }),
   deleteDashboard: (id: string) => del(`/v1/dashboards/${encodeURIComponent(id)}`),

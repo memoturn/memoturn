@@ -118,6 +118,24 @@ export async function createQueryWidget(projectId: string, input: CreateQueryWid
   return toQueryWidget(w);
 }
 
+/** Persist a widget's 12-col grid placement (drag/resize). Unspecified fields are left unchanged. */
+export async function updateWidgetGrid(
+  projectId: string,
+  id: string,
+  grid: { gridX?: number; gridY?: number; gridW?: number; gridH?: number },
+): Promise<{ updated: boolean }> {
+  const { count } = await prisma.widget.updateMany({
+    where: { projectId, id },
+    data: {
+      ...(grid.gridX !== undefined && { gridX: grid.gridX }),
+      ...(grid.gridY !== undefined && { gridY: grid.gridY }),
+      ...(grid.gridW !== undefined && { gridW: grid.gridW }),
+      ...(grid.gridH !== undefined && { gridH: grid.gridH }),
+    },
+  });
+  return { updated: count > 0 };
+}
+
 /** Query-engine widgets for a dashboard (rows where `query` is set — legacy tiles are excluded). */
 export async function listQueryWidgets(projectId: string, dashboardId?: string | null): Promise<QueryWidget[]> {
   const widgets = await prisma.widget.findMany({

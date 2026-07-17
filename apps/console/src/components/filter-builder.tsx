@@ -94,9 +94,12 @@ function buildFilter(col: FilterColumnDef, key: string, operator: string, raw: s
 export function FilterBuilder({
   value,
   onChange,
+  columns = TRACE_FILTER_COLUMNS,
 }: {
   value: SingleFilter[];
   onChange: (next: SingleFilter[]) => void;
+  /** Filterable columns to offer; defaults to the traces list columns. */
+  columns?: FilterColumnDef[];
 }) {
   const [open, setOpen] = useState(false);
   const [col, setCol] = useState<FilterColumnDef | null>(null);
@@ -126,7 +129,7 @@ export function FilterBuilder({
   };
   const remove = (i: number) => onChange(value.filter((_, idx) => idx !== i));
 
-  const colFor = (id: string) => TRACE_FILTER_COLUMNS.find((c) => c.id === id);
+  const colFor = (id: string) => columns.find((c) => c.id === id);
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -167,7 +170,7 @@ export function FilterBuilder({
               <CommandList>
                 <CommandEmpty>No column.</CommandEmpty>
                 <CommandGroup>
-                  {TRACE_FILTER_COLUMNS.map((c) => (
+                  {columns.map((c) => (
                     <CommandItem key={c.id} value={c.label} onSelect={() => pickColumn(c)}>
                       {c.label}
                       <span className="ml-auto text-[0.625rem] text-muted-foreground">{c.type}</span>
