@@ -16,6 +16,7 @@
   },
   "scripts": {
     "dev": "turbo run dev --filter=!@memoturn/web --filter=!@memoturn/docs",
+    "dev:status": "bun run infra:status && turbo run dev:status --filter=!@memoturn/web --filter=!@memoturn/docs",
     "dev:site": "turbo run dev --filter=@memoturn/web --filter=@memoturn/docs",
     "deploy:site": "turbo run deploy --filter=@memoturn/web --filter=@memoturn/docs",
     "build": "turbo run build",
@@ -29,6 +30,7 @@
     "infra:down": "docker compose -f infra/docker-compose.dev.yml down",
     "infra:wait": "bun scripts/wait-for-infra.ts",
     "infra:logs": "docker compose -f infra/docker-compose.dev.yml logs -f",
+    "infra:status": "docker compose -f infra/docker-compose.dev.yml ps",
     "prod:up": "docker compose -f infra/docker-compose.prod.yml --env-file .env up -d --build",
     "prod:down": "docker compose -f infra/docker-compose.prod.yml down",
     "prod:logs": "docker compose -f infra/docker-compose.prod.yml logs -f",
