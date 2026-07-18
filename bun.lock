@@ -301,6 +301,7 @@
       },
       "peerDependencies": {
         "@anthropic-ai/sdk": ">=0.30",
+        "@aws-sdk/client-bedrock-runtime": ">=3.0",
         "@google/genai": ">=1.0",
         "@modelcontextprotocol/sdk": ">=1.0",
         "@opentelemetry/exporter-trace-otlp-http": ">=0.50.0",
@@ -310,6 +311,7 @@
       },
       "optionalPeers": [
         "@anthropic-ai/sdk",
+        "@aws-sdk/client-bedrock-runtime",
         "@google/genai",
         "@modelcontextprotocol/sdk",
         "@opentelemetry/exporter-trace-otlp-http",
