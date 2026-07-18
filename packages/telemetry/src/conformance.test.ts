@@ -206,6 +206,12 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
 
     // Honors the trace-list filters (non-matching tag → no buckets).
     expect(await store.traceHistogram(P, { tag: "nope" }, "day")).toHaveLength(0);
+
+    // Honors the structured power-path filter set too (same traceListWhere).
+    const match = [{ type: "string", column: "name", operator: "contains", value: "Conformance" } as const];
+    const miss = [{ type: "string", column: "name", operator: "contains", value: "nope" } as const];
+    expect(await store.traceHistogram(P, { days: 7, filters: match }, "day")).toHaveLength(1);
+    expect(await store.traceHistogram(P, { days: 7, filters: miss }, "day")).toHaveLength(0);
   });
 
   it("runs analytics queries (total, breakdown, filter, time series)", async () => {
@@ -385,6 +391,24 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(filtered.names).toHaveLength(0);
     expect(filtered.tags).toHaveLength(0);
     expect(filtered.environments).toContainEqual({ value: "default", count: 1 });
+
+    // Structured power-path filters narrow EVERY facet (they are not a facet dimension,
+    // so no facet-excluding treatment — a non-matching set empties all counts).
+    const structuredMiss = await store.traceFacets(P, {
+      filters: [{ type: "string", column: "name", operator: "contains", value: "nope" }],
+    });
+    expect(structuredMiss.environments).toHaveLength(0);
+    expect(structuredMiss.names).toHaveLength(0);
+    expect(structuredMiss.tags).toHaveLength(0);
+    expect(structuredMiss.scores).toHaveLength(0);
+    expect(structuredMiss.levels).toHaveLength(0);
+    expect(structuredMiss.types).toHaveLength(0);
+    // A matching set (metric aggregate over observations) keeps them.
+    const structuredHit = await store.traceFacets(P, {
+      filters: [{ type: "number", column: "tokens", operator: "gte", value: 300 }],
+    });
+    expect(structuredHit.environments).toContainEqual({ value: "default", count: 1 });
+    expect(structuredHit.tags).toContainEqual({ value: "alpha", count: 1 });
   });
 
   it("returns trace header, observations (null end_time preserved), and scores", async () => {

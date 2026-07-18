@@ -216,6 +216,7 @@ export const api = {
       scoreName?: string;
       level?: string;
       type?: string;
+      filter?: string;
     } = {},
   ) => get<TraceFacets>(`/v1/traces/facets${qs(opts as Record<string, unknown>)}`),
   traceHistogram: (opts: TraceFilters = {}) =>

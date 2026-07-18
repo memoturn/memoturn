@@ -10,6 +10,7 @@ import type {
   QueryResult,
   ScoreRow as ScoreDetail,
   SessionSummary,
+  SingleFilter,
   ToolAnalyticsRow,
   TraceFacets,
   TraceHistogramBucket,
@@ -284,10 +285,24 @@ export class DorisTelemetryStore implements TelemetryStore {
       scoreName?: string;
       level?: string;
       type?: string;
+      filters?: SingleFilter[];
     } = {},
   ): Promise<TraceFacets> {
-    const { days = 0, limit = 25, environment, search, userId, tag, scoreName, level, type } = opts;
+    const { days = 0, limit = 25, environment, search, userId, tag, scoreName, level, type, filters } = opts;
     const cap = Math.floor(limit);
+
+    // The structured power-path filter set narrows every facet identically — it is not a facet
+    // dimension, so no facet-excluding treatment. Compiled once, applied as an id-subquery so it
+    // composes with the unaliased facet queries (and the LATERAL VIEW tags variant) unchanged.
+    const structured: { cond: string; params: unknown[] } | null = (() => {
+      if (!filters || filters.length === 0) return null;
+      const compiled = buildTraceFilterSql(projectId, filters);
+      if (compiled.conds.length === 0) return null;
+      return {
+        cond: `id IN (SELECT t.id FROM traces t WHERE t.project_id = ? AND ${compiled.conds.join(" AND ")})`,
+        params: [projectId, ...compiled.params],
+      };
+    })();
 
     // Compose a WHERE from a chosen subset of the active filters. Each facet omits its own
     // dimension (facet-excluding counts) so a selected value still shows its alternatives.
@@ -340,6 +355,10 @@ export class DorisTelemetryStore implements TelemetryStore {
       if (include.type && type) {
         conds.push("id IN (SELECT trace_id FROM observations WHERE project_id = ? AND type = ?)");
         params.push(projectId, type);
+      }
+      if (structured) {
+        conds.push(structured.cond);
+        params.push(...structured.params);
       }
       return { where: conds.join(" AND "), params };
     };

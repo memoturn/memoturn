@@ -774,6 +774,8 @@ app.openapi(
         scoreName: z.string().optional(),
         level: z.string().optional(),
         type: z.string().optional(),
+        // Structured operator-based filter set (the power-path builder), JSON-encoded.
+        filter: z.string().optional(),
       }),
     },
     responses: {
@@ -781,7 +783,7 @@ app.openapi(
     },
   }),
   async (c) => {
-    const { days, limit, environment, search, userId, tag, scoreName, level, type } = c.req.valid("query");
+    const { days, limit, environment, search, userId, tag, scoreName, level, type, filter } = c.req.valid("query");
     const data = await traceFacets(c.get("projectId"), {
       days,
       limit,
@@ -792,6 +794,7 @@ app.openapi(
       scoreName,
       level,
       type,
+      filters: parseTraceFilter(filter),
     });
     return c.json(data);
   },
@@ -815,6 +818,8 @@ app.openapi(
         scoreName: z.string().optional(),
         level: z.string().optional(),
         type: z.string().optional(),
+        // Structured operator-based filter set (the power-path builder), JSON-encoded.
+        filter: z.string().optional(),
       }),
     },
     responses: {
@@ -822,7 +827,7 @@ app.openapi(
     },
   }),
   async (c) => {
-    const { days, environment, search, userId, tag, scoreName, level, type } = c.req.valid("query");
+    const { days, environment, search, userId, tag, scoreName, level, type, filter } = c.req.valid("query");
     const data = await traceHistogram(c.get("projectId"), {
       days,
       environment,
@@ -832,6 +837,7 @@ app.openapi(
       scoreName,
       level,
       type,
+      filters: parseTraceFilter(filter),
     });
     return c.json(data);
   },
