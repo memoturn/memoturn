@@ -10,6 +10,7 @@ import type {
   QueryResult,
   ScoreRow as ScoreDetail,
   SessionSummary,
+  SingleFilter,
   ToolAnalyticsRow,
   TraceFacets,
   TraceHistogramBucket,
@@ -76,6 +77,9 @@ export interface TelemetryStore {
       tag?: string;
       scoreName?: string;
       level?: string;
+      type?: string;
+      /** Structured power-path filter set — applied to every facet (it is not a facet dimension). */
+      filters?: SingleFilter[];
     },
   ): Promise<TraceFacets>;
   listSessions(

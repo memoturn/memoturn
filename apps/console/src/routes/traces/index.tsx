@@ -318,15 +318,18 @@ type FacetProps = {
   scoreName?: string;
   level?: string;
   type?: string;
+  // JSON-encoded structured filter set — narrows every facet (it is not a facet dimension).
+  filter?: string;
   onPick: (key: "environment" | "search" | "tag" | "scoreName" | "level" | "type", value: string) => void;
 };
 
 /** The facet sections — shared by the desktop rail and the mobile Filters sheet. */
-function FacetSections({ days, environment, search, userId, tag, scoreName, level, type, onPick }: FacetProps) {
+function FacetSections({ days, environment, search, userId, tag, scoreName, level, type, filter, onPick }: FacetProps) {
   // Counts are facet-excluding server-side; passing the active filters makes them narrow live.
   const { data } = useQuery({
-    queryKey: ["trace-facets", days, environment, search, userId, tag, scoreName, level, type],
-    queryFn: () => api.traceFacets({ days, limit: 25, environment, search, userId, tag, scoreName, level, type }),
+    queryKey: ["trace-facets", days, environment, search, userId, tag, scoreName, level, type, filter],
+    queryFn: () =>
+      api.traceFacets({ days, limit: 25, environment, search, userId, tag, scoreName, level, type, filter }),
     refetchInterval: 15_000,
     // Keep the current counts on screen while the next set loads — no skeleton flash on select.
     placeholderData: keepPreviousData,
@@ -673,6 +676,7 @@ function TracesPage() {
                 scoreName={filters.scoreName}
                 level={filters.level}
                 type={filters.type}
+                filter={filters.filter}
                 onPick={pickFacet}
               />
             </div>
@@ -839,6 +843,7 @@ function TracesPage() {
           scoreName={filters.scoreName}
           level={filters.level}
           type={filters.type}
+          filter={filters.filter}
           onPick={pickFacet}
         />
         <div className="min-w-0 flex-1 space-y-3">

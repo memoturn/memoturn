@@ -2,6 +2,7 @@ import type {
   ObservationDetail,
   ScoreRow,
   SessionSummary,
+  SingleFilter,
   TraceDetail,
   TraceFacets,
   TraceSummary,
@@ -75,6 +76,7 @@ export async function traceFacets(
     scoreName?: string;
     level?: string;
     type?: string;
+    filters?: SingleFilter[];
   } = {},
 ): Promise<TraceFacets> {
   return telemetry().traceFacets(projectId, opts);
