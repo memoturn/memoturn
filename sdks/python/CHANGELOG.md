@@ -17,6 +17,17 @@ All notable changes to the memoturn Python SDK.
   this one is a load-bearing dependency, not a cosmetic extra**, since there is no
   duck-typed path to an isinstance-gated callback interface. The import is deferred
   inside the factory function, so `import memoturn` never touches `langgraph`.
+- `instrument_crewai()` (`memoturn.crewai`) — registers handlers on CrewAI's
+  process-global event bus (`crewai_event_bus`) to record crew kickoffs as traces,
+  tasks as `CHAIN` spans, agent execution as `AGENT` observations, tool calls as
+  `TOOL` observations, and LLM calls as generations with usage/model parameters —
+  nested task → agent → tool/LLM. Call once at process startup, unlike every other
+  wrapper in this SDK which wraps a specific client/session instance; CrewAI's event
+  bus is a singleton, so there is no per-crew handle to return. **Requires the real
+  `crewai` package (`pip install "memoturn[crewai]"`) — unlike every other integration
+  in this SDK, this one is a load-bearing dependency, not a cosmetic extra**, since
+  CrewAI's typed event-bus system has no duck-typed registration path. The import is
+  deferred inside `instrument_crewai()`, so `import memoturn` never touches `crewai`.
 - `wrap_mcp_client(session)` — drop-in wrapper for an MCP `ClientSession`
   (`modelcontextprotocol/python-sdk`): records each `call_tool()` call as a `TOOL`
   observation with the arguments as input and the result's `content` as output. A

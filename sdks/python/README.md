@@ -8,9 +8,9 @@ dependencies.
 pip install memoturn        # or: uv add memoturn
 ```
 
-Optional extras (discoverability only for every entry below except `langgraph` — the
-SDK itself never imports those at runtime; `make_langgraph_handler()` is the one
-exception, see its section below):
+Optional extras (discoverability only for every entry below except `langgraph` and
+`crewai` — the SDK itself never imports those at runtime; `make_langgraph_handler()`
+and `instrument_crewai()` are the two exceptions, see their sections below):
 
 ```bash
 pip install "memoturn[openai]"      # openai>=1.0 for wrap_openai
@@ -20,6 +20,7 @@ pip install "memoturn[pinecone]"    # pinecone>=5.0 for wrap_pinecone
 pip install "memoturn[langchain]"   # langchain-core for MemoturnCallbackHandler
 pip install "memoturn[langgraph]"   # langgraph for make_langgraph_handler — a real, load-bearing dependency
 pip install "memoturn[llamaindex]"  # llama-index-core for MemoturnLlamaIndexHandler
+pip install "memoturn[crewai]"      # crewai for instrument_crewai — a real, load-bearing dependency
 pip install "memoturn[otel]"        # OTel SDK + OTLP/HTTP exporter for span_exporter/span_processor
 ```
 
@@ -316,6 +317,34 @@ Settings.callback_manager = CallbackManager([MemoturnLlamaIndexHandler()])
 Records query/retrieve/synthesize/LLM/tool/agent steps as a nested trace tree
 (using LlamaIndex's own parent ids), including retrieved documents and embedding
 vectors. Duck-typed — imports no LlamaIndex packages.
+
+## CrewAI
+
+```bash
+pip install "memoturn[crewai]"
+```
+
+```python
+from memoturn import instrument_crewai
+
+instrument_crewai()  # once at process startup
+
+# ... build and kick off Crews as usual — every crew in this process is now traced.
+```
+
+**Requires installing the real `crewai` package (`pip install "memoturn[crewai]"`) —
+unlike every other optional extra in this SDK, this one is load-bearing, not
+cosmetic.** CrewAI has its own independent, typed event-bus system rather than
+LangChain's callback mechanism, so there is no duck-typed way to observe it — this
+integration registers handlers on CrewAI's process-global `crewai_event_bus`. That
+also makes its usage shape different from every other wrapper in this file:
+`instrument_crewai()` instruments the global bus once, rather than wrapping a specific
+client/session instance, and returns nothing.
+
+Records crew kickoffs as a trace, tasks as `CHAIN` spans, agent execution as `AGENT`
+observations, tool calls as `TOOL` observations, and LLM calls as generations (with
+model parameters and token usage) — nested task → agent → tool/LLM, falling back one
+level up (and finally to a fresh trace) whenever a parent's start event wasn't seen.
 
 ## Prompts
 
