@@ -1,3 +1,4 @@
+export { wrapChroma } from "./chroma.js";
 export { Memoturn, MemoturnSpan, MemoturnTrace } from "./client.js";
 export type { DatasetHandle, DatasetItem, GateResult, GateThreshold } from "./dataset.js";
 export { addDatasetItems, createDataset, evaluateGate, getDataset } from "./dataset.js";
@@ -7,4 +8,6 @@ export { MemoturnCallback } from "./langchain.js";
 export { wrapOpenAI } from "./openai.js";
 export type { CompiledPrompt } from "./prompt.js";
 export { compilePrompt, getPrompt } from "./prompt.js";
+export { wrapQdrant } from "./qdrant.js";
 export type * from "./types.js";
+export { wrapWeaviate } from "./weaviate.js";

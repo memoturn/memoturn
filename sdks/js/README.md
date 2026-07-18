@@ -14,6 +14,9 @@ npm install openai                       # for wrapOpenAI
 npm install @anthropic-ai/sdk            # for wrapAnthropic
 npm install @google/genai                # for wrapGemini
 npm install @pinecone-database/pinecone  # for wrapPinecone
+npm install chromadb                     # for wrapChroma
+npm install weaviate-client              # for wrapWeaviate
+npm install @qdrant/js-client-rest       # for wrapQdrant
 npm install @aws-sdk/client-bedrock-runtime  # for wrapBedrock
 npm install groq-sdk                     # for wrapGroq
 npm install @modelcontextprotocol/sdk    # for wrapMcpClient / wrapMcpServer
@@ -50,6 +53,9 @@ Call `await memoturn.flush()` to push the buffer immediately (e.g. per request i
 | `@memoturn/sdk/anthropic` | `wrapAnthropic` |
 | `@memoturn/sdk/gemini` | `wrapGemini` |
 | `@memoturn/sdk/pinecone` | `wrapPinecone` |
+| `@memoturn/sdk/chroma` | `wrapChroma` (also in the barrel) |
+| `@memoturn/sdk/weaviate` | `wrapWeaviate` (also in the barrel) |
+| `@memoturn/sdk/qdrant` | `wrapQdrant` (also in the barrel) |
 | `@memoturn/sdk/bedrock` | `wrapBedrock` |
 | `@memoturn/sdk/groq` | `wrapGroq` |
 | `@memoturn/sdk/mcp` | `wrapMcpClient`, `wrapMcpServer` |
@@ -211,6 +217,66 @@ const index = wrapPinecone(pc.index("my-index"), memoturn, {
   getContent: (match) => match.metadata?.body,
 });
 ```
+
+## Chroma wrapper
+
+```ts
+import { ChromaClient } from "chromadb";
+import { wrapChroma } from "@memoturn/sdk/chroma";
+
+const client = new ChromaClient();
+const collection = wrapChroma(await client.getCollection({ name: "my-docs" }), memoturn);
+await collection.query({ queryTexts: ["what is a fox?"], nResults: 5 });
+```
+
+Wraps a Chroma `Collection` handle's `.query()` as a `RETRIEVER` span: `queryTexts` as the
+span `input`, the first query embedding as `embedding` (truncated to 4096 dims), and the
+first query's column-major result arrays (`ids`/`distances`/`documents`/`metadatas`)
+re-assembled row-wise into `retrievedDocuments` with `score = 1 - distance`. `content` comes
+from the `documents` entry when present, else best-effort from the row's metadata
+(`text`/`content`/`page_content`, else stringified) — override with `{ getContent }`. All
+other collection methods (`add`, `get`, `peek`, …) pass through untouched.
+
+## Weaviate wrapper
+
+```ts
+import weaviate from "weaviate-client";
+import { wrapWeaviate } from "@memoturn/sdk/weaviate";
+
+const client = await weaviate.connectToLocal();
+const collection = wrapWeaviate(client.collections.get("MyDocs"), memoturn);
+await collection.query.nearText("brown fox", { limit: 5, returnMetadata: ["distance"] });
+await collection.query.nearVector(queryEmbedding, { limit: 5 });
+```
+
+Wraps a weaviate-client (v3+) collection handle, intercepting the retrieval methods of its
+`.query` namespace — `nearVector`, `nearText`, `hybrid`, `bm25`, `fetchObjects` — as
+`RETRIEVER` spans: the query vector as `embedding` (truncated to 4096 dims), the query text
+as `input`, and the response's `objects` as `retrievedDocuments`. `score` is taken from each
+object's `metadata` (`score`, else `1 - distance`, else `certainty` — ask for one via
+`returnMetadata` or the scores come back empty); `content` best-effort from `properties`
+(`text`/`content`/`page_content`/`body`, else stringified) — override with `{ getContent }`.
+Non-retrieval members (`.data`, `.aggregate`, the `generate` variants) pass through untouched.
+
+## Qdrant wrapper
+
+```ts
+import { QdrantClient } from "@qdrant/js-client-rest";
+import { wrapQdrant } from "@memoturn/sdk/qdrant";
+
+const qdrant = wrapQdrant(new QdrantClient({ url: "http://localhost:6333" }), memoturn);
+await qdrant.search("my-docs", { vector: queryEmbedding, limit: 5 });
+await qdrant.query("my-docs", { query: queryEmbedding, limit: 5 }); // universal Query Points API
+```
+
+Wraps a `QdrantClient`'s `.search()` and the universal `.query()`/`.queryPoints()` as
+`RETRIEVER` spans: the query vector as `embedding` (truncated to 4096 dims; named
+`{ name, vector }` and `{ nearest }` forms are unwrapped, and a non-vector `query` — a point
+id or recommend/fusion object — is recorded in the span metadata instead), and the scored
+points as `retrievedDocuments`. Qdrant points carry no document text field — `content` is
+extracted best-effort from `payload` (`text`/`content`/`page_content`/`body`, else
+stringified) — override with `{ getContent }`. Everything else (`upsert`, collection
+management, …) passes through untouched.
 
 ## Bedrock wrapper
 
