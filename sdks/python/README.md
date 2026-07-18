@@ -225,6 +225,61 @@ match. For a non-standard metadata schema, override the extractor:
 index = wrap_pinecone(index, get_content=lambda match: match.metadata.get("chunk_text"))
 ```
 
+## Chroma wrapper
+
+```python
+import chromadb
+from memoturn import wrap_chroma
+
+collection = wrap_chroma(chromadb.Client().get_or_create_collection("docs"))
+collection.query(query_embeddings=[embedding], n_results=5)  # recorded as a RETRIEVER span
+```
+
+Wraps a collection handle — only `collection.query` is patched; same
+`memoturn=`/`trace=` options as the other wrappers. Chroma responses are columnar
+arrays-of-arrays (one column per query); the first query's results are recorded, with
+`score = 1 - distance`. Unlike Pinecone, Chroma usually returns the raw chunk in
+`documents`, so that becomes `content` directly; when documents are excluded the
+wrapper falls back to metadata keys (`text`/`content`/`page_content`), then the
+stringified metadata. Override with
+`get_content=` (receives `{id, distance, document, metadata}`).
+
+## Weaviate wrapper
+
+```python
+import weaviate
+from memoturn import wrap_weaviate
+
+collection = wrap_weaviate(client.collections.get("Docs"))
+collection.query.near_vector(near_vector=embedding, limit=5)  # recorded as a RETRIEVER span
+```
+
+Wraps a weaviate-client **v4** collection handle: the retrieval methods on its
+`query` namespace (`near_vector`, `near_text`, `hybrid`, `bm25`, `fetch_objects` —
+whichever exist) are patched; same `memoturn=`/`trace=` options as the other wrappers.
+The recorded `score` is normalized higher-is-better: the response metadata's `score`
+(hybrid/bm25), else `certainty`, else `1 - distance`. `content` comes from each
+object's properties (`text`/`content`/`page_content`, else stringified properties) —
+override with `get_content=lambda obj: ...`.
+
+## Qdrant wrapper
+
+```python
+from qdrant_client import QdrantClient
+from memoturn import wrap_qdrant
+
+client = wrap_qdrant(QdrantClient(url="..."))
+client.query_points(collection_name="docs", query=embedding, limit=5)  # RETRIEVER span
+```
+
+Wraps a `QdrantClient`: both `search` (legacy) and `query_points` (the universal
+query API) are patched when present; same `memoturn=`/`trace=` options as the other
+wrappers. Points carry `id`/`score`/`payload`; `content` is extracted from the payload
+(`text`/`content`/`page_content`, else stringified payload) — override with
+`get_content=lambda point: ...`. Only flat float vectors passed as
+`query_vector=`/`query=` are recorded as the span embedding (point-id and
+recommend/fusion queries are skipped).
+
 ## Bedrock wrapper
 
 ```bash
