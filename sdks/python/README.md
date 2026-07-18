@@ -215,6 +215,56 @@ match. For a non-standard metadata schema, override the extractor:
 index = wrap_pinecone(index, get_content=lambda match: match.metadata.get("chunk_text"))
 ```
 
+## MCP
+
+```bash
+pip install "memoturn[mcp]"
+```
+
+### Client — `wrap_mcp_client`
+
+```python
+from mcp import ClientSession
+from memoturn import wrap_mcp_client
+
+session = wrap_mcp_client(ClientSession(read, write))
+await session.call_tool("search", arguments={"query": "hello"})  # recorded as a TOOL observation
+```
+
+Patches `session.call_tool` to record each call as a `TOOL` observation — the tool name,
+`arguments` as input, and the result's `content` as output. A result with
+`isError`/`is_error` set to true marks the observation `ERROR` without raising (MCP
+signals tool failures via the result shape, not an exception); an exception raised by
+`call_tool` itself also marks the observation `ERROR` and re-raises. Same `memoturn=`/
+`trace=` options as the other wrappers.
+
+### Server-side tracing is already built in
+
+There is no `wrap_mcp_server` — an MCP Python server doesn't need one. Every server built
+on the official SDK (`FastMCP`/`MCPServer` or the low-level `Server`) already emits an
+OpenTelemetry span for every inbound message, including `tools/call`, the moment you
+construct it — zero code required, and it costs nothing until an OTel SDK + exporter is
+installed. Those spans carry `gen_ai.operation.name: "execute_tool"` and
+`gen_ai.tool.name: "<tool>"` (OTel's GenAI semantic conventions), which memoturn's OTLP
+ingestion already classifies as `TOOL` observations — so pointing that tracing at
+memoturn is all that's needed:
+
+```python
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry import trace
+from memoturn.otel import span_processor
+
+provider = TracerProvider()
+provider.add_span_processor(span_processor())  # exports to memoturn's OTLP endpoint
+trace.set_tracer_provider(provider)
+
+# Construct your MCP server as usual — no other change:
+# mcp = FastMCP("my-server")
+```
+
+Distributed trace context (client → server) propagates automatically too, via the W3C
+trace-context standard both sides already implement.
+
 ## LangChain
 
 ```python

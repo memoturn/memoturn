@@ -7,6 +7,7 @@ from .gemini import wrap_gemini
 from .guardrails import GuardrailBlockedError, check_guardrails, run_guarded
 from .langchain import MemoturnCallbackHandler
 from .llamaindex import MemoturnLlamaIndexHandler
+from .mcp import wrap_mcp_client
 from .openai import wrap_openai
 from .otel import otlp_config, span_exporter, span_processor
 from .pinecone import wrap_pinecone
@@ -26,6 +27,7 @@ __all__ = [
     "wrap_anthropic",
     "wrap_gemini",
     "wrap_pinecone",
+    "wrap_mcp_client",
     "MemoturnCallbackHandler",
     "MemoturnLlamaIndexHandler",
     "create_dataset",

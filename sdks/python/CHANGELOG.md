@@ -6,6 +6,16 @@ All notable changes to the memoturn Python SDK.
 
 ### Features
 
+- `wrap_mcp_client(session)` — drop-in wrapper for an MCP `ClientSession`
+  (`modelcontextprotocol/python-sdk`): records each `call_tool()` call as a `TOOL`
+  observation with the arguments as input and the result's `content` as output. A
+  result with `isError`/`is_error` set marks the observation `ERROR` without raising
+  (MCP signals tool failure via the result shape, not an exception); a raised exception
+  also marks `ERROR` and re-raises. Duck-typed, no `mcp` dependency. There is
+  deliberately no server-side wrapper — an MCP Python server already emits
+  OpenTelemetry spans for `tools/call` by default, which memoturn's OTLP ingestion
+  already classifies as `TOOL` observations; see the `## MCP` section of the README for
+  how to point that built-in tracing at memoturn with `memoturn.otel.span_processor`.
 - `wrap_gemini(client)` — drop-in Gemini wrapper: records `client.models.generate_content`
   as a generation (`systemInstruction` nested alongside `contents` as input, everything
   else in `config` as `modelParameters`, usage incl. cached tokens) and independently
