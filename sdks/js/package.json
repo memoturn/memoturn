@@ -29,6 +29,9 @@
     "./anthropic": "./src/anthropic.ts",
     "./gemini": "./src/gemini.ts",
     "./pinecone": "./src/pinecone.ts",
+    "./chroma": "./src/chroma.ts",
+    "./weaviate": "./src/weaviate.ts",
+    "./qdrant": "./src/qdrant.ts",
     "./bedrock": "./src/bedrock.ts",
     "./groq": "./src/groq.ts",
     "./mcp": "./src/mcp.ts",
@@ -71,6 +74,18 @@
       "./pinecone": {
         "types": "./dist/pinecone.d.ts",
         "default": "./dist/pinecone.js"
+      },
+      "./chroma": {
+        "types": "./dist/chroma.d.ts",
+        "default": "./dist/chroma.js"
+      },
+      "./weaviate": {
+        "types": "./dist/weaviate.d.ts",
+        "default": "./dist/weaviate.js"
+      },
+      "./qdrant": {
+        "types": "./dist/qdrant.d.ts",
+        "default": "./dist/qdrant.js"
       },
       "./bedrock": {
         "types": "./dist/bedrock.d.ts",
@@ -123,6 +138,9 @@
     "@anthropic-ai/sdk": ">=0.30",
     "@google/genai": ">=1.0",
     "@pinecone-database/pinecone": ">=3",
+    "chromadb": ">=1.8",
+    "weaviate-client": ">=3",
+    "@qdrant/js-client-rest": ">=1.9",
     "@aws-sdk/client-bedrock-runtime": ">=3.0",
     "groq-sdk": ">=0.5",
     "@modelcontextprotocol/sdk": ">=1.0",
@@ -140,6 +158,15 @@
       "optional": true
     },
     "@pinecone-database/pinecone": {
+      "optional": true
+    },
+    "chromadb": {
+      "optional": true
+    },
+    "weaviate-client": {
+      "optional": true
+    },
+    "@qdrant/js-client-rest": {
       "optional": true
     },
     "@aws-sdk/client-bedrock-runtime": {
