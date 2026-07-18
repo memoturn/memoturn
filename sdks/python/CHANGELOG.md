@@ -6,6 +6,22 @@ All notable changes to the memoturn Python SDK.
 
 ### Features
 
+- `wrap_chroma(collection)` / `wrap_weaviate(collection)` / `wrap_qdrant(client)` —
+  vector-store retriever wrappers mirroring `wrap_pinecone`: each patched retrieval
+  call is recorded as a RETRIEVER span with `retrievedDocuments` (rank/id/score/
+  content/metadata), query embeddings truncated to 4096 dims, content clamped to
+  16 KB, error paths ending the span with level ERROR, and a `get_content=` override
+  for non-standard schemas. Chroma patches `collection.query` (columnar
+  arrays-of-arrays response; first query's column recorded; `score = 1 - distance`;
+  content from `documents`, else metadata keys, else stringified metadata). Weaviate
+  patches the v4 `collection.query` namespace retrieval methods (`near_vector`/
+  `near_text`/`hybrid`/`bm25`/`fetch_objects`, whichever exist; score normalized
+  higher-is-better from metadata `score`, else `certainty`, else `1 - distance`;
+  content from properties). Qdrant patches `client.search` and `client.query_points`
+  (bare list vs `.points` response shapes both handled; content from payload). All
+  three are duck-typed with no hard dependency — the `chromadb`/`weaviate`/`qdrant`
+  extras are discoverability-only.
+
 - `wrap_groq(client)` — drop-in wrapper for a Groq client (`groq` on PyPI): records
   `client.chat.completions.create` as a generation with an exclusion-list
   `modelParameters` (`model`/`messages`/`stream` excluded, everything else passed
