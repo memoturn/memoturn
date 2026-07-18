@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
+    "dev:status": "bun ../../scripts/check-port.ts console 3000 /",
     "generate-routes": "tsr generate",
     "build": "tsr generate && vite build",
     "preview": "vite preview --port 3000",

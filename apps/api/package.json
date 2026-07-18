@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun --watch --env-file=../../.env src/server.bun.ts",
+    "dev:status": "bun ../../scripts/check-port.ts api 3001 /health",
     "start": "bun src/server.bun.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "biome check .",
