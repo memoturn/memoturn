@@ -10,6 +10,11 @@
 - `runGuarded` (+ `GuardrailBlockedError`, `OnGuardFailure`) in `@memoturn/sdk/guardrails` (also exported from the barrel): run a function, scan its resolved value with `checkGuardrails`, and apply block/pass semantics — default `onFailure: "raise"` throws `GuardrailBlockedError`, or opt into `"log"` / `{ fallback }`. Compose two calls to guard input and output separately.
 - `setTraceContext` in `@memoturn/sdk/observe`: update the current trace's `userId`/`sessionId`/`tags`/`metadata` from anywhere inside an active `observe()` call stack without holding a trace/span reference. No-op with a `console.warn` outside an active `observe()` context.
 - `wrapMcpClient` / `wrapMcpServer` (`@memoturn/sdk/mcp`): auto-instrumentation for `@modelcontextprotocol/sdk`. `wrapMcpClient` records each `.callTool()` call as a TOOL observation (tool name + arguments as input, result `content` as output; `isError`/thrown errors mapped to ERROR). `wrapMcpServer` intercepts `.registerTool()`/the legacy `.tool()` overload so every registered handler is automatically wrapped as a TOOL observation when invoked — genuinely additive since, unlike the Python MCP SDK, the TypeScript MCP SDK has no built-in tracing.
+- `wrapBedrock` (`@memoturn/sdk/bedrock`): drop-in wrapper for an AWS SDK v3 `BedrockRuntimeClient` — records `Converse`/`ConverseStream` calls as generations (model, allowlisted `inferenceConfig` params, system+messages input, usage incl. cache tokens, streaming content-block accumulation). Only the standardized Converse API is covered — `InvokeModel`/`InvokeModelWithResponseStream` (raw, per-model-family request/response bodies) are explicitly out of scope and documented as a limitation; those commands pass through the wrapper's `.send` proxy completely untouched.
+
+### Documentation
+
+- Noted that `wrapGemini` already covers Vertex AI — `@google/genai` is a unified client for both the direct Gemini API and Vertex AI mode (`new GoogleGenAI({ vertexai: true, ... })`), so no new wrapper is needed. No code change.
 
 ### Fixes
 

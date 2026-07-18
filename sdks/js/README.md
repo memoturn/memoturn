@@ -14,6 +14,7 @@ npm install openai                       # for wrapOpenAI
 npm install @anthropic-ai/sdk            # for wrapAnthropic
 npm install @google/genai                # for wrapGemini
 npm install @pinecone-database/pinecone  # for wrapPinecone
+npm install @aws-sdk/client-bedrock-runtime  # for wrapBedrock
 npm install @modelcontextprotocol/sdk    # for wrapMcpClient / wrapMcpServer
 ```
 
@@ -48,6 +49,7 @@ Call `await memoturn.flush()` to push the buffer immediately (e.g. per request i
 | `@memoturn/sdk/anthropic` | `wrapAnthropic` |
 | `@memoturn/sdk/gemini` | `wrapGemini` |
 | `@memoturn/sdk/pinecone` | `wrapPinecone` |
+| `@memoturn/sdk/bedrock` | `wrapBedrock` |
 | `@memoturn/sdk/mcp` | `wrapMcpClient`, `wrapMcpServer` |
 | `@memoturn/sdk/langchain` | `MemoturnCallback` |
 | `@memoturn/sdk/otel` | `memoturnOtlpConfig`, `memoturnTraceExporter`, `memoturnSpanProcessor` |
@@ -172,6 +174,12 @@ are yielded to the caller unchanged in real time; `.text` deltas are concatenate
 and the latest non-null `.usageMetadata` is taken as-is (Gemini's usage is cumulative, not
 per-chunk). `{ streamTimeoutMs }` overrides the idle-stream abandonment backstop (default 120s).
 
+`wrapGemini` also covers **Vertex AI** — no separate wrapper needed. `@google/genai` is a
+unified client for both the direct Gemini API and Vertex AI:
+`new GoogleGenAI({ vertexai: true, project, location })` is the same `GoogleGenAI` class with
+the identical `models.generateContent`/`.generateContentStream` methods, so a Vertex-mode
+client gets full tracing with zero code changes.
+
 ## Pinecone wrapper
 
 ```ts
@@ -201,6 +209,46 @@ const index = wrapPinecone(pc.index("my-index"), memoturn, {
   getContent: (match) => match.metadata?.body,
 });
 ```
+
+## Bedrock wrapper
+
+```ts
+import { BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
+import { wrapBedrock } from "@memoturn/sdk/bedrock";
+
+const bedrock = wrapBedrock(new BedrockRuntimeClient({ region: "us-east-1" }), memoturn);
+await bedrock.send(
+  new ConverseCommand({
+    modelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    messages: [{ role: "user", content: [{ text: "2+2?" }] }],
+    inferenceConfig: { maxTokens: 64, temperature: 0.2 },
+  }),
+);
+```
+
+**Only the standardized `Converse`/`ConverseStream` API is covered** — this is a stated
+limitation, not a silent gap. `InvokeModel`/`InvokeModelWithResponseStream` use a raw,
+per-model-family request/response body (Anthropic-on-Bedrock, Titan, Llama, … each shaped
+differently) and are out of scope; calls using those commands (or any other Bedrock/AWS
+command) pass straight through the wrapper completely untouched.
+
+AWS SDK v3 routes every operation through a single `client.send(command)` call — there's no
+`client.converse(...)` method to intercept like the other wrappers in this package. `wrapBedrock`
+proxies `.send` and checks `command.constructor.name` (`"ConverseCommand"` /
+`"ConverseStreamCommand"`) to decide whether to instrument a call; it never imports
+`@aws-sdk/client-bedrock-runtime`.
+
+Records `modelId` as `model`, provider `"bedrock"`, allowlisted `inferenceConfig` params
+(`maxTokens`, `temperature`, `topP`, `stopSequences`) as `modelParameters`, `system` + `messages`
+as input (mirroring the Anthropic wrapper's own system+messages shape, or bare `messages` when
+there's no system prompt), `output.message` as output, and usage mapped from Bedrock's
+`inputTokens`/`outputTokens`/`totalTokens` (incl. `cacheReadInputTokens`/`cacheWriteInputTokens`
+as `cacheReadTokens`/`cacheCreationTokens` when reported). `ConverseStreamCommand` calls are
+recorded too: `contentBlockStart`/`contentBlockDelta` events are accumulated per content-block
+index (text deltas concatenated, other delta shapes like `toolUse` merged as-is) while every
+event is still yielded to the caller in real time — no buffering, no added latency; final usage
+is taken from the stream's `metadata` event. `{ streamTimeoutMs }` overrides the idle-stream
+abandonment backstop (default 120s).
 
 ## MCP
 
