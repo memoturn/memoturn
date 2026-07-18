@@ -15,6 +15,7 @@ npm install @anthropic-ai/sdk            # for wrapAnthropic
 npm install @google/genai                # for wrapGemini
 npm install @pinecone-database/pinecone  # for wrapPinecone
 npm install @aws-sdk/client-bedrock-runtime  # for wrapBedrock
+npm install groq-sdk                     # for wrapGroq
 npm install @modelcontextprotocol/sdk    # for wrapMcpClient / wrapMcpServer
 ```
 
@@ -50,6 +51,7 @@ Call `await memoturn.flush()` to push the buffer immediately (e.g. per request i
 | `@memoturn/sdk/gemini` | `wrapGemini` |
 | `@memoturn/sdk/pinecone` | `wrapPinecone` |
 | `@memoturn/sdk/bedrock` | `wrapBedrock` |
+| `@memoturn/sdk/groq` | `wrapGroq` |
 | `@memoturn/sdk/mcp` | `wrapMcpClient`, `wrapMcpServer` |
 | `@memoturn/sdk/langchain` | `MemoturnCallback` |
 | `@memoturn/sdk/otel` | `memoturnOtlpConfig`, `memoturnTraceExporter`, `memoturnSpanProcessor` |
@@ -248,6 +250,46 @@ recorded too: `contentBlockStart`/`contentBlockDelta` events are accumulated per
 index (text deltas concatenated, other delta shapes like `toolUse` merged as-is) while every
 event is still yielded to the caller in real time — no buffering, no added latency; final usage
 is taken from the stream's `metadata` event. `{ streamTimeoutMs }` overrides the idle-stream
+abandonment backstop (default 120s).
+
+## Groq wrapper
+
+```ts
+import Groq from "groq-sdk";
+import { wrapGroq } from "@memoturn/sdk/groq";
+
+const groq = wrapGroq(new Groq(), memoturn);
+await groq.chat.completions.create({ model: "llama-3.3-70b-versatile", messages });
+
+// Streaming is recorded too — chunks are still yielded to you in real time (no buffering);
+// content/tool-call deltas and usage (if a chunk happens to carry it) are accumulated into
+// one generation.
+const stream = await groq.chat.completions.create({ model: "llama-3.3-70b-versatile", messages, stream: true });
+for await (const chunk of stream) {
+  /* consume as usual */
+}
+```
+
+Groq's SDK (`groq-sdk`) is Stainless-generated and structurally close to `openai`'s own client —
+same `chat.completions.create` shape, same response/usage field names — which raises the
+obvious question: why not just call `wrapOpenAI` on a Groq client? **Because it would crash
+every streaming call.** `wrapOpenAI` unconditionally injects `stream_options: { include_usage:
+true }` into streaming requests to request a final usage-bearing chunk; Groq's real `create()`
+has a strict, fully-enumerated parameter list with no `stream_options` field and no catch-all
+kwargs, so that injection raises `TypeError: create() got an unexpected keyword argument
+'stream_options'` against a real Groq client. `wrapGroq` never injects it — it only reads
+`chunk.usage` opportunistically if a chunk happens to carry one.
+
+Records `chat.completions.create` as a generation — model, everything in the params object
+except `model`/`messages`/`stream` as `modelParameters` (an exclusion list, mirroring
+`wrapOpenAI`'s philosophy rather than the small allowlists used by the Anthropic/Bedrock
+wrappers, since Groq's param surface is large and evolving like OpenAI's), `messages` as input,
+`response.choices[0].message` as output, and usage mapped from Groq's
+`prompt_tokens`/`completion_tokens`/`total_tokens` (a straight 3-field passthrough — Groq has no
+prompt-caching fields to map). Streaming calls accumulate `delta.content` and
+`delta.tool_calls[].function.arguments` fragments by index into the same output shape, same as
+the non-streaming path, while every chunk is still yielded to the caller in real time. Chat
+completions only — Groq has no Responses API. `{ streamTimeoutMs }` overrides the idle-stream
 abandonment backstop (default 120s).
 
 ## MCP
