@@ -15,6 +15,7 @@ and `instrument_crewai()` are the two exceptions, see their sections below):
 ```bash
 pip install "memoturn[openai]"      # openai>=1.0 for wrap_openai
 pip install "memoturn[anthropic]"   # anthropic>=0.30 for wrap_anthropic
+pip install "memoturn[bedrock]"     # boto3>=1.34 for wrap_bedrock
 pip install "memoturn[gemini]"      # google-genai>=1.0 for wrap_gemini
 pip install "memoturn[pinecone]"    # pinecone>=5.0 for wrap_pinecone
 pip install "memoturn[langchain]"   # langchain-core for MemoturnCallbackHandler
@@ -178,6 +179,10 @@ duck-typed — a plain dict, a pydantic-like object (`model_dump()`), or a
 nested alongside `contents` as the recorded input, and everything else in `config`
 becomes `modelParameters`.
 
+Also covers Vertex AI — `wrap_gemini(genai.Client(vertexai=True, project=..., location=...))`
+works identically, since it's the same client class and the same
+`models.generate_content`/`.generate_content_stream` methods, no new wrapper needed.
+
 Gemini has no `stream=True` flag — streaming is a separate, always-streaming method,
 so it's wrapped independently:
 
@@ -218,6 +223,51 @@ match. For a non-standard metadata schema, override the extractor:
 ```python
 index = wrap_pinecone(index, get_content=lambda match: match.metadata.get("chunk_text"))
 ```
+
+## Bedrock wrapper
+
+```bash
+pip install "memoturn[bedrock]"
+```
+
+```python
+import boto3
+from memoturn import wrap_bedrock
+
+client = wrap_bedrock(boto3.client("bedrock-runtime"))
+client.converse(
+    modelId="anthropic.claude-3-5-sonnet-20241022-v2:0",
+    system=[{"text": "be terse"}],
+    messages=[{"role": "user", "content": [{"text": "2+2?"}]}],
+    inferenceConfig={"maxTokens": 256, "temperature": 0.2},
+)  # recorded: system + messages as input, usage incl. cache read/write tokens
+```
+
+**Only the standardized Converse API (`converse`/`converse_stream`) is covered — this
+is a stated scope limitation, not an oversight.** `invoke_model`/
+`invoke_model_with_response_stream` are not wrapped: their request/response body shape
+is different for every underlying model family (Anthropic-on-Bedrock, Titan, Llama,
+...), so there is no single generic shape to record against. `Converse`/
+`ConverseStream` is AWS's own standardized cross-model API, added specifically to unify
+this — use it if you want automatic tracing.
+
+`inferenceConfig` is read as a small, stable allowlist (`maxTokens`, `temperature`,
+`topP`, `stopSequences`) — Bedrock's Converse API has a fixed inference-parameter set,
+unlike Gemini's larger/unstable `config` bag. Same `memoturn=`/`trace=` options as the
+other wrappers.
+
+### Streaming
+
+`client.converse_stream(...)` is wrapped too (only if the client exposes it) — the
+response dict's `"stream"` key is transparently wrapped so events forward to the caller
+unchanged while being accumulated into the same output/usage shape a non-streaming call
+produces; every other key in the response (e.g. `ResponseMetadata`) passes through
+untouched. Structurally this mirrors the Anthropic streaming accumulator: content
+blocks are tracked by index (`contentBlockStart` initializes a block, `contentBlockDelta`
+concatenates text or merges other delta fields like `toolUse` generically), and the
+final `usage` comes from the `metadata` event. As with the other wrappers, a mid-stream
+exception marks the generation `ERROR` with partial output and re-raises, and
+abandonment marks it `WARNING` with partial output.
 
 ## MCP
 
