@@ -9,6 +9,7 @@ memoturn is an open-source AI engineering platform (LLM observability, evals, me
 ```bash
 bun run setup        # one-time: install + infra up + wait-healthy + Prisma migrate + Doris migrate + seed
 bun run dev          # turbo: api (:3001) + worker + console (:3000), all with --watch (public sites excluded)
+bun run dev:status   # turbo: confirm infra containers + api/worker/console dev servers are all up (per-app dev:status task)
 bun run dev:site     # marketing site (:3003) + docs site (:4321)
 bun run quickstart   # emit a sample trace via the SDK, then open http://localhost:3000
 
@@ -17,7 +18,7 @@ bun run typecheck    # turbo: tsc --noEmit across packages
 bun run test         # turbo: vitest (core + server + worker + telemetry have real tests)
 bun run build        # turbo build (respects ^build dependency order)
 
-bun run infra:up / infra:down / infra:logs   # docker compose for PG/Doris/Redis/MinIO
+bun run infra:up / infra:down / infra:logs / infra:status   # docker compose for PG/Doris/Redis/MinIO
 bun run db:migrate   # prisma migrate deploy
 bun run db:telemetry # apply Doris migrations (infra/doris; schema_migrations ledger)
 bun run seed         # seed organization/project/dev API key

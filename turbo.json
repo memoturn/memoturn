@@ -43,6 +43,9 @@
       "cache": false,
       "persistent": true
     },
+    "dev:status": {
+      "cache": false
+    },
     "lint": {},
     "typecheck": {
       "dependsOn": ["^build"]
