@@ -5,7 +5,10 @@ description = "memoturn Python SDK — tracing, @observe, OpenAI wrapper, prompt
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
-keywords = ["memoturn", "llm", "observability", "tracing", "openai", "langchain", "llamaindex", "evals", "opentelemetry"]
+keywords = [
+  "memoturn", "llm", "observability", "tracing", "openai", "langchain", "langgraph",
+  "llamaindex", "crewai", "evals", "opentelemetry",
+]
 dependencies = []
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -30,7 +33,14 @@ mcp = ["mcp>=1.0"]
 otel = ["opentelemetry-sdk>=1.20", "opentelemetry-exporter-otlp-proto-http>=1.20"]
 langchain = ["langchain-core>=0.1"]
 llamaindex = ["llama-index-core>=0.10"]
-dev = ["pytest>=9.0.3"]
+# Load-bearing, not cosmetic: unlike every other extra above (which only documents
+# what wrap_*/MemoturnCallbackHandler duck-type against), make_langgraph_handler()
+# and instrument_crewai() genuinely `import langgraph` / `import crewai` at call time —
+# there is no duck-typed path for LangGraph's isinstance-gated lifecycle callbacks or
+# CrewAI's typed event-bus classes.
+langgraph = ["langgraph>=0.2"]
+crewai = ["crewai>=0.80"]
+dev = ["pytest>=9.0.3", "langgraph>=0.2", "langchain-core>=0.1", "crewai>=0.80"]
 
 [build-system]
 requires = ["hatchling"]
