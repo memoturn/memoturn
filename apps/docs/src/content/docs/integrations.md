@@ -26,8 +26,23 @@ is planned.
 - **TypeScript:** `wrapOpenAI(new OpenAI(), mt)` — see the [TypeScript SDK](/sdk-typescript/).
 - **Python:** `wrap_openai(OpenAI())` — see the [Python SDK](/sdk-python/).
 
-Each `chat.completions.create` is recorded as a generation with model, params, usage, latency,
-and errors.
+Each `chat.completions.create` and `responses.create` (the Responses API) is recorded as a
+generation with model, params, usage, latency, and errors.
+
+### Azure OpenAI
+
+The same wrappers work unchanged with Azure clients — `AzureOpenAI` shares the OpenAI
+client surface:
+
+- **TypeScript:** `wrapOpenAI(new AzureOpenAI({ endpoint, apiKey, apiVersion, deployment }), mt)`
+- **Python:** `wrap_openai(AzureOpenAI(azure_endpoint=..., api_key=..., api_version=...))`
+
+Cost note: prices are matched on the recorded **model name**, and Azure reports your
+*deployment* name. Deployments named after the base model (`gpt-4o`, `gpt-4o-mini`, …)
+price correctly out of the box; custom deployment names need a per-project price override
+(Settings → Model Pricing) — pattern-match the deployment name to the base model's price.
+Azure spans arriving via OpenTelemetry (e.g. openllmetry) are also handled by the generic
+`gen_ai.*` mapping above.
 
 ## LangChain
 
