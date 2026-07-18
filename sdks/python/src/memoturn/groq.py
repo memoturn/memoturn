@@ -110,5 +110,11 @@ class _GroqAccumulator:
             self._usage = usage
 
     def finalize(self) -> tuple[Any, Optional[dict]]:
-        ordered = [self._choices[i] for i in sorted(self._choices)]
+        ordered = []
+        for i in sorted(self._choices):
+            entry = self._choices[i]
+            tool_calls = entry.get("tool_calls")
+            if isinstance(tool_calls, dict):
+                entry["tool_calls"] = [tool_calls[j] for j in sorted(tool_calls)]
+            ordered.append(entry)
         return (ordered[0] if len(ordered) <= 1 else ordered), _map_usage(self._usage)

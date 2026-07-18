@@ -167,10 +167,11 @@ def test_stream_accumulates_tool_calls_by_index(capture: Capture) -> None:
 
     output = _find(capture.batch(), "generation-update")["body"]["output"]
     assert output["role"] == "assistant"
-    # tool_calls is keyed by tool-call index (JSON round-trips int keys to strings).
-    assert output["tool_calls"] == {
-        "0": {"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": '{"city":"SF"}'}}
-    }
+    # tool_calls is an ordered list by tool-call index, matching openai.py's own
+    # accumulator convention (and the JS wrapper's array shape) — not a raw index-keyed dict.
+    assert output["tool_calls"] == [
+        {"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": '{"city":"SF"}'}}
+    ]
 
 
 def test_stream_usage_captured_if_a_chunk_carries_it(capture: Capture) -> None:
