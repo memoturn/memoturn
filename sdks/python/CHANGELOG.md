@@ -6,6 +6,22 @@ All notable changes to the memoturn Python SDK.
 
 ### Features
 
+- `wrap_groq(client)` — drop-in wrapper for a Groq client (`groq` on PyPI): records
+  `client.chat.completions.create` as a generation with an exclusion-list
+  `modelParameters` (`model`/`messages`/`stream` excluded, everything else passed
+  through — matching `wrap_openai`'s philosophy, not Bedrock's small allowlist) and
+  usage mapping (`prompt_tokens`/`completion_tokens`/`total_tokens`, no cache-token
+  handling — Groq has no prompt caching). Streaming (`stream=True`) accumulates
+  `content` deltas and `tool_calls` argument fragments by index the same way
+  `wrap_openai`'s chat-completions path does. **This is a dedicated wrapper rather
+  than reusing `wrap_openai` on a Groq client because Groq's `create()` has a strict,
+  fully-enumerated parameter list with no `stream_options` field and no catch-all
+  `**kwargs` — `wrap_openai` unconditionally injects `stream_options` on streaming
+  calls, which would raise `TypeError` against a real Groq client.** `wrap_groq` never
+  injects it; it only reads `chunk.usage` opportunistically if a chunk happens to
+  carry it. Groq has no Responses API, so chat completions is the only surface.
+  Duck-typed, no `groq` dependency (`pip install "memoturn[groq]"` is
+  discoverability-only).
 - `wrap_bedrock(client)` — drop-in wrapper for a boto3 `bedrock-runtime` client:
   records `client.converse` calls as generations (system + messages as input, an
   `inferenceConfig` allowlist — `maxTokens`/`temperature`/`topP`/`stopSequences` — as

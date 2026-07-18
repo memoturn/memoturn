@@ -6,6 +6,7 @@ from .crewai import instrument_crewai
 from .dataset import add_dataset_items, create_dataset, evaluate_gate, get_dataset, record_run
 from .decorator import configure, get_client, observe, set_trace_context
 from .gemini import wrap_gemini
+from .groq import wrap_groq
 from .guardrails import GuardrailBlockedError, check_guardrails, run_guarded
 from .langchain import MemoturnCallbackHandler
 from .langgraph import make_langgraph_handler
@@ -30,6 +31,7 @@ __all__ = [
     "wrap_anthropic",
     "wrap_bedrock",
     "wrap_gemini",
+    "wrap_groq",
     "wrap_pinecone",
     "wrap_mcp_client",
     "MemoturnCallbackHandler",

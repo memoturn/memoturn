@@ -17,6 +17,7 @@ pip install "memoturn[openai]"      # openai>=1.0 for wrap_openai
 pip install "memoturn[anthropic]"   # anthropic>=0.30 for wrap_anthropic
 pip install "memoturn[bedrock]"     # boto3>=1.34 for wrap_bedrock
 pip install "memoturn[gemini]"      # google-genai>=1.0 for wrap_gemini
+pip install "memoturn[groq]"        # groq>=0.4 for wrap_groq
 pip install "memoturn[pinecone]"    # pinecone>=5.0 for wrap_pinecone
 pip install "memoturn[langchain]"   # langchain-core for MemoturnCallbackHandler
 pip install "memoturn[langgraph]"   # langgraph for make_langgraph_handler — a real, load-bearing dependency
@@ -268,6 +269,42 @@ concatenates text or merges other delta fields like `toolUse` generically), and 
 final `usage` comes from the `metadata` event. As with the other wrappers, a mid-stream
 exception marks the generation `ERROR` with partial output and re-raises, and
 abandonment marks it `WARNING` with partial output.
+
+## Groq wrapper
+
+```bash
+pip install "memoturn[groq]"
+```
+
+```python
+from groq import Groq
+from memoturn import wrap_groq
+
+client = wrap_groq(Groq())
+client.chat.completions.create(
+    model="llama-3.3-70b-versatile",
+    messages=[{"role": "user", "content": "2+2?"}],
+)  # recorded automatically
+```
+
+**Why a dedicated wrapper instead of just calling `wrap_openai` on a Groq client?**
+Groq's SDK (`groq` on PyPI) is Stainless-generated and structurally close to
+openai-python — same `client.chat.completions.create(model=, messages=, ...)` shape —
+but its `create()` has a strict, fully-enumerated parameter list with **no
+`stream_options` field and no catch-all `**kwargs`**. `wrap_openai`'s streaming path
+unconditionally injects `stream_options={"include_usage": True}`; against a real Groq
+client that would raise `TypeError: create() got an unexpected keyword argument
+'stream_options'` on every streaming call. `wrap_groq` never injects it — it only
+reads `chunk.usage` opportunistically if a chunk happens to carry it. Groq also has no
+Responses API, so this wrapper covers chat completions only.
+
+Same `memoturn=`/`trace=` options as the other wrappers; `modelParameters` is an
+exclusion list (`model`/`messages`/`stream` excluded, everything else in the call
+passed through), matching `wrap_openai`'s philosophy rather than Bedrock's small
+allowlist. Streaming (`stream=True`) works the same way as `wrap_openai`'s
+chat-completions path — chunks forward unchanged while `content` deltas and
+`tool_calls` argument fragments are accumulated by index — except, as above, without
+the `stream_options` auto-injection.
 
 ## MCP
 
