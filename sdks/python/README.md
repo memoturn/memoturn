@@ -18,10 +18,13 @@ pip install "memoturn[anthropic]"   # anthropic>=0.30 for wrap_anthropic
 pip install "memoturn[bedrock]"     # boto3>=1.34 for wrap_bedrock
 pip install "memoturn[gemini]"      # google-genai>=1.0 for wrap_gemini
 pip install "memoturn[groq]"        # groq>=0.4 for wrap_groq
+pip install "memoturn[mistral]"     # mistralai>=1.0 for wrap_mistral
+pip install "memoturn[cohere]"      # cohere>=5.0 for wrap_cohere
 pip install "memoturn[pinecone]"    # pinecone>=5.0 for wrap_pinecone
 pip install "memoturn[langchain]"   # langchain-core for MemoturnCallbackHandler
 pip install "memoturn[langgraph]"   # langgraph for make_langgraph_handler — a real, load-bearing dependency
 pip install "memoturn[llamaindex]"  # llama-index-core for MemoturnLlamaIndexHandler
+pip install "memoturn[haystack]"    # haystack-ai>=2.0 for MemoturnHaystackTracer
 pip install "memoturn[crewai]"      # crewai for instrument_crewai — a real, load-bearing dependency
 pip install "memoturn[otel]"        # OTel SDK + OTLP/HTTP exporter for span_exporter/span_processor
 ```
@@ -361,6 +364,63 @@ chat-completions path — chunks forward unchanged while `content` deltas and
 `tool_calls` argument fragments are accumulated by index — except, as above, without
 the `stream_options` auto-injection.
 
+## Mistral wrapper
+
+```bash
+pip install "memoturn[mistral]"
+```
+
+```python
+from mistralai import Mistral
+from memoturn import wrap_mistral
+
+client = wrap_mistral(Mistral(api_key="..."))
+client.chat.complete(
+    model="mistral-small-latest",
+    messages=[{"role": "user", "content": "2+2?"}],
+)  # recorded automatically
+```
+
+Records `client.chat.complete` and `client.chat.stream` (Mistral streams via a
+dedicated `stream()` method, not a `stream=True` flag) as generations. Non-streaming
+responses are OpenAI-chat-shaped (`choices[0].message`, snake_case
+`usage.prompt_tokens`/`completion_tokens`/`total_tokens`), so mapping mirrors
+`wrap_groq`; streamed events wrap the chunk one level deeper
+(`event.data.choices[].delta`), and delta `content` may be either a plain string or a
+list of typed content chunks — both are accumulated, along with tool-call argument
+fragments by index, with usage captured from the final chunk that carries it. Same
+`memoturn=`/`trace=` options and exclusion-list `modelParameters`
+(`model`/`messages`/`stream` excluded) as the other wrappers.
+
+## Cohere wrapper
+
+```bash
+pip install "memoturn[cohere]"
+```
+
+```python
+import cohere
+from memoturn import wrap_cohere
+
+client = wrap_cohere(cohere.ClientV2(api_key="..."))
+client.chat(
+    model="command-r-plus",
+    messages=[{"role": "user", "content": "2+2?"}],
+)  # recorded automatically
+```
+
+Records `client.chat` and `client.chat_stream` as generations, and handles **both
+Cohere API generations in one wrapper** — shapes are probed per response, so it works
+on `cohere.ClientV2` (`message.content` list + `usage.tokens.input_tokens`/
+`output_tokens`; stream events discriminated by `.type`, text in
+`content-delta`, usage on `message-end`) and on the legacy `cohere.Client` v1 API
+(`text` + `meta.tokens`; stream events discriminated by `.event_type`, text in
+`text-generation`, usage from the `stream-end` event's full response). Cohere reports
+token counts as floats and never a total, so usage is int-coerced and `totalTokens`
+computed as input + output. Same `memoturn=`/`trace=` options as the other wrappers;
+`modelParameters` is an exclusion list (`model`/`messages`/`message`/`chat_history`
+excluded).
+
 ## MCP
 
 ```bash
@@ -459,6 +519,37 @@ Settings.callback_manager = CallbackManager([MemoturnLlamaIndexHandler()])
 Records query/retrieve/synthesize/LLM/tool/agent steps as a nested trace tree
 (using LlamaIndex's own parent ids), including retrieved documents and embedding
 vectors. Duck-typed — imports no LlamaIndex packages.
+
+## Haystack
+
+```bash
+pip install "memoturn[haystack]"
+```
+
+```python
+from haystack import tracing
+from memoturn import MemoturnHaystackTracer
+
+tracing.enable_tracing(MemoturnHaystackTracer())
+tracing.tracer.is_content_tracing_enabled = True  # or HAYSTACK_CONTENT_TRACING_ENABLED=true
+
+# ... build and run Pipelines as usual — every pipeline run is now traced.
+```
+
+Plugs into Haystack 2.x's own tracing seam (`haystack.tracing.Tracer`): each
+top-level `Pipeline.run` becomes one memoturn trace (pipeline input/output data as
+trace input/output), and each component run becomes a typed observation nested under
+it — `*Generator` components as generations (model + token usage extracted from the
+output's `meta`/`replies[].meta`), `*Retriever` as `RETRIEVER` spans with
+`retrievedDocuments`, `*Embedder` as `EMBEDDING`, `*Ranker` as `RERANKER`, tool/agent
+components as `TOOL`/`AGENT`, nested pipelines as `CHAIN` steps inside the outer
+trace. Nesting follows the `parent_span` Haystack passes (with a context-local
+fallback that is safe under `AsyncPipeline` concurrency).
+
+Component inputs/outputs flow through Haystack's *content tracing* gate
+(`span.set_content_tag`), which is **off by default** — enable it as shown above or
+set `HAYSTACK_CONTENT_TRACING_ENABLED=true`, or observations will record structure
+but no payloads. Duck-typed — imports no Haystack packages at module import time.
 
 ## CrewAI
 

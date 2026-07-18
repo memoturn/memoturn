@@ -3,16 +3,19 @@ from .anthropic import wrap_anthropic
 from .bedrock import wrap_bedrock
 from .chroma import wrap_chroma
 from .client import Memoturn, Span, Trace
+from .cohere import wrap_cohere
 from .crewai import instrument_crewai
 from .dataset import add_dataset_items, create_dataset, evaluate_gate, get_dataset, record_run
 from .decorator import configure, get_client, observe, set_trace_context
 from .gemini import wrap_gemini
 from .groq import wrap_groq
 from .guardrails import GuardrailBlockedError, check_guardrails, run_guarded
+from .haystack import MemoturnHaystackTracer
 from .langchain import MemoturnCallbackHandler
 from .langgraph import make_langgraph_handler
 from .llamaindex import MemoturnLlamaIndexHandler
 from .mcp import wrap_mcp_client
+from .mistral import wrap_mistral
 from .openai import wrap_openai
 from .otel import otlp_config, span_exporter, span_processor
 from .pinecone import wrap_pinecone
@@ -35,6 +38,8 @@ __all__ = [
     "wrap_bedrock",
     "wrap_gemini",
     "wrap_groq",
+    "wrap_mistral",
+    "wrap_cohere",
     "wrap_pinecone",
     "wrap_chroma",
     "wrap_weaviate",
@@ -43,6 +48,7 @@ __all__ = [
     "MemoturnCallbackHandler",
     "make_langgraph_handler",
     "MemoturnLlamaIndexHandler",
+    "MemoturnHaystackTracer",
     "instrument_crewai",
     "create_dataset",
     "add_dataset_items",
