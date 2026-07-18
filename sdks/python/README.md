@@ -8,7 +8,9 @@ dependencies.
 pip install memoturn        # or: uv add memoturn
 ```
 
-Optional extras (discoverability only — the SDK itself never imports them at runtime):
+Optional extras (discoverability only for every entry below except `langgraph` — the
+SDK itself never imports those at runtime; `make_langgraph_handler()` is the one
+exception, see its section below):
 
 ```bash
 pip install "memoturn[openai]"      # openai>=1.0 for wrap_openai
@@ -16,6 +18,7 @@ pip install "memoturn[anthropic]"   # anthropic>=0.30 for wrap_anthropic
 pip install "memoturn[gemini]"      # google-genai>=1.0 for wrap_gemini
 pip install "memoturn[pinecone]"    # pinecone>=5.0 for wrap_pinecone
 pip install "memoturn[langchain]"   # langchain-core for MemoturnCallbackHandler
+pip install "memoturn[langgraph]"   # langgraph for make_langgraph_handler — a real, load-bearing dependency
 pip install "memoturn[llamaindex]"  # llama-index-core for MemoturnLlamaIndexHandler
 pip install "memoturn[otel]"        # OTel SDK + OTLP/HTTP exporter for span_exporter/span_processor
 ```
@@ -275,6 +278,30 @@ chain.invoke(inputs, config={"callbacks": [MemoturnCallbackHandler()]})
 
 Records chains, LLM/chat-model calls (with token usage), and tools as a trace
 tree. Duck-typed — imports no LangChain packages.
+
+## LangGraph
+
+```bash
+pip install "memoturn[langgraph]"
+```
+
+```python
+from memoturn import make_langgraph_handler
+
+graph.invoke(state, config={"callbacks": [make_langgraph_handler()]})
+```
+
+**Requires installing the real `langgraph` package (`pip install
+"memoturn[langgraph]"`) — unlike every other optional extra in this SDK, this one is
+load-bearing, not cosmetic.** Node-level execution inside a graph (LLM calls, tool
+calls, sub-chains) already runs through the standard LangChain callback mechanism, so
+a plain `MemoturnCallbackHandler` passed the same way already captures all of that —
+`make_langgraph_handler()` is only needed to additionally capture LangGraph's own
+interrupt/resume lifecycle events (the pause/resume around durable-execution
+checkpoints and human-in-the-loop), which LangGraph delivers only to a real
+`langgraph.callbacks.GraphCallbackHandler` subclass — never to a duck-typed handler.
+The returned handler is both at once: full LangChain recording plus
+`langgraph.interrupt`/`langgraph.resume` trace events.
 
 ## LlamaIndex
 

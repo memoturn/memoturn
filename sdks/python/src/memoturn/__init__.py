@@ -6,6 +6,7 @@ from .decorator import configure, get_client, observe, set_trace_context
 from .gemini import wrap_gemini
 from .guardrails import GuardrailBlockedError, check_guardrails, run_guarded
 from .langchain import MemoturnCallbackHandler
+from .langgraph import make_langgraph_handler
 from .llamaindex import MemoturnLlamaIndexHandler
 from .mcp import wrap_mcp_client
 from .openai import wrap_openai
@@ -29,6 +30,7 @@ __all__ = [
     "wrap_pinecone",
     "wrap_mcp_client",
     "MemoturnCallbackHandler",
+    "make_langgraph_handler",
     "MemoturnLlamaIndexHandler",
     "create_dataset",
     "add_dataset_items",
