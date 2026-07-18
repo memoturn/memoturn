@@ -8,15 +8,21 @@ dependencies.
 pip install memoturn        # or: uv add memoturn
 ```
 
-Optional extras (discoverability only — the SDK itself never imports them at runtime):
+Optional extras (discoverability only for every entry below except `langgraph` and
+`crewai` — the SDK itself never imports those at runtime; `make_langgraph_handler()`
+and `instrument_crewai()` are the two exceptions, see their sections below):
 
 ```bash
 pip install "memoturn[openai]"      # openai>=1.0 for wrap_openai
 pip install "memoturn[anthropic]"   # anthropic>=0.30 for wrap_anthropic
+pip install "memoturn[bedrock]"     # boto3>=1.34 for wrap_bedrock
 pip install "memoturn[gemini]"      # google-genai>=1.0 for wrap_gemini
+pip install "memoturn[groq]"        # groq>=0.4 for wrap_groq
 pip install "memoturn[pinecone]"    # pinecone>=5.0 for wrap_pinecone
 pip install "memoturn[langchain]"   # langchain-core for MemoturnCallbackHandler
+pip install "memoturn[langgraph]"   # langgraph for make_langgraph_handler — a real, load-bearing dependency
 pip install "memoturn[llamaindex]"  # llama-index-core for MemoturnLlamaIndexHandler
+pip install "memoturn[crewai]"      # crewai for instrument_crewai — a real, load-bearing dependency
 pip install "memoturn[otel]"        # OTel SDK + OTLP/HTTP exporter for span_exporter/span_processor
 ```
 
@@ -174,6 +180,10 @@ duck-typed — a plain dict, a pydantic-like object (`model_dump()`), or a
 nested alongside `contents` as the recorded input, and everything else in `config`
 becomes `modelParameters`.
 
+Also covers Vertex AI — `wrap_gemini(genai.Client(vertexai=True, project=..., location=...))`
+works identically, since it's the same client class and the same
+`models.generate_content`/`.generate_content_stream` methods, no new wrapper needed.
+
 Gemini has no `stream=True` flag — streaming is a separate, always-streaming method,
 so it's wrapped independently:
 
@@ -215,6 +225,137 @@ match. For a non-standard metadata schema, override the extractor:
 index = wrap_pinecone(index, get_content=lambda match: match.metadata.get("chunk_text"))
 ```
 
+## Bedrock wrapper
+
+```bash
+pip install "memoturn[bedrock]"
+```
+
+```python
+import boto3
+from memoturn import wrap_bedrock
+
+client = wrap_bedrock(boto3.client("bedrock-runtime"))
+client.converse(
+    modelId="anthropic.claude-3-5-sonnet-20241022-v2:0",
+    system=[{"text": "be terse"}],
+    messages=[{"role": "user", "content": [{"text": "2+2?"}]}],
+    inferenceConfig={"maxTokens": 256, "temperature": 0.2},
+)  # recorded: system + messages as input, usage incl. cache read/write tokens
+```
+
+**Only the standardized Converse API (`converse`/`converse_stream`) is covered — this
+is a stated scope limitation, not an oversight.** `invoke_model`/
+`invoke_model_with_response_stream` are not wrapped: their request/response body shape
+is different for every underlying model family (Anthropic-on-Bedrock, Titan, Llama,
+...), so there is no single generic shape to record against. `Converse`/
+`ConverseStream` is AWS's own standardized cross-model API, added specifically to unify
+this — use it if you want automatic tracing.
+
+`inferenceConfig` is read as a small, stable allowlist (`maxTokens`, `temperature`,
+`topP`, `stopSequences`) — Bedrock's Converse API has a fixed inference-parameter set,
+unlike Gemini's larger/unstable `config` bag. Same `memoturn=`/`trace=` options as the
+other wrappers.
+
+### Streaming
+
+`client.converse_stream(...)` is wrapped too (only if the client exposes it) — the
+response dict's `"stream"` key is transparently wrapped so events forward to the caller
+unchanged while being accumulated into the same output/usage shape a non-streaming call
+produces; every other key in the response (e.g. `ResponseMetadata`) passes through
+untouched. Structurally this mirrors the Anthropic streaming accumulator: content
+blocks are tracked by index (`contentBlockStart` initializes a block, `contentBlockDelta`
+concatenates text or merges other delta fields like `toolUse` generically), and the
+final `usage` comes from the `metadata` event. As with the other wrappers, a mid-stream
+exception marks the generation `ERROR` with partial output and re-raises, and
+abandonment marks it `WARNING` with partial output.
+
+## Groq wrapper
+
+```bash
+pip install "memoturn[groq]"
+```
+
+```python
+from groq import Groq
+from memoturn import wrap_groq
+
+client = wrap_groq(Groq())
+client.chat.completions.create(
+    model="llama-3.3-70b-versatile",
+    messages=[{"role": "user", "content": "2+2?"}],
+)  # recorded automatically
+```
+
+**Why a dedicated wrapper instead of just calling `wrap_openai` on a Groq client?**
+Groq's SDK (`groq` on PyPI) is Stainless-generated and structurally close to
+openai-python — same `client.chat.completions.create(model=, messages=, ...)` shape —
+but its `create()` has a strict, fully-enumerated parameter list with **no
+`stream_options` field and no catch-all `**kwargs`**. `wrap_openai`'s streaming path
+unconditionally injects `stream_options={"include_usage": True}`; against a real Groq
+client that would raise `TypeError: create() got an unexpected keyword argument
+'stream_options'` on every streaming call. `wrap_groq` never injects it — it only
+reads `chunk.usage` opportunistically if a chunk happens to carry it. Groq also has no
+Responses API, so this wrapper covers chat completions only.
+
+Same `memoturn=`/`trace=` options as the other wrappers; `modelParameters` is an
+exclusion list (`model`/`messages`/`stream` excluded, everything else in the call
+passed through), matching `wrap_openai`'s philosophy rather than Bedrock's small
+allowlist. Streaming (`stream=True`) works the same way as `wrap_openai`'s
+chat-completions path — chunks forward unchanged while `content` deltas and
+`tool_calls` argument fragments are accumulated by index — except, as above, without
+the `stream_options` auto-injection.
+
+## MCP
+
+```bash
+pip install "memoturn[mcp]"
+```
+
+### Client — `wrap_mcp_client`
+
+```python
+from mcp import ClientSession
+from memoturn import wrap_mcp_client
+
+session = wrap_mcp_client(ClientSession(read, write))
+await session.call_tool("search", arguments={"query": "hello"})  # recorded as a TOOL observation
+```
+
+Patches `session.call_tool` to record each call as a `TOOL` observation — the tool name,
+`arguments` as input, and the result's `content` as output. A result with
+`isError`/`is_error` set to true marks the observation `ERROR` without raising (MCP
+signals tool failures via the result shape, not an exception); an exception raised by
+`call_tool` itself also marks the observation `ERROR` and re-raises. Same `memoturn=`/
+`trace=` options as the other wrappers.
+
+### Server-side tracing is already built in
+
+There is no `wrap_mcp_server` — an MCP Python server doesn't need one. Every server built
+on the official SDK (`FastMCP`/`MCPServer` or the low-level `Server`) already emits an
+OpenTelemetry span for every inbound message, including `tools/call`, the moment you
+construct it — zero code required, and it costs nothing until an OTel SDK + exporter is
+installed. Those spans carry `gen_ai.operation.name: "execute_tool"` and
+`gen_ai.tool.name: "<tool>"` (OTel's GenAI semantic conventions), which memoturn's OTLP
+ingestion already classifies as `TOOL` observations — so pointing that tracing at
+memoturn is all that's needed:
+
+```python
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry import trace
+from memoturn.otel import span_processor
+
+provider = TracerProvider()
+provider.add_span_processor(span_processor())  # exports to memoturn's OTLP endpoint
+trace.set_tracer_provider(provider)
+
+# Construct your MCP server as usual — no other change:
+# mcp = FastMCP("my-server")
+```
+
+Distributed trace context (client → server) propagates automatically too, via the W3C
+trace-context standard both sides already implement.
+
 ## LangChain
 
 ```python
@@ -225,6 +366,30 @@ chain.invoke(inputs, config={"callbacks": [MemoturnCallbackHandler()]})
 
 Records chains, LLM/chat-model calls (with token usage), and tools as a trace
 tree. Duck-typed — imports no LangChain packages.
+
+## LangGraph
+
+```bash
+pip install "memoturn[langgraph]"
+```
+
+```python
+from memoturn import make_langgraph_handler
+
+graph.invoke(state, config={"callbacks": [make_langgraph_handler()]})
+```
+
+**Requires installing the real `langgraph` package (`pip install
+"memoturn[langgraph]"`) — unlike every other optional extra in this SDK, this one is
+load-bearing, not cosmetic.** Node-level execution inside a graph (LLM calls, tool
+calls, sub-chains) already runs through the standard LangChain callback mechanism, so
+a plain `MemoturnCallbackHandler` passed the same way already captures all of that —
+`make_langgraph_handler()` is only needed to additionally capture LangGraph's own
+interrupt/resume lifecycle events (the pause/resume around durable-execution
+checkpoints and human-in-the-loop), which LangGraph delivers only to a real
+`langgraph.callbacks.GraphCallbackHandler` subclass — never to a duck-typed handler.
+The returned handler is both at once: full LangChain recording plus
+`langgraph.interrupt`/`langgraph.resume` trace events.
 
 ## LlamaIndex
 
@@ -239,6 +404,34 @@ Settings.callback_manager = CallbackManager([MemoturnLlamaIndexHandler()])
 Records query/retrieve/synthesize/LLM/tool/agent steps as a nested trace tree
 (using LlamaIndex's own parent ids), including retrieved documents and embedding
 vectors. Duck-typed — imports no LlamaIndex packages.
+
+## CrewAI
+
+```bash
+pip install "memoturn[crewai]"
+```
+
+```python
+from memoturn import instrument_crewai
+
+instrument_crewai()  # once at process startup
+
+# ... build and kick off Crews as usual — every crew in this process is now traced.
+```
+
+**Requires installing the real `crewai` package (`pip install "memoturn[crewai]"`) —
+unlike every other optional extra in this SDK, this one is load-bearing, not
+cosmetic.** CrewAI has its own independent, typed event-bus system rather than
+LangChain's callback mechanism, so there is no duck-typed way to observe it — this
+integration registers handlers on CrewAI's process-global `crewai_event_bus`. That
+also makes its usage shape different from every other wrapper in this file:
+`instrument_crewai()` instruments the global bus once, rather than wrapping a specific
+client/session instance, and returns nothing.
+
+Records crew kickoffs as a trace, tasks as `CHAIN` spans, agent execution as `AGENT`
+observations, tool calls as `TOOL` observations, and LLM calls as generations (with
+model parameters and token usage) — nested task → agent → tool/LLM, falling back one
+level up (and finally to a fresh trace) whenever a parent's start event wasn't seen.
 
 ## Prompts
 

@@ -14,6 +14,9 @@ npm install openai                       # for wrapOpenAI
 npm install @anthropic-ai/sdk            # for wrapAnthropic
 npm install @google/genai                # for wrapGemini
 npm install @pinecone-database/pinecone  # for wrapPinecone
+npm install @aws-sdk/client-bedrock-runtime  # for wrapBedrock
+npm install groq-sdk                     # for wrapGroq
+npm install @modelcontextprotocol/sdk    # for wrapMcpClient / wrapMcpServer
 ```
 
 ## Quickstart
@@ -47,6 +50,9 @@ Call `await memoturn.flush()` to push the buffer immediately (e.g. per request i
 | `@memoturn/sdk/anthropic` | `wrapAnthropic` |
 | `@memoturn/sdk/gemini` | `wrapGemini` |
 | `@memoturn/sdk/pinecone` | `wrapPinecone` |
+| `@memoturn/sdk/bedrock` | `wrapBedrock` |
+| `@memoturn/sdk/groq` | `wrapGroq` |
+| `@memoturn/sdk/mcp` | `wrapMcpClient`, `wrapMcpServer` |
 | `@memoturn/sdk/langchain` | `MemoturnCallback` |
 | `@memoturn/sdk/otel` | `memoturnOtlpConfig`, `memoturnTraceExporter`, `memoturnSpanProcessor` |
 | `@memoturn/sdk/observe` | `observe`, `configure`, `getClient`, `setTraceContext` — **Node-only**, not in the barrel |
@@ -170,6 +176,12 @@ are yielded to the caller unchanged in real time; `.text` deltas are concatenate
 and the latest non-null `.usageMetadata` is taken as-is (Gemini's usage is cumulative, not
 per-chunk). `{ streamTimeoutMs }` overrides the idle-stream abandonment backstop (default 120s).
 
+`wrapGemini` also covers **Vertex AI** — no separate wrapper needed. `@google/genai` is a
+unified client for both the direct Gemini API and Vertex AI:
+`new GoogleGenAI({ vertexai: true, project, location })` is the same `GoogleGenAI` class with
+the identical `models.generateContent`/`.generateContentStream` methods, so a Vertex-mode
+client gets full tracing with zero code changes.
+
 ## Pinecone wrapper
 
 ```ts
@@ -199,6 +211,128 @@ const index = wrapPinecone(pc.index("my-index"), memoturn, {
   getContent: (match) => match.metadata?.body,
 });
 ```
+
+## Bedrock wrapper
+
+```ts
+import { BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
+import { wrapBedrock } from "@memoturn/sdk/bedrock";
+
+const bedrock = wrapBedrock(new BedrockRuntimeClient({ region: "us-east-1" }), memoturn);
+await bedrock.send(
+  new ConverseCommand({
+    modelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    messages: [{ role: "user", content: [{ text: "2+2?" }] }],
+    inferenceConfig: { maxTokens: 64, temperature: 0.2 },
+  }),
+);
+```
+
+**Only the standardized `Converse`/`ConverseStream` API is covered** — this is a stated
+limitation, not a silent gap. `InvokeModel`/`InvokeModelWithResponseStream` use a raw,
+per-model-family request/response body (Anthropic-on-Bedrock, Titan, Llama, … each shaped
+differently) and are out of scope; calls using those commands (or any other Bedrock/AWS
+command) pass straight through the wrapper completely untouched.
+
+AWS SDK v3 routes every operation through a single `client.send(command)` call — there's no
+`client.converse(...)` method to intercept like the other wrappers in this package. `wrapBedrock`
+proxies `.send` and checks `command.constructor.name` (`"ConverseCommand"` /
+`"ConverseStreamCommand"`) to decide whether to instrument a call; it never imports
+`@aws-sdk/client-bedrock-runtime`.
+
+Records `modelId` as `model`, provider `"bedrock"`, allowlisted `inferenceConfig` params
+(`maxTokens`, `temperature`, `topP`, `stopSequences`) as `modelParameters`, `system` + `messages`
+as input (mirroring the Anthropic wrapper's own system+messages shape, or bare `messages` when
+there's no system prompt), `output.message` as output, and usage mapped from Bedrock's
+`inputTokens`/`outputTokens`/`totalTokens` (incl. `cacheReadInputTokens`/`cacheWriteInputTokens`
+as `cacheReadTokens`/`cacheCreationTokens` when reported). `ConverseStreamCommand` calls are
+recorded too: `contentBlockStart`/`contentBlockDelta` events are accumulated per content-block
+index (text deltas concatenated, other delta shapes like `toolUse` merged as-is) while every
+event is still yielded to the caller in real time — no buffering, no added latency; final usage
+is taken from the stream's `metadata` event. `{ streamTimeoutMs }` overrides the idle-stream
+abandonment backstop (default 120s).
+
+## Groq wrapper
+
+```ts
+import Groq from "groq-sdk";
+import { wrapGroq } from "@memoturn/sdk/groq";
+
+const groq = wrapGroq(new Groq(), memoturn);
+await groq.chat.completions.create({ model: "llama-3.3-70b-versatile", messages });
+
+// Streaming is recorded too — chunks are still yielded to you in real time (no buffering);
+// content/tool-call deltas and usage (if a chunk happens to carry it) are accumulated into
+// one generation.
+const stream = await groq.chat.completions.create({ model: "llama-3.3-70b-versatile", messages, stream: true });
+for await (const chunk of stream) {
+  /* consume as usual */
+}
+```
+
+Groq's SDK (`groq-sdk`) is Stainless-generated and structurally close to `openai`'s own client —
+same `chat.completions.create` shape, same response/usage field names — which raises the
+obvious question: why not just call `wrapOpenAI` on a Groq client? **Because it would crash
+every streaming call.** `wrapOpenAI` unconditionally injects `stream_options: { include_usage:
+true }` into streaming requests to request a final usage-bearing chunk; Groq's real `create()`
+has a strict, fully-enumerated parameter list with no `stream_options` field and no catch-all
+kwargs, so that injection raises `TypeError: create() got an unexpected keyword argument
+'stream_options'` against a real Groq client. `wrapGroq` never injects it — it only reads
+`chunk.usage` opportunistically if a chunk happens to carry one.
+
+Records `chat.completions.create` as a generation — model, everything in the params object
+except `model`/`messages`/`stream` as `modelParameters` (an exclusion list, mirroring
+`wrapOpenAI`'s philosophy rather than the small allowlists used by the Anthropic/Bedrock
+wrappers, since Groq's param surface is large and evolving like OpenAI's), `messages` as input,
+`response.choices[0].message` as output, and usage mapped from Groq's
+`prompt_tokens`/`completion_tokens`/`total_tokens` (a straight 3-field passthrough — Groq has no
+prompt-caching fields to map). Streaming calls accumulate `delta.content` and
+`delta.tool_calls[].function.arguments` fragments by index into the same output shape, same as
+the non-streaming path, while every chunk is still yielded to the caller in real time. Chat
+completions only — Groq has no Responses API. `{ streamTimeoutMs }` overrides the idle-stream
+abandonment backstop (default 120s).
+
+## MCP
+
+Two independent wrappers for `@modelcontextprotocol/sdk` — the official TypeScript MCP SDK.
+Both are duck-typed (no hard dependency on the SDK) and produce `TOOL` observations via
+`.tool()`.
+
+**`wrapMcpClient`** — for apps that *call* tools via an MCP `Client`:
+
+```ts
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { wrapMcpClient } from "@memoturn/sdk/mcp";
+
+const client = wrapMcpClient(new Client({ name: "my-app", version: "1.0.0" }), memoturn);
+await client.connect(transport);
+await client.callTool({ name: "get-weather", arguments: { city: "SF" } });
+```
+
+Each `.callTool()` call is recorded as a TOOL observation: the tool name + `arguments` as
+input, the result's `content` as output. MCP signals tool-level failure via `result.isError`
+(not a thrown error) — that case marks the observation ERROR without rethrowing; a
+transport-level throw marks it ERROR and rethrows.
+
+**`wrapMcpServer`** — for apps that *implement* an MCP server via `McpServer`:
+
+```ts
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { wrapMcpServer } from "@memoturn/sdk/mcp";
+
+const server = wrapMcpServer(new McpServer({ name: "my-server", version: "1.0.0" }), memoturn);
+server.registerTool("get-weather", { description: "...", inputSchema: {...} }, async (args) => {
+  return { content: [{ type: "text", text: `sunny in ${args.city}` }] };
+});
+```
+
+`wrapMcpServer` intercepts tool *registration* (`.registerTool()`, and the deprecated
+`.tool()` overload) so every registered handler is automatically wrapped — no need to
+instrument each tool by hand. Unlike the Python MCP SDK, which auto-traces via
+OpenTelemetry out of the box, the TypeScript MCP SDK has no built-in tracing at all, so this
+is genuinely additive. Both wrappers accept `{ trace }` to nest under an existing trace;
+otherwise each call/invocation gets its own trace (`mcp.client` / `mcp.server`, override via
+`{ traceName }`).
 
 ## LangChain
 

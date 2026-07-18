@@ -29,6 +29,9 @@
     "./anthropic": "./src/anthropic.ts",
     "./gemini": "./src/gemini.ts",
     "./pinecone": "./src/pinecone.ts",
+    "./bedrock": "./src/bedrock.ts",
+    "./groq": "./src/groq.ts",
+    "./mcp": "./src/mcp.ts",
     "./langchain": "./src/langchain.ts",
     "./otel": "./src/otel.ts",
     "./observe": "./src/observe.ts",
@@ -69,6 +72,18 @@
         "types": "./dist/pinecone.d.ts",
         "default": "./dist/pinecone.js"
       },
+      "./bedrock": {
+        "types": "./dist/bedrock.d.ts",
+        "default": "./dist/bedrock.js"
+      },
+      "./groq": {
+        "types": "./dist/groq.d.ts",
+        "default": "./dist/groq.js"
+      },
+      "./mcp": {
+        "types": "./dist/mcp.d.ts",
+        "default": "./dist/mcp.js"
+      },
       "./langchain": {
         "types": "./dist/langchain.d.ts",
         "default": "./dist/langchain.js"
@@ -108,6 +123,9 @@
     "@anthropic-ai/sdk": ">=0.30",
     "@google/genai": ">=1.0",
     "@pinecone-database/pinecone": ">=3",
+    "@aws-sdk/client-bedrock-runtime": ">=3.0",
+    "groq-sdk": ">=0.5",
+    "@modelcontextprotocol/sdk": ">=1.0",
     "@opentelemetry/exporter-trace-otlp-http": ">=0.50.0",
     "@opentelemetry/sdk-trace-base": ">=1.20.0"
   },
@@ -122,6 +140,15 @@
       "optional": true
     },
     "@pinecone-database/pinecone": {
+      "optional": true
+    },
+    "@aws-sdk/client-bedrock-runtime": {
+      "optional": true
+    },
+    "groq-sdk": {
+      "optional": true
+    },
+    "@modelcontextprotocol/sdk": {
       "optional": true
     },
     "@opentelemetry/exporter-trace-otlp-http": {
