@@ -6,6 +6,50 @@ All notable changes to the memoturn Python SDK.
 
 ### Features
 
+- `wrap_mistral(client)` — drop-in wrapper for a Mistral client (`mistralai` v1 on
+  PyPI): records `client.chat.complete` and `client.chat.stream` as generations.
+  Non-streaming responses are OpenAI-chat-shaped (`choices[0].message`, snake_case
+  `usage.prompt_tokens`/`completion_tokens`/`total_tokens`), so mapping mirrors
+  `wrap_groq`; streaming is a dedicated `stream()` method (not `stream=True`) whose
+  events wrap the chunk one level deeper (`event.data.choices[].delta`) — content
+  deltas (plain strings or lists of typed content chunks) and tool-call argument
+  fragments (string fragments concatenated, already-parsed dicts replaced) are
+  accumulated by index, with usage captured from the final chunk that carries it.
+  Exclusion-list `modelParameters` (`model`/`messages`/`stream` excluded). Duck-typed,
+  no `mistralai` dependency (`pip install "memoturn[mistral]"` is
+  discoverability-only).
+- `wrap_cohere(client)` — drop-in wrapper for a Cohere client (`cohere` v5+ on PyPI):
+  records `client.chat` and `client.chat_stream` as generations, handling **both API
+  generations in one wrapper** by probing shapes per response — `ClientV2`
+  (`message.content` list + `usage.tokens`; stream events discriminated by `.type`,
+  text in `content-delta` at `event.delta.message.content.text`, usage on the
+  `message-end` event's `delta.usage`) and the legacy v1 API (`text` + `meta.tokens`;
+  stream events discriminated by `.event_type`, text in `text-generation`, usage from
+  the `stream-end` event's embedded full response). Cohere reports token counts as
+  floats and never a total, so usage is int-coerced and `totalTokens` computed as
+  input + output; absent usage fields are omitted entirely (the ingest schema rejects
+  explicit nulls). Duck-typed, no `cohere` dependency (`pip install
+  "memoturn[cohere]"` is discoverability-only).
+- `MemoturnHaystackTracer` (`memoturn.haystack`) — Haystack 2.x integration via
+  Haystack's own tracing seam: register once with
+  `haystack.tracing.enable_tracing(MemoturnHaystackTracer())`. Each top-level
+  `Pipeline.run` (`haystack.pipeline.run` / `haystack.async_pipeline.run` operations)
+  becomes one memoturn trace with the pipeline's input/output data; each
+  `haystack.component.run` becomes a typed observation classified by component class
+  name — `*Generator` → generation (model + usage extracted from output
+  `meta`/`replies[].meta`, both OpenAI- and Anthropic-style token keys), `*Retriever`
+  → `RETRIEVER` with `retrievedDocuments` (rank/id/score/content/metadata, content
+  clamped to 16 KB), `*Embedder` → `EMBEDDING` (vector truncated to 4096 dims),
+  `*Ranker` → `RERANKER`, tool/agent components → `TOOL`/`AGENT`, nested pipelines →
+  `CHAIN` spans inside the outer trace (not new traces), everything else a plain
+  span. Nesting uses the `parent_span` Haystack passes, with a `ContextVar`-based
+  current-span fallback that stays correct under `AsyncPipeline` concurrency; an
+  exception inside a span ends the observation `ERROR` and re-raises. Component
+  input/output honor Haystack's content-tracing opt-in (`set_content_tag` — enable
+  `HAYSTACK_CONTENT_TRACING_ENABLED=true` to record payloads). Duck-typed, no
+  `haystack-ai` dependency (`pip install "memoturn[haystack]"` is
+  discoverability-only).
+
 - `wrap_chroma(collection)` / `wrap_weaviate(collection)` / `wrap_qdrant(client)` —
   vector-store retriever wrappers mirroring `wrap_pinecone`: each patched retrieval
   call is recorded as a RETRIEVER span with `retrievedDocuments` (rank/id/score/

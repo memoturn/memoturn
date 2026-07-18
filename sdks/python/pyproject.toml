@@ -7,7 +7,7 @@ requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 keywords = [
   "memoturn", "llm", "observability", "tracing", "openai", "langchain", "langgraph",
-  "llamaindex", "crewai", "evals", "opentelemetry",
+  "llamaindex", "crewai", "haystack", "evals", "opentelemetry",
 ]
 dependencies = []
 classifiers = [
@@ -30,6 +30,9 @@ anthropic = ["anthropic>=0.30"]
 bedrock = ["boto3>=1.34"]
 gemini = ["google-genai>=1.0"]
 groq = ["groq>=0.4"]
+mistral = ["mistralai>=1.0"]
+cohere = ["cohere>=5.0"]
+haystack = ["haystack-ai>=2.0"]
 pinecone = ["pinecone>=5.0"]
 chromadb = ["chromadb>=0.5"]
 weaviate = ["weaviate-client>=4.0"]
