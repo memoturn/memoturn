@@ -14,6 +14,7 @@ npm install openai                       # for wrapOpenAI
 npm install @anthropic-ai/sdk            # for wrapAnthropic
 npm install @google/genai                # for wrapGemini
 npm install @pinecone-database/pinecone  # for wrapPinecone
+npm install @modelcontextprotocol/sdk    # for wrapMcpClient / wrapMcpServer
 ```
 
 ## Quickstart
@@ -47,6 +48,7 @@ Call `await memoturn.flush()` to push the buffer immediately (e.g. per request i
 | `@memoturn/sdk/anthropic` | `wrapAnthropic` |
 | `@memoturn/sdk/gemini` | `wrapGemini` |
 | `@memoturn/sdk/pinecone` | `wrapPinecone` |
+| `@memoturn/sdk/mcp` | `wrapMcpClient`, `wrapMcpServer` |
 | `@memoturn/sdk/langchain` | `MemoturnCallback` |
 | `@memoturn/sdk/otel` | `memoturnOtlpConfig`, `memoturnTraceExporter`, `memoturnSpanProcessor` |
 | `@memoturn/sdk/observe` | `observe`, `configure`, `getClient`, `setTraceContext` — **Node-only**, not in the barrel |
@@ -199,6 +201,48 @@ const index = wrapPinecone(pc.index("my-index"), memoturn, {
   getContent: (match) => match.metadata?.body,
 });
 ```
+
+## MCP
+
+Two independent wrappers for `@modelcontextprotocol/sdk` — the official TypeScript MCP SDK.
+Both are duck-typed (no hard dependency on the SDK) and produce `TOOL` observations via
+`.tool()`.
+
+**`wrapMcpClient`** — for apps that *call* tools via an MCP `Client`:
+
+```ts
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { wrapMcpClient } from "@memoturn/sdk/mcp";
+
+const client = wrapMcpClient(new Client({ name: "my-app", version: "1.0.0" }), memoturn);
+await client.connect(transport);
+await client.callTool({ name: "get-weather", arguments: { city: "SF" } });
+```
+
+Each `.callTool()` call is recorded as a TOOL observation: the tool name + `arguments` as
+input, the result's `content` as output. MCP signals tool-level failure via `result.isError`
+(not a thrown error) — that case marks the observation ERROR without rethrowing; a
+transport-level throw marks it ERROR and rethrows.
+
+**`wrapMcpServer`** — for apps that *implement* an MCP server via `McpServer`:
+
+```ts
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { wrapMcpServer } from "@memoturn/sdk/mcp";
+
+const server = wrapMcpServer(new McpServer({ name: "my-server", version: "1.0.0" }), memoturn);
+server.registerTool("get-weather", { description: "...", inputSchema: {...} }, async (args) => {
+  return { content: [{ type: "text", text: `sunny in ${args.city}` }] };
+});
+```
+
+`wrapMcpServer` intercepts tool *registration* (`.registerTool()`, and the deprecated
+`.tool()` overload) so every registered handler is automatically wrapped — no need to
+instrument each tool by hand. Unlike the Python MCP SDK, which auto-traces via
+OpenTelemetry out of the box, the TypeScript MCP SDK has no built-in tracing at all, so this
+is genuinely additive. Both wrappers accept `{ trace }` to nest under an existing trace;
+otherwise each call/invocation gets its own trace (`mcp.client` / `mcp.server`, override via
+`{ traceName }`).
 
 ## LangChain
 
