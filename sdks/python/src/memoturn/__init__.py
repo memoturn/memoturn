@@ -1,5 +1,6 @@
 """memoturn Python SDK — LLM observability, prompts, and evals."""
 from .anthropic import wrap_anthropic
+from .bedrock import wrap_bedrock
 from .client import Memoturn, Span, Trace
 from .crewai import instrument_crewai
 from .dataset import add_dataset_items, create_dataset, evaluate_gate, get_dataset, record_run
@@ -27,6 +28,7 @@ __all__ = [
     "compile_prompt",
     "wrap_openai",
     "wrap_anthropic",
+    "wrap_bedrock",
     "wrap_gemini",
     "wrap_pinecone",
     "wrap_mcp_client",

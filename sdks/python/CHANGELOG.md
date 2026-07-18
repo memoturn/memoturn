@@ -6,6 +6,21 @@ All notable changes to the memoturn Python SDK.
 
 ### Features
 
+- `wrap_bedrock(client)` — drop-in wrapper for a boto3 `bedrock-runtime` client:
+  records `client.converse` calls as generations (system + messages as input, an
+  `inferenceConfig` allowlist — `maxTokens`/`temperature`/`topP`/`stopSequences` — as
+  model parameters, usage mapping incl. cache read/write tokens) and independently
+  wraps `client.converse_stream` (only if present), accumulating streamed content
+  blocks by index the same way `wrap_anthropic` does. **Only the standardized
+  Converse API (`converse`/`converse_stream`) is covered — `invoke_model`/
+  `invoke_model_with_response_stream` are explicitly out of scope**, since their
+  request/response body shape varies per underlying model family (Anthropic-on-Bedrock,
+  Titan, Llama, ...) rather than being generic like Converse. Duck-typed, no `boto3`
+  dependency (`pip install "memoturn[bedrock]"` is discoverability-only).
+- Documentation clarification (no code change): `wrap_gemini` already covers Vertex AI
+  — `genai.Client(vertexai=True, project=..., location=...)` is the same client class
+  and the same `models.generate_content`/`.generate_content_stream` methods as the
+  direct Gemini API, so a Vertex-AI-mode client is traced today with zero new code.
 - `make_langgraph_handler()` (`memoturn.langgraph`) — a combined LangChain +
   LangGraph callback handler: inherits `MemoturnCallbackHandler`'s chain/LLM/tool
   recording unchanged, and additionally records `langgraph.interrupt`/
