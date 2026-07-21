@@ -117,6 +117,7 @@ import {
   mcpAuthorizationServerMetadata,
   mcpProtectedResourceMetadata,
   otlpToEvents,
+  RoleHierarchyError,
   recordAudit,
   recordAuthAudit,
   recordRun,
@@ -4055,8 +4056,9 @@ app.openapi(
     const { userId } = c.req.valid("param");
     const { role } = c.req.valid("json");
     try {
-      await assignProjectMember(c.get("projectId"), userId, role);
+      await assignProjectMember(c.get("projectId"), userId, role, c.get("role"));
     } catch (e) {
+      if (e instanceof RoleHierarchyError) return c.json({ error: e.message }, 403);
       return c.json({ error: e instanceof Error ? e.message : "assign failed" }, 400);
     }
     await recordAudit(c.get("projectId"), c.get("actor"), "project-member.assign", userId, { role });

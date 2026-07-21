@@ -97,14 +97,15 @@ export async function sendEmail(msg: EmailMessage): Promise<boolean> {
   if (kind === "none") {
     // Unconfigured. In development, surface the full message (incl. any action link) to
     // stderr so reset/invite/verification flows are testable without a mail server; in
-    // production this is a real misconfiguration — warn, but don't leak the body to logs.
+    // production this is a real misconfiguration — warn, but don't leak the body OR the subject:
+    // one-time codes (email-OTP / 2FA) are carried IN THE SUBJECT, so logging it would be an
+    // account-takeover path gated only on log access.
     console.warn(
       JSON.stringify({
         level: "warn",
         scope: "mailer.disabled",
         to: msg.to,
-        subject: msg.subject,
-        ...(isProduction() ? {} : { text: msg.text }),
+        ...(isProduction() ? {} : { subject: msg.subject, text: msg.text }),
       }),
     );
     return false;

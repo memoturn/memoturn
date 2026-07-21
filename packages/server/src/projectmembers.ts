@@ -13,6 +13,32 @@ export function isValidProjectRole(role: string): role is ProjectRole {
   return (VALID_ROLES as readonly string[]).includes(role);
 }
 
+/** Raised when a role change violates the hierarchy (privilege escalation / outranked target). */
+export class RoleHierarchyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RoleHierarchyError";
+  }
+}
+
+const ROLE_RANK: Record<string, number> = { owner: 3, admin: 2, member: 1, viewer: 0 };
+const rankOf = (role: string): number => ROLE_RANK[role.toLowerCase()] ?? 1; // unknown → member
+
+/**
+ * Whether `actorRole` may set a member currently at `targetCurrentRole` to `newRole`. Two rules
+ * prevent an ADMIN from escalating or attacking an OWNER:
+ *  - you cannot grant a role above your own (else an ADMIN could mint OWNERs, or self-escalate); and
+ *  - you cannot modify a member who currently outranks you (else an ADMIN could downgrade the org
+ *    OWNER to VIEWER — a lockout, since the per-project override wins over the org role).
+ * Returns null if allowed, or a reason string if forbidden.
+ */
+export function roleChangeDenial(actorRole: string, targetCurrentRole: string, newRole: string): string | null {
+  const actor = rankOf(actorRole);
+  if (rankOf(newRole) > actor) return "cannot assign a role above your own";
+  if (rankOf(targetCurrentRole) > actor) return "cannot modify a member who outranks you";
+  return null;
+}
+
 export interface ProjectMemberRow {
   userId: string;
   email: string;
@@ -49,7 +75,12 @@ export async function listProjectMembers(projectId: string): Promise<ProjectMemb
  * the role is invalid, or the user isn't a member of the project's organization (you can't be
  * on a project without belonging to its org).
  */
-export async function assignProjectMember(projectId: string, userId: string, role: string): Promise<void> {
+export async function assignProjectMember(
+  projectId: string,
+  userId: string,
+  role: string,
+  actorRole: string,
+): Promise<void> {
   if (!isValidProjectRole(role)) throw new Error(`invalid role: ${role}`);
   const project = await prisma.project.findUnique({ where: { id: projectId }, select: { organizationId: true } });
   if (!project) throw new Error("project not found");
@@ -57,6 +88,16 @@ export async function assignProjectMember(projectId: string, userId: string, rol
     where: { organizationId_userId: { userId, organizationId: project.organizationId } },
   });
   if (!member) throw new Error("user is not a member of this project's organization");
+
+  // Enforce the role hierarchy against the target's CURRENT effective role (project override, else
+  // org role) so an ADMIN can neither grant a role above their own nor demote a higher-ranked user.
+  const currentOverride = await prisma.projectMember.findUnique({
+    where: { projectId_userId: { projectId, userId } },
+    select: { role: true },
+  });
+  const denial = roleChangeDenial(actorRole, currentOverride?.role ?? member.role, role);
+  if (denial) throw new RoleHierarchyError(denial);
+
   await prisma.projectMember.upsert({
     where: { projectId_userId: { projectId, userId } },
     update: { role },
