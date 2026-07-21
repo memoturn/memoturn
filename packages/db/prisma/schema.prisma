@@ -93,6 +93,7 @@ model Project {
   budget          CostBudget?
   projectMembers  ProjectMember[]
   traceStates     TraceState[]
+  observationStates ObservationState[]
 
   @@unique([organizationId, slug])
 }
@@ -950,4 +951,38 @@ model TraceState {
 
   @@id([projectId, id])
   @@index([projectId, updatedAt]) // prune sweep (Phase 3)
+}
+
+model ObservationState {
+  projectId           String
+  project             Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id                  String
+  // Raw mergeable fields only — derived latency_ms + costs are computed at mirror time (Phase 2).
+  traceId             String?
+  type                String?
+  parentObservationId String?
+  name                String?
+  startTime           DateTime?
+  endTime             DateTime?
+  environment         String?
+  level               String?
+  statusMessage       String?
+  model               String?
+  provider            String?
+  modelParameters     String?
+  promptTokens        Int?
+  completionTokens    Int?
+  totalTokens         Int?
+  cacheReadTokens     Int?
+  cacheCreationTokens Int?
+  promptId            String?
+  promptVersion       String?
+  input               String?
+  output              String?
+  metadata            String?
+  stateVersion        BigInt    @default(0)
+  updatedAt           DateTime  @updatedAt
+
+  @@id([projectId, id])
+  @@index([projectId, updatedAt])
 }

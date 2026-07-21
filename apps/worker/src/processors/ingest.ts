@@ -6,12 +6,14 @@ import {
   compileMaskers,
   dispatchAutomationsBatch,
   dispatchWebhooksBatch,
+  extractObservationPatch,
   extractTracePatch,
   forwardEvents,
   getSamplingRate,
   listOnlineEvaluators,
   loadMaskingPolicy,
   loadProjectPriceOverrides,
+  mergeObservationStates,
   mergeTraceStates,
   mutableStateEnabled,
   offloadLargePayload,
@@ -231,21 +233,39 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
   );
   inc("ingest_events_total", undefined, parsed.batch.length);
 
-  // ADR-0001 Phase 1 (traces slice): additively merge trace patches into the authoritative
+  // ADR-0001 Phase 1: additively merge trace + observation patches into the authoritative
   // Postgres state, alongside the Doris write above. Flag-gated + best-effort — this is a
   // dual-run to validate the merge; a failure here must never affect ingestion.
   if (mutableStateEnabled()) {
     try {
-      const patches = parsed.batch
-        .map((e, i) => (e.type === "trace-create" ? extractTracePatch(rawJson.batch[i]?.body ?? {}, e.body) : null))
-        .filter((p): p is NonNullable<typeof p> => p !== null);
-      if (patches.length > 0) {
-        await mergeTraceStates(projectId, patches);
-        inc("mutable_state_merges_total", { entity: "trace" }, patches.length);
+      const tracePatches = [];
+      const obsPatches = [];
+      for (let i = 0; i < parsed.batch.length; i++) {
+        const e = parsed.batch[i]!;
+        const rawBody = rawJson.batch[i]?.body ?? {};
+        if (e.type === "trace-create") {
+          tracePatches.push(extractTracePatch(rawBody, e.body, e.timestamp));
+        } else if (
+          e.type === "span-create" ||
+          e.type === "span-update" ||
+          e.type === "generation-create" ||
+          e.type === "generation-update" ||
+          e.type === "event-create"
+        ) {
+          obsPatches.push(extractObservationPatch(rawBody, e.body, e.type, e.timestamp));
+        }
+      }
+      if (tracePatches.length > 0) {
+        await mergeTraceStates(projectId, tracePatches);
+        inc("mutable_state_merges_total", { entity: "trace" }, tracePatches.length);
+      }
+      if (obsPatches.length > 0) {
+        await mergeObservationStates(projectId, obsPatches);
+        inc("mutable_state_merges_total", { entity: "observation" }, obsPatches.length);
       }
     } catch (err) {
-      inc("mutable_state_errors_total", { entity: "trace" });
-      logJson("error", "mutable-state trace merge failed (ingestion unaffected)", {
+      inc("mutable_state_errors_total", undefined);
+      logJson("error", "mutable-state merge failed (ingestion unaffected)", {
         projectId,
         error: err instanceof Error ? err.message : String(err),
       });
