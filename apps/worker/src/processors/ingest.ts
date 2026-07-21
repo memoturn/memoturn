@@ -14,12 +14,18 @@ import {
   offloadLargePayload,
   offloadMedia,
   runEvaluator,
+  withEntityLocks,
 } from "@memoturn/server";
 import { type TelemetryRowMap, type TelemetryTable, telemetry } from "@memoturn/telemetry";
 import type { Job } from "bullmq";
+import { entityLockNames } from "../entitylock.js";
 import { mapEvents } from "../mappers.js";
 import { inc, logJson, observeInsert } from "../metrics.js";
 import { applyHeadSampling, sample } from "../sampling.js";
+
+/** Lock TTL for the read-merge→insert critical section — generous vs the two Doris round trips it
+ * covers; if the worker dies mid-batch the lock auto-expires and another replica proceeds. */
+const MERGE_LOCK_TTL_SECONDS = 30;
 
 /** True for errors worth retrying (rate limits / transient upstream failures). */
 function isTransient(err: unknown): boolean {
@@ -171,41 +177,53 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     ),
   ];
   const store = telemetry();
-  const [traceBases, observationBases] = await Promise.all([
-    store.getTraceRowsByIds(projectId, traceIds),
-    store.getObservationRowsByIds(projectId, observationIds),
-  ]);
-  const bases = {
-    traces: new Map(traceBases.map((r) => [r.id, r])),
-    observations: new Map(observationBases.map((r) => [r.id, r])),
-  };
+  const rate = await getSamplingRate(projectId); // project config — read outside the lock
 
-  const mapped = mapEvents(projectId, parsed.batch, priceOverrides, bases);
+  // Serialize the read-merge→insert per entity id: without it, two batches patching the same trace
+  // each read the same base, materialize a full row from only their own fields, and merge-on-write
+  // (LWW) keeps one and drops the other's. Holding per-entity locks makes the second batch read the
+  // first's already-written row as its base. Best-effort — degrades to unlocked (counted) if Redis
+  // is down or a holder is stuck, rather than stalling ingestion.
+  const { traces, observations, scores, retrieval_documents, embeddings } = await withEntityLocks(
+    entityLockNames(projectId, parsed.batch),
+    MERGE_LOCK_TTL_SECONDS,
+    async () => {
+      const [traceBases, observationBases] = await Promise.all([
+        store.getTraceRowsByIds(projectId, traceIds),
+        store.getObservationRowsByIds(projectId, observationIds),
+      ]);
+      const bases = {
+        traces: new Map(traceBases.map((r) => [r.id, r])),
+        observations: new Map(observationBases.map((r) => [r.id, r])),
+      };
 
-  // Head-based sampling: keep only rate% of traces in the query store (whole traces, stable per
-  // id). The raw batch is already in blob, so dropped traces stay replayable. No-op at rate=100.
-  const rate = await getSamplingRate(projectId);
-  const { rows: sampled, dropped } = applyHeadSampling(rate, mapped);
-  if (dropped > 0) inc("ingest_sampled_out_total", undefined, dropped);
-  const { traces, observations, scores, retrieval_documents, embeddings } = sampled;
+      const mapped = mapEvents(projectId, parsed.batch, priceOverrides, bases);
 
-  // Insert each table independently so one table's failure is isolated and observable.
-  // Re-insert on retry is safe — the store's last-writer-wins merge (event_ts) dedupes
-  // by entity id.
-  const results = await Promise.allSettled([
-    insertTable("traces", traces),
-    insertTable("observations", observations),
-    insertTable("scores", scores),
-    insertTable("retrieval_documents", retrieval_documents),
-    insertTable("embeddings", embeddings),
-  ]);
-  const failed = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+      // Head-based sampling: keep only rate% of traces in the query store (whole traces, stable per
+      // id). The raw batch is already in blob, so dropped traces stay replayable. No-op at rate=100.
+      const { rows, dropped } = applyHeadSampling(rate, mapped);
+      if (dropped > 0) inc("ingest_sampled_out_total", undefined, dropped);
+
+      // Insert each table independently so one table's failure is isolated and observable.
+      // Re-insert on retry is safe — the store's last-writer-wins merge (event_ts) dedupes by id.
+      const results = await Promise.allSettled([
+        insertTable("traces", rows.traces),
+        insertTable("observations", rows.observations),
+        insertTable("scores", rows.scores),
+        insertTable("retrieval_documents", rows.retrieval_documents),
+        insertTable("embeddings", rows.embeddings),
+      ]);
+      const failed = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+      if (failed.length > 0) {
+        // Throw so BullMQ retries the whole job (idempotent). DLQ catches terminal failures.
+        const reasons = failed.map((f) => (f.reason instanceof Error ? f.reason.message : String(f.reason))).join("; ");
+        throw new Error(`telemetry insert failed for ${failed.length} table(s): ${reasons}`);
+      }
+      return rows;
+    },
+    { onDegraded: () => inc("ingest_merge_unlocked_total") },
+  );
   inc("ingest_events_total", undefined, parsed.batch.length);
-  if (failed.length > 0) {
-    // Throw so BullMQ retries the whole job (idempotent). DLQ catches terminal failures.
-    const reasons = failed.map((f) => (f.reason instanceof Error ? f.reason.message : String(f.reason))).join("; ");
-    throw new Error(`telemetry insert failed for ${failed.length} table(s): ${reasons}`);
-  }
 
   logJson("info", "ingest ok", {
     projectId,
