@@ -11,6 +11,7 @@ import {
   withLock,
 } from "@memoturn/server";
 import { Queue, Worker } from "bullmq";
+import { shouldDeadLetter } from "./dlq.js";
 import { logJson, snapshot } from "./metrics.js";
 import { processExperiment } from "./processors/experiment.js";
 import { processIngest } from "./processors/ingest.js";
@@ -36,9 +37,10 @@ const ingestWorker = new Worker<IngestJob>(QUEUE_NAMES.ingest, processIngest, {
 ingestWorker.on("ready", () => console.log(`[worker] ingest ready (concurrency=${concurrency})`));
 ingestWorker.on("failed", async (job, err) => {
   logJson("error", "ingest job failed", { jobId: job?.id, attemptsMade: job?.attemptsMade, error: err.message });
-  // Only DLQ after all retry attempts are exhausted.
+  // DLQ on a terminal failure: retries exhausted OR a stalled job (which BullMQ fails with
+  // attemptsMade possibly still below `attempts`). See shouldDeadLetter.
   const maxAttempts = job?.opts.attempts ?? 1;
-  if (job && job.attemptsMade >= maxAttempts) {
+  if (job && shouldDeadLetter(err.message, job.attemptsMade, maxAttempts)) {
     try {
       await dlq.add(
         "dead",
@@ -74,18 +76,29 @@ const maintenanceQueue = new Queue(QUEUE_NAMES.export, {
   connection: connectionOptions(),
   prefix: QUEUE_PREFIX,
 });
+// Concurrency > 1 so the per-minute alert-eval tick isn't blocked behind a long-running daily
+// sweep (retention/export/embeddings) on the same queue. Each job type is withLock-guarded, so
+// running different types concurrently is safe.
+const maintenanceConcurrency = Number(process.env.MAINTENANCE_CONCURRENCY ?? 4);
 const maintenanceWorker = new Worker(
   QUEUE_NAMES.export,
   async (job) => {
     if (job.name === "retention") {
       // Lock so two workers / a manual trigger can't sweep concurrently (racing deletes).
-      const ran = await withLock("retention", 30 * 60, async () => {
-        const results = await applyAllRetention();
-        const total = results.reduce((n, r) => n + r.deletedTraces, 0);
-        const blobs = results.reduce((n, r) => n + r.deletedBlobObjects, 0);
-        console.log(`[retention] swept ${results.length} project(s), deleted ${total} traces, ${blobs} blob objects`);
-      });
-      if (ran === null) console.log("[retention] skipped — another run holds the lock");
+      // fail-closed: retention DELETES data, so if Redis is down, skip rather than let every
+      // replica run an uncoordinated concurrent sweep.
+      const ran = await withLock(
+        "retention",
+        30 * 60,
+        async () => {
+          const results = await applyAllRetention();
+          const total = results.reduce((n, r) => n + r.deletedTraces, 0);
+          const blobs = results.reduce((n, r) => n + r.deletedBlobObjects, 0);
+          console.log(`[retention] swept ${results.length} project(s), deleted ${total} traces, ${blobs} blob objects`);
+        },
+        { failClosed: true },
+      );
+      if (ran === null) console.log("[retention] skipped — lock held or (Redis down) fail-closed");
     } else if (job.name === "export") {
       const ran = await withLock("scheduled-export", 30 * 60, async () => {
         const results = await runAllScheduledExports();
@@ -116,7 +129,7 @@ const maintenanceWorker = new Worker(
       if (ran === null) console.log("[alerts] skipped — another run holds the lock");
     }
   },
-  { connection: connectionOptions(), prefix: QUEUE_PREFIX },
+  { connection: connectionOptions(), prefix: QUEUE_PREFIX, concurrency: maintenanceConcurrency },
 );
 maintenanceWorker.on("failed", (job, err) => console.error(`[maintenance] job ${job?.id} failed:`, err.message));
 
