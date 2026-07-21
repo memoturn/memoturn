@@ -4,6 +4,7 @@ import {
   assertSafeUserPatterns,
   compileMaskers,
   MAX_USER_PATTERNS,
+  maxStarHeight,
   UserPatternError,
 } from "./masking.js";
 
@@ -25,6 +26,28 @@ describe("compileMaskers", () => {
   });
 });
 
+describe("maxStarHeight", () => {
+  it("is ≤ 1 for safe patterns (single-level repetition, bounded/non-capturing groups)", () => {
+    for (const src of [
+      "sk-[a-z0-9]+",
+      "\\bsecret\\b",
+      "user_\\d{1,10}",
+      "(?:\\d[ -]?){13,16}", // credit-card shape — repeated group but inner is not repeated
+      "(foo|bar)+",
+      "a+b+c+", // sequential, not nested
+      "[\\w.+-]+@[\\w-]+\\.[\\w.-]+", // the email built-in
+    ]) {
+      expect(maxStarHeight(src), src).toBeLessThan(2);
+    }
+  });
+
+  it("is ≥ 2 for nested repetition (the ReDoS signature)", () => {
+    for (const src of ["(a+)+$", "([a-z]+)+", "(\\d*)*", "((ab)+)+", "(a{1,5}){1,5}"]) {
+      expect(maxStarHeight(src), src).toBeGreaterThanOrEqual(2);
+    }
+  });
+});
+
 describe("assertSafeUserPatterns", () => {
   it("accepts ordinary linear patterns", () => {
     expect(() => assertSafeUserPatterns(["sk-[a-z0-9]+", "\\bsecret\\b", "user_\\d{1,10}"])).not.toThrow();
@@ -34,7 +57,7 @@ describe("assertSafeUserPatterns", () => {
     expect(() => assertSafeUserPatterns(["[unterminated"])).toThrow(UserPatternError);
   });
 
-  it("rejects a catastrophic-backtracking pattern (ReDoS)", () => {
+  it("rejects a catastrophic-backtracking pattern (ReDoS) — statically, without executing it", () => {
     // Classic exponential patterns — must be refused before they reach the shared ingest worker.
     expect(() => assertSafeUserPatterns(["(a+)+$"])).toThrow(/backtracking/);
     expect(() => assertSafeUserPatterns(["([a-z]+)+$"])).toThrow(UserPatternError);

@@ -31,32 +31,111 @@ export class UserPatternError extends Error {
   }
 }
 
-// Adversarial probes that trigger catastrophic backtracking in vulnerable patterns. Length is
-// tuned so an exponential pattern clearly blows the budget (and is rejected) while still RETURNING
-// in tens of ms — we can only time a call that comes back, so a longer input (which would hang on
-// a pathological pattern) is not usable here. A linear regex finishes any probe in microseconds.
-const REDOS_PROBES = [`${"a".repeat(24)}!`, `${"a1".repeat(12)}!`, `${"-".repeat(24)}!`, `${" ".repeat(24)}!`];
-const REDOS_BUDGET_MS = 20;
-
-/** True if `re` shows super-linear backtracking on an adversarial probe (a linear regex is µs). */
-function isCatastrophic(re: RegExp): boolean {
-  for (const probe of REDOS_PROBES) {
-    const start = performance.now();
-    try {
-      re.lastIndex = 0;
-      probe.replace(re, "");
-    } catch {
-      // exotic runtime errors aren't a ReDoS signal
-    }
-    if (performance.now() - start > REDOS_BUDGET_MS) return true;
+function isValidRegex(src: string): boolean {
+  try {
+    return Boolean(new RegExp(src, "g"));
+  } catch {
+    return false;
   }
-  return false;
+}
+
+/**
+ * Maximum regex "star height": the deepest nesting of repetition operators (`*`, `+`, `{n,}`).
+ * A height ≥ 2 — a repeated group that itself repeats, e.g. `(a+)+` or `([a-z]*)*` — is the
+ * structural signature of catastrophic backtracking (ReDoS). This is computed by walking the
+ * pattern STATICALLY (no execution), so it is deterministic and portable — unlike timing a probe
+ * input, which varies with CPU speed and, on a pathological pattern, can itself hang the caller.
+ * Conservative by design: it may reject an unusual-but-safe nested-repeat pattern, which is an
+ * acceptable trade for a PII-redaction config that runs on every event in the shared worker.
+ */
+export function maxStarHeight(src: string): number {
+  let i = 0;
+
+  const walk = (): number => {
+    let groupMax = 0;
+    let lastHeight = 0; // star height of the most recent atom at this level
+    let haveAtom = false;
+    const bump = (h: number) => {
+      if (h > groupMax) groupMax = h;
+    };
+    const flushAtom = () => {
+      if (haveAtom) bump(lastHeight);
+    };
+
+    while (i < src.length) {
+      const c = src[i];
+      if (c === ")") break; // let the caller consume the ')'
+      if (c === "|") {
+        flushAtom();
+        lastHeight = 0;
+        haveAtom = false;
+        i++;
+      } else if (c === "\\") {
+        flushAtom();
+        lastHeight = 0;
+        haveAtom = true;
+        i += 2; // escaped atom
+      } else if (c === "[") {
+        flushAtom();
+        i++;
+        while (i < src.length && src[i] !== "]") {
+          if (src[i] === "\\") i++;
+          i++;
+        }
+        i++; // closing ]
+        lastHeight = 0;
+        haveAtom = true;
+      } else if (c === "(") {
+        flushAtom();
+        i++;
+        // Skip a group-type prefix so its punctuation isn't misread as a quantifier.
+        if (src[i] === "?") {
+          i++;
+          if (src[i] === "<" && (src[i + 1] === "=" || src[i + 1] === "!"))
+            i += 2; // lookbehind
+          else if (src[i] === "<") {
+            while (i < src.length && src[i] !== ">") i++;
+            if (src[i] === ">") i++; // named group
+          } else if (src[i] === ":" || src[i] === "=" || src[i] === "!") i++;
+        }
+        lastHeight = walk();
+        if (src[i] === ")") i++;
+        haveAtom = true;
+      } else if (c === "*" || c === "+") {
+        if (haveAtom) bump((lastHeight += 1));
+        i++;
+      } else if (c === "{") {
+        const close = src.indexOf("}", i);
+        if (close === -1) {
+          flushAtom(); // a literal '{'
+          lastHeight = 0;
+          haveAtom = true;
+          i++;
+        } else {
+          const repeating = src.slice(i + 1, close).includes(","); // {n,}/{n,m} repeat; {n} is exact
+          i = close + 1;
+          if (haveAtom && repeating) bump((lastHeight += 1));
+        }
+      } else if (c === "?") {
+        i++; // optional / lazy suffix — adds no star height
+      } else {
+        flushAtom(); // ordinary literal
+        lastHeight = 0;
+        haveAtom = true;
+        i++;
+      }
+    }
+    flushAtom();
+    return groupMax;
+  };
+
+  return walk();
 }
 
 /**
  * Validate user-supplied regex sources at policy-WRITE time: reject invalid syntax, too many
- * patterns, or a pattern with catastrophic backtracking. This keeps pathological regexes out of
- * the shared ingest worker, where masking runs synchronously over every event — a ReDoS pattern
+ * patterns, or a pattern with nested repetition (ReDoS risk). This keeps pathological regexes out
+ * of the shared ingest worker, where masking runs synchronously over every event — a ReDoS pattern
  * there would wedge ingest for every tenant on the replica (a low-privilege, cross-tenant DoS).
  * Throws UserPatternError (→ 400). Callers pass every user regex the policy will execute.
  */
@@ -65,14 +144,13 @@ export function assertSafeUserPatterns(patterns: string[]): void {
     throw new UserPatternError(`too many custom patterns (max ${MAX_USER_PATTERNS})`);
   }
   for (const src of patterns) {
-    let re: RegExp;
-    try {
-      re = new RegExp(src, "g");
-    } catch {
+    if (!isValidRegex(src)) {
       throw new UserPatternError(`invalid regex: ${src.slice(0, 80)}`);
     }
-    if (isCatastrophic(re)) {
-      throw new UserPatternError(`pattern rejected — too slow, likely catastrophic backtracking: ${src.slice(0, 80)}`);
+    if (maxStarHeight(src) >= 2) {
+      throw new UserPatternError(
+        `pattern rejected — nested repetition risks catastrophic backtracking: ${src.slice(0, 80)}`,
+      );
     }
   }
 }
