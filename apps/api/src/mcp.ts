@@ -101,11 +101,34 @@ function buildServer(mcpAuth: McpAuth): Server {
   return server;
 }
 
-/** Best-effort client IP for pre-auth throttling (behind Caddy, X-Forwarded-For is set). */
+// Number of trusted reverse proxies in front of the API (the documented deploy runs behind one
+// Caddy). Set to 0 when the API is directly internet-exposed so X-Forwarded-For is never trusted.
+const TRUSTED_PROXIES = Math.max(0, Math.floor(Number(process.env.RATE_LIMIT_TRUSTED_PROXIES ?? 1)));
+
+/**
+ * Resolve the client IP for the pre-auth throttle from X-Forwarded-For, honoring the trusted-proxy
+ * count. The client-controlled PREFIX of XFF is spoofable; each trusted proxy appends the real peer
+ * it saw to the RIGHT, so the genuine client IP is `trustedProxies` entries from the end. Reading
+ * the leftmost value (the old behavior) let an attacker mint a unique fake IP per request and evade
+ * the per-IP limit entirely. Returns "unknown" when XFF can't be trusted, yielding one shared bucket.
+ */
+export function clientIpFrom(xff: string | undefined, xRealIp: string | undefined, trustedProxies: number): string {
+  // With no trusted proxy, both XFF and X-Real-IP are client-settable, so trust neither — one
+  // shared bucket is safer than a spoofable per-IP key we'd have no way to validate here.
+  if (trustedProxies <= 0) return "unknown";
+  if (xff) {
+    const parts = xff
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const ip = parts[parts.length - trustedProxies];
+    if (ip) return ip;
+  }
+  return xRealIp?.trim() || "unknown";
+}
+
 function clientIp(c: Context): string {
-  const xff = c.req.header("x-forwarded-for");
-  if (xff) return xff.split(",")[0]?.trim() || "unknown";
-  return c.req.header("x-real-ip")?.trim() || "unknown";
+  return clientIpFrom(c.req.header("x-forwarded-for"), c.req.header("x-real-ip"), TRUSTED_PROXIES);
 }
 
 export async function handleMcp(c: Context): Promise<Response> {

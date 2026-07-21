@@ -98,21 +98,37 @@ const superadminUserIds = (process.env.SUPERADMIN_USER_IDS ?? "")
  * Redis blip must never lock users out of signing in); the stored value's `lastRequest`
  * drives the window, so the Redis TTL is only garbage collection.
  */
+// In-process fallback so a Redis OUTAGE degrades to per-replica throttling instead of removing
+// the auth rate limit entirely (a fully-open limiter is a brute-force window on password + OTP).
+// Bounded and pruned so it can't grow unbounded; only consulted when Redis is unreachable.
+type RlEntry = { count: number; lastRequest: number };
+const localRl = new Map<string, RlEntry>();
+const LOCAL_RL_MAX = 10_000;
+function localRlSet(key: string, value: RlEntry) {
+  if (localRl.size >= LOCAL_RL_MAX) {
+    const cutoff = Date.now() - 120_000;
+    for (const [k, v] of localRl) if (v.lastRequest < cutoff) localRl.delete(k);
+    if (localRl.size >= LOCAL_RL_MAX) localRl.clear(); // still full of fresh entries — hard reset
+  }
+  localRl.set(key, value);
+}
+
 const rateLimitStorage = {
   get: async (key: string) => {
     try {
       const raw = await redisConnection().get(`memoturn:ba-rl:${key}`);
       return raw ? JSON.parse(raw) : undefined;
     } catch {
-      return undefined;
+      return localRl.get(key); // Redis down — fall back to the per-replica counter
     }
   },
-  set: async (key: string, value: { count: number; lastRequest: number }) => {
+  set: async (key: string, value: RlEntry) => {
+    localRlSet(key, value); // bounded per-replica mirror, so a mid-window outage still throttles
     try {
       // TTL a little beyond the max window keeps stale counters from lingering.
       await redisConnection().set(`memoturn:ba-rl:${key}`, JSON.stringify(value), "EX", 120);
     } catch {
-      // fail open — never block auth on a Redis outage
+      // fall back to the local mirror written above
     }
   },
 };
