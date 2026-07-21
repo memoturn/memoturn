@@ -1,6 +1,6 @@
-import type { GenerationBody, TraceBody } from "@memoturn/core";
+import type { GenerationBody, ScoreBody, TraceBody } from "@memoturn/core";
 import { describe, expect, it } from "vitest";
-import { extractObservationPatch, extractTracePatch } from "./mutablestate.js";
+import { extractObservationPatch, extractScorePatch, extractTracePatch } from "./mutablestate.js";
 
 const TS = "2026-01-01T00:00:00.000Z";
 const V = BigInt(Date.parse(TS));
@@ -8,6 +8,16 @@ const maskedTrace = (over: Record<string, unknown>): TraceBody =>
   ({ id: "t1", environment: "default", ...over }) as unknown as TraceBody;
 const maskedObs = (over: Record<string, unknown>): GenerationBody =>
   ({ id: "o1", traceId: "t1", environment: "default", ...over }) as unknown as GenerationBody;
+const maskedScore = (over: Record<string, unknown>): ScoreBody =>
+  ({
+    id: "s1",
+    traceId: "t1",
+    name: "quality",
+    environment: "default",
+    source: "API",
+    dataType: "NUMERIC",
+    ...over,
+  }) as unknown as ScoreBody;
 
 describe("extractTracePatch", () => {
   it("includes only fields present in the raw wire body", () => {
@@ -83,5 +93,32 @@ describe("extractObservationPatch", () => {
     expect(p.scalars.endTime).toBeInstanceOf(Date);
     expect(p.scalars.model).toBeUndefined();
     expect(p.scalars.promptTokens).toBeUndefined();
+  });
+});
+
+describe("extractScorePatch", () => {
+  it("always sets the required traceId + name and the merge version", () => {
+    const p = extractScorePatch(
+      { id: "s1", traceId: "t1", name: "quality", value: 0.9 },
+      maskedScore({ value: 0.9 }),
+      TS,
+    );
+    expect(p.scalars.traceId).toBe("t1");
+    expect(p.scalars.name).toBe("quality");
+    expect(p.scalars.value).toBe(0.9);
+    expect(p.mergeVersion).toBe(V);
+  });
+
+  it("only sets source/dataType when the client sent them (NULL coalesces to defaults at mirror)", () => {
+    const p = extractScorePatch({ id: "s1", traceId: "t1", name: "quality", value: 1 }, maskedScore({ value: 1 }), TS);
+    expect(p.scalars.source).toBeUndefined();
+    expect(p.scalars.dataType).toBeUndefined();
+    const p2 = extractScorePatch(
+      { id: "s1", traceId: "t1", name: "quality", source: "EVAL", dataType: "CATEGORICAL", stringValue: "good" },
+      maskedScore({ source: "EVAL", dataType: "CATEGORICAL", stringValue: "good" }),
+      TS,
+    );
+    expect(p2.scalars.source).toBe("EVAL");
+    expect(p2.scalars.stringValue).toBe("good");
   });
 });

@@ -1,4 +1,4 @@
-import type { GenerationBody, TraceBody } from "@memoturn/core";
+import type { GenerationBody, ScoreBody, TraceBody } from "@memoturn/core";
 import { prisma } from "@memoturn/db";
 
 /**
@@ -248,6 +248,66 @@ export async function mergeObservationStates(projectId: string, patches: Observa
   return upsertState(
     "ObservationState",
     OBS_COLS,
+    null,
+    projectId,
+    patches.map((p) => ({ id: p.id, version: p.mergeVersion, scalars: p.scalars })),
+  );
+}
+
+// ── Scores ───────────────────────────────────────────────────────────────────────
+
+export interface ScorePatch {
+  id: string;
+  mergeVersion: bigint;
+  scalars: Record<string, unknown>;
+}
+
+const SCORE_COLS: readonly ColDef[] = [
+  ["traceId", "text"],
+  ["observationId", "text"],
+  ["name", "text"],
+  ["timestamp", "timestamp"],
+  ["environment", "text"],
+  ["source", "text"],
+  ["dataType", "text"],
+  ["value", "double precision"],
+  ["stringValue", "text"],
+  ["comment", "text"],
+  ["configId", "text"],
+];
+
+/**
+ * Build a sparse score patch from the fields the client actually sent (present in `rawBody`).
+ * Scores are lightly mutable (corrections re-send the same id); `source`/`dataType` NULL when
+ * unsent coalesce to their defaults at mirror time (like `environment`). Note: because `value`
+ * merges via COALESCE, a correction can't clear a prior numeric value back to NULL — acceptable
+ * for Phase 1 (a real correction re-sends the value).
+ */
+export function extractScorePatch(
+  rawBody: Record<string, unknown>,
+  maskedBody: ScoreBody,
+  eventTs: string,
+): ScorePatch {
+  const has = (k: string) => Object.hasOwn(rawBody, k);
+  const s: Record<string, unknown> = {};
+  s.traceId = maskedBody.traceId; // required on every score
+  s.name = maskedBody.name; // required
+  if (has("observationId")) s.observationId = maskedBody.observationId ?? "";
+  if (has("timestamp") && maskedBody.timestamp) s.timestamp = new Date(maskedBody.timestamp);
+  if (has("environment")) s.environment = maskedBody.environment;
+  if (has("source")) s.source = maskedBody.source;
+  if (has("dataType")) s.dataType = maskedBody.dataType;
+  if (has("value")) s.value = maskedBody.value ?? null;
+  if (has("stringValue")) s.stringValue = maskedBody.stringValue ?? "";
+  if (has("comment")) s.comment = maskedBody.comment ?? "";
+  if (has("configId")) s.configId = maskedBody.configId ?? "";
+  return { id: maskedBody.id, mergeVersion: versionOf(eventTs), scalars: s };
+}
+
+export async function mergeScoreStates(projectId: string, patches: ScorePatch[]): Promise<number> {
+  return upsertState(
+    "ScoreState",
+    SCORE_COLS,
     null,
     projectId,
     patches.map((p) => ({ id: p.id, version: p.mergeVersion, scalars: p.scalars })),

@@ -7,6 +7,7 @@ import {
   dispatchAutomationsBatch,
   dispatchWebhooksBatch,
   extractObservationPatch,
+  extractScorePatch,
   extractTracePatch,
   forwardEvents,
   getSamplingRate,
@@ -14,6 +15,7 @@ import {
   loadMaskingPolicy,
   loadProjectPriceOverrides,
   mergeObservationStates,
+  mergeScoreStates,
   mergeTraceStates,
   mutableStateEnabled,
   offloadLargePayload,
@@ -240,6 +242,7 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     try {
       const tracePatches = [];
       const obsPatches = [];
+      const scorePatches = [];
       for (let i = 0; i < parsed.batch.length; i++) {
         const e = parsed.batch[i]!;
         const rawBody = rawJson.batch[i]?.body ?? {};
@@ -253,6 +256,8 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
           e.type === "event-create"
         ) {
           obsPatches.push(extractObservationPatch(rawBody, e.body, e.type, e.timestamp));
+        } else if (e.type === "score-create") {
+          scorePatches.push(extractScorePatch(rawBody, e.body, e.timestamp));
         }
       }
       if (tracePatches.length > 0) {
@@ -262,6 +267,10 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
       if (obsPatches.length > 0) {
         await mergeObservationStates(projectId, obsPatches);
         inc("mutable_state_merges_total", { entity: "observation" }, obsPatches.length);
+      }
+      if (scorePatches.length > 0) {
+        await mergeScoreStates(projectId, scorePatches);
+        inc("mutable_state_merges_total", { entity: "score" }, scorePatches.length);
       }
     } catch (err) {
       inc("mutable_state_errors_total", undefined);

@@ -94,6 +94,7 @@ model Project {
   projectMembers  ProjectMember[]
   traceStates     TraceState[]
   observationStates ObservationState[]
+  scoreStates     ScoreState[]
 
   @@unique([organizationId, slug])
 }
@@ -982,6 +983,29 @@ model ObservationState {
   metadata            String?
   stateVersion        BigInt    @default(0)
   updatedAt           DateTime  @updatedAt
+
+  @@id([projectId, id])
+  @@index([projectId, updatedAt])
+}
+
+model ScoreState {
+  projectId     String
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id            String
+  // All mergeable, no derived fields. NULL source/dataType coalesce to their defaults at mirror.
+  traceId       String?
+  observationId String?
+  name          String?
+  timestamp     DateTime?
+  environment   String?
+  source        String?
+  dataType      String?
+  value         Float?
+  stringValue   String?
+  comment       String?
+  configId      String?
+  stateVersion  BigInt    @default(0)
+  updatedAt     DateTime  @updatedAt
 
   @@id([projectId, id])
   @@index([projectId, updatedAt])
