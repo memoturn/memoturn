@@ -92,6 +92,7 @@ model Project {
   alertRules      AlertRule[]
   budget          CostBudget?
   projectMembers  ProjectMember[]
+  traceStates     TraceState[]
 
   @@unique([organizationId, slug])
 }
@@ -916,4 +917,37 @@ model ModelPrice {
   createdAt     DateTime @default(now())
 
   @@unique([projectId, pattern])
+}
+
+// ── Mutable entity state (ADR-0001, Phase 1) ─────────────────────────────────────
+// Authoritative, field-mergeable state for mutable telemetry entities. Ingest events
+// merge into these tables field-by-field (only fields an event actually carries
+// overwrite — see @memoturn/server mutable-state merge), which is transactional and
+// correct under concurrency in a way Doris's single row-level sequence column can't be.
+// Doris is then the analytical mirror. Additive + flag-gated (MUTABLE_STATE_STORE) in
+// Phase 1; every mergeable column is NULLable so "absent in the event" = "keep stored".
+// `stateVersion` is a monotonic per-row version (mirror ordering, Phase 2).
+
+model TraceState {
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id          String
+  // Mergeable fields (mirror the Doris trace row; NULL = not provided by any event yet).
+  name        String?
+  timestamp   DateTime?
+  userId      String?
+  sessionId   String?
+  release     String?
+  version     String?
+  environment String?
+  public      Boolean?
+  tags        String[]  @default([])
+  metadata    String?
+  input       String?
+  output      String?
+  stateVersion BigInt   @default(0)
+  updatedAt   DateTime  @updatedAt
+
+  @@id([projectId, id])
+  @@index([projectId, updatedAt]) // prune sweep (Phase 3)
 }
