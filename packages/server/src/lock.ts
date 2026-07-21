@@ -65,3 +65,77 @@ export async function withLock<T>(
     }
   }
 }
+
+// Acquire ALL keys or NONE (rolling back any taken in this attempt), so concurrent callers can't
+// deadlock on partial ordering. Release only deletes keys we still own.
+const MULTI_ACQUIRE_LUA = `
+for i=1,#KEYS do
+  if not redis.call('set', KEYS[i], ARGV[1], 'NX', 'EX', ARGV[2]) then
+    for j=1,i-1 do redis.call('del', KEYS[j]) end
+    return 0
+  end
+end
+return 1`;
+const MULTI_RELEASE_LUA = `
+for i=1,#KEYS do
+  if redis.call('get', KEYS[i]) == ARGV[1] then redis.call('del', KEYS[i]) end
+end
+return 1`;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Run `fn` while holding a lock on every one of `names` — used to serialize the ingest
+ * read-merge→insert per entity id. Two batches patching the same trace would otherwise each read
+ * the same stored base, materialize a full row from only their own fields, and let merge-on-write
+ * (LWW) keep one and silently drop the other's fields. Holding per-entity locks makes the second
+ * batch read the first's already-written row as its base.
+ *
+ * Best-effort: acquires all-or-nothing with jittered backoff up to ~maxWaitMs; if it can't (a
+ * genuinely stuck holder) or Redis is unreachable, it runs `fn` WITHOUT the locks rather than
+ * failing ingestion — `onDegraded` is called so the caller can count it. Locks auto-expire via TTL.
+ */
+export async function withEntityLocks<T>(
+  names: string[],
+  ttlSeconds: number,
+  fn: () => Promise<T>,
+  opts: { maxWaitMs?: number; onDegraded?: () => void } = {},
+): Promise<T> {
+  if (names.length === 0) return fn();
+  const keys = [...new Set(names)].sort().map((n) => `memoturn:elock:${n}`);
+  const token = randomBytes(12).toString("hex");
+  const redis = redisConnection();
+  const deadline = Date.now() + (opts.maxWaitMs ?? 3000);
+
+  let held = false;
+  let backoff = 20;
+  while (!held) {
+    let res: unknown;
+    try {
+      res = await redis.eval(MULTI_ACQUIRE_LUA, keys.length, ...keys, token, String(ttlSeconds));
+    } catch {
+      opts.onDegraded?.(); // Redis unreachable — proceed unlocked rather than stall ingestion
+      return fn();
+    }
+    if (res === 1) {
+      held = true;
+      break;
+    }
+    if (Date.now() >= deadline) {
+      opts.onDegraded?.(); // stuck holder — degrade rather than block ingestion indefinitely
+      return fn();
+    }
+    await sleep(backoff + Math.floor(Math.random() * backoff)); // jitter to avoid lockstep retries
+    backoff = Math.min(backoff * 2, 200);
+  }
+
+  try {
+    return await fn();
+  } finally {
+    try {
+      await redis.eval(MULTI_RELEASE_LUA, keys.length, ...keys, token);
+    } catch {
+      // best-effort release; TTL expires the keys anyway
+    }
+  }
+}
