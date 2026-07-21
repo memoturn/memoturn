@@ -19,6 +19,8 @@ npm install weaviate-client              # for wrapWeaviate
 npm install @qdrant/js-client-rest       # for wrapQdrant
 npm install @aws-sdk/client-bedrock-runtime  # for wrapBedrock
 npm install groq-sdk                     # for wrapGroq
+npm install @mistralai/mistralai         # for wrapMistral
+npm install cohere-ai                    # for wrapCohere
 npm install @modelcontextprotocol/sdk    # for wrapMcpClient / wrapMcpServer
 ```
 
@@ -58,6 +60,8 @@ Call `await memoturn.flush()` to push the buffer immediately (e.g. per request i
 | `@memoturn/sdk/qdrant` | `wrapQdrant` (also in the barrel) |
 | `@memoturn/sdk/bedrock` | `wrapBedrock` |
 | `@memoturn/sdk/groq` | `wrapGroq` |
+| `@memoturn/sdk/mistral` | `wrapMistral` |
+| `@memoturn/sdk/cohere` | `wrapCohere` |
 | `@memoturn/sdk/mcp` | `wrapMcpClient`, `wrapMcpServer` |
 | `@memoturn/sdk/langchain` | `MemoturnCallback` |
 | `@memoturn/sdk/otel` | `memoturnOtlpConfig`, `memoturnTraceExporter`, `memoturnSpanProcessor` |
@@ -357,6 +361,72 @@ prompt-caching fields to map). Streaming calls accumulate `delta.content` and
 the non-streaming path, while every chunk is still yielded to the caller in real time. Chat
 completions only — Groq has no Responses API. `{ streamTimeoutMs }` overrides the idle-stream
 abandonment backstop (default 120s).
+
+## Mistral wrapper
+
+```ts
+import { Mistral } from "@mistralai/mistralai";
+import { wrapMistral } from "@memoturn/sdk/mistral";
+
+const mistral = wrapMistral(new Mistral({ apiKey }), memoturn);
+await mistral.chat.complete({ model: "mistral-large-latest", messages });
+
+// Streaming is a separate method in Mistral's SDK (no `stream: true` flag) — recorded too,
+// with every event still yielded to you in real time (no buffering).
+const stream = await mistral.chat.stream({ model: "mistral-large-latest", messages });
+for await (const event of stream) {
+  /* event.data is the chunk, e.g. event.data.choices[0].delta.content */
+}
+```
+
+Mistral's TS SDK (`@mistralai/mistralai` v1+) is Speakeasy-generated, and although the wire API
+is OpenAI-compatible, the client surface is not: streaming is a separate `chat.stream` method,
+each streamed event wraps the actual chunk in a `.data` property (`CompletionEvent { data:
+CompletionChunk }`), and the SDK remaps all wire snake_case to camelCase (`usage.promptTokens`,
+`delta.toolCalls`) — which is why this is a dedicated wrapper rather than `wrapOpenAI`/`wrapGroq`
+pointed at a Mistral client.
+
+Records `chat.complete` and `chat.stream` as generations — model, everything in the params
+object except `model`/`messages` as `modelParameters` (an exclusion list, mirroring
+`wrapGroq`), `messages` as input, `response.choices[0].message` as output, and usage passed
+through from the SDK's already-camelCase `promptTokens`/`completionTokens`/`totalTokens`.
+Streaming calls accumulate `delta.content` (string or text-part arrays) and
+`delta.toolCalls[].function.arguments` fragments by index into the same output shape; usage is
+taken from the final chunk, which Mistral always sends. `{ streamTimeoutMs }` overrides the
+idle-stream abandonment backstop (default 120s).
+
+## Cohere wrapper
+
+```ts
+import { CohereClientV2 } from "cohere-ai";
+import { wrapCohere } from "@memoturn/sdk/cohere";
+
+const cohere = wrapCohere(new CohereClientV2({ token }), memoturn);
+await cohere.chat({ model: "command-a-03-2025", messages });
+
+// Streaming is recorded too — events are still yielded to you in real time (no buffering).
+const stream = await cohere.chatStream({ model: "command-a-03-2025", messages });
+for await (const event of stream) {
+  if (event.type === "content-delta") process.stdout.write(event.delta?.message?.content?.text ?? "");
+}
+```
+
+Covers **both API generations** of the chat surface in `cohere-ai` v7+: the v1 `CohereClient`
+(`chat`/`chatStream` — `{ text, meta.tokens }` responses, `eventType`-discriminated stream
+events), the v2 `CohereClientV2` (same method names, `{ message, usage.tokens }` responses,
+`type`-discriminated events), and the `client.v2` namespace on a v1 client. Because
+`CohereClientV2` serves v2 shapes from the same top-level method names, the wrapper sniffs the
+response/event shape at record time instead of assuming one per method.
+
+Records chat calls as generations — model, everything except `model`/`message`/`messages`/
+`chatHistory` as `modelParameters`, the v2 `messages` array (or the v1 `message`, with
+`chatHistory` folded in front of it) as input, `response.message` (v2) or `response.text` (v1)
+as output. Cohere reports usage as `inputTokens`/`outputTokens` with no total, so usage maps to
+`promptTokens`/`completionTokens` and `totalTokens` is computed as their sum when both are
+present. v1 streams take output/usage from the final `stream-end` event's full response
+(accumulated `text-generation` deltas as fallback); v2 streams accumulate `content-delta` text
+and take usage from the final `message-end` event. `{ streamTimeoutMs }` overrides the
+idle-stream abandonment backstop (default 120s).
 
 ## MCP
 

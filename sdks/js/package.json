@@ -34,6 +34,8 @@
     "./qdrant": "./src/qdrant.ts",
     "./bedrock": "./src/bedrock.ts",
     "./groq": "./src/groq.ts",
+    "./mistral": "./src/mistral.ts",
+    "./cohere": "./src/cohere.ts",
     "./mcp": "./src/mcp.ts",
     "./langchain": "./src/langchain.ts",
     "./otel": "./src/otel.ts",
@@ -95,6 +97,14 @@
         "types": "./dist/groq.d.ts",
         "default": "./dist/groq.js"
       },
+      "./mistral": {
+        "types": "./dist/mistral.d.ts",
+        "default": "./dist/mistral.js"
+      },
+      "./cohere": {
+        "types": "./dist/cohere.d.ts",
+        "default": "./dist/cohere.js"
+      },
       "./mcp": {
         "types": "./dist/mcp.d.ts",
         "default": "./dist/mcp.js"
@@ -143,6 +153,8 @@
     "@qdrant/js-client-rest": ">=1.9",
     "@aws-sdk/client-bedrock-runtime": ">=3.0",
     "groq-sdk": ">=0.5",
+    "@mistralai/mistralai": ">=1.0",
+    "cohere-ai": ">=7.0",
     "@modelcontextprotocol/sdk": ">=1.0",
     "@opentelemetry/exporter-trace-otlp-http": ">=0.50.0",
     "@opentelemetry/sdk-trace-base": ">=1.20.0"
@@ -173,6 +185,12 @@
       "optional": true
     },
     "groq-sdk": {
+      "optional": true
+    },
+    "@mistralai/mistralai": {
+      "optional": true
+    },
+    "cohere-ai": {
       "optional": true
     },
     "@modelcontextprotocol/sdk": {
