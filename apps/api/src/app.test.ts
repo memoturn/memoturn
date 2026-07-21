@@ -40,6 +40,8 @@ describe.skipIf(!HAS_INFRA)("authenticated /v1 routes (infra)", () => {
   let projectId = "";
   let full = { publicKey: "", secretKey: "" };
   let readOnly = { publicKey: "", secretKey: "" };
+  const foreignSlug = `apitest-foreign-${Date.now()}`;
+  let foreignProjectId = "";
 
   beforeAll(async () => {
     const org = await prisma.organization.create({ data: { name: slug, slug } });
@@ -49,12 +51,21 @@ describe.skipIf(!HAS_INFRA)("authenticated /v1 routes (infra)", () => {
     projectId = project.id;
     full = await createApiKey(projectId, { name: "full" }); // default scopes: read+write+ingest
     readOnly = await createApiKey(projectId, { name: "read", scopes: ["read"] });
+
+    // A second tenant with no shared membership — used to prove cross-project isolation.
+    const foreignOrg = await prisma.organization.create({ data: { name: foreignSlug, slug: foreignSlug } });
+    const foreignProject = await prisma.project.create({
+      data: { name: foreignSlug, slug: foreignSlug, organizationId: foreignOrg.id },
+    });
+    foreignProjectId = foreignProject.id;
   });
 
   afterAll(async () => {
     await prisma.apiKey.deleteMany({ where: { projectId } });
     await prisma.project.delete({ where: { id: projectId } }).catch(() => {});
     await prisma.organization.delete({ where: { slug } }).catch(() => {});
+    await prisma.project.delete({ where: { id: foreignProjectId } }).catch(() => {});
+    await prisma.organization.delete({ where: { slug: foreignSlug } }).catch(() => {});
   });
 
   it("lists traces for a valid key and returns the contract envelope", async () => {
@@ -145,5 +156,14 @@ describe.skipIf(!HAS_INFRA)("authenticated /v1 routes (infra)", () => {
     expect(body.errors).toHaveLength(2);
     expect(body.errors[0]?.id).toBe(""); // no readable id on the rejected event
     expect(body.errors.map((e) => e.index)).toEqual([0, 1]);
+  });
+
+  it("rejects an MCP call to another tenant's project with a key scoped to this one (401)", async () => {
+    const res = await app.request(`/v1/mcp/${foreignProjectId}`, {
+      method: "POST",
+      headers: { authorization: basic(full.publicKey, full.secretKey), "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    expect(res.status).toBe(401);
   });
 });

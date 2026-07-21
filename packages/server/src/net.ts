@@ -46,12 +46,49 @@ export function isBlockedIp(ip: string): boolean {
     if (lower === "::1" || lower === "::") return true; // loopback / unspecified
     if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // unique local fc00::/7
     if (lower.startsWith("fe80")) return true; // link-local
-    // IPv4-mapped (::ffff:a.b.c.d) — re-check the embedded v4.
-    const mapped = lower.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped?.[1]) return isBlockedIp(mapped[1]);
+    // Any IPv6 form that embeds an IPv4 address — IPv4-mapped (::ffff:a.b.c.d, which the URL
+    // parser normalizes to the hex form ::ffff:a9fe:a9fe), IPv4-compatible (::a.b.c.d), 6to4
+    // (2002:V4::/16) and NAT64 (64:ff9b::/96) — is re-checked against the v4 rules. A regex on
+    // the dotted form alone missed the hex-normalized encodings and let metadata IPs through.
+    const groups = expandIpv6(lower);
+    const embedded = groups && embeddedIpv4(groups);
+    if (embedded) return isBlockedIp(embedded);
     return false;
   }
   return false;
+}
+
+/** Expand an IPv6 literal into its eight 16-bit groups, or null if unparseable. */
+function expandIpv6(ip: string): number[] | null {
+  let s = ip.replace(/^\[|\]$/g, "");
+  // Fold a trailing dotted-quad (e.g. ::ffff:1.2.3.4) into two hex groups first.
+  const dotted = s.match(/(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (dotted?.[1]) {
+    const o = dotted[1].split(".").map(Number);
+    if (o.some((n) => n > 255)) return null;
+    s = `${s.slice(0, s.length - dotted[1].length)}${(((o[0] ?? 0) << 8) | (o[1] ?? 0)).toString(16)}:${(((o[2] ?? 0) << 8) | (o[3] ?? 0)).toString(16)}`;
+  }
+  const halves = s.split("::");
+  if (halves.length > 2) return null;
+  const toGroups = (p: string) => (p ? p.split(":").map((h) => Number.parseInt(h, 16)) : []);
+  const head = toGroups(halves[0] ?? "");
+  const tail = halves.length === 2 ? toGroups(halves[1] ?? "") : [];
+  const gap = 8 - head.length - tail.length;
+  // No "::" means the address must already be a full 8 groups; "::" stands for ≥1 zero group.
+  if (halves.length === 1 ? gap !== 0 : gap < 1) return null;
+  const groups = [...head, ...Array(Math.max(gap, 0)).fill(0), ...tail];
+  if (groups.length !== 8 || groups.some((g) => Number.isNaN(g) || g < 0 || g > 0xffff)) return null;
+  return groups;
+}
+
+/** Extract the embedded IPv4 (dotted) from a v4-in-v6 encoding, or null if there isn't one. */
+function embeddedIpv4(g: number[]): string | null {
+  const v4 = (hi: number, lo: number) => `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
+  // ::ffff:V4 (mapped) and ::V4 (deprecated compatible): first five groups zero, sixth 0xffff or 0.
+  if (g.slice(0, 5).every((x) => x === 0) && (g[5] === 0xffff || g[5] === 0)) return v4(g[6] ?? 0, g[7] ?? 0);
+  if (g[0] === 0x2002) return v4(g[1] ?? 0, g[2] ?? 0); // 6to4 2002:V4::/16
+  if (g[0] === 0x0064 && g[1] === 0xff9b) return v4(g[6] ?? 0, g[7] ?? 0); // NAT64 64:ff9b::/96
+  return null;
 }
 
 /**

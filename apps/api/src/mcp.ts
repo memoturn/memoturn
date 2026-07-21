@@ -52,7 +52,12 @@ async function resolveMcpAuth(c: Context, projectId: string): Promise<McpAuth | 
   const token = await betterAuth.api.getMcpSession({ headers: c.req.raw.headers });
   if (token) {
     const access = await getUserProjectAccess(token.userId, projectId);
-    if (access) {
+    // Tenant isolation: getUserProjectAccess falls back to the user's default project when
+    // they are NOT a member of the requested one, so a truthy result is not proof of access to
+    // THIS project. Require the resolved project to be exactly the one named in the resource
+    // URL — otherwise a user could address another tenant's project and be authorized by their
+    // role in their own.
+    if (access && access.projectId === projectId) {
       return {
         projectId,
         actor: `user:${token.userId}`,
