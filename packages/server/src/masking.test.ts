@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { applyMasking, compileMaskers } from "./masking.js";
+import {
+  applyMasking,
+  assertSafeUserPatterns,
+  compileMaskers,
+  MAX_USER_PATTERNS,
+  maxStarHeight,
+  UserPatternError,
+} from "./masking.js";
 
 const policy = (over: Partial<Parameters<typeof compileMaskers>[0]> = {}) => ({
   enabled: true,
@@ -16,6 +23,49 @@ describe("compileMaskers", () => {
     );
     // email built-in (bogus dropped) + the one valid custom pattern
     expect(m.regexes).toHaveLength(2);
+  });
+});
+
+describe("maxStarHeight", () => {
+  it("is ≤ 1 for safe patterns (single-level repetition, bounded/non-capturing groups)", () => {
+    for (const src of [
+      "sk-[a-z0-9]+",
+      "\\bsecret\\b",
+      "user_\\d{1,10}",
+      "(?:\\d[ -]?){13,16}", // credit-card shape — repeated group but inner is not repeated
+      "(foo|bar)+",
+      "a+b+c+", // sequential, not nested
+      "[\\w.+-]+@[\\w-]+\\.[\\w.-]+", // the email built-in
+    ]) {
+      expect(maxStarHeight(src), src).toBeLessThan(2);
+    }
+  });
+
+  it("is ≥ 2 for nested repetition (the ReDoS signature)", () => {
+    for (const src of ["(a+)+$", "([a-z]+)+", "(\\d*)*", "((ab)+)+", "(a{1,5}){1,5}"]) {
+      expect(maxStarHeight(src), src).toBeGreaterThanOrEqual(2);
+    }
+  });
+});
+
+describe("assertSafeUserPatterns", () => {
+  it("accepts ordinary linear patterns", () => {
+    expect(() => assertSafeUserPatterns(["sk-[a-z0-9]+", "\\bsecret\\b", "user_\\d{1,10}"])).not.toThrow();
+  });
+
+  it("rejects invalid regex syntax", () => {
+    expect(() => assertSafeUserPatterns(["[unterminated"])).toThrow(UserPatternError);
+  });
+
+  it("rejects a catastrophic-backtracking pattern (ReDoS) — statically, without executing it", () => {
+    // Classic exponential patterns — must be refused before they reach the shared ingest worker.
+    expect(() => assertSafeUserPatterns(["(a+)+$"])).toThrow(/backtracking/);
+    expect(() => assertSafeUserPatterns(["([a-z]+)+$"])).toThrow(UserPatternError);
+  });
+
+  it("rejects more than the pattern cap", () => {
+    const many = Array.from({ length: MAX_USER_PATTERNS + 1 }, (_, i) => `p${i}`);
+    expect(() => assertSafeUserPatterns(many)).toThrow(/max/);
   });
 });
 

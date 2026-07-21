@@ -1,7 +1,7 @@
 import { prisma } from "@memoturn/db";
 import { redisConnection } from "@memoturn/db/queue";
 import { judgeWithEvaluator, listEvaluators } from "./evaluators.js";
-import { applyMasking, BUILTIN_NAMES, BUILTIN_PATTERNS, compileMaskers } from "./masking.js";
+import { applyMasking, assertSafeUserPatterns, BUILTIN_NAMES, BUILTIN_PATTERNS, compileMaskers } from "./masking.js";
 
 /**
  * Runtime guardrails — the request-time sibling of masking. An SDK-callable endpoint
@@ -381,17 +381,23 @@ async function validateEvaluatorGuards(projectId: string, guards: EvaluatorGuard
 }
 
 export async function setGuardrailPolicy(projectId: string, input: SetGuardrailInput) {
+  const customPatterns = input.customPatterns ?? [];
+  const requireMatch = (input.requireMatch ?? []).map((s) => s.trim()).filter(Boolean);
+  // customPatterns and requireMatch are both compiled as regex in scanGuardrails and run on the
+  // shared worker — validate them (invalid syntax / ReDoS / count) before persisting. blockedTerms
+  // are regex-escaped at scan time, so they don't need pattern validation.
+  assertSafeUserPatterns([...customPatterns, ...requireMatch]);
   const data = {
     enabled: input.enabled ?? false,
     pii: input.pii ?? true,
     piiAction: input.piiAction === "block" ? "block" : "redact",
     builtins: (input.builtins ?? []).filter((b) => BUILTIN_NAMES.includes(b)),
-    customPatterns: input.customPatterns ?? [],
+    customPatterns,
     redactWith: input.redactWith || "[REDACTED]",
     injection: input.injection ?? true,
     blockedTerms: (input.blockedTerms ?? []).map((t) => t.trim()).filter(Boolean),
     sqlInjection: input.sqlInjection ?? false,
-    requireMatch: (input.requireMatch ?? []).map((s) => s.trim()).filter(Boolean),
+    requireMatch,
     requireValidJson: input.requireValidJson ?? false,
     requiredJsonKeys: (input.requiredJsonKeys ?? []).map((k) => k.trim()).filter(Boolean),
     evaluatorGuards: (await validateEvaluatorGuards(projectId, input.evaluatorGuards ?? [])) as object,

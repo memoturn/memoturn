@@ -1103,10 +1103,13 @@ export class DorisTelemetryStore implements TelemetryStore {
 
   async exportTraces(projectId: string, filters: ExportFilters = {}): Promise<ExportTraceRow[]> {
     const { limit = 1000 } = filters;
+    // Defensive ceiling: the API clamps the limit, but bound it here too so any caller (the
+    // whole result set is materialized in memory) can't request an unbounded scan.
+    const boundedLimit = Math.min(Math.max(1, Math.floor(Number(limit) || 1000)), 100_000);
     // Reuse the trace-list WHERE so exports honor the same filters as the console list
     // (environment, search, tag, score, level, user, …).
     const { where, params: whereParams } = this.traceListWhere(projectId, filters);
-    const params = [...whereParams, Math.floor(limit)];
+    const params = [...whereParams, boundedLimit];
 
     const traces = await this.query<Omit<ExportTraceRow, "observations">>(
       `

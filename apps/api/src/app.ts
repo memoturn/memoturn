@@ -17,6 +17,7 @@ import {
   cancelExperiment,
   checkGuardrails,
   checkRateLimit,
+  clampExportLimit,
   correctScore,
   countSessions,
   countTraces,
@@ -151,6 +152,7 @@ import {
   submitReviewScore,
   traceFacets,
   traceHistogram,
+  UserPatternError,
   updateAlertRule,
   updateWidgetGrid,
 } from "@memoturn/server";
@@ -409,7 +411,7 @@ app.get("/v1/exports/traces", async (c) => {
   const format = fmt === "csv" ? "csv" : fmt === "parquet" ? "parquet" : "jsonl";
   // Honor the same filters as the trace list so an export matches the on-screen view.
   const filters = {
-    limit: Number(q.get("limit") ?? 1000),
+    limit: clampExportLimit(q.get("limit")), // bound rows: exports materialize the full set in memory
     environment: q.get("environment") || undefined,
     search: q.get("search") || undefined,
     userId: q.get("userId") || undefined,
@@ -1750,6 +1752,17 @@ app.openapi(
       if (!baseUrl) return c.json({ error: "openai_compatible requires a baseUrl" }, 400);
     } else if (!apiKey) {
       return c.json({ error: `${provider} requires an apiKey` }, 400);
+    }
+    // SSRF guard: a stored baseUrl (openai_compatible / azure) is fetched server-side by the
+    // playground and evaluators, so it must pass the same egress policy as webhooks — otherwise a
+    // member could point it at the cloud-metadata endpoint or an internal service. Private/http
+    // targets need ALLOW_PRIVATE_WEBHOOK_TARGETS=1 (the self-host LAN opt-in for a local vLLM).
+    if (baseUrl) {
+      try {
+        await assertPublicUrl(baseUrl);
+      } catch {
+        return c.json({ error: "baseUrl must be a public https endpoint (private/loopback targets are blocked)" }, 400);
+      }
     }
     const result = await createProviderConnection(c.get("projectId"), provider, { apiKey, baseUrl, region });
     await recordAudit(c.get("projectId"), c.get("actor"), "provider.connect", `provider:${provider}`);
@@ -3817,13 +3830,20 @@ app.openapi(
     },
     responses: {
       200: { description: "Updated", content: { "application/json": { schema: C.maskingPolicy } } },
+      400: { description: "Invalid custom pattern" },
       403: { description: "Forbidden" },
     },
   }),
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
-    const result = await setMaskingPolicy(c.get("projectId"), c.req.valid("json"));
+    let result: Awaited<ReturnType<typeof setMaskingPolicy>>;
+    try {
+      result = await setMaskingPolicy(c.get("projectId"), c.req.valid("json"));
+    } catch (err) {
+      if (err instanceof UserPatternError) return c.json({ error: err.message }, 400);
+      throw err;
+    }
     await recordAudit(c.get("projectId"), c.get("actor"), "masking.set", `enabled:${result.enabled}`);
     return c.json(result);
   },
@@ -3891,13 +3911,20 @@ app.openapi(
     },
     responses: {
       200: { description: "Updated", content: { "application/json": { schema: C.guardrailPolicy } } },
+      400: { description: "Invalid custom pattern" },
       403: { description: "Forbidden" },
     },
   }),
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
-    const result = await setGuardrailPolicy(c.get("projectId"), c.req.valid("json"));
+    let result: Awaited<ReturnType<typeof setGuardrailPolicy>>;
+    try {
+      result = await setGuardrailPolicy(c.get("projectId"), c.req.valid("json"));
+    } catch (err) {
+      if (err instanceof UserPatternError) return c.json({ error: err.message }, 400);
+      throw err;
+    }
     await recordAudit(c.get("projectId"), c.get("actor"), "guardrails.set", `enabled:${result.enabled}`);
     return c.json(result);
   },
