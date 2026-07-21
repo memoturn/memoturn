@@ -1,6 +1,7 @@
 import { clampTokens, computeCost, type ModelPrice, providerForModel } from "@memoturn/core";
 import type { ObservationState, ScoreState, TraceState } from "@memoturn/db";
 import type { ObservationRow, ScoreWriteRow, TraceRow } from "@memoturn/telemetry";
+import { getObservationStates, getScoreStates, getTraceStates } from "./mutablestate.js";
 
 /**
  * Mirror builders — ADR-0001 Phase 2. Turn an authoritative Postgres `*State` row into the Doris
@@ -95,4 +96,144 @@ export function mirrorScoreRow(s: ScoreState): ScoreWriteRow {
     config_id: s.configId ?? "",
     event_ts: verTs(s.stateVersion),
   };
+}
+
+// ── Shadow-compare (ADR-0001 Phase 2b, step 1) ───────────────────────────────────
+// Additively verify, on real traffic, that the Postgres-authoritative + mirror path produces the
+// SAME Doris row the current read-merge path writes — the confidence needed before Phase 2b
+// removes the read-merge + entity lock. Fields that legitimately differ (the merge version's
+// event_ts, and timestamp/start_time whose read-merge fallback is the envelope ts vs the mirror's
+// stateVersion — and latency_ms, which derives from start_time) are excluded from the diff.
+
+const IGNORE: Record<"trace" | "observation" | "score", ReadonlySet<string>> = {
+  trace: new Set(["event_ts", "timestamp"]),
+  observation: new Set(["event_ts", "start_time", "latency_ms"]),
+  score: new Set(["event_ts", "timestamp"]),
+};
+
+function valueEq(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => x === b[i]);
+  if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) < 1e-9; // cost floats
+  return a === b;
+}
+
+/** Field names where the read-merge row and the mirror row differ (excluding `ignore`). */
+export function diffMirror(
+  mapped: Record<string, unknown>,
+  mirror: Record<string, unknown>,
+  ignore: ReadonlySet<string>,
+): string[] {
+  const diffs: string[] = [];
+  for (const k of Object.keys(mapped)) {
+    if (!ignore.has(k) && !valueEq(mapped[k], mirror[k])) diffs.push(k);
+  }
+  return diffs;
+}
+
+export interface ShadowResult {
+  entity: string;
+  matched: number;
+  mismatched: number;
+  missing: number; // rows in Doris output with no Postgres state (shouldn't happen once merged)
+  samples: { id: string; fields: string[] }[];
+}
+
+function compareGroup<M extends { id: string }>(
+  entity: string,
+  mappedRows: M[],
+  mirrorFor: (id: string) => Record<string, unknown> | null,
+  ignore: ReadonlySet<string>,
+): ShadowResult {
+  const r: ShadowResult = { entity, matched: 0, mismatched: 0, missing: 0, samples: [] };
+  for (const mapped of mappedRows) {
+    const mirror = mirrorFor(mapped.id);
+    if (!mirror) {
+      r.missing++;
+      continue;
+    }
+    const fields = diffMirror(mapped as Record<string, unknown>, mirror, ignore);
+    if (fields.length === 0) r.matched++;
+    else {
+      r.mismatched++;
+      if (r.samples.length < 3) r.samples.push({ id: mapped.id, fields });
+    }
+  }
+  return r;
+}
+
+/**
+ * Compare the mapped (read-merge) rows for a batch against the mirror rows built from the freshly
+ * merged Postgres state. Returns per-entity match/mismatch counts + a few sample mismatches. Read
+ * the state AFTER the Postgres merge for this batch.
+ */
+export async function shadowCompareBatch(
+  projectId: string,
+  mapped: { traces: TraceRow[]; observations: ObservationRow[]; scores: ScoreWriteRow[] },
+  prices: ModelPrice[],
+): Promise<ShadowResult[]> {
+  const out: ShadowResult[] = [];
+  if (mapped.traces.length > 0) {
+    const st = new Map(
+      (
+        await getTraceStates(
+          projectId,
+          mapped.traces.map((t) => t.id),
+        )
+      ).map((s) => [s.id, s]),
+    );
+    out.push(
+      compareGroup(
+        "trace",
+        mapped.traces,
+        (id) => {
+          const s = st.get(id);
+          return s ? (mirrorTraceRow(s) as unknown as Record<string, unknown>) : null;
+        },
+        IGNORE.trace,
+      ),
+    );
+  }
+  if (mapped.observations.length > 0) {
+    const st = new Map(
+      (
+        await getObservationStates(
+          projectId,
+          mapped.observations.map((o) => o.id),
+        )
+      ).map((s) => [s.id, s]),
+    );
+    out.push(
+      compareGroup(
+        "observation",
+        mapped.observations,
+        (id) => {
+          const s = st.get(id);
+          return s ? (mirrorObservationRow(s, prices) as unknown as Record<string, unknown>) : null;
+        },
+        IGNORE.observation,
+      ),
+    );
+  }
+  if (mapped.scores.length > 0) {
+    const st = new Map(
+      (
+        await getScoreStates(
+          projectId,
+          mapped.scores.map((sc) => sc.id),
+        )
+      ).map((s) => [s.id, s]),
+    );
+    out.push(
+      compareGroup(
+        "score",
+        mapped.scores,
+        (id) => {
+          const s = st.get(id);
+          return s ? (mirrorScoreRow(s) as unknown as Record<string, unknown>) : null;
+        },
+        IGNORE.score,
+      ),
+    );
+  }
+  return out;
 }
