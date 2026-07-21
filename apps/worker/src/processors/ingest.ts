@@ -6,11 +6,14 @@ import {
   compileMaskers,
   dispatchAutomationsBatch,
   dispatchWebhooksBatch,
+  extractTracePatch,
   forwardEvents,
   getSamplingRate,
   listOnlineEvaluators,
   loadMaskingPolicy,
   loadProjectPriceOverrides,
+  mergeTraceStates,
+  mutableStateEnabled,
   offloadLargePayload,
   offloadMedia,
   runEvaluator,
@@ -123,7 +126,10 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
   const raw = await getRawBatch(blobKey);
   if (!raw) throw new Error(`raw batch not found at ${blobKey}`);
 
-  const parsed = ingestRequest.parse(JSON.parse(raw));
+  // Keep the pre-zod-parse JSON so the mutable-state merge can tell which fields the client
+  // actually SENT (present keys) vs. zod-filled defaults — the two diverge (e.g. `environment`).
+  const rawJson = JSON.parse(raw) as { batch: Array<{ body?: Record<string, unknown> }> };
+  const parsed = ingestRequest.parse(rawJson);
 
   // Offload any inline base64 media (data: URIs) in input/output to blob storage.
   for (const e of parsed.batch) {
@@ -224,6 +230,27 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     { onDegraded: () => inc("ingest_merge_unlocked_total") },
   );
   inc("ingest_events_total", undefined, parsed.batch.length);
+
+  // ADR-0001 Phase 1 (traces slice): additively merge trace patches into the authoritative
+  // Postgres state, alongside the Doris write above. Flag-gated + best-effort — this is a
+  // dual-run to validate the merge; a failure here must never affect ingestion.
+  if (mutableStateEnabled()) {
+    try {
+      const patches = parsed.batch
+        .map((e, i) => (e.type === "trace-create" ? extractTracePatch(rawJson.batch[i]?.body ?? {}, e.body) : null))
+        .filter((p): p is NonNullable<typeof p> => p !== null);
+      if (patches.length > 0) {
+        await mergeTraceStates(projectId, patches);
+        inc("mutable_state_merges_total", { entity: "trace" }, patches.length);
+      }
+    } catch (err) {
+      inc("mutable_state_errors_total", { entity: "trace" });
+      logJson("error", "mutable-state trace merge failed (ingestion unaffected)", {
+        projectId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   logJson("info", "ingest ok", {
     projectId,
