@@ -13,10 +13,18 @@ const MIN_SECRET_LEN = 16;
 const WEAK_VALUES = new Set([
   "dev-only-change-me",
   "dev-secret-please-change-in-prod-0123456789",
+  "dev-encryption-key-please-change-in-prod-0123456789",
   "memoturn-dev-encryption-key",
   "changeme",
   "secret",
 ]);
+
+/**
+ * Every placeholder shipped in `.env.example` shares this marker; matching it catches the
+ * ENCRYPTION_KEY/BETTER_AUTH_SECRET examples (and any future one) even if the exact string
+ * drifts, so a self-hoster can't boot production with a world-readable committed secret.
+ */
+const PLACEHOLDER_MARKER = "please-change-in-prod";
 
 export function isProduction(): boolean {
   return process.env.NODE_ENV === "production";
@@ -27,7 +35,7 @@ function secretProblem(name: string): string | null {
   if (!v || v.length < MIN_SECRET_LEN) {
     return `${name} must be set to at least ${MIN_SECRET_LEN} characters`;
   }
-  if (WEAK_VALUES.has(v)) {
+  if (WEAK_VALUES.has(v) || v.includes(PLACEHOLDER_MARKER)) {
     return `${name} is set to a known development placeholder — generate a fresh random value`;
   }
   return null;

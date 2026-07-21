@@ -15,14 +15,27 @@ describe("isBlockedIp", () => {
       "fc00::1",
       "fd12:3456::1",
       "fe80::1",
-      "::ffff:127.0.0.1", // IPv4-mapped loopback
+      "::ffff:127.0.0.1", // IPv4-mapped loopback (dotted form)
+      "::ffff:7f00:1", // IPv4-mapped loopback (hex-normalized form the URL parser emits)
+      "::ffff:a9fe:a9fe", // IPv4-mapped 169.254.169.254 (cloud metadata), hex form
+      "::ffff:169.254.169.254", // same, dotted form
+      "::127.0.0.1", // deprecated IPv4-compatible loopback
+      "2002:7f00:1::", // 6to4 wrapping 127.0.0.1
+      "64:ff9b::a9fe:a9fe", // NAT64 wrapping 169.254.169.254
     ]) {
       expect(isBlockedIp(ip), ip).toBe(true);
     }
   });
 
   it("allows public addresses", () => {
-    for (const ip of ["8.8.8.8", "1.1.1.1", "203.0.113.7", "2606:4700:4700::1111"]) {
+    for (const ip of [
+      "8.8.8.8",
+      "1.1.1.1",
+      "203.0.113.7",
+      "2606:4700:4700::1111",
+      "::ffff:8.8.8.8", // IPv4-mapped public address stays allowed
+      "::ffff:808:808", // same, hex form
+    ]) {
       expect(isBlockedIp(ip), ip).toBe(false);
     }
   });
@@ -54,6 +67,14 @@ describe("assertPublicUrl (production policy)", () => {
       await expect(assertPublicUrl("https://127.0.0.1/x")).rejects.toThrow();
       await expect(assertPublicUrl("https://169.254.169.254/latest/meta-data")).rejects.toThrow();
       await expect(assertPublicUrl("https://10.1.2.3/x")).rejects.toThrow();
+    });
+  });
+
+  it("rejects IPv4-mapped IPv6 literals that the URL parser normalizes to hex", async () => {
+    await strict(async () => {
+      // new URL("https://[::ffff:169.254.169.254]/").hostname === "::ffff:a9fe:a9fe"
+      await expect(assertPublicUrl("https://[::ffff:169.254.169.254]/latest/meta-data")).rejects.toThrow();
+      await expect(assertPublicUrl("https://[::ffff:127.0.0.1]/x")).rejects.toThrow();
     });
   });
 
