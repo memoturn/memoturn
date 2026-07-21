@@ -6,14 +6,22 @@ import {
   compileMaskers,
   dispatchAutomationsBatch,
   dispatchWebhooksBatch,
+  extractObservationPatch,
+  extractScorePatch,
+  extractTracePatch,
   forwardEvents,
   getSamplingRate,
   listOnlineEvaluators,
   loadMaskingPolicy,
   loadProjectPriceOverrides,
+  mergeObservationStates,
+  mergeScoreStates,
+  mergeTraceStates,
+  mutableStateEnabled,
   offloadLargePayload,
   offloadMedia,
   runEvaluator,
+  shadowCompareBatch,
   withEntityLocks,
 } from "@memoturn/server";
 import { type TelemetryRowMap, type TelemetryTable, telemetry } from "@memoturn/telemetry";
@@ -123,7 +131,10 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
   const raw = await getRawBatch(blobKey);
   if (!raw) throw new Error(`raw batch not found at ${blobKey}`);
 
-  const parsed = ingestRequest.parse(JSON.parse(raw));
+  // Keep the pre-zod-parse JSON so the mutable-state merge can tell which fields the client
+  // actually SENT (present keys) vs. zod-filled defaults — the two diverge (e.g. `environment`).
+  const rawJson = JSON.parse(raw) as { batch: Array<{ body?: Record<string, unknown> }> };
+  const parsed = ingestRequest.parse(rawJson);
 
   // Offload any inline base64 media (data: URIs) in input/output to blob storage.
   for (const e of parsed.batch) {
@@ -224,6 +235,78 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     { onDegraded: () => inc("ingest_merge_unlocked_total") },
   );
   inc("ingest_events_total", undefined, parsed.batch.length);
+
+  // ADR-0001 Phase 1: additively merge trace + observation patches into the authoritative
+  // Postgres state, alongside the Doris write above. Flag-gated + best-effort — this is a
+  // dual-run to validate the merge; a failure here must never affect ingestion.
+  if (mutableStateEnabled()) {
+    try {
+      const tracePatches = [];
+      const obsPatches = [];
+      const scorePatches = [];
+      for (let i = 0; i < parsed.batch.length; i++) {
+        const e = parsed.batch[i]!;
+        const rawBody = rawJson.batch[i]?.body ?? {};
+        if (e.type === "trace-create") {
+          tracePatches.push(extractTracePatch(rawBody, e.body, e.timestamp));
+        } else if (
+          e.type === "span-create" ||
+          e.type === "span-update" ||
+          e.type === "generation-create" ||
+          e.type === "generation-update" ||
+          e.type === "event-create"
+        ) {
+          obsPatches.push(extractObservationPatch(rawBody, e.body, e.type, e.timestamp));
+        } else if (e.type === "score-create") {
+          scorePatches.push(extractScorePatch(rawBody, e.body, e.timestamp));
+        }
+      }
+      if (tracePatches.length > 0) {
+        await mergeTraceStates(projectId, tracePatches);
+        inc("mutable_state_merges_total", { entity: "trace" }, tracePatches.length);
+      }
+      if (obsPatches.length > 0) {
+        await mergeObservationStates(projectId, obsPatches);
+        inc("mutable_state_merges_total", { entity: "observation" }, obsPatches.length);
+      }
+      if (scorePatches.length > 0) {
+        await mergeScoreStates(projectId, scorePatches);
+        inc("mutable_state_merges_total", { entity: "score" }, scorePatches.length);
+      }
+    } catch (err) {
+      inc("mutable_state_errors_total", undefined);
+      logJson("error", "mutable-state merge failed (ingestion unaffected)", {
+        projectId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Shadow-compare (Phase 2b step 1): verify the mirror-from-Postgres-state row equals the
+    // read-merge row this batch just wrote to Doris. Separate best-effort step so a compare hiccup
+    // doesn't affect the merge counters; surfaces divergences before Phase 2b removes the read-merge.
+    try {
+      const results = await shadowCompareBatch(projectId, { traces, observations, scores }, priceOverrides);
+      for (const r of results) {
+        if (r.matched > 0) inc("mutable_state_shadow_total", { entity: r.entity, result: "match" }, r.matched);
+        if (r.mismatched > 0) {
+          inc("mutable_state_shadow_total", { entity: r.entity, result: "mismatch" }, r.mismatched);
+          logJson("warn", "mutable-state shadow mismatch", {
+            projectId,
+            entity: r.entity,
+            mismatched: r.mismatched,
+            samples: r.samples,
+          });
+        }
+        if (r.missing > 0) inc("mutable_state_shadow_total", { entity: r.entity, result: "missing" }, r.missing);
+      }
+    } catch (err) {
+      inc("mutable_state_errors_total", undefined);
+      logJson("error", "mutable-state shadow-compare failed (ingestion unaffected)", {
+        projectId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   logJson("info", "ingest ok", {
     projectId,
