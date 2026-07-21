@@ -8,6 +8,16 @@ import { generateObject, generateText, jsonSchema, type LanguageModel, streamTex
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * Wall-clock bound on a single provider call. Without it, a provider that accepts the
+ * connection but never responds (common during provider incidents) hangs the caller
+ * forever — and since online evaluators run serially inside the shared ingest worker, one
+ * hung judge call can wedge ingest for every tenant on that replica. Streaming gets a more
+ * generous bound so a legitimately long generation isn't truncated. Both are overridable.
+ */
+const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? 60_000);
+const LLM_STREAM_TIMEOUT_MS = Number(process.env.LLM_STREAM_TIMEOUT_MS ?? 300_000);
+
+/**
  * Provider gateway — one entrypoint for chat completions used by the playground and
  * LLM-as-judge evaluators. Real providers go through the Vercel AI SDK; the "mock"
  * provider returns a deterministic response so the platform is fully testable without
@@ -44,6 +54,8 @@ export interface GenerateInput {
   tools?: ToolDef[];
   /** When set, the model returns an object matching this JSON Schema (structured output). */
   responseFormat?: { type: "json_schema"; schema: Record<string, unknown> };
+  /** Wall-clock timeout for this call, ms. Defaults to LLM_TIMEOUT_MS (non-streaming). */
+  timeoutMs?: number;
 }
 
 /** Provider-specific connection config resolved from a stored connection or env. */
@@ -104,6 +116,7 @@ function usageOf(usage: unknown, prompt: string, completion: string) {
 export async function generate(input: GenerateInput): Promise<GenerateResult> {
   const { provider, model, messages, temperature, maxTokens, apiKey, baseUrl, region, tools, responseFormat } = input;
   const promptText = messages.map((m) => m.content).join("\n");
+  const abortSignal = AbortSignal.timeout(input.timeoutMs ?? LLM_TIMEOUT_MS);
 
   if (provider === "mock") {
     const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
@@ -125,6 +138,7 @@ export async function generate(input: GenerateInput): Promise<GenerateResult> {
       messages: sdkMessages,
       schema: jsonSchema(responseFormat.schema),
       temperature,
+      abortSignal,
     });
     const content = JSON.stringify(result.object, null, 2);
     return { provider, model, content, usage: usageOf(result.usage, promptText, content) };
@@ -141,6 +155,7 @@ export async function generate(input: GenerateInput): Promise<GenerateResult> {
       tools: toolMap,
       temperature,
       maxOutputTokens: maxTokens,
+      abortSignal,
     });
     const calls = result.toolCalls as unknown as { toolName: string; input?: unknown; args?: unknown }[];
     const content =
@@ -159,6 +174,7 @@ export async function generate(input: GenerateInput): Promise<GenerateResult> {
     messages: sdkMessages,
     temperature,
     maxOutputTokens: maxTokens,
+    abortSignal,
   });
   return { provider, model, content: result.text, usage: usageOf(result.usage, promptText, result.text) };
 }
@@ -210,6 +226,7 @@ export async function* generateStreamWithTools(input: GenerateInput): AsyncGener
     ...(toolMap ? { tools: toolMap } : {}),
     temperature,
     maxOutputTokens: maxTokens,
+    abortSignal: AbortSignal.timeout(input.timeoutMs ?? LLM_STREAM_TIMEOUT_MS),
   });
   for await (const delta of result.textStream) yield { type: "delta", text: delta };
   const calls = (await result.toolCalls) as unknown as { toolName: string; input?: unknown; args?: unknown }[];
@@ -241,6 +258,7 @@ export async function* generateStream(input: GenerateInput): AsyncGenerator<stri
     messages: messages.map((m) => ({ role: m.role, content: m.content })),
     temperature,
     maxOutputTokens: maxTokens,
+    abortSignal: AbortSignal.timeout(input.timeoutMs ?? LLM_STREAM_TIMEOUT_MS),
   });
   for await (const delta of result.textStream) yield delta;
 }

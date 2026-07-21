@@ -82,7 +82,8 @@ const maintenanceWorker = new Worker(
       const ran = await withLock("retention", 30 * 60, async () => {
         const results = await applyAllRetention();
         const total = results.reduce((n, r) => n + r.deletedTraces, 0);
-        console.log(`[retention] swept ${results.length} project(s), deleted ${total} traces`);
+        const blobs = results.reduce((n, r) => n + r.deletedBlobObjects, 0);
+        console.log(`[retention] swept ${results.length} project(s), deleted ${total} traces, ${blobs} blob objects`);
       });
       if (ran === null) console.log("[retention] skipped — another run holds the lock");
     } else if (job.name === "export") {

@@ -1,5 +1,5 @@
 import type { EvaluatorAnalytics } from "@memoturn/contracts";
-import { EVALUATOR_TEMPLATES, getEvaluatorTemplate, isoNow, newId } from "@memoturn/core";
+import { deterministicId, EVALUATOR_TEMPLATES, getEvaluatorTemplate, isoNow, newId } from "@memoturn/core";
 import { prisma } from "@memoturn/db";
 import { generate, type Provider } from "@memoturn/llm";
 import { telemetry } from "@memoturn/telemetry";
@@ -231,6 +231,10 @@ export async function runEvaluator(projectId: string, name: string, input: RunEv
   if (!judged) return null;
 
   // Write the score back through the ingest pipeline (lands in the telemetry store, source=EVAL).
+  // The score id is DETERMINISTIC in (trace, evaluator): if this job is retried — e.g. the
+  // ingest processor re-runs the eval phase after a post-insert failure — the same id is
+  // produced, so merge-on-write overwrites the prior score instead of inserting a duplicate
+  // (which would also double the LLM-judge cost). A trace has at most one score per evaluator.
   await submitBatch(projectId, {
     batch: [
       {
@@ -238,7 +242,7 @@ export async function runEvaluator(projectId: string, name: string, input: RunEv
         type: "score-create",
         timestamp: isoNow(),
         body: {
-          id: newId(),
+          id: deterministicId(input.traceId, judged.evaluator),
           traceId: input.traceId,
           name: judged.evaluator,
           value: judged.score,

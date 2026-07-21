@@ -239,5 +239,18 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     ]),
   ]);
 
-  await runOnlineEvals(projectId, parsed.batch);
+  // Online evals are best-effort and run AFTER telemetry is committed, so the whole phase is
+  // wrapped: a throw here (e.g. the evaluator lookup fails) must not fail the job. If it did,
+  // BullMQ would retry the entire batch — re-running evals and re-dispatching webhooks for
+  // data that already landed. The invariant is "evals never fail ingestion"; this closes the
+  // gap the per-evaluator catch inside runOnlineEvals didn't cover.
+  try {
+    await runOnlineEvals(projectId, parsed.batch);
+  } catch (err) {
+    inc("evaluator_runs_total", { evaluator: "*", result: "phase_error" });
+    logJson("error", "online-eval phase failed (ingestion unaffected)", {
+      projectId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
