@@ -1,6 +1,6 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import * as C from "@memoturn/contracts";
-import { type IngestEvent, type IngestResult, ingestEvent, ingestRequest, ingestResponse } from "@memoturn/core";
+import { type IngestEvent, type IngestResult, ingestRequest, ingestResponse } from "@memoturn/core";
 import {
   ALERT_COMPARATORS,
   ALERT_METRICS,
@@ -162,6 +162,7 @@ import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
+import { partitionIngestBatch } from "./ingest-partition.js";
 import { handleMcp } from "./mcp.js";
 import { logJson, recordRequest, requestStarted, snapshot } from "./metrics.js";
 import { type AuthVars, denyIfNotAdmin, denyIfReadOnly, requireAuth } from "./middleware/auth.js";
@@ -513,23 +514,13 @@ app.openapi(
       return c.json({ error: "ingest event rate limit exceeded", limit: ev.limit, retryAfter: ev.resetSeconds }, 429);
     }
 
-    const valid: IngestEvent[] = [];
-    const errors: IngestResult[] = [];
-    envelope.data.batch.forEach((raw, index) => {
-      const parsed = ingestEvent.safeParse(raw);
-      if (parsed.success) {
-        valid.push(parsed.data);
-        return;
-      }
-      const id = typeof (raw as { id?: unknown } | null)?.id === "string" ? (raw as { id: string }).id : "";
-      const issue = parsed.error.issues[0];
-      const error = (issue ? `${issue.path.join(".") || "event"}: ${issue.message}` : "invalid event").slice(0, 500);
-      errors.push({ id, index, status: 400, error });
-    });
+    const { valid, persist, errors } = partitionIngestBatch(envelope.data.batch);
 
-    // Only valid events are persisted + enqueued: the blob stays a strictly-valid,
-    // replayable log (the worker and DLQ replay parse it with ingestRequest.parse).
-    if (valid.length > 0) await submitBatch(c.get("projectId"), { batch: valid });
+    // Only valid events are persisted + enqueued: the blob stays a strictly-valid, replayable log
+    // (the worker and DLQ replay parse it with ingestRequest.parse). We persist the ORIGINAL
+    // (pre-zod-default) bodies so the worker can tell which fields the client actually sent — the
+    // mutable-state merge (ADR-0001) needs that; the Doris path re-applies defaults on re-parse.
+    if (persist.length > 0) await submitBatch(c.get("projectId"), { batch: persist as IngestEvent[] });
     if (errors.length > 0) {
       console.error(
         JSON.stringify({
