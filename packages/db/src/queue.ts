@@ -42,7 +42,10 @@ export function getIngestQueue(): Queue<IngestJob> {
       connection: connectionOptions(),
       prefix: QUEUE_PREFIX,
       defaultJobOptions: {
-        attempts: 5,
+        // 8 attempts of exponential backoff (1,2,4,…,64s) span ~2min, so a routine Doris FE
+        // restart / failover no longer dumps the whole ingest stream to the DLQ after ~15s.
+        // Backoff delays sit in the delayed set, not a worker slot, so this costs no concurrency.
+        attempts: 8,
         backoff: { type: "exponential", delay: 1000 },
         removeOnComplete: 1000,
         removeOnFail: 5000,

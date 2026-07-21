@@ -351,8 +351,16 @@ function alertMessage(rule: AlertRuleRow, projectId: string, value: number, firi
   };
 }
 
-async function notify(channels: Channel[], message: ChannelMessage): Promise<void> {
-  await mapConcurrent(channels, DISPATCH_CONCURRENCY, (ch) => deliverToChannel(ch, message));
+/**
+ * Deliver a message to every channel. Returns true when there was nothing to send (no channels
+ * configured — the transition is UI-only) OR at least one channel accepted it. A false return
+ * means every channel failed, and the caller must NOT commit the state transition yet, so the
+ * next tick retries instead of silently dropping the page.
+ */
+async function notify(channels: Channel[], message: ChannelMessage): Promise<boolean> {
+  if (channels.length === 0) return true;
+  const results = await mapConcurrent(channels, DISPATCH_CONCURRENCY, (ch) => deliverToChannel(ch, message));
+  return results.some((ok) => ok);
 }
 
 /**
@@ -393,20 +401,32 @@ export async function evaluateAllAlerts(
       const status = rule.state?.status ?? "ok";
       const channels = parseChannels(rule.channels);
       if (breached && status !== "firing") {
+        // Notify FIRST and only commit "firing" once a channel accepts the page. If we persisted
+        // "firing" before a failed delivery, the next tick would see status=firing, treat it as
+        // "no transition", and never retry — the page would be lost forever. On failure keep the
+        // prior status so the next tick retries, while still refreshing lastValue for the UI.
+        const delivered = await notify(channels, alertMessage(rule, rule.projectId, value, true));
         await prisma.alertState.upsert({
           where: { ruleId: rule.id },
-          update: { status: "firing", lastValue: value, lastFiredAt: new Date() },
-          create: { ruleId: rule.id, status: "firing", lastValue: value, lastFiredAt: new Date() },
+          update: delivered ? { status: "firing", lastValue: value, lastFiredAt: new Date() } : { lastValue: value },
+          create: delivered
+            ? { ruleId: rule.id, status: "firing", lastValue: value, lastFiredAt: new Date() }
+            : { ruleId: rule.id, status, lastValue: value },
         });
-        await notify(channels, alertMessage(rule, rule.projectId, value, true));
-        fired++;
+        if (delivered) fired++;
       } else if (!breached && status === "firing") {
+        // Same rule for the all-clear: don't claim "resolved" until the notification lands, so a
+        // failed delivery is retried next tick rather than silently dropped.
+        const delivered = await notify(channels, alertMessage(rule, rule.projectId, value, false));
         await prisma.alertState.upsert({
           where: { ruleId: rule.id },
-          update: { status: "resolved", lastValue: value, lastResolvedAt: new Date() },
-          create: { ruleId: rule.id, status: "resolved", lastValue: value, lastResolvedAt: new Date() },
+          update: delivered
+            ? { status: "resolved", lastValue: value, lastResolvedAt: new Date() }
+            : { lastValue: value },
+          create: delivered
+            ? { ruleId: rule.id, status: "resolved", lastValue: value, lastResolvedAt: new Date() }
+            : { ruleId: rule.id, status, lastValue: value },
         });
-        await notify(channels, alertMessage(rule, rule.projectId, value, false));
       } else {
         // No transition — keep lastValue fresh for the UI.
         await prisma.alertState.upsert({
@@ -470,10 +490,11 @@ export async function evaluateBudgets(): Promise<{ evaluated: number; notified: 
       const crossed = steps.filter((s) => ratio >= s && s > b.notifiedThreshold);
       if (crossed.length === 0) continue;
       const step = Math.max(...crossed);
-      await prisma.costBudget.update({ where: { id: b.id }, data: { notifiedThreshold: step } });
       const pct = Math.round(step * 100);
       const summary = `memoturn budget ${pct}% of $${b.monthlyUsd}/mo reached — spent $${round(mtdCost)} · project ${b.projectId}`;
-      await notify(channels, {
+      // Notify FIRST: only advance notifiedThreshold once delivery lands, else a failed
+      // notification would permanently suppress this step (next tick sees it already "notified").
+      const delivered = await notify(channels, {
         slackText: `*memoturn budget* :moneybag: ${summary}`,
         webhookBody: { budget: b.projectId, monthlyUsd: b.monthlyUsd, spent: mtdCost, step, ratio },
         summary,
@@ -482,6 +503,8 @@ export async function evaluateBudgets(): Promise<{ evaluated: number; notified: 
         // Per budget+step so PagerDuty shows each threshold crossing as its own alert.
         dedupKey: `memoturn-budget-${b.id}-${pct}`,
       });
+      if (!delivered) continue; // retry on the next tick
+      await prisma.costBudget.update({ where: { id: b.id }, data: { notifiedThreshold: step } });
       notified++;
     } catch (err) {
       console.error(`[budgets] project ${b.projectId} failed:`, err instanceof Error ? err.message : err);
