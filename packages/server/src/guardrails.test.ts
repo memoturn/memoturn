@@ -206,20 +206,25 @@ describe("runEvaluatorGuards", () => {
   });
 
   it("runs guards in parallel, not sequentially", async () => {
+    // Each guard sleeps DELAY ms. Parallel ≈ DELAY; sequential ≈ N*DELAY. Use a wide gap (3
+    // equal delays) and assert well under the sequential time so CI timer jitter can't flip it —
+    // the old ~5ms parallel-vs-sequential margin was smaller than scheduling noise (flaky).
+    const DELAY = 80;
     judgeWithEvaluator.mockImplementation(
       (_projectId: string, name: string) =>
         new Promise((resolve) => {
-          setTimeout(() => resolve({ evaluator: name, score: 1, reasoning: "" }), name === "slow" ? 60 : 5);
+          setTimeout(() => resolve({ evaluator: name, score: 1, reasoning: "" }), DELAY);
         }),
     );
     const start = Date.now();
     await runEvaluatorGuards("p1", "text", [
-      guard({ name: "slow", comparator: "gt", threshold: 2 }),
-      guard({ name: "fast", comparator: "gt", threshold: 2 }),
+      guard({ name: "a", comparator: "gt", threshold: 2 }),
+      guard({ name: "b", comparator: "gt", threshold: 2 }),
+      guard({ name: "c", comparator: "gt", threshold: 2 }),
     ]);
     const elapsed = Date.now() - start;
-    // Sequential would be ~65ms; parallel should track the slower of the two (~60ms).
-    expect(elapsed).toBeLessThan(65 + 5);
+    // parallel ~80ms, sequential ~240ms — 160ms leaves ~80ms margin on both sides.
+    expect(elapsed).toBeLessThan(DELAY * 2);
   });
 
   it("fails open on timeout: no finding, no throw", async () => {
