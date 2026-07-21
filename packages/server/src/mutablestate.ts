@@ -314,6 +314,18 @@ export async function mergeScoreStates(projectId: string, patches: ScorePatch[])
   );
 }
 
+// ── State readers (Phase 2 mirror / shadow-compare) ──────────────────────────────
+
+export function getTraceStates(projectId: string, ids: string[]) {
+  return prisma.traceState.findMany({ where: { projectId, id: { in: ids } } });
+}
+export function getObservationStates(projectId: string, ids: string[]) {
+  return prisma.observationState.findMany({ where: { projectId, id: { in: ids } } });
+}
+export function getScoreStates(projectId: string, ids: string[]) {
+  return prisma.scoreState.findMany({ where: { projectId, id: { in: ids } } });
+}
+
 /** Whether the Postgres mutable-state path is enabled (ADR-0001 Phase 1 dual-run flag). */
 export function mutableStateEnabled(): boolean {
   return process.env.MUTABLE_STATE_STORE === "pg";

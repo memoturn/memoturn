@@ -1,7 +1,7 @@
 import { compileModelPrices } from "@memoturn/core";
 import type { ObservationState, ScoreState, TraceState } from "@memoturn/db";
 import { describe, expect, it } from "vitest";
-import { mirrorObservationRow, mirrorScoreRow, mirrorTraceRow } from "./mirror.js";
+import { diffMirror, mirrorObservationRow, mirrorScoreRow, mirrorTraceRow } from "./mirror.js";
 
 const V = BigInt(Date.parse("2026-01-01T00:00:00.000Z"));
 const traceState = (over: Partial<TraceState>): TraceState =>
@@ -60,6 +60,27 @@ describe("mirrorObservationRow", () => {
     expect(r.model_parameters).toBe("{}");
     expect(r.level).toBe("DEFAULT");
     expect(r.total_cost).toBe(0);
+  });
+});
+
+describe("diffMirror", () => {
+  const ignore = new Set(["event_ts", "timestamp"]);
+
+  it("reports no diffs for equal rows (ignoring the excluded fields)", () => {
+    const a = { id: "t1", name: "x", environment: "prod", event_ts: "A", timestamp: "A" };
+    const b = { id: "t1", name: "x", environment: "prod", event_ts: "B", timestamp: "B" };
+    expect(diffMirror(a, b, ignore)).toEqual([]);
+  });
+
+  it("reports the fields that differ", () => {
+    const a = { id: "t1", name: "x", environment: "prod" };
+    const b = { id: "t1", name: "y", environment: "default" };
+    expect(diffMirror(a, b, ignore).sort()).toEqual(["environment", "name"]);
+  });
+
+  it("compares arrays by element and floats with tolerance", () => {
+    expect(diffMirror({ tags: ["a", "b"], c: 0.1 + 0.2 }, { tags: ["a", "b"], c: 0.3 }, ignore)).toEqual([]);
+    expect(diffMirror({ tags: ["a"] }, { tags: ["a", "b"] }, ignore)).toEqual(["tags"]);
   });
 });
 

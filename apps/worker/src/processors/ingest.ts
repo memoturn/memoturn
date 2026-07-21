@@ -21,6 +21,7 @@ import {
   offloadLargePayload,
   offloadMedia,
   runEvaluator,
+  shadowCompareBatch,
   withEntityLocks,
 } from "@memoturn/server";
 import { type TelemetryRowMap, type TelemetryTable, telemetry } from "@memoturn/telemetry";
@@ -275,6 +276,32 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     } catch (err) {
       inc("mutable_state_errors_total", undefined);
       logJson("error", "mutable-state merge failed (ingestion unaffected)", {
+        projectId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Shadow-compare (Phase 2b step 1): verify the mirror-from-Postgres-state row equals the
+    // read-merge row this batch just wrote to Doris. Separate best-effort step so a compare hiccup
+    // doesn't affect the merge counters; surfaces divergences before Phase 2b removes the read-merge.
+    try {
+      const results = await shadowCompareBatch(projectId, { traces, observations, scores }, priceOverrides);
+      for (const r of results) {
+        if (r.matched > 0) inc("mutable_state_shadow_total", { entity: r.entity, result: "match" }, r.matched);
+        if (r.mismatched > 0) {
+          inc("mutable_state_shadow_total", { entity: r.entity, result: "mismatch" }, r.mismatched);
+          logJson("warn", "mutable-state shadow mismatch", {
+            projectId,
+            entity: r.entity,
+            mismatched: r.mismatched,
+            samples: r.samples,
+          });
+        }
+        if (r.missing > 0) inc("mutable_state_shadow_total", { entity: r.entity, result: "missing" }, r.missing);
+      }
+    } catch (err) {
+      inc("mutable_state_errors_total", undefined);
+      logJson("error", "mutable-state shadow-compare failed (ingestion unaffected)", {
         projectId,
         error: err instanceof Error ? err.message : String(err),
       });
