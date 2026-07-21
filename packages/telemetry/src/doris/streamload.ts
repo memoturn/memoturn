@@ -22,6 +22,11 @@ import { toDorisDateTime } from "./serialize.js";
 // Row fields that are ISO-8601 timestamps and must be reformatted to Doris DATETIME(3).
 const DATETIME_KEYS = new Set(["timestamp", "event_ts", "start_time", "end_time"]);
 
+// Wall-clock bound per Stream Load PUT. A BE that accepts the connection but never responds
+// would otherwise pin the ingest job (and its worker slot) on the primary write path until
+// undici's default timeout — the same wedge class the LLM gateway guards against.
+const STREAM_LOAD_TIMEOUT_MS = Number(process.env.DORIS_STREAM_LOAD_TIMEOUT_MS ?? 60_000);
+
 export interface StreamLoadResult {
   status: string;
   loaded: number;
@@ -59,7 +64,13 @@ export function toStreamLoadRecords<T extends TelemetryTable>(
 async function putFollowingRedirect(url: string, body: string, headers: Record<string, string>): Promise<Response> {
   let target = url;
   for (let hop = 0; hop < 3; hop++) {
-    const res = await fetch(target, { method: "PUT", headers, body, redirect: "manual" });
+    const res = await fetch(target, {
+      method: "PUT",
+      headers,
+      body,
+      redirect: "manual",
+      signal: AbortSignal.timeout(STREAM_LOAD_TIMEOUT_MS),
+    });
     if (res.status === 307 || res.status === 308) {
       const loc = res.headers.get("location");
       if (!loc) return res;

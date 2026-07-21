@@ -1,4 +1,10 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectsCommand,
+  GetObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 
 /**
  * S3-compatible blob storage for the raw ingest event log (the replayable source of
@@ -57,6 +63,34 @@ export async function putBlobObject(
 export async function putBlobBytes(key: string, bytes: Uint8Array, contentType: string): Promise<string> {
   await blob().send(new PutObjectCommand({ Bucket: BLOB_BUCKET, Key: key, Body: bytes, ContentType: contentType }));
   return key;
+}
+
+/**
+ * Delete every object under `prefix` last modified before `cutoff`; returns the count removed.
+ * Used by data retention to reach the blob store — the raw event log (written pre-masking),
+ * offloaded payloads, and media are otherwise never deleted, so "retention" and PII masking
+ * wouldn't actually erase anything there. Filters on S3 `LastModified` so it works for both
+ * date-partitioned keys (events/, payloads/) and hash-only keys (media/). Paginates the
+ * listing and batches deletes (S3 caps DeleteObjects at 1000 keys per call).
+ */
+export async function deleteBlobPrefixOlderThan(prefix: string, cutoff: Date): Promise<number> {
+  let deleted = 0;
+  let continuationToken: string | undefined;
+  do {
+    const list = await blob().send(
+      new ListObjectsV2Command({ Bucket: BLOB_BUCKET, Prefix: prefix, ContinuationToken: continuationToken }),
+    );
+    const expired = (list.Contents ?? [])
+      .filter((o) => o.Key && o.LastModified && o.LastModified < cutoff)
+      .map((o) => ({ Key: o.Key as string }));
+    for (let i = 0; i < expired.length; i += 1000) {
+      const chunk = expired.slice(i, i + 1000);
+      await blob().send(new DeleteObjectsCommand({ Bucket: BLOB_BUCKET, Delete: { Objects: chunk, Quiet: true } }));
+      deleted += chunk.length;
+    }
+    continuationToken = list.IsTruncated ? list.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return deleted;
 }
 
 /** Fetch raw bytes + content type for a key, or null if missing. */
