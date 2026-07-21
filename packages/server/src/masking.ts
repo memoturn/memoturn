@@ -20,6 +20,63 @@ export const BUILTIN_PATTERNS: Record<string, string> = {
 };
 export const BUILTIN_NAMES = Object.keys(BUILTIN_PATTERNS);
 
+/** Cap on user-supplied regex patterns per policy (masking custom + guardrail custom/requireMatch). */
+export const MAX_USER_PATTERNS = 50;
+
+/** Raised when a user-supplied regex is rejected at policy-write time. Surfaced as a 400. */
+export class UserPatternError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UserPatternError";
+  }
+}
+
+// Adversarial probes that trigger catastrophic backtracking in vulnerable patterns. Length is
+// tuned so an exponential pattern clearly blows the budget (and is rejected) while still RETURNING
+// in tens of ms — we can only time a call that comes back, so a longer input (which would hang on
+// a pathological pattern) is not usable here. A linear regex finishes any probe in microseconds.
+const REDOS_PROBES = [`${"a".repeat(24)}!`, `${"a1".repeat(12)}!`, `${"-".repeat(24)}!`, `${" ".repeat(24)}!`];
+const REDOS_BUDGET_MS = 20;
+
+/** True if `re` shows super-linear backtracking on an adversarial probe (a linear regex is µs). */
+function isCatastrophic(re: RegExp): boolean {
+  for (const probe of REDOS_PROBES) {
+    const start = performance.now();
+    try {
+      re.lastIndex = 0;
+      probe.replace(re, "");
+    } catch {
+      // exotic runtime errors aren't a ReDoS signal
+    }
+    if (performance.now() - start > REDOS_BUDGET_MS) return true;
+  }
+  return false;
+}
+
+/**
+ * Validate user-supplied regex sources at policy-WRITE time: reject invalid syntax, too many
+ * patterns, or a pattern with catastrophic backtracking. This keeps pathological regexes out of
+ * the shared ingest worker, where masking runs synchronously over every event — a ReDoS pattern
+ * there would wedge ingest for every tenant on the replica (a low-privilege, cross-tenant DoS).
+ * Throws UserPatternError (→ 400). Callers pass every user regex the policy will execute.
+ */
+export function assertSafeUserPatterns(patterns: string[]): void {
+  if (patterns.length > MAX_USER_PATTERNS) {
+    throw new UserPatternError(`too many custom patterns (max ${MAX_USER_PATTERNS})`);
+  }
+  for (const src of patterns) {
+    let re: RegExp;
+    try {
+      re = new RegExp(src, "g");
+    } catch {
+      throw new UserPatternError(`invalid regex: ${src.slice(0, 80)}`);
+    }
+    if (isCatastrophic(re)) {
+      throw new UserPatternError(`pattern rejected — too slow, likely catastrophic backtracking: ${src.slice(0, 80)}`);
+    }
+  }
+}
+
 export interface MaskingPolicy {
   enabled: boolean;
   builtins: string[];
@@ -36,7 +93,8 @@ export interface Maskers {
 export function compileMaskers(policy: MaskingPolicy): Maskers {
   const sources = [
     ...policy.builtins.map((b) => BUILTIN_PATTERNS[b]).filter((s): s is string => Boolean(s)),
-    ...policy.customPatterns,
+    // Runtime backstop: honor the count cap even for rows written before validation existed.
+    ...policy.customPatterns.slice(0, MAX_USER_PATTERNS),
   ];
   const regexes: RegExp[] = [];
   for (const src of sources) {
@@ -84,10 +142,12 @@ export interface SetMaskingInput {
 }
 
 export async function setMaskingPolicy(projectId: string, input: SetMaskingInput) {
+  const customPatterns = input.customPatterns ?? [];
+  assertSafeUserPatterns(customPatterns); // reject invalid / ReDoS patterns before they reach ingest
   const data = {
     enabled: input.enabled ?? false,
     builtins: (input.builtins ?? []).filter((b) => BUILTIN_NAMES.includes(b)),
-    customPatterns: input.customPatterns ?? [],
+    customPatterns,
     redactWith: input.redactWith || "[REDACTED]",
   };
   const p = await prisma.maskingPolicy.upsert({ where: { projectId }, update: data, create: { projectId, ...data } });

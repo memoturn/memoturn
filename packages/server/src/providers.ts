@@ -1,5 +1,6 @@
 import { prisma } from "@memoturn/db";
 import { decryptSecret, encryptSecret, maskSecret, type Provider, type ProviderConfig } from "@memoturn/llm";
+import { assertPublicUrl } from "./net.js";
 
 /**
  * Per-project LLM provider connections. Credentials are encrypted at rest (AES-256-GCM)
@@ -81,8 +82,9 @@ export async function resolveProviderConfig(projectId: string, provider: Provide
     where: { projectId_provider: { projectId, provider } },
   });
   if (conn) {
+    let config: ProviderConfig;
     try {
-      return decodeConfig(conn.encryptedKey);
+      config = decodeConfig(conn.encryptedKey);
     } catch {
       // A stored key that won't decrypt (e.g. ENCRYPTION_KEY was rotated) must NOT silently
       // fall back to the operator's shared env key — that would mis-attribute cost/traffic.
@@ -97,6 +99,11 @@ export async function resolveProviderConfig(projectId: string, provider: Provide
       );
       throw new Error(`stored ${provider} config could not be decrypted — re-enter it in provider settings`);
     }
+    // Re-validate the egress target at DISPATCH time: DNS can rebind between save and use, so a
+    // baseUrl that was public when connected could now resolve to an internal address. Mirrors the
+    // webhook write+dispatch double-check.
+    if (config.baseUrl) await assertPublicUrl(config.baseUrl);
+    return config;
   }
   const envName = ENV_KEYS[provider];
   const apiKey = envName ? process.env[envName] : undefined;

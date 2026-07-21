@@ -9,6 +9,16 @@ import { type ExportFilters, telemetry } from "@memoturn/telemetry";
  */
 export type { ExportFilters };
 
+/** Hard ceiling on rows per export — the whole result set (with payloads) is built in memory. */
+export const MAX_EXPORT_ROWS = 100_000;
+
+/** Clamp a requested export limit into [1, MAX_EXPORT_ROWS]; NaN/absent/≤0 → the 1000 default. */
+export function clampExportLimit(raw: string | number | null | undefined): number {
+  const n = Math.floor(Number(raw ?? 1000));
+  if (!Number.isFinite(n) || n < 1) return 1000;
+  return Math.min(n, MAX_EXPORT_ROWS);
+}
+
 export async function exportTracesJsonl(projectId: string, filters: ExportFilters = {}): Promise<string> {
   const rows = await telemetry().exportTraces(projectId, filters);
   return rows.map((r) => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : "");

@@ -63,6 +63,14 @@ export function validateRuntimeEnv(service: string): void {
           "Generate secrets with e.g. `openssl rand -base64 48` and set them in the environment.",
       );
     }
+    // Non-fatal: API rate limiting defaults to disabled. Warn (don't throw — some deployments
+    // rate-limit at the edge) so an unthrottled ingest/read surface isn't a silent posture.
+    if (service === "api" && !(Number(process.env.RATE_LIMIT_PER_MINUTE) > 0)) {
+      console.warn(
+        `[${service}] RATE_LIMIT_PER_MINUTE is unset/0 — the API is unthrottled. Set it (and ` +
+          "INGEST_EVENTS_PER_MINUTE) or ensure an upstream proxy enforces limits in production.",
+      );
+    }
     return;
   }
 
