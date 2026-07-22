@@ -84,6 +84,10 @@ function applySecurityHeaders(headers: Headers, nonce: string, host: string | nu
   // fallback is honoured by browsers only when no nonce is present, so
   // adding the nonce + reporting endpoint lets us migrate incrementally
   // without breaking the live dashboard.
+  // Enforcement precondition: plumb this nonce into the router as
+  // `router.options.ssr.nonce` (it is currently generated after render, so the
+  // inline hydration scripts never carry it) — only then can this header
+  // become an enforcing Content-Security-Policy.
   headers.set(
     "Content-Security-Policy-Report-Only",
     [
@@ -99,6 +103,20 @@ function applySecurityHeaders(headers: Headers, nonce: string, host: string | nu
       `object-src 'none'`,
     ].join("; "),
   );
+}
+
+/**
+ * Edge-cache successful SSR HTML at Cloudflare for 60s (serving stale for up
+ * to a day while revalidating) — the marketing pages are effectively static
+ * per deploy. Browsers still revalidate every time (`max-age=0`), so a deploy
+ * propagates within a minute. Errors and non-GET responses are never cached.
+ */
+function applyEdgeCaching(headers: Headers, request: Request, response: Response): void {
+  if (request.method.toUpperCase() !== "GET") return;
+  if (!response.ok) return;
+  if (!(headers.get("content-type") ?? "").includes("text/html")) return;
+  if (headers.has("set-cookie")) return;
+  headers.set("Cache-Control", "public, max-age=0, s-maxage=60, stale-while-revalidate=86400");
 }
 
 /**
@@ -143,6 +161,7 @@ const secureHandler = defineHandlerCallback(async (ctx) => {
   const headers = new Headers(response.headers);
   const host = new URL(ctx.request.url).host;
   applySecurityHeaders(headers, nonce, host);
+  applyEdgeCaching(headers, ctx.request, response);
 
   return new Response(response.body, {
     status: response.status,
