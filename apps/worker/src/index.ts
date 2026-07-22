@@ -5,8 +5,10 @@ import {
   applyAllRetention,
   evaluateAllAlerts,
   evaluateBudgets,
+  pruneMutableState,
   runAllEmbeddingProjections,
   runAllScheduledExports,
+  statePruneWindowHours,
   validateRuntimeEnv,
   withLock,
 } from "@memoturn/server";
@@ -115,6 +117,20 @@ const maintenanceWorker = new Worker(
         console.log(`[embeddings] projected ${results.length} project(s), ${total} points`);
       });
       if (ran === null) console.log("[embeddings] skipped — another run holds the lock");
+    } else if (job.name === "state-prune") {
+      // Bound the Postgres mutable-state working set (ADR-0001 Phase 3): drop rows quiet past the
+      // window. Doris keeps full history. Lock-guarded like the other destructive sweeps.
+      const ran = await withLock(
+        "state-prune",
+        30 * 60,
+        async () => {
+          const cutoff = new Date(Date.now() - statePruneWindowHours() * 3_600_000);
+          const r = await pruneMutableState(cutoff);
+          console.log(`[state-prune] deleted ${r.traces} trace / ${r.observations} obs / ${r.scores} score states`);
+        },
+        { failClosed: true },
+      );
+      if (ran === null) console.log("[state-prune] skipped — lock held or (Redis down) fail-closed");
     } else if (job.name === "alert-eval") {
       // Short TTL: this runs every minute, so a stuck holder shouldn't block the next tick long.
       const ran = await withLock("alert-eval", 120, async () => {
@@ -158,6 +174,16 @@ await maintenanceQueue.add(
   {
     repeat: { pattern: "0 5 * * *" },
     jobId: "embeddings-daily",
+    removeOnComplete: true,
+  },
+);
+// Mutable-state prune: bound the Postgres working set hourly (ADR-0001 Phase 3).
+await maintenanceQueue.add(
+  "state-prune",
+  {},
+  {
+    repeat: { pattern: "17 * * * *" },
+    jobId: "state-prune-hourly",
     removeOnComplete: true,
   },
 );
