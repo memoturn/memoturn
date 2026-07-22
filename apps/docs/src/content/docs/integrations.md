@@ -1,10 +1,10 @@
 ---
 title: Integrations
-description: Ingest telemetry from OpenTelemetry, OpenAI, LangChain, LiteLLM, or any custom source.
+description: Ingest telemetry from OpenTelemetry, OpenAI, Azure OpenAI, LangChain, LlamaIndex, LiteLLM, or any custom source.
 ---
 
-memoturn ingests from any source that can speak its batched `/v1/ingest` API or OpenTelemetry.
-All paths funnel through the same pipeline → Doris.
+memoturn ingests from any source that can speak its batched `/v1/ingest` API or
+OpenTelemetry. All paths funnel through the same pipeline → Doris.
 
 ## OpenTelemetry (universal)
 
@@ -16,15 +16,27 @@ Authorization: Basic base64(publicKey:secretKey)
 Content-Type: application/json
 ```
 
-Spans carrying GenAI semantic-convention attributes (`gen_ai.*`) become **generations** (model,
-provider, token usage mapped); other spans become **spans**. This is the zero-lock-in path for
-frameworks that emit OTel (LlamaIndex, Pydantic AI, Semantic Kernel, etc.). OTLP/protobuf support
-is planned.
+Spans carrying GenAI semantic-convention attributes (`gen_ai.*`) become **generations**
+(model, provider, token usage mapped); other spans become **spans**. This is the
+zero-lock-in path for frameworks that emit OTel (LlamaIndex, Pydantic AI, Semantic
+Kernel, etc.). OTLP/protobuf support is planned.
+
+MCP semantic-convention spans are surfaced first-class: `mcp.session.id` maps to the trace
+session, and a `tools/call` span is named after the tool (`mcp:<tool>`, or `mcp:<method>` for
+`tools/list` / `resources/read` / `prompts/get`) so MCP calls appear in the trace waterfall
+and the by-tool analytics next to other tools. The raw `mcp.*` attributes stay in metadata.
+
+The first-party SDKs pre-wire the endpoint + auth so you don't hand-build the URL/header —
+JS `import { memoturnSpanProcessor, memoturnOtlpConfig } from "@memoturn/sdk/otel"`, Python
+`from memoturn.otel import span_processor, otlp_config`, and Go `mt.OTLPConfig()` (see
+[Go SDK](/sdk-go/#opentelemetry)). All three resolve creds from `MEMOTURN_BASE_URL` /
+`MEMOTURN_PUBLIC_KEY` / `MEMOTURN_SECRET_KEY` (or explicit args); the OTel exporter packages
+are optional peer deps used only by these helpers.
 
 ## OpenAI
 
-- **TypeScript:** `wrapOpenAI(new OpenAI(), mt)` — see the [TypeScript SDK](/sdk-typescript/).
-- **Python:** `wrap_openai(OpenAI())` — see the [Python SDK](/sdk-python/).
+- **TypeScript:** `wrapOpenAI(new OpenAI(), mt)` — see [TS SDK](/sdk-typescript/).
+- **Python:** `wrap_openai(OpenAI())` — see [Python SDK](/sdk-python/).
 
 Each `chat.completions.create` and `responses.create` (the Responses API) is recorded as a
 generation with model, params, usage, latency, and errors.
@@ -63,11 +75,10 @@ embedding vectors, with one trace per top-level operation. Python only.
 ## LiteLLM
 
 Use LiteLLM's custom callback to forward to `/v1/ingest` (adapter under
-[`integrations/litellm`](https://github.com/memoturn/memoturn/blob/main/integrations/litellm)),
-or route LiteLLM through its OTel exporter into the OTel receiver above.
+`integrations/litellm`), or route LiteLLM through its OTel exporter into the OTel
+receiver above.
 
 ## Anything else
 
-Send batched events directly to `POST /v1/ingest` — see the [API reference](/api/) and the event
-contracts in
-[`packages/core/src/events.ts`](https://github.com/memoturn/memoturn/blob/main/packages/core/src/events.ts).
+Send batched events directly to `POST /v1/ingest` (see the [API reference](/api/) and
+the event contracts in `packages/core/src/events.ts`).

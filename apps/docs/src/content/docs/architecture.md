@@ -13,14 +13,16 @@ SDKs / OTel / LangChain / OpenAI
 apps/api (Hono on Bun)
    ├── write raw batch ──► S3 / MinIO      (source of truth)
    ├── enqueue job ──────► Redis / BullMQ
+   ├── metadata ─────────► Postgres
    └── ack 207 ──────────► client
                              │
 Redis / BullMQ ──────────────┘
    │ deliver job
    ▼
 apps/worker (Bun + BullMQ)
-   ├── fetch raw batch ──► S3 / MinIO
-   └── merge + insert ───► Apache Doris
+   ├── fetch raw batch ────► S3 / MinIO
+   ├── field-merge state ──► Postgres      (authoritative)
+   └── mirror + insert ────► Apache Doris  (analytical)
 
 apps/console (SPA) ── TanStack Query ──► apps/api ── reads ──► Postgres + Doris
 ```
@@ -51,15 +53,19 @@ apps/console (SPA) ── TanStack Query ──► apps/api ── reads ──�
 5. **API → SDK**: responds `207` with a per-event status.
 6. **Queue → worker**: delivers the job.
 7. **Worker → blob**: fetches the raw batch back.
-8. **Worker → Doris**: merges and inserts traces/observations/scores.
-9. **Worker**: runs sampled online evaluators on completed traces.
+8. **Worker → Postgres**: field-merges trace/observation/score state (authoritative).
+9. **Worker → Doris**: mirrors the merged state + append-only rows (analytical).
+10. **Worker**: runs sampled online evaluators on completed traces.
 
-- The API acks fast; the blob event log is the source of truth, so Doris is
+- The API acks fast; the blob event log is the source of truth, so both stores below are
   rebuildable.
-- Merge semantics: Doris `UNIQUE KEY` merge-on-write tables keyed on `(project_id, id)`
-  with `event_ts` as the sequence column, so late/partial/out-of-order events converge
-  (last writer — the newest `event_ts` — wins). Create + update for one observation are
-  merged in the worker when they arrive in the same batch.
+- Merge semantics (ADR-0001): mutable entities (trace/observation/score) are **authoritative in
+  Postgres** — each ingest event merges field-by-field into a `*State` row (an atomic
+  `INSERT … ON CONFLICT DO UPDATE SET col = COALESCE(EXCLUDED.col, stored.col)`), so a partial
+  update keeps the fields it omits and concurrent batches can't lose each other's fields. **Doris is
+  the analytical mirror**: the worker writes each Doris row FROM the merged Postgres state (computing
+  derived latency/cost), ordered by `stateVersion` (its merge-on-write sequence). Append-only rows
+  (retrieval documents, embeddings) come straight from the events. There is no Doris read-merge.
 
 ## Packages
 
@@ -89,5 +95,5 @@ apps/console (SPA) ── TanStack Query ──► apps/api ── reads ──�
 - **Better Auth session** (cookie) — for the dashboard; resolves the user's role and
   active project (via the `x-memoturn-project` header / project switcher).
 
-See [Data model](/concepts/) for the entities and [Deployment](/deployment/) for
+See [Concepts](/concepts/) for the data model and [Deployment](/deployment/) for
 scaling.
