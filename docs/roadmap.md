@@ -49,8 +49,7 @@ OpenAI, LangChain, prompts, OTel exporter, **LlamaIndex (Python)**).
 
 ## Horizon 3 — enterprise & monetization (post-launch)
 
-The paid tier mirrors the line the market accepts (Langfuse's post-MIT gating):
-compliance, not product features. **Monetization is deliberately deferred until there
+The paid tier draws the line at compliance, not product features. **Monetization is deliberately deferred until there
 are paying customers** — these ship ungated as OSS until the `/ee` gate is justified.
 
 | Feature | Effort | Notes |

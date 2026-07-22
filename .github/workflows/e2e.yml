@@ -86,6 +86,11 @@ jobs:
       - run: bun --filter @memoturn/db generate
       - run: bun --filter @memoturn/db migrate
       - run: bun run db:telemetry
+      # The worker's Doris-backed integration tests (blob → worker → telemetry store)
+      # gate on DORIS_HOST and need the real engine — this is the only job that has it.
+      # The plain `build` job deliberately unsets DORIS_* so these skip there.
+      - name: Worker integration tests (real Doris)
+        run: bun --filter @memoturn/worker test
       - name: Install Playwright browser
         run: bunx playwright install --with-deps chromium
         working-directory: apps/console

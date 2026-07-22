@@ -27,12 +27,15 @@ jobs:
     runs-on: ubuntu-latest
     if: github.repository == 'memoturn/memoturn'
     strategy:
+      fail-fast: false
       matrix:
         include:
           - app: "@memoturn/web"
             dir: apps/web
+            url: https://memoturn.ai
           - app: "@memoturn/docs"
             dir: apps/docs
+            url: https://docs.memoturn.ai
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -49,3 +52,22 @@ jobs:
             exit 0
           fi
           bun run deploy
+      - name: Smoke test ${{ matrix.url }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          # Mirror the deploy step's guard — no token means nothing was deployed.
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "CLOUDFLARE_API_TOKEN secret not set — deploy was skipped, skipping smoke test." >&2
+            exit 0
+          fi
+          for attempt in 1 2 3 4 5; do
+            status="$(curl -fsS -o /dev/null -w '%{http_code}' --max-time 15 "${{ matrix.url }}" || true)"
+            echo "Attempt $attempt: ${{ matrix.url }} -> HTTP $status"
+            if [ "$status" = "200" ]; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Smoke test failed: ${{ matrix.url }} did not return HTTP 200 after 5 attempts." >&2
+          exit 1

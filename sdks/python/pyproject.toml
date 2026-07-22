@@ -4,7 +4,8 @@ version = "0.3.0"
 description = "memoturn Python SDK — tracing, @observe, OpenAI wrapper, prompts."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 keywords = [
   "memoturn", "llm", "observability", "tracing", "openai", "langchain", "langgraph",
   "llamaindex", "crewai", "haystack", "evals", "opentelemetry",

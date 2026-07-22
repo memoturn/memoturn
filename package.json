@@ -1,6 +1,6 @@
 {
   "name": "memoturn",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Open-source AI engineering platform: LLM observability, evals, metrics, prompts, playground, datasets.",
   "license": "Apache-2.0",

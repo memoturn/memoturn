@@ -58,12 +58,10 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://memoturn:memoturn@localhost:5432/memoturn?schema=public
-      DORIS_HOST: localhost
-      DORIS_PORT: "9030"
-      DORIS_HTTP_PORT: "8030"
-      DORIS_USER: root
-      DORIS_PASSWORD: ""
-      DORIS_DB: memoturn
+      # No DORIS_* here on purpose: this job runs no Doris service, and the worker's
+      # integration tests gate on DORIS_HOST being set — they run against the real
+      # engine in the e2e job instead. Doris-backed conformance tests probe
+      # reachability and skip themselves.
       REDIS_URL: redis://localhost:6379
       BLOB_ENDPOINT: http://localhost:9000
       BLOB_REGION: us-east-1
