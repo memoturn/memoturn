@@ -1,9 +1,10 @@
+import { prisma } from "@memoturn/db";
 import { putRawBatch } from "@memoturn/db/blob";
 import type { IngestJob } from "@memoturn/db/queue";
 import { getTrace } from "@memoturn/server";
 import { telemetry } from "@memoturn/telemetry";
 import type { Job } from "bullmq";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { processIngest } from "./processors/ingest.js";
 
 /**
@@ -29,8 +30,23 @@ async function getTraceWithRetry(projectId: string, traceId: string, tries = 10)
 
 describe.skipIf(!HAS_INFRA)("ingest pipeline (blob → worker → telemetry store → read)", () => {
   const projectId = `itest-${Date.now()}`;
+  const orgId = `${projectId}-org`;
+
+  // The processor persists mutable state to Postgres (*State rows FK onto Project),
+  // so the project must actually exist relationally, not just as an id.
+  beforeAll(async () => {
+    await prisma.organization.create({
+      data: {
+        id: orgId,
+        name: "itest org",
+        slug: orgId,
+        projects: { create: { id: projectId, name: "itest", slug: projectId } },
+      },
+    });
+  });
 
   afterAll(async () => {
+    await prisma.organization.delete({ where: { id: orgId } }).catch(() => {});
     await telemetry()
       .deleteProjectData(projectId)
       .catch(() => {});

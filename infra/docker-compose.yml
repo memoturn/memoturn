@@ -124,6 +124,31 @@ services:
       mc mb --ignore-existing local/${BLOB_BUCKET:-memoturn};
       "
 
+  # One-shot schema migration. Runs Prisma (Postgres) then the Doris DDL, reading
+  # connection config from the injected env. Calls the telemetry script directly rather than
+  # `bun run db:telemetry` to bypass that script's hardcoded `--env-file=../../.env` (no such
+  # file in the image). api/worker wait for this to complete successfully before starting.
+  migrate:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+      doris-fe: { condition: service_healthy }
+      doris-be: { condition: service_healthy }
+      doris-setup: { condition: service_completed_successfully }
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/memoturn?schema=public
+      DORIS_HOST: doris-fe
+      DORIS_PORT: "9030"
+      DORIS_HTTP_PORT: "8030"
+      DORIS_USER: root
+      DORIS_PASSWORD: ${DORIS_PASSWORD:?set DORIS_PASSWORD in .env}
+      DORIS_DB: memoturn
+    command: ["sh", "-c", "bun --filter @memoturn/db migrate && bun packages/telemetry/src/migrate.ts"]
+
   # Public API (Hono on Bun): /v1 ingest + OTel receiver + read API + OpenAPI.
   api:
     build:
@@ -131,6 +156,7 @@ services:
       dockerfile: docker/api.Dockerfile
     restart: unless-stopped
     depends_on:
+      migrate: { condition: service_completed_successfully }
       postgres: { condition: service_healthy }
       doris-fe: { condition: service_healthy }
       doris-be: { condition: service_healthy }
@@ -139,6 +165,10 @@ services:
     environment:
       NODE_ENV: production
       API_PORT: "3001"
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env (openssl rand -base64 48)}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (openssl rand -base64 48)}
+      AUTH_TRUSTED_ORIGINS: ${AUTH_TRUSTED_ORIGINS:?set AUTH_TRUSTED_ORIGINS in .env (comma-separated console origins)}
+      AUTH_BASE_URL: ${AUTH_BASE_URL:-http://localhost:3001}
       DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/memoturn?schema=public
       DORIS_HOST: doris-fe
       DORIS_PORT: "9030"
@@ -169,12 +199,17 @@ services:
       dockerfile: docker/worker.Dockerfile
     restart: unless-stopped
     depends_on:
+      migrate: { condition: service_completed_successfully }
+      postgres: { condition: service_healthy }
       doris-fe: { condition: service_healthy }
       doris-be: { condition: service_healthy }
       redis: { condition: service_healthy }
       minio: { condition: service_healthy }
     environment:
       NODE_ENV: production
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env (openssl rand -base64 48)}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (openssl rand -base64 48)}
+      AUTH_TRUSTED_ORIGINS: ${AUTH_TRUSTED_ORIGINS:?set AUTH_TRUSTED_ORIGINS in .env (comma-separated console origins)}
       DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/memoturn?schema=public
       DORIS_HOST: doris-fe
       DORIS_PORT: "9030"
