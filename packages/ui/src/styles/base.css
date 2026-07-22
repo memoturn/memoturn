@@ -155,9 +155,43 @@ pre code {
 	pointer-events: none;
 }
 
-/* Lit top edge — a center-anchored lagoon hairline along the frame's top,
- * the corner-light treatment adapted to this system's top-edge glow
- * language. Static; part of the frame, not an effect. */
+/* Lit edge — a center-anchored lagoon hairline along an element's top (or
+ * bottom) edge: the corner-light treatment adapted to this system's
+ * top-edge glow language. Static, always paired with an existing hairline
+ * border; it lights structure, it never replaces it. Sits at intensity 35%
+ * on structural boundaries; .frame-shot's own edge runs hotter (55%)
+ * because the frame is a lit instrument, not a divider. */
+.lit-edge,
+.lit-edge--bottom {
+	position: relative;
+}
+
+.lit-edge::before,
+.lit-edge--bottom::after {
+	content: "";
+	position: absolute;
+	left: 12%;
+	right: 12%;
+	height: 1px;
+	z-index: 1;
+	background: linear-gradient(
+		90deg,
+		transparent,
+		color-mix(in oklab, var(--lagoon) 35%, transparent) 50%,
+		transparent
+	);
+	pointer-events: none;
+}
+
+.lit-edge::before {
+	top: -1px;
+}
+
+.lit-edge--bottom::after {
+	bottom: -1px;
+}
+
+/* The frame's own lit top edge — hotter than structural boundaries. */
 .frame-shot::after {
 	content: "";
 	position: absolute;

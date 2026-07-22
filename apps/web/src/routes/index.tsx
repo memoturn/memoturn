@@ -215,7 +215,7 @@ function Landing() {
         </div>
       </section>
 
-      <section aria-label="Ingestion sources" className="border-y border-border/60 bg-background">
+      <section aria-label="Ingestion sources" className="lit-edge border-y border-border/60 bg-background">
         <div className="page-wrap max-w-6xl! py-6">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
             <span className="font-mono text-xs tracking-[0.04em] text-muted-foreground">works with</span>
@@ -258,7 +258,7 @@ function Landing() {
         </div>
       </section>
 
-      <section aria-labelledby="features-heading" className="border-y border-border/60 bg-card/50">
+      <section aria-labelledby="features-heading" className="lit-edge border-y border-border/60 bg-card/50">
         <div className="page-wrap relative max-w-6xl! py-24">
           <div className="mb-12 grid max-w-[62ch] gap-4">
             <h2 id="features-heading" className="display-title text-[clamp(2rem,4vw,3rem)] text-foreground">
@@ -332,7 +332,7 @@ function Landing() {
                 nobody.
               </p>
             </div>
-            <dl className="m-0 grid border-t border-l border-[--rule] bg-background sm:grid-cols-2">
+            <dl className="lit-edge m-0 grid border-t border-l border-[--rule] bg-background sm:grid-cols-2">
               {PLATFORM.map((p) => (
                 <div key={p.label} className="glow-panel grid gap-1.5 border-r border-b border-[--rule] px-6 py-5">
                   <dt className="font-semibold text-[0.9375rem] tracking-[-0.005em] text-foreground">{p.label}</dt>
@@ -344,7 +344,7 @@ function Landing() {
         </div>
       </section>
 
-      <section aria-labelledby="use-cases-heading" className="border-t border-border/60 bg-card/50">
+      <section aria-labelledby="use-cases-heading" className="lit-edge border-t border-border/60 bg-card/50">
         <div className="page-wrap max-w-6xl! py-24">
           <div className="mb-12 grid max-w-[62ch] gap-4">
             <h2 id="use-cases-heading" className="display-title text-[clamp(2rem,4vw,3rem)] text-foreground">
