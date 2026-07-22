@@ -21,6 +21,7 @@ export default defineConfig({
       customCss: ["./src/styles/memoturn.css"],
       social: [{ icon: "github", label: "GitHub", href: "https://github.com/memoturn/memoturn" }],
       head: [
+        { tag: "meta", attrs: { name: "theme-color", content: "#0f1213" } },
         { tag: "meta", attrs: { property: "og:type", content: "website" } },
         { tag: "meta", attrs: { property: "og:image", content: `${SITE}/og-image.png` } },
         { tag: "meta", attrs: { property: "og:image:width", content: "1200" } },

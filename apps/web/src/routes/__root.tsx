@@ -17,7 +17,7 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: TITLE },
       { name: "description", content: DESCRIPTION },
-      { name: "theme-color", content: "#0d1417" },
+      { name: "theme-color", content: "#0f1213" },
       { property: "og:title", content: TITLE },
       { property: "og:description", content: DESCRIPTION },
       { property: "og:type", content: "website" },
@@ -47,7 +47,7 @@ function RootErrorBoundary({ error }: { error: Error }) {
   return (
     <div className="page-wrap py-24 sm:py-32">
       <div className="mx-auto max-w-xl text-center">
-        <p className="kicker mb-3 text-muted-foreground">500 · unexpected</p>
+        <p className="mb-3 font-mono text-xs tracking-[0.04em] text-muted-foreground">500 · unexpected</p>
         <h1 className="display-title mb-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
           Something went sideways.
         </h1>
@@ -80,7 +80,7 @@ function RootNotFound() {
   return (
     <div className="page-wrap py-24 sm:py-32">
       <div className="mx-auto max-w-xl text-center">
-        <p className="kicker mb-3 text-muted-foreground">404 · not found</p>
+        <p className="mb-3 font-mono text-xs tracking-[0.04em] text-muted-foreground">404 · not found</p>
         <h1 className="display-title mb-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
           This page doesn't exist.
         </h1>
