@@ -28,9 +28,15 @@
     },
     {
       "match": [
-        "apps/mcp/src/tools.ts"
+        "packages/server/src/mcp-tools.ts"
       ],
-      "note": "The MCP tool list in apps/mcp/README.md is hand-maintained. If you added/renamed a tool, update that README. Verify with `bun run docs:check`."
+      "note": "The MCP tool registry is restated in apps/mcp/README.md (checked by `bun run docs:check`) AND in the site page apps/docs/src/content/docs/mcp.md (hand-maintained). If you added/renamed a tool, update both."
+    },
+    {
+      "match": [
+        "docs/*.md"
+      ],
+      "note": "docs/*.md is the source of truth for the docs site — the mirror pages under apps/docs/src/content/docs/ must be resynced when content changes (docs:check only validates mechanical facts there, not content parity). See the sync-docs skill for the site adaptation conventions, or delegate to the doc-sync-auditor agent."
     },
     {
       "match": [

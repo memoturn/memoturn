@@ -8,7 +8,7 @@ Delegated subagents for multi-file work that benefits from its own context. Invo
 
 | Agent | Model · color | Use it for |
 | --- | --- | --- |
-| `doc-sync-auditor` | sonnet · cyan | Sweep docs vs. code, run `docs:check`, fix stale docs (incl. the hand-checked `app.ts` → `docs/api.md` tables). |
+| `doc-sync-auditor` | sonnet · cyan | Sweep docs vs. code, run `docs:check`, fix stale docs (incl. the hand-checked `app.ts` → `docs/api.md` tables and the `docs/*.md` → docs-site content parity pass). |
 | `endpoint-builder` | sonnet · blue | Add/change a `/v1` endpoint across contracts → server → API route → console client, with the read-only guard + audit. |
 | `prisma-migrator` | sonnet · green | Change `schema.prisma`: the `Project` reverse-relation rule, migrate with env loading, regenerate, typecheck. |
 | `ingest-syncer` | opus · purple | Change an ingest event shape, keeping `events.ts` ↔ `mappers.ts` ↔ Doris SQL ↔ tests aligned. |
@@ -29,7 +29,7 @@ Knowledge-first recipes loaded on demand, usable in the main thread or by the ag
 | `add-evaluator` | LLM-as-judge config, online vs offline, deterministic FNV sampling, never-fail-ingest, `EVAL` write-back. |
 | `model-registry` | The USD-per-1M-token cost registry, first-match-wins ordering, per-project overrides. |
 | `add-mcp-tool` | The `ToolDef` registry, plain JSON Schema, handlers into `@memoturn/server`, stderr-only logging. |
-| `sync-docs` | The doc↔code coupling map and how to run/fix drift. |
+| `sync-docs` | The doc↔code coupling map, how to run/fix drift, and the docs-site mirror conventions. |
 
 ## Hooks (`hooks/`, wired in `settings.json`)
 
