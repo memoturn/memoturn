@@ -1358,7 +1358,8 @@ function SettingsPage() {
               <CardDescription>
                 A worker cron evaluates each rule every minute over a trailing window and notifies your channels when it
                 crosses the threshold — firing once, then again when it resolves. Metrics: error_rate (0–1), latency_p95
-                (ms), cost_per_day (USD), ingest_volume (traces), dlq_depth (failed batches).
+                (ms), cost_per_day (USD), ingest_volume (traces), dlq_depth (failed batches), rehydrate_rate (state
+                rehydrations/min — a sustained rise means STATE_RETENTION_HOURS is too short).
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -1396,6 +1397,7 @@ function SettingsPage() {
                               <SelectItem value="cost_per_day">cost_per_day</SelectItem>
                               <SelectItem value="ingest_volume">ingest_volume</SelectItem>
                               <SelectItem value="dlq_depth">dlq_depth</SelectItem>
+                              <SelectItem value="rehydrate_rate">rehydrate_rate</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />

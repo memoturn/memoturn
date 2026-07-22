@@ -14,8 +14,21 @@ import { mapConcurrent } from "./concurrency.js";
  * lives in one place. No hard caps — budgets are soft (memoturn is not a gateway).
  */
 
-export const ALERT_METRICS = ["error_rate", "latency_p95", "cost_per_day", "ingest_volume", "dlq_depth"] as const;
+export const ALERT_METRICS = [
+  "error_rate",
+  "latency_p95",
+  "cost_per_day",
+  "ingest_volume",
+  "dlq_depth",
+  "rehydrate_rate",
+] as const;
 export type AlertMetric = (typeof ALERT_METRICS)[number];
+
+/** Process-global signals the worker injects for metrics that aren't a Doris window query. */
+export interface AlertContext {
+  dlqDepth?: number;
+  rehydrateRate?: number;
+}
 export const ALERT_COMPARATORS = ["gt", "gte", "lt", "lte", "anomaly_high", "anomaly_low"] as const;
 export type AlertComparator = (typeof ALERT_COMPARATORS)[number];
 
@@ -289,9 +302,10 @@ async function prefetchWindows(
 function ruleValue(
   rule: { projectId: string; metric: string; window: number },
   cache: Map<string, WindowMetric>,
-  ctx: { dlqDepth?: number },
+  ctx: AlertContext,
 ): number | null {
   if (rule.metric === "dlq_depth") return ctx.dlqDepth ?? null; // global queue depth, injected by the worker
+  if (rule.metric === "rehydrate_rate") return ctx.rehydrateRate ?? null; // global rehydrate/min, injected too
   const win = cache.get(windowKey(rule.projectId, rule.window));
   if (!win) return null; // fetch failed for this window → skip
   return metricFromWindow(rule.metric, win);
@@ -307,7 +321,7 @@ async function prefetchSeries(
 ): Promise<Map<string, WindowMetric[]>> {
   const targets = new Map<string, { projectId: string; window: number }>();
   for (const r of rules) {
-    if (!isAnomalyComparator(r.comparator) || r.metric === "dlq_depth") continue;
+    if (!isAnomalyComparator(r.comparator) || r.metric === "dlq_depth" || r.metric === "rehydrate_rate") continue;
     targets.set(windowKey(r.projectId, r.window), { projectId: r.projectId, window: r.window });
   }
   const cache = new Map<string, WindowMetric[]>();
@@ -369,9 +383,7 @@ async function notify(channels: Channel[], message: ChannelMessage): Promise<boo
  * `ctx.dlqDepth` (global DLQ queue depth) is injected by the worker for dlq_depth rules.
  * Never throws for one bad rule — failures are isolated so the sweep completes.
  */
-export async function evaluateAllAlerts(
-  ctx: { dlqDepth?: number } = {},
-): Promise<{ evaluated: number; fired: number }> {
+export async function evaluateAllAlerts(ctx: AlertContext = {}): Promise<{ evaluated: number; fired: number }> {
   const rules = await prisma.alertRule.findMany({ where: { enabled: true }, include: { state: true } });
   const [windows, seriesCache] = await Promise.all([prefetchWindows(rules), prefetchSeries(rules)]);
   let fired = 0;

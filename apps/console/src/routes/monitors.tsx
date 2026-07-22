@@ -54,6 +54,7 @@ const METRIC_LABEL: Record<string, string> = {
   cost_per_day: "Cost / day",
   ingest_volume: "Ingest volume",
   dlq_depth: "DLQ depth",
+  rehydrate_rate: "Rehydrate / min",
 };
 
 const COMPARATOR_SYMBOL: Record<string, string> = {
