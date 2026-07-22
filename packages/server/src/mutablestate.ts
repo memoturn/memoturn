@@ -325,3 +325,33 @@ export function getObservationStates(projectId: string, ids: string[]) {
 export function getScoreStates(projectId: string, ids: string[]) {
   return prisma.scoreState.findMany({ where: { projectId, id: { in: ids } } });
 }
+
+// ── Prune (ADR-0001 Phase 3) ─────────────────────────────────────────────────────
+
+export interface StatePruneResult {
+  traces: number;
+  observations: number;
+  scores: number;
+}
+
+/** Hours a `*State` row is kept after its last update before it's pruned (the mutation window). */
+export function statePruneWindowHours(): number {
+  const h = Number(process.env.STATE_RETENTION_HOURS ?? 72);
+  return Number.isFinite(h) && h > 0 ? h : 72;
+}
+
+/**
+ * Delete mutable-state rows not updated since `cutoff`. Postgres holds the working set only —
+ * Doris keeps full history — so once an entity has been quiet past the window (well beyond any real
+ * mutation), its state row is dropped to bound growth. A later update to a pruned entity is handled
+ * by the rehydrate path (Phase 3b). Runs in one transaction; global (the window is operational, not
+ * per-project data retention, which applies to Doris).
+ */
+export async function pruneMutableState(cutoff: Date): Promise<StatePruneResult> {
+  const [traces, observations, scores] = await prisma.$transaction([
+    prisma.traceState.deleteMany({ where: { updatedAt: { lt: cutoff } } }),
+    prisma.observationState.deleteMany({ where: { updatedAt: { lt: cutoff } } }),
+    prisma.scoreState.deleteMany({ where: { updatedAt: { lt: cutoff } } }),
+  ]);
+  return { traces: traces.count, observations: observations.count, scores: scores.count };
+}
