@@ -138,6 +138,22 @@
 	letter-spacing: -0.01em;
 }
 
+/* Code frames (expressive-code): route the frame chrome through the shared
+ * tokens — hairline borders, flat (no frame shadow), panel-tinted headers —
+ * and give the terminal titlebar comfortable padding. */
+:root {
+	--ec-brdCol: var(--docs-line);
+	--ec-brdRad: var(--radius-lg);
+	--ec-frm-frameBoxShdCssVal: none;
+	--ec-frm-trmTtbBg: var(--docs-panel-bg);
+	--ec-frm-edTabBarBg: var(--docs-panel-bg);
+}
+
+.sl-markdown-content .expressive-code .frame.is-terminal .header {
+	padding-block: 0.45rem 0.5rem;
+	border-bottom: 1px solid var(--docs-line);
+}
+
 /* Asides / callouts: full hairline border + tinted panel, never a thick
  * side stripe. */
 .sl-markdown-content .starlight-aside {
