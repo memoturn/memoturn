@@ -1,0 +1,11 @@
+{
+  "name": "memoturn",
+  "short_name": "memoturn",
+  "icons": [
+    { "src": "/favicon-256.png", "sizes": "256x256", "type": "image/png" },
+    { "src": "/favicon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "theme_color": "#0f1213",
+  "background_color": "#0f1213",
+  "display": "browser"
+}
