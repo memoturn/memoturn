@@ -94,6 +94,28 @@ describe("extractObservationPatch", () => {
     expect(p.scalars.model).toBeUndefined();
     expect(p.scalars.promptTokens).toBeUndefined();
   });
+
+  it("does NOT set type on an update that omits observationType (keeps a prior TOOL/AGENT override)", () => {
+    // Common span lifecycle: created as TOOL, later updated with just endTime/output. The update
+    // must not re-derive type from the kind (GENERATION) and clobber the stored TOOL.
+    const p = extractObservationPatch(
+      { id: "o1", traceId: "t1", endTime: "2026-01-01T00:01:00.000Z" },
+      maskedObs({ endTime: "2026-01-01T00:01:00.000Z" }),
+      "generation-update",
+      TS,
+    );
+    expect(p.scalars.type).toBeUndefined();
+  });
+
+  it("sets type on an update that DOES carry an observationType override", () => {
+    const p = extractObservationPatch(
+      { id: "o1", traceId: "t1", observationType: "AGENT" },
+      maskedObs({ observationType: "AGENT" }),
+      "span-update",
+      TS,
+    );
+    expect(p.scalars.type).toBe("AGENT");
+  });
 });
 
 describe("extractScorePatch", () => {
