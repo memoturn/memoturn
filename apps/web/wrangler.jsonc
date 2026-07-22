@@ -9,16 +9,14 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "memoturn-web",
-  "compatibility_date": "2026-04-22",
+  "compatibility_date": "2026-07-01",
   "compatibility_flags": ["nodejs_compat"],
   "main": "./src/server.ts",
-  "observability": { "enabled": true },
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
   "upload_source_maps": true,
-  "routes": [{ "pattern": "memoturn.ai", "custom_domain": true }],
-  "env": {
-    "staging": {
-      "name": "memoturn-web-staging",
-      "routes": [{ "pattern": "staging.memoturn.ai", "custom_domain": true }]
-    }
-  }
+  "routes": [{ "pattern": "memoturn.ai", "custom_domain": true }]
+  // Staging: no `env.staging` block here — the Cloudflare vite plugin flattens
+  // this config at build time and drops env.* overrides. Deploy to staging via
+  // `CF_ENV=staging` (see vite.config.ts), which rewrites the worker name +
+  // route in the emitted dist wrangler.json.
 }
