@@ -10,30 +10,31 @@ import {
   extractScorePatch,
   extractTracePatch,
   forwardEvents,
+  getObservationStates,
   getSamplingRate,
+  getScoreStates,
+  getTraceStates,
   listOnlineEvaluators,
   loadMaskingPolicy,
   loadProjectPriceOverrides,
   mergeObservationStates,
   mergeScoreStates,
   mergeTraceStates,
-  mutableStateEnabled,
+  mirrorObservationRow,
+  mirrorScoreRow,
+  mirrorTraceRow,
+  type ObservationPatch,
   offloadLargePayload,
   offloadMedia,
   runEvaluator,
-  shadowCompareBatch,
-  withEntityLocks,
+  type ScorePatch,
+  type TracePatch,
 } from "@memoturn/server";
 import { type TelemetryRowMap, type TelemetryTable, telemetry } from "@memoturn/telemetry";
 import type { Job } from "bullmq";
-import { entityLockNames } from "../entitylock.js";
 import { mapEvents } from "../mappers.js";
 import { inc, logJson, observeInsert } from "../metrics.js";
 import { applyHeadSampling, sample } from "../sampling.js";
-
-/** Lock TTL for the read-merge→insert critical section — generous vs the two Doris round trips it
- * covers; if the worker dies mid-batch the lock auto-expires and another replica proceeds. */
-const MERGE_LOCK_TTL_SECONDS = 30;
 
 /** True for errors worth retrying (rate limits / transient upstream failures). */
 function isTransient(err: unknown): boolean {
@@ -116,14 +117,14 @@ async function runOnlineEvals(projectId: string, batch: IngestEvent[]): Promise<
 }
 
 /**
- * Ingest job processor. Re-reads the raw batch from blob storage (the source of
- * truth), validates it, maps events to telemetry rows, and inserts.
+ * Ingest job processor. Re-reads the raw batch from blob storage (the source of truth), validates
+ * it, and applies it.
  *
- * Cross-batch partial updates are handled by a READ-MERGE: the currently stored rows
- * for entity ids the batch may be patching are fetched and passed to the mapper as
- * bases, so fields a later event leaves unset keep their stored value instead of
- * being overwritten with defaults. Update events are patches; an observation *-create
- * is authoritative (no base fetched unless a *-update targets the id cross-batch).
+ * Mutable entities (trace/observation/score) merge field-by-field into their authoritative Postgres
+ * `*State` rows (ADR-0001), then Doris is written FROM that merged state (the mirror). This replaces
+ * the old Doris read-merge + per-entity lock: Postgres's atomic per-field upsert is what preserves a
+ * partial update's omitted fields and prevents the cross-batch lost update. Append-only rows
+ * (retrieval documents, embeddings) still come straight from the events.
  */
 export async function processIngest(job: Job<IngestJob>): Promise<void> {
   const { projectId, blobKey } = job.data;
@@ -165,147 +166,76 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
 
   const priceOverrides = compileModelPrices(await loadProjectPriceOverrides(projectId));
 
-  // Read-merge bases: existing rows for every entity id this batch patches.
-  // Traces always need a base — trace-create doubles as the update event (the SDK's
-  // trace.update() re-emits trace-create with a partial body), so any trace id may be
-  // a cross-batch patch. Observations have distinct *-update events: only ids updated
-  // WITHOUT a same-batch create can have a stored base worth fetching, so create-only
-  // batches (the common SDK flush) skip the observations SELECT entirely.
-  const traceIds = [
-    ...new Set(parsed.batch.filter((e) => e.type === "trace-create").map((e) => (e.body as { id: string }).id)),
-  ];
-  const createdObservationIds = new Set(
-    parsed.batch
-      .filter((e) => e.type === "span-create" || e.type === "generation-create" || e.type === "event-create")
-      .map((e) => (e.body as { id: string }).id),
-  );
-  const observationIds = [
-    ...new Set(
-      parsed.batch
-        .filter((e) => e.type === "span-update" || e.type === "generation-update")
-        .map((e) => (e.body as { id: string }).id)
-        .filter((id) => !createdObservationIds.has(id)),
-    ),
-  ];
-  const store = telemetry();
-  const rate = await getSamplingRate(projectId); // project config — read outside the lock
+  const rate = await getSamplingRate(projectId);
 
-  // Serialize the read-merge→insert per entity id: without it, two batches patching the same trace
-  // each read the same base, materialize a full row from only their own fields, and merge-on-write
-  // (LWW) keeps one and drops the other's. Holding per-entity locks makes the second batch read the
-  // first's already-written row as its base. Best-effort — degrades to unlocked (counted) if Redis
-  // is down or a holder is stuck, rather than stalling ingestion.
-  const { traces, observations, scores, retrieval_documents, embeddings } = await withEntityLocks(
-    entityLockNames(projectId, parsed.batch),
-    MERGE_LOCK_TTL_SECONDS,
-    async () => {
-      const [traceBases, observationBases] = await Promise.all([
-        store.getTraceRowsByIds(projectId, traceIds),
-        store.getObservationRowsByIds(projectId, observationIds),
-      ]);
-      const bases = {
-        traces: new Map(traceBases.map((r) => [r.id, r])),
-        observations: new Map(observationBases.map((r) => [r.id, r])),
-      };
-
-      const mapped = mapEvents(projectId, parsed.batch, priceOverrides, bases);
-
-      // Head-based sampling: keep only rate% of traces in the query store (whole traces, stable per
-      // id). The raw batch is already in blob, so dropped traces stay replayable. No-op at rate=100.
-      const { rows, dropped } = applyHeadSampling(rate, mapped);
-      if (dropped > 0) inc("ingest_sampled_out_total", undefined, dropped);
-
-      // Insert each table independently so one table's failure is isolated and observable.
-      // Re-insert on retry is safe — the store's last-writer-wins merge (event_ts) dedupes by id.
-      const results = await Promise.allSettled([
-        insertTable("traces", rows.traces),
-        insertTable("observations", rows.observations),
-        insertTable("scores", rows.scores),
-        insertTable("retrieval_documents", rows.retrieval_documents),
-        insertTable("embeddings", rows.embeddings),
-      ]);
-      const failed = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
-      if (failed.length > 0) {
-        // Throw so BullMQ retries the whole job (idempotent). DLQ catches terminal failures.
-        const reasons = failed.map((f) => (f.reason instanceof Error ? f.reason.message : String(f.reason))).join("; ");
-        throw new Error(`telemetry insert failed for ${failed.length} table(s): ${reasons}`);
-      }
-      return rows;
-    },
-    { onDegraded: () => inc("ingest_merge_unlocked_total") },
-  );
+  // ── Authoritative merge into Postgres, then mirror to Doris (ADR-0001) ────────────
+  // Each mutable entity (trace/observation/score) merges field-by-field into its Postgres `*State`
+  // row — the source of truth. Postgres's atomic upsert prevents the cross-batch lost update, and
+  // its per-field merge preserves fields a partial update omits — so there is NO read-merge and NO
+  // per-entity lock. Doris is written FROM the merged state (the mirror), ordered by `stateVersion`
+  // (its LWW sequence), which is what makes concurrent + out-of-order Doris writes converge.
+  const tracePatches: TracePatch[] = [];
+  const obsPatches: ObservationPatch[] = [];
+  const scorePatches: ScorePatch[] = [];
+  for (let i = 0; i < parsed.batch.length; i++) {
+    const e = parsed.batch[i]!;
+    const rawBody = rawJson.batch[i]?.body ?? {};
+    if (e.type === "trace-create") {
+      tracePatches.push(extractTracePatch(rawBody, e.body, e.timestamp));
+    } else if (
+      e.type === "span-create" ||
+      e.type === "span-update" ||
+      e.type === "generation-create" ||
+      e.type === "generation-update" ||
+      e.type === "event-create"
+    ) {
+      obsPatches.push(extractObservationPatch(rawBody, e.body, e.type, e.timestamp));
+    } else if (e.type === "score-create") {
+      scorePatches.push(extractScorePatch(rawBody, e.body, e.timestamp));
+    }
+  }
+  // Merge is now load-bearing: a failure throws so BullMQ retries the (idempotent) job.
+  await mergeTraceStates(projectId, tracePatches);
+  await mergeObservationStates(projectId, obsPatches);
+  await mergeScoreStates(projectId, scorePatches);
   inc("ingest_events_total", undefined, parsed.batch.length);
 
-  // ADR-0001 Phase 1: additively merge trace + observation patches into the authoritative
-  // Postgres state, alongside the Doris write above. Flag-gated + best-effort — this is a
-  // dual-run to validate the merge; a failure here must never affect ingestion.
-  if (mutableStateEnabled()) {
-    try {
-      const tracePatches = [];
-      const obsPatches = [];
-      const scorePatches = [];
-      for (let i = 0; i < parsed.batch.length; i++) {
-        const e = parsed.batch[i]!;
-        const rawBody = rawJson.batch[i]?.body ?? {};
-        if (e.type === "trace-create") {
-          tracePatches.push(extractTracePatch(rawBody, e.body, e.timestamp));
-        } else if (
-          e.type === "span-create" ||
-          e.type === "span-update" ||
-          e.type === "generation-create" ||
-          e.type === "generation-update" ||
-          e.type === "event-create"
-        ) {
-          obsPatches.push(extractObservationPatch(rawBody, e.body, e.type, e.timestamp));
-        } else if (e.type === "score-create") {
-          scorePatches.push(extractScorePatch(rawBody, e.body, e.timestamp));
-        }
-      }
-      if (tracePatches.length > 0) {
-        await mergeTraceStates(projectId, tracePatches);
-        inc("mutable_state_merges_total", { entity: "trace" }, tracePatches.length);
-      }
-      if (obsPatches.length > 0) {
-        await mergeObservationStates(projectId, obsPatches);
-        inc("mutable_state_merges_total", { entity: "observation" }, obsPatches.length);
-      }
-      if (scorePatches.length > 0) {
-        await mergeScoreStates(projectId, scorePatches);
-        inc("mutable_state_merges_total", { entity: "score" }, scorePatches.length);
-      }
-    } catch (err) {
-      inc("mutable_state_errors_total", undefined);
-      logJson("error", "mutable-state merge failed (ingestion unaffected)", {
-        projectId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+  // Build the analytical rows FROM the merged state, computing derived latency/cost. retrieval docs
+  // + embeddings are append-only (not mutable state), so they still come straight from the events
+  // (mapEvents with no bases — they never needed a read-merge).
+  const [traceStates, obsStates, scoreStates] = await Promise.all([
+    getTraceStates(projectId, [...new Set(tracePatches.map((p) => p.id))]),
+    getObservationStates(projectId, [...new Set(obsPatches.map((p) => p.id))]),
+    getScoreStates(projectId, [...new Set(scorePatches.map((p) => p.id))]),
+  ]);
+  const evented = mapEvents(projectId, parsed.batch, priceOverrides, {});
+  const mapped = {
+    traces: traceStates.map(mirrorTraceRow),
+    observations: obsStates.map((s) => mirrorObservationRow(s, priceOverrides)),
+    scores: scoreStates.map(mirrorScoreRow),
+    retrieval_documents: evented.retrieval_documents,
+    embeddings: evented.embeddings,
+  };
 
-    // Shadow-compare (Phase 2b step 1): verify the mirror-from-Postgres-state row equals the
-    // read-merge row this batch just wrote to Doris. Separate best-effort step so a compare hiccup
-    // doesn't affect the merge counters; surfaces divergences before Phase 2b removes the read-merge.
-    try {
-      const results = await shadowCompareBatch(projectId, { traces, observations, scores }, priceOverrides);
-      for (const r of results) {
-        if (r.matched > 0) inc("mutable_state_shadow_total", { entity: r.entity, result: "match" }, r.matched);
-        if (r.mismatched > 0) {
-          inc("mutable_state_shadow_total", { entity: r.entity, result: "mismatch" }, r.mismatched);
-          logJson("warn", "mutable-state shadow mismatch", {
-            projectId,
-            entity: r.entity,
-            mismatched: r.mismatched,
-            samples: r.samples,
-          });
-        }
-        if (r.missing > 0) inc("mutable_state_shadow_total", { entity: r.entity, result: "missing" }, r.missing);
-      }
-    } catch (err) {
-      inc("mutable_state_errors_total", undefined);
-      logJson("error", "mutable-state shadow-compare failed (ingestion unaffected)", {
-        projectId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+  // Head-based sampling: keep only rate% of traces in the analytical store (whole traces, stable per
+  // id). Postgres keeps the full authoritative state; only the Doris mirror is sampled. No-op at 100.
+  const { rows, dropped } = applyHeadSampling(rate, mapped);
+  if (dropped > 0) inc("ingest_sampled_out_total", undefined, dropped);
+  const { traces, observations, scores, retrieval_documents, embeddings } = rows;
+
+  // Insert each table independently so one table's failure is isolated and observable. Re-insert on
+  // retry is safe — merge-on-write (stateVersion sequence) dedupes by id.
+  const results = await Promise.allSettled([
+    insertTable("traces", traces),
+    insertTable("observations", observations),
+    insertTable("scores", scores),
+    insertTable("retrieval_documents", retrieval_documents),
+    insertTable("embeddings", embeddings),
+  ]);
+  const failed = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+  if (failed.length > 0) {
+    const reasons = failed.map((f) => (f.reason instanceof Error ? f.reason.message : String(f.reason))).join("; ");
+    throw new Error(`telemetry insert failed for ${failed.length} table(s): ${reasons}`);
   }
 
   logJson("info", "ingest ok", {
