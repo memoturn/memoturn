@@ -268,6 +268,17 @@ export function AuthPanel({ mode, redirect }: { mode: Mode; redirect?: string })
               </Button>
             </form>
           )}
+
+          {/* Back out of the password form to the passwordless options (only when they exist). */}
+          {showPasswordForm && passwordless && (
+            <button
+              type="button"
+              className="w-full text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setShowPassword(false)}
+            >
+              Use a different method
+            </button>
+          )}
         </div>
       )}
     </div>
