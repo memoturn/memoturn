@@ -216,8 +216,18 @@ export function extractObservationPatch(
 ): ObservationPatch {
   const has = (k: string) => Object.hasOwn(rawBody, k);
   const s: Record<string, unknown> = {};
-  // `type` is always known from the event kind (+ optional override) — set it on every event.
-  s.type = maskedBody.observationType ?? OBS_TYPE[eventType] ?? "SPAN";
+  // `type` is DERIVED from the event kind — not a field the client "carries" — so treat it like
+  // every other field: set it on CREATE (kind default, or an explicit `observationType` override),
+  // but on an UPDATE only when the event actually carries `observationType`. Otherwise a partial
+  // update (e.g. just endTime/output, which is the common span lifecycle) would COALESCE the kind
+  // default over a prior override — silently downgrading a TOOL/AGENT/RETRIEVER span back to
+  // GENERATION/SPAN. A null stored type mirrors as "SPAN" (mirror.ts), so leaving it unset on a
+  // (rare) update-first event is safe.
+  if (eventType.endsWith("-create")) {
+    s.type = maskedBody.observationType ?? OBS_TYPE[eventType] ?? "SPAN";
+  } else if (maskedBody.observationType) {
+    s.type = maskedBody.observationType;
+  }
   s.traceId = maskedBody.traceId; // required on every observation event
   if (has("parentObservationId")) s.parentObservationId = maskedBody.parentObservationId ?? "";
   if (has("name")) s.name = maskedBody.name ?? "";
