@@ -206,25 +206,32 @@ describe("runEvaluatorGuards", () => {
   });
 
   it("runs guards in parallel, not sequentially", async () => {
-    // Each guard sleeps DELAY ms. Parallel ≈ DELAY; sequential ≈ N*DELAY. Use a wide gap (3
-    // equal delays) and assert well under the sequential time so CI timer jitter can't flip it —
-    // the old ~5ms parallel-vs-sequential margin was smaller than scheduling noise (flaky).
-    const DELAY = 80;
+    // Assert parallelism *structurally* — that all guards are in-flight at once — rather than by
+    // wall-clock threshold. A timing bound (parallel ≈ DELAY vs sequential ≈ N*DELAY) is flaky on
+    // a loaded CI runner: starved event-loop scheduling can delay even parallel timer callbacks
+    // past the threshold. Instead each mock records when it *starts*; if the guards run in
+    // parallel every start happens before any resolves, so peak concurrency reaches N. If they
+    // ran sequentially, peak concurrency would never exceed 1. Immune to scheduling jitter.
+    let inFlight = 0;
+    let peak = 0;
     judgeWithEvaluator.mockImplementation(
       (_projectId: string, name: string) =>
         new Promise((resolve) => {
-          setTimeout(() => resolve({ evaluator: name, score: 1, reasoning: "" }), DELAY);
+          inFlight++;
+          peak = Math.max(peak, inFlight);
+          setTimeout(() => {
+            inFlight--;
+            resolve({ evaluator: name, score: 1, reasoning: "" });
+          }, 20);
         }),
     );
-    const start = Date.now();
     await runEvaluatorGuards("p1", "text", [
       guard({ name: "a", comparator: "gt", threshold: 2 }),
       guard({ name: "b", comparator: "gt", threshold: 2 }),
       guard({ name: "c", comparator: "gt", threshold: 2 }),
     ]);
-    const elapsed = Date.now() - start;
-    // parallel ~80ms, sequential ~240ms — 160ms leaves ~80ms margin on both sides.
-    expect(elapsed).toBeLessThan(DELAY * 2);
+    // All three overlapped → dispatched concurrently. Sequential execution would cap peak at 1.
+    expect(peak).toBe(3);
   });
 
   it("fails open on timeout: no finding, no throw", async () => {
