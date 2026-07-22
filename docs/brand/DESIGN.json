@@ -31,13 +31,13 @@
       "canvas": {
         "role": "neutral",
         "displayName": "Sea-Ink Canvas",
-        "canonical": "oklch(0.146 0.012 215)",
+        "canonical": "oklch(0.132 0.004 215)",
         "tonalRamp": ["#0d1417", "#131b1e", "#1a2427", "#243033", "#3a4a4e", "#5c7075", "#8fa2a5", "#cdd9da"]
       },
       "panel": {
         "role": "neutral",
         "displayName": "Panel",
-        "canonical": "oklch(0.175 0.013 215)",
+        "canonical": "oklch(0.162 0.005 215)",
         "tonalRamp": ["#0d1417", "#131b1e", "#1a2427", "#243033", "#3a4a4e", "#5c7075", "#8fa2a5", "#cdd9da"]
       },
       "foreground": {
@@ -49,7 +49,7 @@
       "muted": {
         "role": "neutral",
         "displayName": "Muted Foam",
-        "canonical": "oklch(0.735 0.014 205)",
+        "canonical": "oklch(0.735 0.008 205)",
         "tonalRamp": ["#20302f", "#3d5250", "#5d7573", "#829a98", "#a8b4b3", "#c4cecd", "#dde4e3", "#f2f6f5"]
       },
       "sea-ink": {
@@ -88,7 +88,7 @@
     "shadows": [
       {
         "name": "glow-lagoon",
-        "value": "radial-gradient(120% 90% at 50% 0%, rgba(79,184,178,0.13) 0%, transparent 62%)",
+        "value": "radial-gradient(120% 90% at 50% 0%, rgba(79,184,178,0.10) 0%, transparent 62%)",
         "purpose": "The only radial treatment: static top-edge lagoon wash on framed captures and glow-panels. Never pulsing, never a border."
       },
       {
@@ -142,7 +142,7 @@
       "refersTo": "frame-shot",
       "description": "A real console capture in a hairline frame with the static lagoon glow. The rebrand's signature component.",
       "html": "<figure class=\"ds-frame-shot\"><div class=\"ds-frame-shot__img\">console capture</div></figure>",
-      "css": ".ds-frame-shot { position: relative; margin: 0; overflow: hidden; border: 1px solid rgba(243,250,245,0.14); border-radius: 8px; background: #131b1e; isolation: isolate; } .ds-frame-shot::before { content: ''; position: absolute; inset: 0; z-index: 1; background: radial-gradient(120% 90% at 50% 0%, rgba(79,184,178,0.13) 0%, transparent 62%); pointer-events: none; } .ds-frame-shot__img { aspect-ratio: 16/10; display: grid; place-items: center; color: #a8b4b3; font-family: Archivo, system-ui, sans-serif; font-size: 13px; }"
+      "css": ".ds-frame-shot { position: relative; margin: 0; overflow: hidden; border: 1px solid rgba(243,250,245,0.14); border-radius: 8px; background: #131b1e; isolation: isolate; } .ds-frame-shot::before { content: ''; position: absolute; inset: 0; z-index: 1; background: radial-gradient(120% 90% at 50% 0%, rgba(79,184,178,0.10) 0%, transparent 62%); pointer-events: none; } .ds-frame-shot__img { aspect-ratio: 16/10; display: grid; place-items: center; color: #a8b4b3; font-family: Archivo, system-ui, sans-serif; font-size: 13px; }"
     },
     {
       "name": "Glow Panel (ledger cell)",
@@ -150,7 +150,7 @@
       "refersTo": "card",
       "description": "Hairline-ruled cell on the canvas; the lagoon wash fades in on hover (opacity only).",
       "html": "<article class=\"ds-glow-panel\"><h3 class=\"ds-glow-panel__title\">Every call, traced</h3><p class=\"ds-glow-panel__body\">Traces, spans, generations, and scores on a waterfall timeline.</p></article>",
-      "css": ".ds-glow-panel { position: relative; isolation: isolate; background: #0d1417; border: 1px solid rgba(243,250,245,0.14); padding: 24px 28px 32px; color: #f2f6f5; } .ds-glow-panel::before { content: ''; position: absolute; inset: 0; z-index: -1; background: radial-gradient(120% 90% at 50% 0%, rgba(79,184,178,0.13) 0%, transparent 62%); opacity: 0; transition: opacity 260ms cubic-bezier(0.4,0,0.2,1); pointer-events: none; } .ds-glow-panel:hover::before { opacity: 1; } .ds-glow-panel__title { margin: 0 0 10px; font-family: Archivo, system-ui, sans-serif; font-weight: 700; font-stretch: 110%; letter-spacing: -0.03em; font-size: 22px; } .ds-glow-panel__body { margin: 0; color: #a8b4b3; font-family: Archivo, system-ui, sans-serif; font-size: 14.5px; line-height: 1.65; }"
+      "css": ".ds-glow-panel { position: relative; isolation: isolate; background: #0d1417; border: 1px solid rgba(243,250,245,0.14); padding: 24px 28px 32px; color: #f2f6f5; } .ds-glow-panel::before { content: ''; position: absolute; inset: 0; z-index: -1; background: radial-gradient(120% 90% at 50% 0%, rgba(79,184,178,0.10) 0%, transparent 62%); opacity: 0; transition: opacity 260ms cubic-bezier(0.4,0,0.2,1); pointer-events: none; } .ds-glow-panel:hover::before { opacity: 1; } .ds-glow-panel__title { margin: 0 0 10px; font-family: Archivo, system-ui, sans-serif; font-weight: 700; font-stretch: 110%; letter-spacing: -0.03em; font-size: 22px; } .ds-glow-panel__body { margin: 0; color: #a8b4b3; font-family: Archivo, system-ui, sans-serif; font-size: 14.5px; line-height: 1.65; }"
     },
     {
       "name": "Two-Tone Headline",
@@ -215,7 +215,7 @@
       },
       {
         "name": "The Static-Glow Rule",
-        "body": "The lagoon glow is the only radial treatment: top-edge origin, <=13% (22% hero), static or hover-faded. Animated glows, glowing borders, and glassmorphism are forbidden.",
+        "body": "The lagoon glow is the only radial treatment: top-edge origin, <=10% (16% hero), static or hover-faded. Animated glows, glowing borders, and glassmorphism are forbidden.",
         "section": "elevation"
       },
       {

@@ -39,10 +39,10 @@ Dark-first. The canvas is the brand; lagoon is reserved for action, focus, data,
 
 | Token | Value | Use |
 |---|---|---|
-| `--background` | `oklch(0.146 0.012 215)` | Page canvas — near-black tinted toward sea-ink's hue. Never pure `#000`. |
-| `--card` | `oklch(0.175 0.013 215)` | Raised blocks, feature cells, alternating section bands (`bg-card/50`). |
-| `--foreground` | `oklch(0.965 0.005 195)` | Body text — foam-tinted white. |
-| `--muted-foreground` | `oklch(0.735 0.014 205)` | Secondary text, the soft half of two-tone headlines. ≥4.5:1 on the canvas. |
+| `--background` | `oklch(0.132 0.004 215)` | Page canvas — near-black with a whisper of sea-ink's hue (chroma ≤0.006: dark, not green). Never pure `#000`, never fully neutral. |
+| `--card` | `oklch(0.162 0.005 215)` | Raised blocks, feature cells, alternating section bands (`bg-card/50`). |
+| `--foreground` | `oklch(0.965 0.003 195)` | Body text — foam-tinted white. |
+| `--muted-foreground` | `oklch(0.735 0.008 205)` | Secondary text, the soft half of two-tone headlines. ≥4.5:1 on the canvas. |
 | `--border` / `--rule` | foam at 11% / 14% | Containment vs structure. Hairlines carry all depth. |
 
 ### Brand colors
@@ -64,7 +64,7 @@ In light mode `--primary` steps darker than lagoon-deep — to `oklch(0.52 0.073
 |---|---|---|
 | `--gradient-lagoon` | `linear-gradient(135deg, lagoon, lagoon-deep)` | BrandMark fill. |
 | `--gradient-atoll` | `linear-gradient(135deg, lagoon-deep, palm)` | The one loud brand moment: the closing band. Load-bearing, never decorative. |
-| `--glow-lagoon` | radial lagoon wash from the top edge, ≤13% | The dimensional treatment for dark surfaces (`.frame-shot`, `.glow-panel`). Static, or a hover fade. **Never pulsing, never a colored border, never glassmorphic** — that's the orchestrator-glow family we define ourselves against. |
+| `--glow-lagoon` | radial lagoon wash from the top edge, ≤10% (16% hero) | The dimensional treatment for dark surfaces (`.frame-shot`, `.glow-panel`). Static, or a hover fade. **Never pulsing, never a colored border, never glassmorphic** — that's the orchestrator-glow family we define ourselves against. |
 
 ## Typography
 
