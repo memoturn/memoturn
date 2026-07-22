@@ -47,7 +47,8 @@ async function upsertState(
   projectId: string,
   rows: StateUpsert[],
 ): Promise<number> {
-  for (const r of rows) {
+  if (rows.length === 0) return 0;
+  const statements = rows.map((r) => {
     const base = 2; // $1 projectId, $2 id
     const cast = (i: number) => `$${base + i + 1}::${scalarCols[i]![1]}`;
     const params: unknown[] = [projectId, r.id, ...scalarCols.map(([c]) => r.scalars[c] ?? null)];
@@ -79,8 +80,12 @@ async function upsertState(
         ${colAssign}${arrayAssign},
         "stateVersion" = GREATEST("${table}"."stateVersion", EXCLUDED."stateVersion"),
         "updatedAt" = now()`;
-    await prisma.$executeRawUnsafe(sql, ...params);
-  }
+    return prisma.$executeRawUnsafe(sql, ...params);
+  });
+  // One transaction / round-trip for the whole batch instead of a statement-per-row await. Each
+  // upsert is still atomic and row-scoped, so the field-level-merge concurrency guarantee holds;
+  // all-or-nothing here also means a mid-batch failure rolls back cleanly and the job retries.
+  await prisma.$transaction(statements);
   return rows.length;
 }
 
