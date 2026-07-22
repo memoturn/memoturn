@@ -35,12 +35,24 @@
 	/* Solid nav background — differentiates header chrome from the body
 	 * without a hairline. */
 	--docs-nav-bg: var(--docs-panel-bg);
+
+	/* Primary button — matches the marketing site's foam-fill spec on the
+	 * dark canvas (the Surgical-Lagoon Rule forbids lagoon-filled buttons);
+	 * light mode inverts to sea-ink fill so the button stays the loud
+	 * element on white. */
+	--docs-btn-primary-bg: var(--foam);
+	--docs-btn-primary-fg: var(--sea-ink);
+	--docs-btn-primary-bg-hover: #e4efe8;
 }
 
 :root[data-theme="light"] {
 	--docs-panel-bg: color-mix(in oklab, var(--background) 96%, var(--sand) 4%);
 	--docs-chip-bg: color-mix(in oklab, var(--background) 92%, var(--sand) 8%);
 	--docs-nav-bg: var(--docs-panel-bg);
+
+	--docs-btn-primary-bg: var(--sea-ink);
+	--docs-btn-primary-fg: #f6fefb;
+	--docs-btn-primary-bg-hover: #0e2a2f;
 }
 
 /* Starlight → design system semantic mapping. Almost everything routes
@@ -320,17 +332,18 @@ html[data-has-hero] .sl-markdown-content {
 	box-sizing: border-box;
 }
 
-/* Branded Starlight hero / pagination primary buttons */
+/* Branded Starlight hero / pagination primary buttons — same foam-fill
+ * (dark) / sea-ink-fill (light) spec as the marketing site's primary. */
 .sl-link-button.primary {
-	background: var(--primary);
-	color: var(--primary-foreground);
+	background: var(--docs-btn-primary-bg);
+	color: var(--docs-btn-primary-fg);
 	border: 0;
 	transition:
 		transform 180ms ease,
 		background-color 180ms ease;
 }
 .sl-link-button.primary:hover {
-	background: color-mix(in oklab, var(--primary) 88%, var(--foreground));
+	background: var(--docs-btn-primary-bg-hover);
 	transform: translateY(-1px);
 }
 .sl-link-button.minimal {

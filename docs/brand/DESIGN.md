@@ -11,8 +11,8 @@ colors:
   foam-light: "#f6fefb"
   foam: "#f3faf5"
   sand: "#e7f0e8"
-  canvas: "#0d1417"
-  panel: "#131b1e"
+  canvas: "#0f1213"
+  panel: "#171b1c"
   foreground: "#f2f6f5"
   muted: "#a8b4b3"
   rule: "#f3faf524"
@@ -144,9 +144,9 @@ Memoturn deliberately rejects every standard AI-coding-tool aesthetic: no generi
 **Key Characteristics:**
 - One family: Archivo variable (weight + width axes) — the display voice is `font-stretch: 110%` + `-0.03em`, not a second typeface. JetBrains Mono for code, data, and meta.
 - Two-tone headlines (bright key phrase + muted elaboration in one sentence) are the section-header system. Uppercase tracked eyebrows are retired as section grammar.
-- The canvas (`#0d1417`-class sea-ink near-black) carries the brand; lagoon `#4fb8b2` is reserved for links, focus, data, chips, and glow.
+- The canvas (`#0f1213`-class near-black, a whisper of the sea-ink hue) carries the brand; lagoon `#4fb8b2` is reserved for links, focus, data, chips, and glow.
 - Real console captures (from `bun run screenshots`, dark theme, @2x) are required imagery: dashboard in the hero, matching surface per feature card.
-- Hairline rules and tonal layering carry depth; the only radial treatment is `--glow-lagoon`, a static ≤13% wash from a surface's top edge.
+- Hairline rules and tonal layering carry depth; the only radial treatment is `--glow-lagoon`, a static ≤10% wash from a surface's top edge.
 - Lagoon → Atoll gradient remains the only gradient; load-bearing on the brand mark and the closing band, never decorative.
 
 ## 2. Colors: The Dark Lagoon
@@ -164,19 +164,19 @@ The canvas runs dark and cool, tinted toward sea-ink's hue (oklch hue ≈ 215) a
 - **Ember** (`#e89456`): The warm counter-accent. Chart-4, occasional state cues. The Ember Cap Rule: less than 5% of any composition; never a CTA fill or ground.
 
 ### Neutral
-- **Canvas** (`#0d1417`, `oklch(0.146 0.012 215)`): The page ground. Sea-ink-hued near-black — never pure `#000`, never a neutral gray.
-- **Panel** (`#131b1e`, `oklch(0.175 0.013 215)`): Raised blocks: feature cells, framed captures, alternating section bands at 50% mix.
-- **Foreground** (`#f2f6f5`, `oklch(0.965 0.005 195)`): Body text — foam-tinted white, full ink.
-- **Muted** (`#a8b4b3`, `oklch(0.735 0.014 205)`): The soft half of two-tone headlines, secondary body copy, meta rows. Clears 4.5:1 on canvas; still forbidden for long body copy where foreground belongs.
+- **Canvas** (`#0f1213`, `oklch(0.132 0.004 215)`): The page ground. Near-black carrying a whisper of the sea-ink hue — never pure `#000`, never fully neutral, and never chromatic enough to read green.
+- **Panel** (`#171b1c`, `oklch(0.162 0.005 215)`): Raised blocks: feature cells, framed captures, alternating section bands at 50% mix.
+- **Foreground** (`#f2f6f5`, `oklch(0.965 0.003 195)`): Body text — foam-tinted white, full ink.
+- **Muted** (`#a8b4b3`, `oklch(0.735 0.008 205)`): The soft half of two-tone headlines, secondary body copy, meta rows. Clears 4.5:1 on canvas; still forbidden for long body copy where foreground belongs.
 - **Rule** (foam at 14% alpha): Hairline structure inside ledgers, grids, dashed tag rows. **Border** (foam at 11%) is containment. Rule = structure inside; border = containment around.
 - **Sea Ink / Foam / Foam Light / Sand** (`#173a40` / `#f3faf5` / `#f6fefb` / `#e7f0e8`): Sea-ink is the text on foam-filled buttons; foam is the primary CTA fill on the canvas; foam-light is the on-gradient foreground; sand survives as a light-mode tint.
 
 ### Named Rules
-**The Canvas-Tint Rule.** Every dark surface carries the sea-ink hue (oklch hue ~215, chroma 0.012–0.014). Pure `#000` and neutral-gray darks are forbidden; the tint is what makes the dark canvas Memoturn's rather than generic dark mode.
+**The Canvas-Tint Rule.** Every dark surface carries a whisper of the sea-ink hue (oklch hue ~215, chroma 0.004–0.006). Pure `#000` and fully neutral darks are forbidden, and so is anything chromatic enough to read green — the tint is detectable side-by-side, never as a color.
 
 **The Surgical-Lagoon Rule.** Lagoon appears as text/stroke/glow at small scale only — links, rings, chips, chart lines, the glow wash. A lagoon-filled button, panel, or band is forbidden; when the brand needs to be loud, the atoll gradient is the instrument.
 
-**The Lagoon-Atoll Rule.** The two named gradients (`gradient-lagoon`, `gradient-atoll`) are the only gradients permitted. Any other gradient is forbidden — with one carve-out: `--glow-lagoon`, the static radial wash (≤13% lagoon from a surface's top edge), which is a lighting treatment, not a gradient surface.
+**The Lagoon-Atoll Rule.** The two named gradients (`gradient-lagoon`, `gradient-atoll`) are the only gradients permitted. Any other gradient is forbidden — with one carve-out: `--glow-lagoon`, the static radial wash (≤10% lagoon from a surface's top edge), which is a lighting treatment, not a gradient surface.
 
 **The Foam-Light-On-Dark Rule.** On the atoll gradient the only valid foreground is foam-light at ≥92% opacity; secondary on-gradient buttons darken their fill (sea-ink at ~45%) rather than fade their text.
 
@@ -205,7 +205,7 @@ The canvas runs dark and cool, tinted toward sea-ink's hue (oklch hue ≈ 215) a
 
 ## 4. Elevation: Flat Hairlines, Lit by Glow
 
-The system is flat at rest. Depth comes from hairline rules (foam 14% on dark), tonal steps (canvas → panel), and one lighting treatment: `--glow-lagoon`, a static radial lagoon wash (≤13%, from the top edge) on framed captures and glow-panels. The glow may fade in on hover (opacity only, 260ms); it never pulses, never becomes a colored border, and never pairs with backdrop blur — those are the orchestrator-glow tells this system defines itself against.
+The system is flat at rest. Depth comes from hairline rules (foam 14% on dark), tonal steps (canvas → panel), and one lighting treatment: `--glow-lagoon`, a static radial lagoon wash (≤10%, from the top edge) on framed captures and glow-panels. The glow may fade in on hover (opacity only, 260ms); it never pulses, never becomes a colored border, and never pairs with backdrop blur — those are the orchestrator-glow tells this system defines itself against.
 
 ### Shadow Vocabulary
 - **None on resting surfaces.** Cards, sections, ledgers, framed captures: no box-shadow.
@@ -215,7 +215,7 @@ The system is flat at rest. Depth comes from hairline rules (foam 14% on dark), 
 ### Named Rules
 **The Flat-By-Default Rule.** Unchanged: resting surfaces have no shadow; overlays are exempt.
 
-**The Static-Glow Rule.** `--glow-lagoon` is the only permitted radial treatment: top-edge origin, lagoon ≤13% (22% for the hero frame), static or hover-faded. Animated/pulsing glows, glowing borders, and glassmorphism are forbidden.
+**The Static-Glow Rule.** `--glow-lagoon` is the only permitted radial treatment: top-edge origin, lagoon ≤10% (16% for the hero frame), static or hover-faded. Animated/pulsing glows, glowing borders, and glassmorphism are forbidden.
 
 **The Tonal-Step Rule.** Dark grounds step canvas → panel (→ panel at 50% mix for section bands). Depth comes from the step; never add a shadow to reinforce it.
 

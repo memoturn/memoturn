@@ -169,14 +169,19 @@ if (image) {
 		margin-top: 0.75rem;
 	}
 
+	/* Button spec matches the marketing home: 40px height, 6px radius,
+	 * 14px/500 type, foam-fill primary (sea-ink fill in light mode via
+	 * --docs-btn-primary-*), hairline outline secondary. */
 	.memoturn-hero__action {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.5rem;
-		padding: 0.625rem 1.25rem;
-		border-radius: var(--radius-md);
-		font-size: 0.95rem;
-		font-weight: 600;
+		height: 2.5rem;
+		padding: 0 1.375rem;
+		border-radius: var(--radius-lg);
+		font-size: 0.875rem;
+		font-weight: 500;
+		line-height: 1;
 		text-decoration: none;
 		outline: none;
 		transition:
@@ -191,22 +196,24 @@ if (image) {
 	}
 
 	.memoturn-hero__action--primary {
-		background: var(--primary);
-		color: var(--primary-foreground);
+		background: var(--docs-btn-primary-bg);
+		color: var(--docs-btn-primary-fg);
 	}
 	.memoturn-hero__action--primary:hover {
-		background: color-mix(in oklab, var(--primary) 90%, var(--foreground));
+		background: var(--docs-btn-primary-bg-hover);
+		color: var(--docs-btn-primary-fg);
 	}
 
 	.memoturn-hero__action--secondary,
 	.memoturn-hero__action--minimal {
-		background: var(--docs-chip-bg);
+		background: transparent;
 		color: var(--foreground);
-		border: 1px solid var(--docs-chip-line);
+		border: 1px solid var(--border);
 	}
 	.memoturn-hero__action--secondary:hover,
 	.memoturn-hero__action--minimal:hover {
-		background: var(--docs-link-bg-hover);
+		background: var(--card);
+		border-color: color-mix(in oklab, var(--foreground) 22%, transparent);
 	}
 
 	.memoturn-hero__action-icon :global(svg) {
