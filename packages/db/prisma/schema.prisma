@@ -951,7 +951,7 @@ model TraceState {
   updatedAt   DateTime  @updatedAt
 
   @@id([projectId, id])
-  @@index([projectId, updatedAt]) // prune sweep (Phase 3)
+  @@index([updatedAt]) // prune sweep (Phase 3)
 }
 
 model ObservationState {
@@ -985,7 +985,7 @@ model ObservationState {
   updatedAt           DateTime  @updatedAt
 
   @@id([projectId, id])
-  @@index([projectId, updatedAt])
+  @@index([updatedAt])
 }
 
 model ScoreState {
@@ -1008,5 +1008,5 @@ model ScoreState {
   updatedAt     DateTime  @updatedAt
 
   @@id([projectId, id])
-  @@index([projectId, updatedAt])
+  @@index([updatedAt])
 }
