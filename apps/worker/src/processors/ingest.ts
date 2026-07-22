@@ -6,6 +6,8 @@ import {
   compileMaskers,
   dispatchAutomationsBatch,
   dispatchWebhooksBatch,
+  existingObservationStateIds,
+  existingTraceStateIds,
   extractObservationPatch,
   extractScorePatch,
   extractTracePatch,
@@ -28,6 +30,8 @@ import {
   offloadMedia,
   runEvaluator,
   type ScorePatch,
+  seedObservationStates,
+  seedTraceStates,
   type TracePatch,
 } from "@memoturn/server";
 import { type TelemetryRowMap, type TelemetryTable, telemetry } from "@memoturn/telemetry";
@@ -126,6 +130,42 @@ async function runOnlineEvals(projectId: string, batch: IngestEvent[]): Promise<
  * partial update's omitted fields and prevents the cross-batch lost update. Append-only rows
  * (retrieval documents, embeddings) still come straight from the events.
  */
+/**
+ * Seed Postgres state from Doris for any entity this batch touches that was pruned from Postgres
+ * (Phase 3a) but still lives in Doris — so a late update merges onto the settled state, not an
+ * empty row. Cheap in the common case: an id-only presence check, then a Doris read only for the
+ * (rare) absent-but-in-Doris ids.
+ */
+async function rehydratePruned(
+  projectId: string,
+  tracePatches: TracePatch[],
+  obsPatches: ObservationPatch[],
+): Promise<void> {
+  const traceIds = [...new Set(tracePatches.map((p) => p.id))];
+  const obsIds = [...new Set(obsPatches.map((p) => p.id))];
+  const [presentTraces, presentObs] = await Promise.all([
+    existingTraceStateIds(projectId, traceIds),
+    existingObservationStateIds(projectId, obsIds),
+  ]);
+  const absentTraceIds = traceIds.filter((id) => !presentTraces.has(id));
+  const absentObsIds = obsIds.filter((id) => !presentObs.has(id));
+  if (absentTraceIds.length === 0 && absentObsIds.length === 0) return;
+
+  const store = telemetry();
+  const [dorisTraces, dorisObs] = await Promise.all([
+    absentTraceIds.length > 0 ? store.getTraceRowsByIds(projectId, absentTraceIds) : Promise.resolve([]),
+    absentObsIds.length > 0 ? store.getObservationRowsByIds(projectId, absentObsIds) : Promise.resolve([]),
+  ]);
+  if (dorisTraces.length > 0) {
+    await seedTraceStates(projectId, dorisTraces);
+    inc("mutable_state_rehydrated_total", { entity: "trace" }, dorisTraces.length);
+  }
+  if (dorisObs.length > 0) {
+    await seedObservationStates(projectId, dorisObs);
+    inc("mutable_state_rehydrated_total", { entity: "observation" }, dorisObs.length);
+  }
+}
+
 export async function processIngest(job: Job<IngestJob>): Promise<void> {
   const { projectId, blobKey } = job.data;
 
@@ -194,6 +234,12 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
       scorePatches.push(extractScorePatch(rawBody, e.body, e.timestamp));
     }
   }
+  // Rehydrate (Phase 3b): if an entity this batch touches was pruned from Postgres but still exists
+  // in Doris, seed its state from the Doris row before merging so a late update doesn't drop the
+  // settled fields. Common case (entity present, or a genuine new create absent from Doris) does no
+  // Doris read.
+  await rehydratePruned(projectId, tracePatches, obsPatches);
+
   // Merge is now load-bearing: a failure throws so BullMQ retries the (idempotent) job.
   await mergeTraceStates(projectId, tracePatches);
   await mergeObservationStates(projectId, obsPatches);

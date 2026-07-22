@@ -1,5 +1,6 @@
 import type { GenerationBody, ScoreBody, TraceBody } from "@memoturn/core";
 import { prisma } from "@memoturn/db";
+import type { ObservationRow, TraceRow } from "@memoturn/telemetry";
 
 /**
  * Mutable entity state — ADR-0001, Phase 1.
@@ -329,6 +330,90 @@ export function getObservationStates(projectId: string, ids: string[]) {
 }
 export function getScoreStates(projectId: string, ids: string[]) {
   return prisma.scoreState.findMany({ where: { projectId, id: { in: ids } } });
+}
+
+/** The subset of `ids` that already have a `TraceState`/`ObservationState` row (id-only, cheap). */
+export async function existingTraceStateIds(projectId: string, ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const rows = await prisma.traceState.findMany({ where: { projectId, id: { in: ids } }, select: { id: true } });
+  return new Set(rows.map((r) => r.id));
+}
+export async function existingObservationStateIds(projectId: string, ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const rows = await prisma.observationState.findMany({ where: { projectId, id: { in: ids } }, select: { id: true } });
+  return new Set(rows.map((r) => r.id));
+}
+
+// ── Rehydrate (ADR-0001 Phase 3b) ────────────────────────────────────────────────
+// When an ingest event targets an entity whose `*State` row was pruned (Phase 3a) but which still
+// exists in Doris, seed the state from the current Doris row BEFORE merging the patch — otherwise a
+// late update would merge onto an empty row and the mirror would over-write Doris with only the
+// update's fields. The seed carries the Doris row's `event_ts` as its version, so a newer incoming
+// update still wins on `stateVersion`; its fields COALESCE-merge on top of the seeded state.
+
+export async function seedTraceStates(projectId: string, rows: TraceRow[]): Promise<number> {
+  return upsertState(
+    "TraceState",
+    TRACE_COLS,
+    "tags",
+    projectId,
+    rows.map((r) => ({
+      id: r.id,
+      version: versionOf(r.event_ts),
+      scalars: {
+        name: r.name,
+        timestamp: r.timestamp ? new Date(r.timestamp) : null,
+        userId: r.user_id,
+        sessionId: r.session_id,
+        release: r.release,
+        version: r.version,
+        environment: r.environment,
+        public: r.public === 1,
+        metadata: r.metadata,
+        input: r.input,
+        output: r.output,
+      },
+      arrayProvided: true,
+      arrayValue: r.tags,
+    })),
+  );
+}
+
+export async function seedObservationStates(projectId: string, rows: ObservationRow[]): Promise<number> {
+  return upsertState(
+    "ObservationState",
+    OBS_COLS,
+    null,
+    projectId,
+    rows.map((r) => ({
+      id: r.id,
+      version: versionOf(r.event_ts),
+      scalars: {
+        traceId: r.trace_id,
+        type: r.type,
+        parentObservationId: r.parent_observation_id,
+        name: r.name,
+        startTime: r.start_time ? new Date(r.start_time) : null,
+        endTime: r.end_time ? new Date(r.end_time) : null,
+        environment: r.environment,
+        level: r.level,
+        statusMessage: r.status_message,
+        model: r.model,
+        provider: r.provider,
+        modelParameters: r.model_parameters,
+        promptTokens: r.prompt_tokens,
+        completionTokens: r.completion_tokens,
+        totalTokens: r.total_tokens,
+        cacheReadTokens: r.cache_read_tokens,
+        cacheCreationTokens: r.cache_creation_tokens,
+        promptId: r.prompt_id,
+        promptVersion: r.prompt_version,
+        input: r.input,
+        output: r.output,
+        metadata: r.metadata,
+      },
+    })),
+  );
 }
 
 // ── Prune (ADR-0001 Phase 3) ─────────────────────────────────────────────────────
