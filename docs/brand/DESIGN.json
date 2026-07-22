@@ -1,398 +1,265 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-05-03T04:32:29.068387Z",
+  "generatedAt": "2026-07-22T02:20:00Z",
   "title": "Design System: Memoturn",
   "extensions": {
     "colorMeta": {
-      "lagoon-deep": {
-        "role": "primary",
-        "displayName": "Lagoon Deep",
-        "canonical": "oklch(58.6% 0.078 199)",
-        "tonalRamp": ["#0a1d1f", "#11343a", "#1a4f57", "#256b75", "#328f97", "#56a8af", "#8cc6cb", "#cbe5e8"]
-      },
       "lagoon": {
-        "role": "secondary",
+        "role": "primary",
         "displayName": "Lagoon",
-        "canonical": "oklch(74.4% 0.075 188)",
-        "tonalRamp": ["#0d2628", "#16413e", "#225d56", "#327a73", "#4fb8b2", "#7ecdc8", "#aeded9", "#dceeec"]
+        "canonical": "#4fb8b2",
+        "tonalRamp": ["#0d2321", "#173e3b", "#215955", "#2c7c76", "#4fb8b2", "#79cac5", "#a8ded9", "#d8f1ee"]
+      },
+      "lagoon-deep": {
+        "role": "secondary",
+        "displayName": "Lagoon Deep",
+        "canonical": "#328f97",
+        "tonalRamp": ["#0b1f22", "#143439", "#1e4d54", "#28707a", "#328f97", "#5fadb3", "#94cbd0", "#cce8ea"]
       },
       "palm": {
         "role": "secondary",
         "displayName": "Palm",
-        "canonical": "oklch(50.5% 0.085 154)",
-        "tonalRamp": ["#0a1f17", "#10322b", "#1a4d3d", "#245a3f", "#2f6a4a", "#4f8a6b", "#82b09a", "#c7dccf"]
+        "canonical": "#2f6a4a",
+        "tonalRamp": ["#0c1a12", "#16301f", "#20472e", "#2f6a4a", "#478a63", "#6fab87", "#a1cbb2", "#d3e9dc"]
       },
       "ember": {
         "role": "tertiary",
         "displayName": "Ember",
-        "canonical": "oklch(72.3% 0.142 53)",
-        "tonalRamp": ["#2a1407", "#451f0d", "#653015", "#8e4a23", "#e89456", "#efad7c", "#f3c8a4", "#fbe9d8"]
+        "canonical": "#e89456",
+        "tonalRamp": ["#33200f", "#5c3a1c", "#8a5629", "#ba7539", "#e89456", "#eeab78", "#f4c7a1", "#fae3d0"]
+      },
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Sea-Ink Canvas",
+        "canonical": "oklch(0.146 0.012 215)",
+        "tonalRamp": ["#0d1417", "#131b1e", "#1a2427", "#243033", "#3a4a4e", "#5c7075", "#8fa2a5", "#cdd9da"]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Panel",
+        "canonical": "oklch(0.175 0.013 215)",
+        "tonalRamp": ["#0d1417", "#131b1e", "#1a2427", "#243033", "#3a4a4e", "#5c7075", "#8fa2a5", "#cdd9da"]
+      },
+      "foreground": {
+        "role": "neutral",
+        "displayName": "Foam Ink",
+        "canonical": "oklch(0.965 0.005 195)",
+        "tonalRamp": ["#20302f", "#3d5250", "#5d7573", "#829a98", "#a8b4b3", "#c4cecd", "#dde4e3", "#f2f6f5"]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted Foam",
+        "canonical": "oklch(0.735 0.014 205)",
+        "tonalRamp": ["#20302f", "#3d5250", "#5d7573", "#829a98", "#a8b4b3", "#c4cecd", "#dde4e3", "#f2f6f5"]
       },
       "sea-ink": {
         "role": "neutral",
         "displayName": "Sea Ink",
-        "canonical": "oklch(28% 0.04 198)",
-        "tonalRamp": ["#0e2024", "#10282d", "#163138", "#173a40", "#1f4e55", "#2c6770", "#558893", "#a8c1c5"]
-      },
-      "sea-ink-soft": {
-        "role": "neutral",
-        "displayName": "Sea Ink Soft",
-        "canonical": "oklch(43.5% 0.026 199)",
-        "tonalRamp": ["#0f2326", "#1b3338", "#274750", "#34555c", "#416166", "#5a7d83", "#869fa3", "#bdcdd0"]
-      },
-      "foam-light": {
-        "role": "neutral",
-        "displayName": "Foam Light",
-        "canonical": "oklch(98.8% 0.012 165)",
-        "tonalRamp": ["#243634", "#3c5854", "#5b7975", "#809b97", "#a4bdb8", "#c8d8d4", "#e2eeec", "#f6fefb"]
+        "canonical": "#173a40",
+        "tonalRamp": ["#0a1a1d", "#10292d", "#173a40", "#265a62", "#3a7d87", "#63a3ab", "#98c5ca", "#d2e7e9"]
       },
       "foam": {
         "role": "neutral",
         "displayName": "Foam",
-        "canonical": "oklch(97.5% 0.014 158)",
-        "tonalRamp": ["#1f3431", "#385450", "#587671", "#7d9893", "#a3bbb6", "#c6d8d4", "#dee9e6", "#f3faf5"]
+        "canonical": "#f3faf5",
+        "tonalRamp": ["#22302a", "#3d5449", "#5f7d6d", "#88a795", "#aecbbb", "#cde3d7", "#e4f2ea", "#f3faf5"]
       },
-      "sand": {
-        "role": "neutral",
-        "displayName": "Sand",
-        "canonical": "oklch(94% 0.014 154)",
-        "tonalRamp": ["#1f2e26", "#384a3d", "#566b58", "#7c9080", "#a4b4a7", "#c7d3c8", "#dde6dd", "#e7f0e8"]
-      },
-      "page": {
-        "role": "neutral",
-        "displayName": "Page",
-        "canonical": "#ffffff",
-        "tonalRamp": ["#0c0c0c", "#202020", "#404040", "#666666", "#909090", "#bbbbbb", "#dddddd", "#ffffff"]
-      },
-      "foreground": {
-        "role": "neutral",
-        "displayName": "Foreground",
-        "canonical": "oklch(14.5% 0 0)",
-        "tonalRamp": ["#0a0a0a", "#1a1a1a", "#252525", "#3d3d3d", "#5a5a5a", "#7a7a7a", "#a0a0a0", "#cfcfcf"]
-      },
-      "muted": {
-        "role": "neutral",
-        "displayName": "Muted",
-        "canonical": "oklch(55.6% 0 0)",
-        "tonalRamp": ["#262626", "#3b3b3b", "#525252", "#6a6a6a", "#878787", "#a3a3a3", "#bdbdbd", "#dcdcdc"]
-      },
-      "border": {
-        "role": "neutral",
-        "displayName": "Border",
-        "canonical": "oklch(92.2% 0 0)",
-        "tonalRamp": ["#2a2a2a", "#494949", "#6c6c6c", "#909090", "#b3b3b3", "#d2d2d2", "#ebebeb", "#f5f5f5"]
-      },
-      "rule": {
-        "role": "neutral",
-        "displayName": "Rule",
-        "canonical": "rgba(23, 58, 64, 0.16)",
-        "tonalRamp": [
-          "#173a4007",
-          "#173a400d",
-          "#173a4012",
-          "#173a401a",
-          "#173a4029",
-          "#173a403d",
-          "#173a4055",
-          "#173a4080"
-        ]
+      "light-primary": {
+        "role": "primary",
+        "displayName": "Light-Mode Lagoon (AA text)",
+        "canonical": "oklch(0.52 0.073 200)",
+        "tonalRamp": ["#0b1f22", "#143439", "#1e4d54", "#2c7c83", "#4a99a0", "#74b5bb", "#a5d1d5", "#d5ebed"]
       }
     },
     "typographyMeta": {
       "display": {
         "displayName": "Display",
-        "purpose": "Hero headlines, marketing surface only. One per page."
+        "purpose": "Hero headline, one per page. Archivo 700 at 110% width, -0.03em, two-tone sentence."
       },
       "headline": {
         "displayName": "Headline",
-        "purpose": "Section headlines. The 'Three legs. One substrate.' voice."
+        "purpose": "Section headers, always two-tone (bright phrase + muted elaboration)."
       },
-      "title": {
-        "displayName": "Title",
-        "purpose": "Card titles, smaller heading slots. Same face and weight as headline; difference is scale."
-      },
-      "body-large": {
-        "displayName": "Body Large",
-        "purpose": "Hero subheads and lede copy. The bridge between display and body."
-      },
-      "body": {
-        "displayName": "Body",
-        "purpose": "All running copy. Capped at 65 to 75ch line length."
-      },
-      "label": {
-        "displayName": "Label",
-        "purpose": "Eyebrows on every section, table column headers, mono utility text. Tracked uppercase signature."
-      },
-      "mono": {
-        "displayName": "Mono",
-        "purpose": "Inline code, package names, file paths, license abbreviations. Lower-case where source-matched."
-      }
+      "title": { "displayName": "Title", "purpose": "Card titles." },
+      "body": { "displayName": "Body", "purpose": "Running copy, 65-75ch cap, foreground ink." },
+      "mono": { "displayName": "Mono", "purpose": "Code, data, tag chips." },
+      "meta": { "displayName": "Meta", "purpose": "License/meta rows, 'works with' labels. 12px floor." }
     },
     "shadows": [
       {
-        "name": "button-cue",
-        "value": "0 1px 2px rgba(0, 0, 0, 0.06)",
-        "purpose": "The only shadow in the system. Applied to button-primary as a state cue, not for elevation."
+        "name": "glow-lagoon",
+        "value": "radial-gradient(120% 90% at 50% 0%, rgba(79,184,178,0.13) 0%, transparent 62%)",
+        "purpose": "The only radial treatment: static top-edge lagoon wash on framed captures and glow-panels. Never pulsing, never a border."
       },
       {
-        "name": "button-cue-hover",
-        "value": "0 2px 4px rgba(23, 58, 64, 0.12)",
-        "purpose": "Hover-state lift on button-primary. Barely-perceptible, tinted toward sea-ink."
-      },
-      {
-        "name": "mark-shadow-on-dark",
-        "value": "drop-shadow(0 6px 18px rgba(0, 0, 0, 0.28))",
-        "purpose": "Filter applied to the brand mark on the closing-band atoll gradient. Not a box-shadow; an SVG drop-shadow filter for legibility against the gradient."
+        "name": "mark-anchor",
+        "value": "drop-shadow(0 6px 18px rgba(0,0,0,0.28))",
+        "purpose": "BrandMark on the atoll band only."
       }
     ],
     "motion": [
       {
         "name": "ease-tide",
         "value": "cubic-bezier(0.16, 1, 0.3, 1)",
-        "purpose": "The tide easing. Glacial. Used only on the 8s brand-mark hover rotation."
+        "purpose": "Entrances (rise-in, the hero capture's single signature entrance)."
       },
       {
         "name": "ease-swell",
         "value": "cubic-bezier(0.4, 0, 0.2, 1)",
-        "purpose": "Default state-change easing. 180ms duration. Hover, focus, simple transitions."
-      },
-      {
-        "name": "duration-tide",
-        "value": "8000ms",
-        "purpose": "Brand mark hover rotation duration. Suppressed under prefers-reduced-motion."
-      },
-      {
-        "name": "duration-swell",
-        "value": "180ms",
-        "purpose": "Default state-change duration."
+        "purpose": "Hover/press, 180ms; glow-panel fade 260ms (opacity only)."
       }
     ],
-    "patterns": [
-      {
-        "name": "pattern-topo",
-        "value": "url(\"data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 240'%3E%3Cg fill='none' stroke='%23173a40' stroke-width='1'%3E%3Ccircle cx='120' cy='120' r='30'/%3E%3Ccircle cx='120' cy='120' r='58'/%3E%3Ccircle cx='120' cy='120' r='86'/%3E%3Ccircle cx='120' cy='120' r='118'/%3E%3Ccircle cx='120' cy='120' r='154'/%3E%3C/g%3E%3C/svg%3E\")",
-        "purpose": "Concentric ring tile in sea-ink stroke. Used at low opacity (6 to 8 percent) behind feature grids. The mark concept echoes this motif compressed into a single mark."
-      },
-      {
-        "name": "pattern-topo-light",
-        "value": "url(\"data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 240'%3E%3Cg fill='none' stroke='%23f6fefb' stroke-width='1'%3E%3Ccircle cx='120' cy='120' r='30'/%3E%3Ccircle cx='120' cy='120' r='58'/%3E%3Ccircle cx='120' cy='120' r='86'/%3E%3Ccircle cx='120' cy='120' r='118'/%3E%3Ccircle cx='120' cy='120' r='154'/%3E%3C/g%3E%3C/svg%3E\")",
-        "purpose": "Foam-light variant. Used over atoll/lagoon gradients with mix-blend-mode: screen at 16 to 18 percent opacity."
-      }
-    ],
-    "gradients": [
-      {
-        "name": "gradient-lagoon",
-        "value": "linear-gradient(135deg, #4fb8b2 0%, #328f97 100%)",
-        "purpose": "Lagoon to lagoon-deep. The brand mark fill on light surfaces. Load-bearing; the mark IS this gradient."
-      },
-      {
-        "name": "gradient-atoll",
-        "value": "linear-gradient(135deg, #328f97 0%, #2f6a4a 100%)",
-        "purpose": "Lagoon-deep to palm. The closing-band substrate. Inverted-section ground for any dark band on the marketing surface."
-      }
-    ],
-    "breakpoints": [
-      {
-        "name": "tablet",
-        "value": "960px",
-        "purpose": "Desktop to tablet collapse. Hero spec strips collapse to 2 columns; feature grids reflow to 1."
-      },
-      {
-        "name": "mobile",
-        "value": "720px",
-        "purpose": "Tablet to mobile. Section padding-y compresses; brand-lockup and pill stack."
-      }
-    ]
+    "breakpoints": [{ "name": "md", "value": "768px" }, { "name": "lg", "value": "1024px" }]
   },
   "components": [
     {
-      "name": "Primary Button",
+      "name": "Primary Button (foam fill)",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "Filled sea-ink primary action. The single drop-shadow exception in the system as a state cue.",
-      "html": "<button class=\"ds-btn-primary\" type=\"button\">Get started — free</button>",
-      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 22px; border-radius: 6px; background: #173a40; color: #f6fefb; border: 1px solid transparent; font-family: \"Manrope\", ui-sans-serif, system-ui, sans-serif; font-weight: 500; font-size: 14px; line-height: 1; letter-spacing: -0.005em; cursor: pointer; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); transition: background-color 180ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 180ms cubic-bezier(0.4, 0, 0.2, 1); white-space: nowrap; }\n.ds-btn-primary:hover { background: #0e2a2f; box-shadow: 0 2px 4px rgba(23, 58, 64, 0.12); }\n.ds-btn-primary:focus-visible { outline: 2px solid #328f97; outline-offset: 2px; }"
+      "description": "Highest-priority CTA on the dark canvas. Light fill is the loud element; the accent stays scarce.",
+      "html": "<button class=\"ds-btn-primary\">Get started</button>",
+      "css": ".ds-btn-primary { background: #f3faf5; color: #173a40; height: 40px; padding: 0 22px; border: none; border-radius: 6px; font-family: Archivo, system-ui, sans-serif; font-weight: 500; font-size: 14px; transition: background-color 180ms cubic-bezier(0.4,0,0.2,1); } .ds-btn-primary:hover { background: #e4efe8; } .ds-btn-primary:focus-visible { outline: 2px solid #4fb8b2; outline-offset: 2px; }"
     },
     {
-      "name": "On-Dark Primary Button",
+      "name": "Outline Button",
       "kind": "button",
-      "refersTo": "button-on-dark-primary",
-      "description": "Foam-light fill primary for atoll-gradient surfaces. Filled sea-ink on the gradient midpoint fails AA contrast; this is the AA-safe inversion. Closing-band primary slot only.",
-      "html": "<div class=\"ds-on-dark-frame\"><button class=\"ds-btn-on-dark-primary\" type=\"button\">Create your project</button></div>",
-      "css": ".ds-on-dark-frame { display: inline-block; padding: 24px 28px; border-radius: 8px; background: linear-gradient(135deg, #328f97 0%, #2f6a4a 100%); }\n.ds-btn-on-dark-primary { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 22px; border-radius: 6px; background: #f6fefb; color: #173a40; border: 1px solid transparent; font-family: \"Manrope\", ui-sans-serif, system-ui, sans-serif; font-weight: 500; font-size: 14px; line-height: 1; cursor: pointer; transition: background-color 180ms cubic-bezier(0.4, 0, 0.2, 1); white-space: nowrap; }\n.ds-btn-on-dark-primary:hover { background: #ffffff; }\n.ds-btn-on-dark-primary:focus-visible { outline: 2px solid #f6fefb; outline-offset: 2px; }"
-    },
-    {
-      "name": "Ghost on Dark Button",
-      "kind": "button",
-      "refersTo": "button-ghost-on-dark",
-      "description": "Foam-light translucent secondary. Only on atoll-gradient or lagoon-gradient surfaces.",
-      "html": "<div class=\"ds-ghost-frame\"><button class=\"ds-btn-ghost\" type=\"button\">Read the docs</button></div>",
-      "css": ".ds-ghost-frame { display: inline-block; padding: 24px 28px; border-radius: 8px; background: linear-gradient(135deg, #328f97 0%, #2f6a4a 100%); }\n.ds-btn-ghost { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 22px; border-radius: 6px; background: rgba(246, 254, 251, 0.12); color: #f6fefb; border: 1px solid rgba(246, 254, 251, 0.4); font-family: \"Manrope\", ui-sans-serif, system-ui, sans-serif; font-weight: 500; font-size: 14px; line-height: 1; cursor: pointer; transition: background-color 180ms cubic-bezier(0.4, 0, 0.2, 1), border-color 180ms cubic-bezier(0.4, 0, 0.2, 1); white-space: nowrap; }\n.ds-btn-ghost:hover { background: rgba(246, 254, 251, 0.2); border-color: rgba(246, 254, 251, 0.6); }\n.ds-btn-ghost:focus-visible { outline: 2px solid #f6fefb; outline-offset: 2px; }"
-    },
-    {
-      "name": "Quiet Link",
-      "kind": "button",
-      "refersTo": "button-quiet",
-      "description": "Transparent secondary CTA with a translating arrow. Hero secondary slot and courtesy off-ramps.",
-      "html": "<a class=\"ds-btn-quiet\" href=\"#\">Read the docs</a>",
-      "css": ".ds-btn-quiet { display: inline-flex; align-items: center; height: 40px; padding: 0 4px; background: transparent; color: #878787; border: 0; font-family: \"Manrope\", ui-sans-serif, system-ui, sans-serif; font-weight: 500; font-size: 14px; line-height: 1; text-decoration: none; cursor: pointer; transition: color 180ms cubic-bezier(0.4, 0, 0.2, 1); }\n.ds-btn-quiet::after { content: \" →\"; display: inline-block; margin-left: 4px; transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1); }\n.ds-btn-quiet:hover { color: #252525; }\n.ds-btn-quiet:hover::after { transform: translateX(3px); }\n.ds-btn-quiet:focus-visible { outline: 2px solid #328f97; outline-offset: 2px; border-radius: 4px; }"
-    },
-    {
-      "name": "Status Pill",
-      "kind": "chip",
-      "refersTo": "pill",
-      "description": "Foam-grounded lagoon-stroked label. Static; never animated, never hovered. Used as the eyebrow above the hero headline.",
-      "html": "<span class=\"ds-pill\">Open source</span>",
-      "css": ".ds-pill { display: inline-flex; align-items: center; padding: 4px 12px; border-radius: 999px; background: #f3faf5; color: #328f97; border: 1px solid rgba(50, 143, 151, 0.32); font-family: \"Manrope\", ui-sans-serif, system-ui, sans-serif; font-weight: 500; font-size: 11px; line-height: 1.45; letter-spacing: 0.08em; text-transform: uppercase; }"
+      "refersTo": "button-outline",
+      "description": "Secondary CTA on the dark canvas.",
+      "html": "<button class=\"ds-btn-outline\">Star on GitHub</button>",
+      "css": ".ds-btn-outline { background: transparent; color: #f2f6f5; height: 40px; padding: 0 22px; border: 1px solid rgba(243,250,245,0.11); border-radius: 6px; font-family: Archivo, system-ui, sans-serif; font-weight: 500; font-size: 14px; transition: background-color 180ms cubic-bezier(0.4,0,0.2,1), border-color 180ms cubic-bezier(0.4,0,0.2,1); } .ds-btn-outline:hover { background: #131b1e; border-color: rgba(243,250,245,0.22); } .ds-btn-outline:focus-visible { outline: 2px solid #4fb8b2; outline-offset: 2px; }"
     },
     {
       "name": "Tag Chip",
       "kind": "chip",
       "refersTo": "tag",
-      "description": "Inline binding label inside feature cards. Mono and tinted; static.",
-      "html": "<span class=\"ds-tag\">Workers</span>",
-      "css": ".ds-tag { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px; background: rgba(50, 143, 151, 0.10); color: #328f97; font-family: \"JetBrains Mono\", ui-monospace, \"SF Mono\", Menlo, Consolas, monospace; font-weight: 500; font-size: 11px; line-height: 1.45; letter-spacing: 0.02em; }"
+      "description": "Inline mono label inside the three feature cards only. Static.",
+      "html": "<span class=\"ds-tag\">waterfall</span>",
+      "css": ".ds-tag { display: inline-block; background: rgba(79,184,178,0.10); color: #4fb8b2; border-radius: 4px; padding: 3px 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: -0.01em; }"
     },
     {
-      "name": "Feature Card",
+      "name": "Frame Shot",
+      "kind": "card",
+      "refersTo": "frame-shot",
+      "description": "A real console capture in a hairline frame with the static lagoon glow. The rebrand's signature component.",
+      "html": "<figure class=\"ds-frame-shot\"><div class=\"ds-frame-shot__img\">console capture</div></figure>",
+      "css": ".ds-frame-shot { position: relative; margin: 0; overflow: hidden; border: 1px solid rgba(243,250,245,0.14); border-radius: 8px; background: #131b1e; isolation: isolate; } .ds-frame-shot::before { content: ''; position: absolute; inset: 0; z-index: 1; background: radial-gradient(120% 90% at 50% 0%, rgba(79,184,178,0.13) 0%, transparent 62%); pointer-events: none; } .ds-frame-shot__img { aspect-ratio: 16/10; display: grid; place-items: center; color: #a8b4b3; font-family: Archivo, system-ui, sans-serif; font-size: 13px; }"
+    },
+    {
+      "name": "Glow Panel (ledger cell)",
       "kind": "card",
       "refersTo": "card",
-      "description": "Ledger card. Eyebrow, title, body, dashed-rule tag row. Hairline rules instead of shadows.",
-      "html": "<article class=\"ds-card\">\n  <span class=\"ds-card-eyebrow\">Real-time</span>\n  <h3 class=\"ds-card-title\">Every call, traced live</h3>\n  <p class=\"ds-card-body\">The worker maps each batch into Doris the moment it lands. No sampling gaps, no lost payloads, replayable from blob.</p>\n  <div class=\"ds-card-tags\">\n    <span class=\"ds-tag\">Doris</span>\n    <span class=\"ds-tag\">OTLP</span>\n  </div>\n</article>",
-      "css": ".ds-card { padding: 32px 28px 36px; background: #ffffff; border-top: 1px solid rgba(23, 58, 64, 0.16); border-right: 1px solid rgba(23, 58, 64, 0.16); border-bottom: 1px solid rgba(23, 58, 64, 0.16); border-left: 1px solid rgba(23, 58, 64, 0.16); border-radius: 6px; display: flex; flex-direction: column; gap: 14px; transition: background-color 180ms cubic-bezier(0.4, 0, 0.2, 1); max-width: 360px; }\n.ds-card:hover { background: #f3faf5; }\n.ds-card-eyebrow { font-family: \"JetBrains Mono\", ui-monospace, monospace; font-weight: 500; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #328f97; margin: 0; }\n.ds-card-title { font-family: \"Inter Tight\", \"Manrope\", ui-sans-serif, sans-serif; font-weight: 700; font-size: 22px; line-height: 1.05; letter-spacing: -0.02em; color: #173a40; margin: 0; }\n.ds-card-body { font-family: \"Manrope\", ui-sans-serif, sans-serif; font-weight: 400; font-size: 14.5px; line-height: 1.6; color: #416166; margin: 0; }\n.ds-card-tags { margin-top: auto; padding-top: 18px; border-top: 1px dashed rgba(23, 58, 64, 0.16); display: flex; gap: 6px; flex-wrap: wrap; }\n.ds-tag { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px; background: rgba(50, 143, 151, 0.10); color: #328f97; font-family: \"JetBrains Mono\", ui-monospace, monospace; font-weight: 500; font-size: 11px; letter-spacing: 0.02em; }"
+      "description": "Hairline-ruled cell on the canvas; the lagoon wash fades in on hover (opacity only).",
+      "html": "<article class=\"ds-glow-panel\"><h3 class=\"ds-glow-panel__title\">Every call, traced</h3><p class=\"ds-glow-panel__body\">Traces, spans, generations, and scores on a waterfall timeline.</p></article>",
+      "css": ".ds-glow-panel { position: relative; isolation: isolate; background: #0d1417; border: 1px solid rgba(243,250,245,0.14); padding: 24px 28px 32px; color: #f2f6f5; } .ds-glow-panel::before { content: ''; position: absolute; inset: 0; z-index: -1; background: radial-gradient(120% 90% at 50% 0%, rgba(79,184,178,0.13) 0%, transparent 62%); opacity: 0; transition: opacity 260ms cubic-bezier(0.4,0,0.2,1); pointer-events: none; } .ds-glow-panel:hover::before { opacity: 1; } .ds-glow-panel__title { margin: 0 0 10px; font-family: Archivo, system-ui, sans-serif; font-weight: 700; font-stretch: 110%; letter-spacing: -0.03em; font-size: 22px; } .ds-glow-panel__body { margin: 0; color: #a8b4b3; font-family: Archivo, system-ui, sans-serif; font-size: 14.5px; line-height: 1.65; }"
     },
     {
-      "name": "Brand Lockup (Light)",
-      "kind": "nav",
-      "refersTo": "brand-lockup",
-      "description": "Brand mark plus wordmark. Inline SVG via use; gradient variant on light surfaces, slow tide-rotation on hover.",
-      "html": "<a class=\"ds-lockup\" href=\"/\" aria-label=\"Memoturn home\">\n  <svg class=\"ds-mark\" viewBox=\"0 0 128 128\" aria-hidden=\"true\" focusable=\"false\">\n    <defs>\n      <linearGradient id=\"ds-lagoon\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\">\n        <stop offset=\"0%\" stop-color=\"#4fb8b2\"/>\n        <stop offset=\"100%\" stop-color=\"#328f97\"/>\n      </linearGradient>\n    </defs>\n    <g fill=\"url(#ds-lagoon)\">\n      <path fill-rule=\"evenodd\" d=\"M 64 10 a 54 54 0 1 0 0 108 a 54 54 0 1 0 0 -108 M 64 24 a 40 40 0 1 1 0 80 a 40 40 0 1 1 0 -80\"/>\n      <path fill-rule=\"evenodd\" d=\"M 64 34 a 30 30 0 1 0 0 60 a 30 30 0 1 0 0 -60 M 64 48 a 16 16 0 1 1 0 32 a 16 16 0 1 1 0 -32\"/>\n      <circle cx=\"64\" cy=\"64\" r=\"8\"/>\n    </g>\n  </svg>\n  <span>Memoturn</span>\n</a>",
-      "css": ".ds-lockup { display: inline-flex; align-items: center; gap: 8px; font-family: \"Manrope\", ui-sans-serif, sans-serif; font-weight: 600; font-size: 16px; letter-spacing: -0.02em; color: #252525; text-decoration: none; }\n.ds-mark { width: 22px; height: 22px; display: block; flex-shrink: 0; transition: transform 8000ms cubic-bezier(0.16, 1, 0.3, 1); }\n.ds-lockup:hover .ds-mark { transform: rotate(360deg); }\n@media (prefers-reduced-motion: reduce) { .ds-mark { transition: none; } .ds-lockup:hover .ds-mark { transform: none; } }"
-    },
-    {
-      "name": "Brand Lockup (Dark)",
-      "kind": "nav",
-      "refersTo": "brand-lockup-dark",
-      "description": "Mono brand mark on sea-ink or atoll-gradient surfaces. currentColor inheritance via fill.",
-      "html": "<div class=\"ds-dark-frame\">\n  <a class=\"ds-lockup-dark\" href=\"/\" aria-label=\"Memoturn home\">\n    <svg class=\"ds-mark\" viewBox=\"0 0 128 128\" fill=\"currentColor\" aria-hidden=\"true\" focusable=\"false\">\n      <path fill-rule=\"evenodd\" d=\"M 64 10 a 54 54 0 1 0 0 108 a 54 54 0 1 0 0 -108 M 64 24 a 40 40 0 1 1 0 80 a 40 40 0 1 1 0 -80\"/>\n      <path fill-rule=\"evenodd\" d=\"M 64 34 a 30 30 0 1 0 0 60 a 30 30 0 1 0 0 -60 M 64 48 a 16 16 0 1 1 0 32 a 16 16 0 1 1 0 -32\"/>\n      <circle cx=\"64\" cy=\"64\" r=\"8\"/>\n    </svg>\n    <span>Memoturn</span>\n  </a>\n</div>",
-      "css": ".ds-dark-frame { display: inline-block; padding: 32px 36px; border-radius: 8px; background: #173a40; }\n.ds-lockup-dark { display: inline-flex; align-items: center; gap: 8px; font-family: \"Manrope\", ui-sans-serif, sans-serif; font-weight: 600; font-size: 16px; letter-spacing: -0.02em; color: #f6fefb; text-decoration: none; }\n.ds-lockup-dark .ds-mark { width: 22px; height: 22px; display: block; flex-shrink: 0; transition: transform 8000ms cubic-bezier(0.16, 1, 0.3, 1); }\n.ds-lockup-dark:hover .ds-mark { transform: rotate(360deg); }\n@media (prefers-reduced-motion: reduce) { .ds-lockup-dark .ds-mark { transition: none; } .ds-lockup-dark:hover .ds-mark { transform: none; } }"
+      "name": "Two-Tone Headline",
+      "kind": "custom",
+      "refersTo": "headline",
+      "description": "The section-header system: bright key phrase + muted elaboration, one sentence, one element. Replaces eyebrow kickers.",
+      "html": "<h2 class=\"ds-two-tone\">The enterprise tier <span>is the free tier.</span></h2>",
+      "css": ".ds-two-tone { margin: 0; color: #f2f6f5; font-family: Archivo, system-ui, sans-serif; font-weight: 700; font-stretch: 110%; font-size: 38px; line-height: 1.04; letter-spacing: -0.03em; text-wrap: balance; } .ds-two-tone span { color: #a8b4b3; }"
     }
   ],
   "narrative": {
-    "northStar": "The Live Substrate",
-    "overview": "Memoturn is a live telemetry substrate, and the visual system says so before any copy is read. The wedge is the live capture (every LLM call traced and scored the moment it lands); the design system is built to feel that way: tight headlines that read as terminal output, hairline rules that read as ledger structure, a slow tide rotation on the brand mark that registers more like a horizon shift than a UI animation. Restraint carries it. One radius, two type faces (plus mono for code), four button shapes, a single load-bearing gradient. The discipline is the brand. Memoturn deliberately rejects every standard AI-coding-tool aesthetic: no generic SaaS gradient-hero (Cursor, Vercel), no neon-purple-on-black (OpenAI, Replit), no monospace-brutalist (HN-aesthetic), no enterprise-AI navy-and-rounded (IBM watsonx, Azure-AI-Foundry), and no AI-agent orchestrator glow (mem0.ai-style: glassmorphic tiles on charcoal, pulsing cyan/teal accent borders, agent avatars with glow halos, \"AI inbox\" three-column layouts). The brand's job is to find a sixth lane. Memoturn is the closest neighbor by category to the orchestrator-glow family, so the visual distance from it has to be the largest.",
+    "northStar": "The Dark Instrument Panel",
+    "overview": "Memoturn's console has always been a dark instrument panel — telemetry on a near-black ground, teal as data. The public surfaces now match the product instead of inverting it: a sea-ink-tinted near-black canvas (never pure #000), hairline-ledger structure, oversized tight-set Archivo headlines in two tones, one surgical lagoon accent, real console captures framed with a faint lagoon glow, and a single loud atoll-gradient moment at the end of every page. The product IS the imagery; the canvas IS the brand. Going dark moved Memoturn closer to the orchestrator-glow family's turf, so the separating discipline is explicit: flat hairline ledgers instead of glassmorphic tiles, a static top-edge glow wash instead of pulsing accent borders, real product captures instead of faux-3D abstractions, one accent used surgically instead of a neon wash.",
     "keyCharacteristics": [
-      "One radius (6px). One heading face (Inter Tight 700). One body face (Manrope 400). One mono stack (JetBrains Mono).",
-      "Four named button shapes, no fifth: filled sea-ink primary (light surfaces), on-dark primary (foam-light fill on atoll/lagoon gradients), ghost-on-dark, quiet-link.",
-      "Lagoon to Atoll gradient is the only gradient; it is load-bearing on the brand mark and the closing band, never decorative.",
-      "Hairline rules and tonal layering carry depth. Surface shadows are forbidden; one tiny button drop-shadow exists as a state cue, not as elevation.",
-      "Latency is the demo. Live indicators (connection pulse, recent-turn ticker, tail of record_turn events) earn their place by being the proof; static product screenshots do not."
+      "One family: Archivo variable (weight + width axes); display voice = font-stretch 110% + -0.03em. JetBrains Mono for code, data, meta.",
+      "Two-tone headlines are the section-header system; uppercase tracked eyebrows are retired as section grammar.",
+      "The sea-ink-tinted canvas carries the brand; lagoon #4fb8b2 is reserved for links, focus, data, chips, and glow.",
+      "Real console captures (bun run screenshots, dark theme, @2x) are required imagery: dashboard in the hero, matching surface per feature card.",
+      "Hairline rules and tonal layering carry depth; the only radial treatment is the static lagoon glow wash.",
+      "Lagoon → Atoll gradient is the only gradient; load-bearing on the brand mark and closing band."
     ],
     "rules": [
       {
+        "name": "The Canvas-Tint Rule",
+        "body": "Every dark surface carries the sea-ink hue (oklch hue ~215, chroma 0.012-0.014). Pure #000 and neutral-gray darks are forbidden.",
+        "section": "colors"
+      },
+      {
+        "name": "The Surgical-Lagoon Rule",
+        "body": "Lagoon appears as text/stroke/glow at small scale only. A lagoon-filled button, panel, or band is forbidden; when the brand needs to be loud, the atoll gradient is the instrument.",
+        "section": "colors"
+      },
+      {
         "name": "The Lagoon-Atoll Rule",
-        "body": "The two named gradients (gradient-lagoon: lagoon to lagoon-deep, and gradient-atoll: lagoon-deep to palm) are the only gradients permitted in the system. Any other gradient is forbidden. The lagoon gradient is the brand mark fill; the atoll gradient is the inverted band substrate. Load-bearing, never decorative.",
-        "section": "colors"
-      },
-      {
-        "name": "The Ember Cap Rule",
-        "body": "Ember (#e89456) covers less than 5% of any composition. Use it for chart accents, license-table proprietary-row markers, and occasional state cues. Forbidden as a CTA fill, as a body text color, or as a section ground.",
-        "section": "colors"
-      },
-      {
-        "name": "The Page-White Choice",
-        "body": "The page substrate is pure #ffffff, not a tinted near-white. The cool neutrals (foam, sand, foam-light) carry the lagoon-tinted warmth; the page itself stays neutral so the lagoon gradient and the brand mark register at full saturation.",
+        "body": "gradient-lagoon and gradient-atoll are the only gradients; the static glow wash is a lighting treatment, not a gradient surface.",
         "section": "colors"
       },
       {
         "name": "The Foam-Light-On-Dark Rule",
-        "body": "On any surface darker than the lagoon stops (sea-ink, atoll gradient, lagoon gradient), the only valid foreground is foam-light (#f6fefb). Never use the gradient mark on these surfaces; switch to the mono variant with foam-light fill.",
+        "body": "On the atoll gradient the only valid foreground is foam-light at >=92% opacity; secondary buttons darken their fill rather than fade their text.",
         "section": "colors"
       },
       {
+        "name": "The Two-Tone Rule",
+        "body": "Section identity is carried by the two-tone headline. At most one deliberate kicker moment per page.",
+        "section": "typography"
+      },
+      {
         "name": "The Tight-Set Rule",
-        "body": "Headlines use line-height 1.02 to 1.05 and letter-spacing -0.025em (display) or -0.02em (title). Loosening these for breathing room is forbidden. The tight set is what makes Inter Tight read as a machine voice, not as a magazine.",
+        "body": "Display type: line-height <=1.05, tracking -0.03em at 110% width; -0.04em is the floor.",
         "section": "typography"
       },
       {
-        "name": "The Em-Dash Exception",
-        "body": "Memoturn copy uses spaced em-dashes in headlines and CTAs as a brand rhythm. This is a documented exception to the shared design law. Substituting hyphens or other punctuation in interface copy is forbidden. The em-dash carries the brand voice.",
-        "section": "typography"
-      },
-      {
-        "name": "The Two-Face Rule",
-        "body": "The system uses Inter Tight (heading) and Manrope (body) plus JetBrains Mono (code/labels). A third typeface is forbidden. Italics are not part of the system; any italic copy is a flag to revise.",
-        "section": "typography"
-      },
-      {
-        "name": "The Full-Ink Body Rule",
-        "body": "Body copy on light surfaces uses full foreground ink (#252525), not the muted variant. Muted is for eyebrows, captions, and metadata only. Softening body to muted is forbidden.",
+        "name": "The Single-Family Rule",
+        "body": "Archivo + JetBrains Mono is the system. A second sans, a serif, or italics are flags to revise.",
         "section": "typography"
       },
       {
         "name": "The Flat-By-Default Rule",
-        "body": "Resting surfaces (cards, sections, banners, callouts, panels) have no shadow. Depth is achieved via hairline rules, ground tones, and content rhythm. Overlays (modal, dialog, popover, sheet, tooltip, hover-card, dropdown content) are exempt: they get a functional shadow because elevation IS their meaning.",
+        "body": "Resting surfaces have no shadow; overlays are exempt because elevation IS their meaning.",
         "section": "elevation"
       },
       {
-        "name": "The Hairline Rule",
-        "body": "1px hairlines at sea-ink 16% alpha (#173a4029, the rule token) carry structure inside cards, tables, and ledger grids. Distinct from border (#ebebeb) which is for component containment.",
+        "name": "The Static-Glow Rule",
+        "body": "The lagoon glow is the only radial treatment: top-edge origin, <=13% (22% hero), static or hover-faded. Animated glows, glowing borders, and glassmorphism are forbidden.",
         "section": "elevation"
       },
       {
-        "name": "The Tonal-Step Rule",
-        "body": "Backgrounds run page (#ffffff) to foam (#f3faf5) to sand (#e7f0e8). Each step adds slight cool warmth and subtracts a hair of luminance. Depth comes from the step itself; never add a shadow on top of the step.",
-        "section": "elevation"
-      },
-      {
-        "name": "The Four-Shapes Rule",
-        "body": "Four button shapes total: filled sea-ink primary (light surfaces), on-dark primary (foam-light fill on atoll/lagoon gradients), ghost-on-dark (atoll/lagoon gradient secondary), quiet-link (any surface secondary). A fifth shape is a flag to revise; if a fifth seems necessary, the design wanted a different component.",
+        "name": "The Real-Capture Rule",
+        "body": "Product imagery is real console output captured by the screenshot pipeline. Mocked UI and stock imagery are forbidden.",
         "section": "components"
       },
       {
-        "name": "The Inline-Mark Rule",
-        "body": "The brand mark is rendered via inline svg and use. CSS mask-image: url(...) and img src are both forbidden in production because they fail differently: mask-image fails silently on file:// and in restrictive sandboxes; img cannot inherit currentColor.",
+        "name": "The Four-Shapes Rule",
+        "body": "Foam-primary, outline, on-gradient primary, on-gradient secondary (+ quiet-link). A fifth shape means the design wanted a different component.",
         "section": "components"
       },
       {
         "name": "The Card-Grid-Three-Only Rule",
-        "body": "Identical card grids are forbidden by the shared design law. Memoturn permits a single exception: the three-leg feature grid. Three is the only valid count; four-up grids and six-up grids are forbidden.",
+        "body": "Three is the only valid identical-card count.",
         "section": "components"
       }
     ],
     "dos": [
-      "Do lead with mechanism. Name the store (Doris, Postgres, Redis, blob), the transport (OTLP, MCP, webhooks), the package (apps/api, apps/worker, packages/core). Specificity is what the Multi-tool Builder trusts.",
-      "Do hold the page substrate pure white (#ffffff). The neutrals (foam, sand) carry the warmth.",
-      "Do use the lagoon (gradient-lagoon) and atoll (gradient-atoll) gradients only as the brand mark fill and the inverted band substrate. They are load-bearing, not decorative.",
-      "Do keep headlines tight: line-height 1.02 to 1.05, letter-spacing -0.025em to -0.02em. The tight set is the brand voice.",
-      "Do use spaced em-dashes in headlines and CTAs (Get started — free). The em-dash is a documented brand exception to the shared no-em-dash law; it carries voice.",
-      "Do render the brand mark inline via symbol and use. Never via CSS mask-image and never via img src.",
-      "Do use foam-light (#f6fefb) as the only foreground on sea-ink, atoll gradient, and lagoon gradient surfaces.",
-      "Do signal real-time somewhere on every page. Present-tense mechanical verbs (captured, fanned, matched) in copy; tiny live indicators in UI. Static product screenshots do not earn their place.",
-      "Do use the four button shapes only: filled sea-ink primary (light surfaces), on-dark primary (foam-light fill on atoll/lagoon gradients), ghost-on-dark (atoll/lagoon gradient secondary), quiet-link (any surface secondary). A fifth shape is a flag to revise the design.",
-      "Do honor prefers-reduced-motion on the 8s tide rotation. The mark may still color-shift on hover; the rotation is suppressed.",
-      "Do test the category-reflex check at both altitudes. The first-order answer (domain to palette) must come back ambiguous. The second-order answer (domain plus anti-references to aesthetic family) must also come back ambiguous."
+      "Do lead with mechanism: name the store, the transport, the surface.",
+      "Do ship the dark canvas tinted toward sea-ink; marketing dark-only, docs default dark with a light reading mode.",
+      "Do show the real console: hero dashboard bottom-masked into the canvas, matching capture per feature card.",
+      "Do use lagoon surgically and let the foam-filled button be the loud element.",
+      "Do set section headers as two-tone sentences.",
+      "Do break out the wedge (SSO/RBAC/audit/PII/retention/rate limits) as its own section.",
+      "Do keep the atoll band as the single loud brand moment at page end.",
+      "Do honor prefers-reduced-motion on the tide rotation, rise-in, and glow fade.",
+      "Do run the category-reflex check at both altitudes; distance to orchestrator-glow stays the largest."
     ],
     "donts": [
-      "Don't look like generic SaaS gradient-hero (Cursor.com, Vercel-style). Big gradient hero, drop-shadowed product screenshot, identical 3-icon feature cards, Trusted-by YC-logo strip. The dominant cliche of the category.",
-      "Don't look like AI-product neon-purple-on-black (OpenAI, Replit-style). Cyberpunk dark mode, glowing edges, neural-net imagery, the-future-of-coding positioning.",
-      "Don't look like developer-tool brutalist-monospace (HN-aesthetic). All-monospace, terminal-green-on-black, ASCII art, NO-JS banners.",
-      "Don't look like enterprise-AI navy-and-rounded (IBM watsonx, Azure-AI-Foundry-style). Navy blue, oversized rounded corners, stock photo of a hand on a glass touchscreen.",
-      "Don't look like AI-agent orchestrator glow (mem0.ai-style; the saturating family in the agent-memory / agent-platform space). Glassmorphic tiles on a near-black or charcoal panel, pulsing animated accent borders in cyan / magenta / teal, agent avatars or cards with glow halos, faux-3D depth on every tile, agent-activity feeds with status dots, three-column AI-inbox layouts. Memoturn is mem0.ai's nearest neighbor by category, so the visual distance must be the largest of any anti-reference. If the two surfaces could be confused at a glance, redesign.",
-      "Don't use border-left or border-right greater than 1px as a colored accent on cards, alerts, or callouts. Side-stripe borders are forbidden by the shared design law.",
-      "Don't use gradient text (background-clip: text on a gradient background). Use a single solid color. Emphasis through weight or scale only.",
-      "Don't apply box-shadows to resting surfaces (cards, sections, banners, callouts, panels). The system is flat by default. The 1px button-cue is the only shadow on a resting surface; overlays (modal, dialog, popover, sheet, tooltip, hover-card, dropdown content) are exempt because elevation IS their meaning.",
-      "Don't add a fifth button shape. The four named shapes (filled sea-ink primary, on-dark primary, ghost-on-dark, quiet-link) are the spec. A fifth shape means the design wanted a different component.",
-      "Don't soften body copy to muted (#878787). Body uses full ink (foreground). Muted is for eyebrows, captions, metadata.",
-      "Don't introduce a third typeface. Inter Tight (heading) plus Manrope (body) plus JetBrains Mono (code/labels) is the system. Italics are not part of the system.",
-      "Don't put coastal vocabulary (tide, lagoon, atoll, swell, foam, sand) in interface copy. The metaphor lives in token names; the prose stays in product language.",
-      "Don't use hype words: revolutionary, next-generation, cutting-edge, game-changing, unlock, empower, seamlessly, leverage, best-in-class.",
-      "Don't use exclamation marks in marketing copy.",
-      "Don't use emojis in marketing surface copy. CLI status output may use one of triangle, anchor, check if functional. Nothing else.",
-      "Don't invent additional gradients. The lagoon and atoll gradients are the spec. A radial blur, a cyan-magenta wash, or a dark hero overlay is forbidden.",
-      "Don't use ember (#e89456) as a CTA fill or section ground. Ember is capped at less than 5% of any composition.",
-      "Don't rely on color alone for status. Every status carries a textual or shape redundancy.",
-      "Don't ship a card grid with more than three cells."
+      "Don't look like generic SaaS gradient-hero (Cursor, Vercel-style).",
+      "Don't look like AI-product neon-purple-on-black (OpenAI, Replit-style).",
+      "Don't look like developer-tool brutalist-monospace (HN-aesthetic).",
+      "Don't look like enterprise-AI navy-and-rounded (IBM watsonx, Azure-style).",
+      "Don't look like AI-agent orchestrator glow (mem0.ai-style): no glassmorphic tiles, no pulsing accent borders, no glow halos, no faux-3D depth, no AI-inbox layouts.",
+      "Don't use side-stripe borders (>1px colored border-left/right) anywhere, including docs asides.",
+      "Don't use gradient text, hero-metric stat blocks, or identical card grids beyond the single three-up.",
+      "Don't put uppercase tracked eyebrows above section headings.",
+      "Don't set lagoon #4fb8b2 as text on light surfaces; light mode uses light-primary.",
+      "Don't use type below 12px.",
+      "Don't ship a marketing surface without product imagery.",
+      "Don't invent gradients beyond lagoon/atoll + the static glow wash, add resting-surface shadows, or introduce a third typeface.",
+      "Don't put coastal vocabulary in interface copy; no hype words, exclamation marks, or emoji in marketing copy.",
+      "Don't rely on color alone for status."
     ]
   }
 }

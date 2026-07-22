@@ -63,17 +63,18 @@ const { kicker, title, primary, secondary } = Astro.props;
 		letter-spacing: 0.16em;
 		text-transform: uppercase;
 		font-weight: 700;
-		color: var(--on-gradient-fg-soft);
+		color: var(--on-gradient-fg);
 	}
 	.m-cta__title {
 		margin: 0;
 		font-family: var(--font-heading-stack);
 		font-size: clamp(1.75rem, 3vw, 2.25rem);
 		font-weight: 700;
+		font-stretch: 110%;
 		line-height: 1.15;
 		max-width: 22ch;
 		color: var(--on-gradient-fg);
-		letter-spacing: -0.015em;
+		letter-spacing: -0.02em;
 		text-wrap: balance;
 	}
 	.m-cta__body {
@@ -135,13 +136,15 @@ const { kicker, title, primary, secondary } = Astro.props;
 	.m-cta__action--primary:hover {
 		background: color-mix(in oklab, var(--on-gradient-fg) 90%, transparent);
 	}
+	/* Foam text over a sea-ink tint: darkening the fill (rather than fading
+	 * the text) is what keeps this legible on the gradient. */
 	.m-cta__action--secondary {
-		background: transparent;
+		background: color-mix(in oklab, var(--sea-ink) 45%, transparent);
 		color: var(--on-gradient-fg);
 		border: 1px solid color-mix(in oklab, var(--on-gradient-fg) 40%, transparent);
 	}
 	.m-cta__action--secondary:hover {
-		background: color-mix(in oklab, var(--on-gradient-fg) 12%, transparent);
+		background: color-mix(in oklab, var(--sea-ink) 60%, transparent);
 		border-color: color-mix(in oklab, var(--on-gradient-fg) 60%, transparent);
 	}
 </style>

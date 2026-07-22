@@ -2,7 +2,13 @@
  * @source, @custom-variant) live in the consumer app's entry CSS — when
  * this file is @import-ed with a layer modifier (as docs does), Tailwind
  * forbids those directives from being nested. This file owns brand vars
- * + semantic tokens + @theme. */
+ * + semantic tokens + @theme.
+ *
+ * DARK-FIRST: `:root` carries the dark instrument-panel theme (the brand
+ * surface — sea-ink-tinted near-blacks with the lagoon accent used
+ * surgically). `[data-theme="light"]` is the override for surfaces that
+ * still offer a light reading mode (docs). The marketing site pins
+ * `data-theme="dark"` and never leaves it. */
 
 @theme inline {
 	/* Map Tailwind font tokens to stacks (avoid self-referential var(--font-sans) in theme). */
@@ -91,9 +97,9 @@
 :root {
 	/* Native form controls (checkboxes, range, progress) pick up brand teal */
 	accent-color: var(--primary);
+	color-scheme: dark;
 
-	/* Brand palette — addressable as `bg-lagoon`, `text-sea-ink`, etc. for hero/CTA only.
-	 * Structural surfaces (background, card, popover, etc.) are pure shadcn neutrals below. */
+	/* Brand palette — addressable as `bg-lagoon`, `text-sea-ink`, etc. */
 	--sea-ink: #173a40;
 	--sea-ink-soft: #416166;
 	--lagoon: #4fb8b2;
@@ -107,28 +113,40 @@
 	--gradient-lagoon: linear-gradient(135deg, var(--lagoon) 0%, var(--lagoon-deep) 100%);
 	--gradient-atoll: linear-gradient(135deg, var(--lagoon-deep) 0%, var(--palm) 100%);
 	--on-gradient-fg: #f6fefb;
-	--on-gradient-fg-soft: rgba(246, 254, 251, 0.85);
+	--on-gradient-fg-soft: rgba(246, 254, 251, 0.92);
 	--on-gradient-border: rgba(246, 254, 251, 0.4);
 	--on-gradient-button-bg: rgba(246, 254, 251, 0.12);
 
+	/* Lagoon glow — the dimensional treatment for dark cards and framed
+	 * screenshots: a soft radial wash from the top edge, never a border. */
+	--glow-lagoon: radial-gradient(
+		120% 90% at 50% 0%,
+		color-mix(in oklab, var(--lagoon) 13%, transparent) 0%,
+		transparent 62%
+	);
+	--glow-lagoon-strong: radial-gradient(
+		90% 70% at 50% 0%,
+		color-mix(in oklab, var(--lagoon) 22%, transparent) 0%,
+		transparent 65%
+	);
+
 	/* Hairline rules — structural lines inside cards, tables, ledger grids.
-	 * Distinct from `--border` which is for component containment.
-	 * `--rule` is the stronger 16% line; `--rule-faint` is the 5% grid backdrop. */
-	--rule: color-mix(in oklab, var(--sea-ink) 16%, transparent);
-	--rule-faint: color-mix(in oklab, var(--sea-ink) 5%, transparent);
-	--pattern-topo: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 240'%3E%3Cg fill='none' stroke='%23328f97' stroke-width='1'%3E%3Ccircle cx='120' cy='120' r='30'/%3E%3Ccircle cx='120' cy='120' r='58'/%3E%3Ccircle cx='120' cy='120' r='86'/%3E%3Ccircle cx='120' cy='120' r='118'/%3E%3Ccircle cx='120' cy='120' r='154'/%3E%3C/g%3E%3C/svg%3E");
-	/* Light-stroke variant for use on dark / atoll-gradient grounds. Foam-light strokes;
-	 * use with mix-blend-mode: screen + low opacity (≤0.16) so it reads as topographic
-	 * depth, not a decorative pattern. Pairs with `bg-(image:--gradient-atoll)`. */
+	 * Distinct from `--border` which is for component containment. */
+	--rule: color-mix(in oklab, var(--foam) 14%, transparent);
+	--rule-faint: color-mix(in oklab, var(--foam) 6%, transparent);
+	--pattern-topo: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 240'%3E%3Cg fill='none' stroke='%234fb8b2' stroke-width='1'%3E%3Ccircle cx='120' cy='120' r='30'/%3E%3Ccircle cx='120' cy='120' r='58'/%3E%3Ccircle cx='120' cy='120' r='86'/%3E%3Ccircle cx='120' cy='120' r='118'/%3E%3Ccircle cx='120' cy='120' r='154'/%3E%3C/g%3E%3C/svg%3E");
+	/* Light-stroke variant for use on the atoll-gradient band. Foam-light strokes;
+	 * use with mix-blend-mode: screen + low opacity (≤0.16) so it reads as
+	 * topographic depth, not a decorative pattern. */
 	--pattern-topo-light: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 240'%3E%3Cg fill='none' stroke='%23f6fefb' stroke-width='1'%3E%3Ccircle cx='120' cy='120' r='30'/%3E%3Ccircle cx='120' cy='120' r='58'/%3E%3Ccircle cx='120' cy='120' r='86'/%3E%3Ccircle cx='120' cy='120' r='118'/%3E%3Ccircle cx='120' cy='120' r='154'/%3E%3C/g%3E%3C/svg%3E");
 	--brand-dot: var(--gradient-lagoon);
 
-	/* Fonts */
-	--font-sans-stack: "Manrope", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+	/* Fonts — Archivo carries the whole surface: normal width for body/UI,
+	 * expanded width (font-stretch) + heavy weights for display. JetBrains
+	 * Mono for code, data, and labels. */
+	--font-sans-stack: "Archivo", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
 		"Segoe UI Symbol", "Noto Color Emoji";
-	--font-heading-stack: "Inter Tight", "Manrope", ui-sans-serif, system-ui, sans-serif;
-	/* JetBrains Mono is loaded by every app (not just a fallback) so code and
-	 * data surfaces render the brand mono everywhere. */
+	--font-heading-stack: "Archivo", ui-sans-serif, system-ui, sans-serif;
 	--font-mono-stack: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 	--font-sans: var(--font-sans-stack);
 	--font-heading: var(--font-heading-stack);
@@ -139,20 +157,94 @@
 	/* ~6px — light rounding; scales --radius-sm … --radius-4xl proportionally */
 	--radius: 0.375rem;
 
-	/* shadcn neutral defaults — pure white surfaces with neutral grayscale text. */
+	/* Dark instrument panel — sea-ink-tinted near-blacks. The canvas is the
+	 * brand; lagoon is reserved for action, focus, data, and glow. */
+	--background: oklch(0.146 0.012 215);
+	--foreground: oklch(0.965 0.005 195);
+	--card: oklch(0.175 0.013 215);
+	--card-foreground: oklch(0.965 0.005 195);
+	--popover: oklch(0.19 0.013 215);
+	--popover-foreground: oklch(0.965 0.005 195);
+	/* Brand: lagoon is the action color on dark. */
+	--primary: var(--lagoon);
+	--primary-foreground: oklch(0.17 0.02 215);
+	--secondary: oklch(0.225 0.013 215);
+	--secondary-foreground: oklch(0.965 0.005 195);
+	--muted: oklch(0.225 0.013 215);
+	--muted-foreground: oklch(0.735 0.014 205);
+	--accent: oklch(0.26 0.014 212);
+	--accent-foreground: oklch(0.965 0.005 195);
+	--destructive: oklch(0.704 0.191 22.216);
+	--destructive-foreground: oklch(0.97 0.01 17);
+	--success: oklch(0.32 0.07 155);
+	--success-foreground: oklch(0.92 0.05 155);
+	--warning: oklch(0.36 0.08 95);
+	--warning-foreground: oklch(0.96 0.055 95);
+	--border: color-mix(in oklab, var(--foam) 11%, transparent);
+	--input: color-mix(in oklab, var(--foam) 15%, transparent);
+	/* Brand-colored focus ring — keyboard focus is one of the few places brand
+	 * identity is louder than the neutral default. */
+	--ring: var(--primary);
+
+	/* Charts — brand-sequenced. */
+	--chart-1: var(--lagoon);
+	--chart-2: var(--palm);
+	--chart-3: var(--lagoon-deep);
+	--chart-4: var(--accent-warm);
+	--chart-5: var(--sea-ink-soft);
+
+	--sidebar: oklch(0.165 0.013 215);
+	--sidebar-foreground: oklch(0.965 0.005 195);
+	--sidebar-primary: var(--primary);
+	--sidebar-primary-foreground: var(--primary-foreground);
+	--sidebar-accent: oklch(0.225 0.013 215);
+	--sidebar-accent-foreground: oklch(0.965 0.005 195);
+	--sidebar-border: color-mix(in oklab, var(--foam) 7%, transparent);
+	--sidebar-ring: oklch(0.45 0.02 210);
+
+	--surface: oklch(0.185 0.013 215);
+	--surface-foreground: oklch(0.735 0.014 205);
+
+	--code: var(--surface);
+	--code-foreground: var(--surface-foreground);
+	--code-highlight: oklch(0.25 0.014 213);
+	--code-number: oklch(0.7 0.012 205);
+
+	--selection: var(--primary);
+	--selection-foreground: var(--primary-foreground);
+
+	--overlay: oklch(0 0 0 / 52%);
+	--overlay-strong: oklch(0 0 0 / 82%);
+	--overlay-subtle: oklch(0 0 0 / 42%);
+	/* Legacy alias for older composites */
+	--overlay-backdrop: var(--overlay);
+
+	/* Motion — preserved for .rise-in / .shimmer keyframes */
+	--ease-tide: cubic-bezier(0.16, 1, 0.3, 1);
+	--ease-swell: cubic-bezier(0.4, 0, 0.2, 1);
+	--duration-rise: 700ms;
+	--duration-swell: 180ms;
+}
+
+/* Light reading mode — offered by the docs theme toggle only. Contrast note:
+ * `--primary` doubles as link/label text on white here, so it steps past
+ * lagoon-deep (#328f97, 3.5:1) to a darker tone that clears 4.5:1. */
+:root[data-theme="light"],
+.light {
+	color-scheme: light;
+
 	--background: oklch(1 0 0);
 	--foreground: oklch(0.145 0 0);
 	--card: oklch(1 0 0);
 	--card-foreground: oklch(0.145 0 0);
 	--popover: oklch(1 0 0);
 	--popover-foreground: oklch(0.145 0 0);
-	/* Brand: lagoon-deep is the action color. Everything else is neutral. */
-	--primary: var(--lagoon-deep);
+	--primary: oklch(0.52 0.073 200);
 	--primary-foreground: oklch(0.985 0 0);
 	--secondary: oklch(0.97 0 0);
 	--secondary-foreground: oklch(0.205 0 0);
 	--muted: oklch(0.97 0 0);
-	--muted-foreground: oklch(0.556 0 0);
+	--muted-foreground: oklch(0.5 0.008 210);
 	--accent: oklch(0.97 0 0);
 	--accent-foreground: oklch(0.205 0 0);
 	--destructive: oklch(0.577 0.245 27.325);
@@ -163,11 +255,8 @@
 	--warning-foreground: oklch(0.33 0.09 95);
 	--border: oklch(0.922 0 0);
 	--input: oklch(0.922 0 0);
-	/* Brand-colored focus ring — keyboard focus is one of the few places brand identity
-	 * is louder than shadcn's neutral default. Maps to lagoon-deep in light, lagoon in dark. */
 	--ring: var(--primary);
 
-	/* Charts — brand-sequenced (the one place brand color stays in structural tokens). */
 	--chart-1: var(--lagoon-deep);
 	--chart-2: var(--palm);
 	--chart-3: var(--lagoon);
@@ -197,139 +286,12 @@
 	--overlay: oklch(0 0 0 / 48%);
 	--overlay-strong: oklch(0 0 0 / 78%);
 	--overlay-subtle: oklch(0 0 0 / 38%);
-	/* Legacy alias for older composites */
 	--overlay-backdrop: var(--overlay);
 
-	/* Motion — preserved for .rise-in / .shimmer keyframes */
-	--ease-tide: cubic-bezier(0.16, 1, 0.3, 1);
-	--ease-swell: cubic-bezier(0.4, 0, 0.2, 1);
-	--duration-rise: 700ms;
-	--duration-swell: 180ms;
-}
-
-:root[data-theme="dark"],
-.dark {
-	--background: oklch(0.145 0 0);
-	--foreground: oklch(0.985 0 0);
-	--card: oklch(0.205 0 0);
-	--card-foreground: oklch(0.985 0 0);
-	--popover: oklch(0.205 0 0);
-	--popover-foreground: oklch(0.985 0 0);
-	/* Brand: lagoon (lighter mint) reads better as primary on dark backdrops. */
-	--primary: var(--lagoon);
-	--primary-foreground: oklch(0.205 0 0);
-	--secondary: oklch(0.269 0 0);
-	--secondary-foreground: oklch(0.985 0 0);
-	--muted: oklch(0.269 0 0);
-	--muted-foreground: oklch(0.708 0 0);
-	--accent: oklch(0.371 0 0);
-	--accent-foreground: oklch(0.985 0 0);
-	--destructive: oklch(0.704 0.191 22.216);
-	--destructive-foreground: oklch(0.97 0.01 17);
-	--success: oklch(0.32 0.07 155);
-	--success-foreground: oklch(0.92 0.05 155);
-	--warning: oklch(0.36 0.08 95);
-	--warning-foreground: oklch(0.96 0.055 95);
-	--border: oklch(1 0 0 / 10%);
-	--input: oklch(1 0 0 / 15%);
-	--ring: var(--primary);
-
-	--chart-1: var(--lagoon);
-	--chart-2: var(--palm);
-	--chart-3: var(--lagoon-deep);
-	--chart-4: var(--accent-warm);
-	--chart-5: var(--sea-ink-soft);
-
-	--sidebar: oklch(0.205 0 0);
-	--sidebar-foreground: oklch(0.985 0 0);
-	--sidebar-primary: var(--primary);
-	--sidebar-primary-foreground: var(--primary-foreground);
-	--sidebar-accent: oklch(0.269 0 0);
-	--sidebar-accent-foreground: oklch(0.985 0 0);
-	--sidebar-border: oklch(1 0 0 / 6%);
-	--sidebar-ring: oklch(0.439 0 0);
-
-	--surface: oklch(0.2 0 0);
-	--surface-foreground: oklch(0.708 0 0);
-
-	--code: var(--surface);
-	--code-foreground: var(--surface-foreground);
-	--code-highlight: oklch(0.27 0 0);
-	--code-number: oklch(0.72 0 0);
-
-	--selection: var(--primary);
-	--selection-foreground: var(--primary-foreground);
-
-	--overlay: oklch(0 0 0 / 52%);
-	--overlay-strong: oklch(0 0 0 / 82%);
-	--overlay-subtle: oklch(0 0 0 / 42%);
-	--overlay-backdrop: var(--overlay);
-
-	/* Hairline rules in dark mode — flip from sea-ink to foam-light tint. */
-	--rule: color-mix(in oklab, var(--on-gradient-fg) 14%, transparent);
-	--rule-faint: color-mix(in oklab, var(--on-gradient-fg) 6%, transparent);
-}
-
-@media (prefers-color-scheme: dark) {
-	:root:not([data-theme="light"]) {
-		--background: oklch(0.145 0 0);
-		--foreground: oklch(0.985 0 0);
-		--card: oklch(0.205 0 0);
-		--card-foreground: oklch(0.985 0 0);
-		--popover: oklch(0.205 0 0);
-		--popover-foreground: oklch(0.985 0 0);
-		--primary: var(--lagoon);
-		--primary-foreground: oklch(0.205 0 0);
-		--secondary: oklch(0.269 0 0);
-		--secondary-foreground: oklch(0.985 0 0);
-		--muted: oklch(0.269 0 0);
-		--muted-foreground: oklch(0.708 0 0);
-		--accent: oklch(0.371 0 0);
-		--accent-foreground: oklch(0.985 0 0);
-		--destructive: oklch(0.704 0.191 22.216);
-		--destructive-foreground: oklch(0.97 0.01 17);
-		--success: oklch(0.32 0.07 155);
-		--success-foreground: oklch(0.92 0.05 155);
-		--warning: oklch(0.36 0.08 95);
-		--warning-foreground: oklch(0.96 0.055 95);
-		--border: oklch(1 0 0 / 10%);
-		--input: oklch(1 0 0 / 15%);
-		--ring: var(--primary);
-
-		--chart-1: var(--lagoon);
-		--chart-2: var(--palm);
-		--chart-3: var(--lagoon-deep);
-		--chart-4: var(--accent-warm);
-		--chart-5: var(--sea-ink-soft);
-
-		--sidebar: oklch(0.205 0 0);
-		--sidebar-foreground: oklch(0.985 0 0);
-		--sidebar-primary: var(--primary);
-		--sidebar-primary-foreground: var(--primary-foreground);
-		--sidebar-accent: oklch(0.269 0 0);
-		--sidebar-accent-foreground: oklch(0.985 0 0);
-		--sidebar-border: oklch(1 0 0 / 6%);
-		--sidebar-ring: oklch(0.439 0 0);
-
-		--surface: oklch(0.2 0 0);
-		--surface-foreground: oklch(0.708 0 0);
-
-		--code: var(--surface);
-		--code-foreground: var(--surface-foreground);
-		--code-highlight: oklch(0.27 0 0);
-		--code-number: oklch(0.72 0 0);
-
-		--selection: var(--primary);
-		--selection-foreground: var(--primary-foreground);
-
-		--overlay: oklch(0 0 0 / 52%);
-		--overlay-strong: oklch(0 0 0 / 82%);
-		--overlay-subtle: oklch(0 0 0 / 42%);
-		--overlay-backdrop: var(--overlay);
-
-		--rule: color-mix(in oklab, var(--on-gradient-fg) 14%, transparent);
-		--rule-faint: color-mix(in oklab, var(--on-gradient-fg) 6%, transparent);
-	}
+	/* Hairline rules in light mode — flip from foam to sea-ink tint. */
+	--rule: color-mix(in oklab, var(--sea-ink) 16%, transparent);
+	--rule-faint: color-mix(in oklab, var(--sea-ink) 5%, transparent);
+	--pattern-topo: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 240'%3E%3Cg fill='none' stroke='%23328f97' stroke-width='1'%3E%3Ccircle cx='120' cy='120' r='30'/%3E%3Ccircle cx='120' cy='120' r='58'/%3E%3Ccircle cx='120' cy='120' r='86'/%3E%3Ccircle cx='120' cy='120' r='118'/%3E%3Ccircle cx='120' cy='120' r='154'/%3E%3C/g%3E%3C/svg%3E");
 }
 
 @layer base {

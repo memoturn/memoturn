@@ -16,7 +16,7 @@ canonical: BRAND.md, DESIGN.md, DESIGN.json
 
 **Register:** `brand`. The marketing surface is the primary register; the console product surface is secondary, but voice rules extend into it (see BRAND.md "Voice").
 
-**Three-word personality:** hot, precise, real-time.
+**Three-word personality:** dark, precise, live.
 
 **CTA hierarchy:** primary CTA is the getting-started guide (`docs.memoturn.ai/getting-started/`), secondary is GitHub (`github.com/memoturn/memoturn`).
 
@@ -35,15 +35,18 @@ canonical: BRAND.md, DESIGN.md, DESIGN.json
 5. Restraint is the visual gesture.
 6. The product surface is part of the brand.
 
-**Visual essentials (canonical: DESIGN.md):**
-- One radius (6px). One heading face (Inter Tight 700). One body face (Manrope 400). One mono stack (JetBrains Mono).
-- Four named button shapes: filled-sea-ink primary (light), on-dark primary (foam-light fill on atoll/lagoon gradients), ghost-on-dark, quiet-link.
+**Visual essentials (canonical: DESIGN.md, dark-first as of 2026-07):**
+- Dark instrument panel: sea-ink-tinted near-black canvas (`oklch(0.146 0.012 215)`), marketing dark-only, docs default dark + light reading mode.
+- One family: Archivo variable (display = 700 @ `font-stretch: 110%`, `-0.03em`) + JetBrains Mono. One radius (6px).
+- Two-tone headlines (bright phrase + muted elaboration) replace eyebrow kickers as section grammar.
+- Real console captures (`bun run screenshots`, dark, @2x) are required imagery: hero dashboard + matching capture per feature card, hairline-framed with the static lagoon glow (`--glow-lagoon`; never pulsing, never glass).
+- Four button shapes: foam-fill primary (dark canvas), outline, on-gradient primary/secondary (+ quiet-link).
 - Lagoon → Atoll gradient is the only gradient. Load-bearing on the brand mark + closing band.
-- Hairline rules + tonal layering carry depth. Surface shadows are forbidden.
-- Em-dashes spaced (` — `) in headlines + CTAs are a documented brand exception to the shared no-em-dash law.
+- Hairline rules + tonal layering carry depth. Resting-surface shadows are forbidden.
+- Em-dashes spaced (` — `) survive in running copy only; headlines break with periods.
 - Inline `<svg>` + `<use>` for the brand mark; never `<img src="logo.svg">` and never `mask-image: url(...)`.
 
-**Accessibility floor:** WCAG 2.2 AA + `prefers-reduced-motion` honored on the 8s tide rotation.
+**Accessibility floor:** WCAG 2.2 AA (incl. light-mode `--primary` darkened for 4.5:1 text) + `prefers-reduced-motion` honored on the tide rotation, rise-in, and glow fade.
 
 ## Why this file exists
 
