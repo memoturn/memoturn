@@ -18,7 +18,7 @@ const NAV_LINK_CLASS =
 
 export default function Header() {
   return (
-    <header className="sticky top-0 z-50 border-b border-border bg-background/90 backdrop-blur-sm">
+    <header className="lit-edge--bottom sticky top-0 z-50 border-b border-border bg-background/90 backdrop-blur-sm">
       <div className="page-wrap flex items-center gap-3.5 py-4">
         <Link
           to="/"
