@@ -205,6 +205,8 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | GET / POST | `/v1/analytics-sink` | Get / configure the event sink — forwarding trace/score events to a product-analytics/CDP endpoint (PostHog-compatible capture API). POST `host` URL is SSRF-validated (400 on private/loopback targets). |
 | GET / POST | `/v1/api-keys` | List project API keys (public key + hint) / mint a new pair (secret returned once). |
 | DELETE | `/v1/api-keys/{id}` | Revoke an API key. |
+| GET | `/v1/account/mcp-connections` | List the OAuth clients (remote MCP IDEs/agents) the signed-in user has authorized. Empty for API-key callers (no user). |
+| DELETE | `/v1/account/mcp-connections/{consentId}` | Disconnect an OAuth client: deletes the consent and revokes its refresh tokens (access ends when the last ≤1 h JWT expires). |
 | GET | `/v1/health` | Liveness (no auth). |
 | `*` | `/auth/*` | Better Auth (sign-in/out, session). |
 
@@ -215,12 +217,13 @@ A remote [Model Context Protocol](https://modelcontextprotocol.io) endpoint expo
 Two auth paths resolve to the same per-project authorization:
 
 - **API-key Basic** (`pk-mt-…:sk-mt-…`, self-host / headless) — the key must belong to the `{projectId}` in the URL; the tool's permission is checked against the key's `read`/`write` scope.
-- **OAuth 2.1 bearer** (memoturn cloud, IDE click-through) — the Better Auth `mcp()` plugin issues the token; it resolves to a user, who is then authorized against `{projectId}` (org membership → role). Any member may run read tools; only non-`VIEWER` roles may run write tools. Clients discover the flow via the two `.well-known` documents below; an unauthenticated request returns `401` with `WWW-Authenticate: Bearer resource_metadata="…"`.
+- **OAuth 2.1 bearer** (memoturn cloud, IDE click-through) — the Better Auth `@better-auth/oauth-provider` plugin issues a JWT access token (authorization-code flow with mandatory PKCE S256, rotating refresh tokens, dynamic client registration per RFC 7591); the API verifies it statelessly (signature via `/auth/jwks`, issuer, audience) and resolves its `sub` to a user, who is then authorized against `{projectId}` (org membership → role). Any member may run read tools; only non-`VIEWER` roles may run write tools. Clients discover the flow via the `.well-known` documents below; an unauthenticated request returns `401` with `WWW-Authenticate: Bearer resource_metadata="…"`.
 
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET / POST / DELETE` | `/v1/mcp/{projectId}` | Streamable-HTTP MCP endpoint scoped to `{projectId}`. `401` (advertising `Bearer` + `Basic`) when auth is missing/invalid or the caller isn't authorized for the project. |
-| GET | `/.well-known/oauth-authorization-server` | OAuth authorization-server metadata (Better Auth `mcp()` plugin). |
-| GET | `/.well-known/oauth-protected-resource` | OAuth protected-resource metadata. |
+| GET | `/.well-known/oauth-authorization-server` | OAuth 2.1 authorization-server metadata (Better Auth `@better-auth/oauth-provider` plugin). |
+| GET | `/.well-known/openid-configuration` | OIDC discovery metadata (same plugin). |
+| GET | `/.well-known/oauth-protected-resource` | OAuth protected-resource metadata (RFC 9728) — advertises the API origin as the canonical `resource` for all per-project MCP URLs. |
 
-> Behind Caddy (single-VM prod), the two `.well-known/oauth-*` paths are routed to the API (they're served at the domain root, not the console) — see `infra/Caddyfile`. The OAuth authorize flow bounces unauthenticated users to the console sign-in page (`MCP_LOGIN_PAGE`, default `<first AUTH_TRUSTED_ORIGINS>/login`).
+> Behind Caddy (single-VM prod), the three `.well-known` paths are routed to the API (they're served at the domain root, not the console) — see `infra/Caddyfile`. The OAuth authorize flow bounces unauthenticated users to the console sign-in page (`MCP_LOGIN_PAGE`, default `<first AUTH_TRUSTED_ORIGINS>/login`) and scope approval to the console consent page (`MCP_CONSENT_PAGE`, default `<first AUTH_TRUSTED_ORIGINS>/consent`).

@@ -54,6 +54,7 @@ import {
   deleteScoreConfig,
   deleteWebhook,
   deleteWidget,
+  disconnectMcpClient,
   evaluateGate,
   exportTracesCsv,
   exportTracesJsonl,
@@ -98,6 +99,7 @@ import {
   listEvaluatorTemplates,
   listEvaluatorVersions,
   listExperiments,
+  listMcpConnections,
   listModelPrices,
   listProjectMembers,
   listPrompts,
@@ -115,6 +117,7 @@ import {
   listWebhooks,
   listWidgets,
   mcpAuthorizationServerMetadata,
+  mcpOpenIdConfigMetadata,
   mcpProtectedResourceMetadata,
   otlpToEvents,
   RoleHierarchyError,
@@ -251,9 +254,12 @@ app.on(["GET", "POST"], "/auth/*", (c) => auth.handler(c.req.raw));
 app.all("/v1/mcp/:projectId", handleMcp);
 
 // OAuth discovery for remote MCP clients (memoturn cloud). MCP clients probe these at the
-// domain root; the mcp() plugin serves them under /auth/.well-known/* and these root mounts
-// proxy to it. Behind Caddy, route `/.well-known/oauth-*` to the API (see infra/Caddyfile).
+// domain root; the oauthProvider() plugin serves auth-server/OIDC metadata under
+// /auth/.well-known/* and these root mounts proxy to it, while the protected-resource
+// document is ours (RFC 9728 — it describes the resource, not the auth server). Behind
+// Caddy, route `/.well-known/*` for these paths to the API (see infra/Caddyfile).
 app.get("/.well-known/oauth-authorization-server", (c) => mcpAuthorizationServerMetadata(c.req.raw));
+app.get("/.well-known/openid-configuration", (c) => mcpOpenIdConfigMetadata(c.req.raw));
 app.get("/.well-known/oauth-protected-resource", (c) => mcpProtectedResourceMetadata(c.req.raw));
 
 // ── Security scheme + auth on everything under /v1 (except health) ──────────────
@@ -321,6 +327,7 @@ app.use("/v1/payloads/*", requireAuth);
 app.use("/v1/analytics-sink", requireAuth);
 app.use("/v1/api-keys", requireAuth);
 app.use("/v1/api-keys/*", requireAuth);
+app.use("/v1/account/*", requireAuth);
 app.use("/v1/masking", requireAuth);
 app.use("/v1/guardrails", requireAuth);
 app.use("/v1/guardrails/*", requireAuth);
@@ -3992,6 +3999,55 @@ app.openapi(
     const result = await revokeApiKey(c.get("projectId"), id);
     await recordAudit(c.get("projectId"), c.get("actor"), "api-key.revoke", id);
     return c.json(result);
+  },
+);
+
+// ── Account: connected OAuth clients (remote MCP IDEs/agents) ────────────────────
+// User-scoped, not project-scoped: the consents belong to the signed-in user. API-key
+// callers have no user, so they see an empty list and can't disconnect anything.
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/account/mcp-connections",
+    summary: "List the OAuth clients (remote MCP) the signed-in user has authorized",
+    tags: ["platform"],
+    security,
+    responses: {
+      200: { description: "Connections", content: { "application/json": { schema: C.listOf(C.mcpConnection) } } },
+    },
+  }),
+  async (c) => {
+    const userId = c.get("userId");
+    return c.json({ data: userId ? await listMcpConnections(userId) : [] });
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/account/mcp-connections/{consentId}",
+    summary: "Disconnect an OAuth client: delete the consent and revoke its refresh tokens",
+    tags: ["platform"],
+    security,
+    request: { params: z.object({ consentId: z.string() }) },
+    responses: {
+      200: {
+        description: "Disconnected",
+        content: { "application/json": { schema: z.object({ deleted: z.boolean() }) } },
+      },
+      403: { description: "Forbidden" },
+      404: { description: "No such connection for this user" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const userId = c.get("userId");
+    if (!userId) return c.json({ error: "forbidden: session auth required" }, 403);
+    const result = await disconnectMcpClient(userId, c.req.valid("param").consentId);
+    if (!result.deleted) return c.json({ error: "not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "mcp.client.disconnect", result.clientId ?? "unknown");
+    return c.json({ deleted: true });
   },
 );
 

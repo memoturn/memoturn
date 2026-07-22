@@ -82,6 +82,8 @@ Tenancy is the **Better Auth organization plugin** (`organization`/`member`/`inv
 
 **SSO** uses the Better Auth `@better-auth/sso` plugin (`ssoProvider` table; endpoints under `/auth/sso/*`) so customers sign into memoturn with their own OIDC/SAML IdP, mapped by email `domain` (and optionally an `organizationId`). Register/list/delete from the Organizations page; full IdP sign-in needs a real provider. Session cookies are prefixed `memoturn.` (`advanced.cookiePrefix`).
 
+**Remote MCP OAuth** uses the `@better-auth/oauth-provider` plugin (OAuth 2.1: mandatory PKCE S256, dynamic client registration, rotating refresh tokens; tables `oauthClient`/`oauthRefreshToken`/`oauthAccessToken`/`oauthConsent` + `jwks` from the `jwt()` plugin). Access tokens are JWTs verified statelessly by `verifyMcpBearer` in `packages/server/src/betterauth.ts` (issuer = `${AUTH_BASE_URL}/auth`, audience = API origin); the console serves the `/login` + `/consent` pages the authorize flow bounces to (the signed query string must be round-tripped verbatim).
+
 ## Recipes
 
 ### Add a read endpoint

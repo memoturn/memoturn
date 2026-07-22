@@ -38,6 +38,7 @@ import type {
   GuardrailVerdict,
   IngestHealth,
   MaskingPolicy,
+  McpConnection,
   MetricsSummary,
   ModelPriceList,
   PlaygroundResponse,
@@ -313,6 +314,9 @@ export const api = {
     rateLimitPerMinute?: number | null;
   }) => post<ApiKeyCreated>(`/v1/api-keys`, body),
   revokeApiKey: (id: string) => del(`/v1/api-keys/${encodeURIComponent(id)}`),
+  listMcpConnections: () => get<{ data: McpConnection[] }>(`/v1/account/mcp-connections`).then((r) => r.data),
+  disconnectMcpClient: (consentId: string) =>
+    del<{ deleted: boolean }>(`/v1/account/mcp-connections/${encodeURIComponent(consentId)}`),
   getMaskingPolicy: () => get<MaskingPolicy>(`/v1/masking`),
   setMaskingPolicy: (body: {
     enabled?: boolean;

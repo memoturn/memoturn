@@ -15,6 +15,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
+    "@better-auth/oauth-provider": "1.6.20",
     "@better-auth/passkey": "1.6.20",
     "@better-auth/sso": "1.6.20",
     "@dsnp/parquetjs": "1.8.8",

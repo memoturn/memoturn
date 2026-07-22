@@ -38,6 +38,7 @@ model Member {
   createdAt      DateTime     @default(now())
 
   @@unique([organizationId, userId])
+  @@index([userId]) // membership-by-user: session-create default org, project resolution
   @@map("member")
 }
 
@@ -54,6 +55,8 @@ model Invitation {
   expiresAt      DateTime
   createdAt      DateTime     @default(now())
 
+  @@index([organizationId]) // org invitations list
+  @@index([email]) // pending-invites lookup on signup/accept
   @@map("invitation")
 }
 
@@ -135,7 +138,8 @@ model User {
   members           Member[]
   invitations       Invitation[]
   ssoProviders      SsoProvider[]
-  oauthApplications OauthApplication[]
+  oauthClients      OauthClient[]
+  oauthRefreshTokens OauthRefreshToken[]
   oauthAccessTokens OauthAccessToken[]
   oauthConsents     OauthConsent[]
   twoFactors        TwoFactor[]
@@ -192,7 +196,10 @@ model Session {
   impersonatedBy       String?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
+  oauthRefreshTokens   OauthRefreshToken[]
+  oauthAccessTokens    OauthAccessToken[]
 
+  @@index([userId]) // list/revoke a user's sessions (admin ban, revoke-others on reset)
   @@map("session")
 }
 
@@ -212,6 +219,7 @@ model Account {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
+  @@index([userId]) // credential/provider lookup on every password or social sign-in
   @@map("account")
 }
 
@@ -223,6 +231,7 @@ model Verification {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
+  @@index([identifier]) // magic-link/OTP/reset token verification path
   @@map("verification")
 }
 
@@ -240,61 +249,127 @@ model SsoProvider {
   organizationId String?
   domain         String
 
+  @@index([domain]) // IdP resolution by email domain on every SSO sign-in
   @@map("ssoProvider")
 }
 
-// ── MCP OAuth (Better Auth mcp() plugin, built on the OIDC provider) ──────────────
-// Registered OAuth clients (dynamic client registration), their access/refresh tokens,
-// and per-user consent. Powers the remote MCP endpoint's OAuth flow (memoturn cloud).
-// clientId is the public OAuth client_id string (not a row id); Better Auth resolves the
-// client<->token link itself, so it's an indexed scalar rather than a Prisma relation.
-model OauthApplication {
-  id           String   @id @default(cuid())
-  name         String?
-  icon         String?
-  metadata     String?
-  clientId     String?  @unique
-  clientSecret String?
-  redirectUrls String?
-  type         String?
-  disabled     Boolean? @default(false)
-  userId       String?
-  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+// ── OAuth 2.1 provider (Better Auth @better-auth/oauth-provider plugin) ──────────
+// Registered OAuth clients (dynamic client registration for MCP IDEs), rotating refresh
+// tokens, opaque access tokens (unused while JWT access tokens are enabled — the plugin
+// requires the table regardless), and per-user scope consent. Powers the remote MCP
+// endpoint's OAuth flow (memoturn cloud). Replaces the deprecated mcp() plugin tables.
+model OauthClient {
+  id                      String              @id @default(cuid())
+  clientId                String              @unique
+  clientSecret            String? // hashed at rest (storeClientSecret: "hashed")
+  disabled                Boolean?            @default(false)
+  skipConsent             Boolean?
+  enableEndSession        Boolean?
+  subjectType             String?
+  scopes                  String[]
+  userId                  String?
+  user                    User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt               DateTime?           @default(now())
+  updatedAt               DateTime?           @updatedAt
+  name                    String?
+  uri                     String?
+  icon                    String?
+  contacts                String[]
+  tos                     String?
+  policy                  String?
+  softwareId              String?
+  softwareVersion         String?
+  softwareStatement       String?
+  redirectUris            String[]
+  postLogoutRedirectUris  String[]
+  tokenEndpointAuthMethod String?
+  grantTypes              String[]
+  responseTypes           String[]
+  public                  Boolean?
+  type                    String?
+  requirePKCE             Boolean?
+  referenceId             String?
+  metadata                Json?
+  refreshTokens           OauthRefreshToken[]
+  accessTokens            OauthAccessToken[]
+  consents                OauthConsent[]
 
-  @@map("oauthApplication")
+  @@index([userId])
+  @@map("oauthClient")
+}
+
+model OauthRefreshToken {
+  id           String             @id @default(cuid())
+  token        String             @unique
+  clientId     String
+  client       OauthClient        @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  sessionId    String?
+  session      Session?           @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  userId       String
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referenceId  String?
+  expiresAt    DateTime?
+  createdAt    DateTime?          @default(now())
+  revoked      DateTime?
+  authTime     DateTime?
+  scopes       String[]
+  accessTokens OauthAccessToken[]
+
+  @@index([clientId])
+  @@index([sessionId])
+  @@index([userId])
+  @@map("oauthRefreshToken")
 }
 
 model OauthAccessToken {
-  id                    String    @id @default(cuid())
-  accessToken           String?   @unique
-  refreshToken          String?   @unique
-  accessTokenExpiresAt  DateTime?
-  refreshTokenExpiresAt DateTime?
-  clientId              String?
-  userId                String?
-  user                  User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  scopes                String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  id           String             @id @default(cuid())
+  token        String?            @unique
+  clientId     String
+  client       OauthClient        @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  sessionId    String?
+  session      Session?           @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  userId       String?
+  user         User?              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referenceId  String?
+  refreshId    String?
+  refreshToken OauthRefreshToken? @relation(fields: [refreshId], references: [id], onDelete: Cascade)
+  expiresAt    DateTime?
+  createdAt    DateTime?          @default(now())
+  scopes       String[]
 
   @@index([clientId])
+  @@index([sessionId])
+  @@index([userId])
+  @@index([refreshId])
   @@map("oauthAccessToken")
 }
 
 model OauthConsent {
-  id           String   @id @default(cuid())
-  clientId     String?
-  userId       String?
-  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  scopes       String?
-  consentGiven Boolean? @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String      @id @default(cuid())
+  clientId    String
+  client      OauthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  userId      String?
+  user        User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referenceId String?
+  scopes      String[]
+  createdAt   DateTime?   @default(now())
+  updatedAt   DateTime?   @updatedAt
 
   @@index([clientId])
+  @@index([userId])
   @@map("oauthConsent")
+}
+
+// Better Auth jwt plugin: signing keypairs for JWT access tokens (private key encrypted
+// at rest by the plugin). Served at /auth/jwks for resource-side verification.
+model Jwks {
+  id         String    @id @default(cuid())
+  publicKey  String
+  privateKey String
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime?
+
+  @@map("jwks")
 }
 
 // API keys are project scoped. The secret is hashed; the public key and a

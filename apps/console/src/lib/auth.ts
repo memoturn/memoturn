@@ -1,3 +1,4 @@
+import { oauthProviderClient } from "@better-auth/oauth-provider/client";
 import { passkeyClient } from "@better-auth/passkey/client";
 import { ssoClient } from "@better-auth/sso/client";
 import {
@@ -25,6 +26,9 @@ export const authClient = createAuthClient({
     twoFactorClient(),
     passkeyClient(),
     adminClient(),
+    // OAuth 2.1 provider (remote MCP): typed access to the /oauth2/* endpoints the
+    // consent page uses.
+    oauthProviderClient(),
   ],
 });
 

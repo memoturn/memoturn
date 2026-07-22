@@ -17,6 +17,7 @@
     "clean": "rm -rf dist .turbo src/routeTree.gen.ts playwright-report test-results"
   },
   "dependencies": {
+    "@better-auth/oauth-provider": "1.6.20",
     "@better-auth/passkey": "1.6.20",
     "@better-auth/sso": "1.6.20",
     "@fontsource-variable/inter-tight": "^5",

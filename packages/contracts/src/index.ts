@@ -958,6 +958,18 @@ export const apiKey = z.object({
 });
 export type ApiKey = z.infer<typeof apiKey>;
 
+// An OAuth 2.1 client (remote MCP: IDE/agent) the signed-in user has granted access to.
+// One row per consent; disconnecting deletes the consent AND revokes the client's tokens.
+export const mcpConnection = z.object({
+  consentId: z.string(),
+  clientId: z.string(),
+  clientName: z.string().nullable(),
+  clientUri: z.string().nullable(),
+  scopes: z.array(z.string()),
+  createdAt: z.string().nullable(),
+});
+export type McpConnection = z.infer<typeof mcpConnection>;
+
 export const apiKeyCreated = z.object({
   id: z.string(),
   publicKey: z.string(),
