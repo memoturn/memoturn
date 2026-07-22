@@ -54,6 +54,7 @@ sequenceDiagram
   participant Blob as S3/MinIO
   participant Q as Redis/BullMQ
   participant W as apps/worker
+  participant PG as Postgres (state)
   participant CH as Apache Doris
 
   SDK->>API: POST /v1/ingest (batch, Basic auth)
@@ -63,16 +64,20 @@ sequenceDiagram
   API-->>SDK: 207 (per-event status)
   Q->>W: deliver job
   W->>Blob: fetch raw batch
-  W->>CH: merge + insert traces/observations/scores
+  W->>PG: field-merge trace/observation/score state (authoritative)
+  W->>CH: mirror merged state + append-only rows (analytical)
   W->>W: run sampled online evaluators on completed traces
 ```
 
-- The API acks fast; the blob event log is the source of truth, so Doris is
+- The API acks fast; the blob event log is the source of truth, so both stores below are
   rebuildable.
-- Merge semantics: Doris `UNIQUE KEY` merge-on-write tables keyed on `(project_id, id)`
-  with `event_ts` as the sequence column, so late/partial/out-of-order events converge
-  (last writer — the newest `event_ts` — wins). Create + update for one observation are
-  merged in the worker when they arrive in the same batch.
+- Merge semantics (ADR-0001): mutable entities (trace/observation/score) are **authoritative in
+  Postgres** — each ingest event merges field-by-field into a `*State` row (an atomic
+  `INSERT … ON CONFLICT DO UPDATE SET col = COALESCE(EXCLUDED.col, stored.col)`), so a partial
+  update keeps the fields it omits and concurrent batches can't lose each other's fields. **Doris is
+  the analytical mirror**: the worker writes each Doris row FROM the merged Postgres state (computing
+  derived latency/cost), ordered by `stateVersion` (its merge-on-write sequence). Append-only rows
+  (retrieval documents, embeddings) come straight from the events. There is no Doris read-merge.
 
 ## Packages
 
