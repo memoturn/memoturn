@@ -6,9 +6,9 @@ description: A versioned prompt registry with deployment channels, resolved and 
 A versioned prompt registry with deployment **channels**.
 
 - **Versions** are immutable — every save creates the next version.
-- **Channels** are movable pointers. `latest` always tracks the newest version; you also deploy to
-  `production` or custom labels. SDKs fetch by channel and cache nothing they shouldn't
-  (resolution is a simple authenticated GET).
+- **Channels** are movable pointers. `latest` always tracks the newest version; you also
+  deploy to `production` or custom labels. SDKs fetch by channel and cache nothing they
+  shouldn't (resolution is a simple authenticated GET).
 
 ## Create / update a version
 
@@ -36,13 +36,13 @@ const prompt = await getPrompt(creds, "support-reply", { channel: "production" }
 const messages = compilePrompt(prompt, { product: "memoturn", question: q });
 ```
 
-`compilePrompt` / `compile_prompt` substitute `{{variable}}` placeholders in both TEXT (string)
-and CHAT (message list) prompts.
+`compilePrompt` / `compile_prompt` substitute `{{variable}}` placeholders in both TEXT
+(string) and CHAT (message list) prompts.
 
 ## In the console
 
-The **Prompts** page lists prompts with their channels and latest version; the detail view shows
-every version, which channels point at it, and the content + config.
+The **Prompts** page lists prompts with their channels and latest version; the detail
+view shows every version, which channels point at it, and the content + config.
 
 ![Prompts — versioned registry with deployment channels](../../assets/screenshots/prompts.png)
 

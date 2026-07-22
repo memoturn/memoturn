@@ -3,11 +3,11 @@ title: Data model
 description: The entities memoturn stores — traces, observations, scores, prompts, datasets, evaluators — and how they relate.
 ---
 
-## Entities & relationships
+## Data model
 
 ```
-Organization (Workspace)
-├── Membership ── User          (role: OWNER / ADMIN / MEMBER / VIEWER)
+Workspace
+├── Membership ── User
 └── Project
     ├── ApiKey
     ├── Prompt
@@ -49,10 +49,9 @@ linked by `trace_id` / `project_id`.
   - **generation** — an LLM call (model, provider, token usage, cost, latency)
   - **event** — a point-in-time marker
 
-  Observations nest via `parentObservationId`, rendered as a **waterfall timeline** in the
-  console's trace detail view:
+  Observations nest via `parentObservationId`, rendered as a **waterfall timeline**.
 
-  ![Trace detail — waterfall timeline with scores and payloads](../../assets/screenshots/trace-detail.png)
+  ![Trace waterfall](../../assets/screenshots/trace-detail.png)
 - **Score** — a numeric/categorical/boolean measurement attached to a trace (or
   observation). `source` is one of:
   - `API` — sent via SDK/API (e.g. user feedback)

@@ -3,8 +3,8 @@ title: Evaluation
 description: Offline, online, and human evaluation modes that all write scores onto your traces.
 ---
 
-memoturn supports three evaluation modes; all write **scores** into Doris, surfaced on the
-trace alongside `API` feedback scores.
+memoturn supports three evaluation modes; all write **scores** into Doris, surfaced
+on the trace alongside `API` feedback scores.
 
 ```
 Offline:  Dataset + items ──► Experiment run ──► Evaluator ─────┐
@@ -28,7 +28,7 @@ Human:    Review queue ──► Reviewer scores ──────────�
    `dataset.recordRun()` in the SDK).
 4. Score the traces (via an evaluator or human review).
 
-See the dataset example in the [TypeScript SDK](/sdk-typescript/#datasets--experiments).
+See the dataset example in [TS SDK](/sdk-typescript/#datasets--experiments).
 
 ## Evaluators (LLM-as-judge)
 
@@ -51,9 +51,9 @@ The judge is asked to return strict JSON `{"score": 0..1, "reasoning": "…"}`.
 
 ### Online evaluation
 
-Enable `online` with a `samplingRate` (and optional `filterName`). After each ingest batch, the
-worker runs enabled online evaluators on the batch's **completed** traces (those carrying an
-output), deterministically sampled by `hash(traceId:evaluator)`:
+Enable `online` with a `samplingRate` (and optional `filterName`). After each ingest
+batch, the worker runs enabled online evaluators on the batch's **completed** traces
+(those carrying an output), deterministically sampled by `hash(traceId:evaluator)`:
 
 ```json
 { "name": "auto-quality", "prompt": "…", "provider": "mock", "model": "mock-1",
@@ -74,8 +74,8 @@ curl -u pk-mt-dev:sk-mt-dev -X POST http://localhost:3001/v1/review-queues/q1/it
   -H 'content-type: application/json' -d '{"value":0.8,"comment":"looks good"}'
 ```
 
-The console **Review** page shows each pending item's trace input/output with an inline scoring
-form:
+The console **Review** page shows each pending item's trace input/output with an inline
+scoring form.
 
 ![Review queues — pending items with inline scoring](../../assets/screenshots/review.png)
 
