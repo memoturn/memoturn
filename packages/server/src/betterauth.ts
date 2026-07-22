@@ -1,17 +1,16 @@
+import {
+  oauthProvider,
+  oauthProviderAuthServerMetadata,
+  oauthProviderOpenIdConfigMetadata,
+} from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
 import { sso } from "@better-auth/sso";
 import { prisma } from "@memoturn/db";
 import { redisConnection } from "@memoturn/db/queue";
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
-import {
-  emailOTP,
-  magicLink,
-  mcp,
-  oAuthDiscoveryMetadata,
-  oAuthProtectedResourceMetadata,
-  twoFactor,
-} from "better-auth/plugins";
+import { verifyJwsAccessToken } from "better-auth/oauth2";
+import { emailOTP, jwt, magicLink, twoFactor } from "better-auth/plugins";
 import { createAccessControl } from "better-auth/plugins/access";
 import { admin } from "better-auth/plugins/admin";
 import { haveIBeenPwned } from "better-auth/plugins/haveibeenpwned";
@@ -30,9 +29,19 @@ import { mailerStatus, sendEmail } from "./mailer.js";
  */
 
 // The console origin — the first trusted origin (project switcher, invite/reset links,
-// and the MCP authorize login page all bounce here). Overridable via AUTH_TRUSTED_ORIGINS.
+// and the OAuth authorize login/consent pages all bounce here). Overridable via AUTH_TRUSTED_ORIGINS.
 const consoleOrigin =
   (process.env.AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000").split(",")[0] ?? "http://localhost:3000";
+
+// The API's own base URL + derived OAuth identities. Better Auth appends basePath to
+// baseURL for its context, so the OAuth issuer (JWT `iss`) is `${authBaseURL}/auth`.
+// `apiOrigin` is the canonical OAuth resource identifier: the protected-resource metadata
+// advertises it, spec-compliant MCP clients request it as the `resource` (RFC 8707), and
+// it becomes the JWT `aud` that verifyMcpBearer checks — strict audience binding, so a
+// token minted for another resource can't be replayed against the MCP endpoint.
+const authBaseURL = process.env.AUTH_BASE_URL ?? `http://localhost:${process.env.API_PORT ?? 3001}`;
+const apiOrigin = new URL(authBaseURL).origin;
+const oauthIssuer = `${authBaseURL}/auth`;
 
 /**
  * Social providers, included only when both the id and secret are set — so an unconfigured
@@ -89,6 +98,15 @@ function mapSsoRole(userInfo: Record<string, unknown>): "member" | "admin" {
 const superadminUserIds = (process.env.SUPERADMIN_USER_IDS ?? "")
   .split(",")
   .map((s) => s.trim())
+  .filter(Boolean);
+
+// Headers a fronting proxy sets with the real client IP (e.g. cf-connecting-ip behind
+// Cloudflare, x-real-ip behind nginx). Better Auth keys its rate limiter on this IP — left
+// unset it trusts x-forwarded-for, which a direct-to-origin client can spoof to dodge the
+// brute-force limits. Deployments behind a proxy should pin the header they control.
+const ipHeaders = (process.env.AUTH_IP_HEADERS ?? "")
+  .split(",")
+  .map((h) => h.trim().toLowerCase())
   .filter(Boolean);
 
 /**
@@ -191,6 +209,17 @@ export const auth = betterAuth({
     // allowing existing bootstrap logins) with AUTH_DISABLE_PASSWORD_SIGNUP=true.
     enabled: true,
     disableSignUp: process.env.AUTH_DISABLE_PASSWORD_SIGNUP === "true",
+    // 12-char floor (NIST leans length-over-complexity; HIBP below rejects breached ones).
+    // Only gates NEW passwords — existing shorter passwords still sign in.
+    minPasswordLength: Number(process.env.AUTH_MIN_PASSWORD_LENGTH) || 12,
+    // Cloud/enterprise deployments flip this on to require a verified email before sign-in;
+    // default off so existing dev/self-host accounts aren't locked out.
+    requireEmailVerification: process.env.AUTH_REQUIRE_EMAIL_VERIFICATION === "true",
+    // A password reset is a recovery from possible compromise — kill every other session.
+    revokeSessionsOnPasswordReset: true,
+    onPasswordReset: async ({ user }) => {
+      await recordAuthAudit({ userId: user.id, action: "password.reset", target: user.email });
+    },
     // Password reset via emailed link. The client calls requestPasswordReset({ email,
     // redirectTo: "/reset-password" }); Better Auth verifies the token then bounces to that
     // console route with ?token=… where authClient.resetPassword completes the change.
@@ -225,11 +254,27 @@ export const auth = betterAuth({
   // Social sign-in (Google/GitHub) — present only for providers whose env is configured.
   socialProviders,
   basePath: "/auth",
-  baseURL: process.env.AUTH_BASE_URL ?? `http://localhost:${process.env.API_PORT ?? 3001}`,
+  baseURL: authBaseURL,
+  // The jwt plugin's /token endpoint mints session-bearer JWTs we don't use (OAuth access
+  // tokens come from /oauth2/token); disable it rather than expose a second token surface.
+  disabledPaths: ["/token"],
   secret: process.env.BETTER_AUTH_SECRET ?? "dev-only-change-me",
   trustedOrigins: (process.env.AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000").split(","),
-  // 7-day sessions, refreshed at most daily.
-  session: { expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24 },
+  // 7-day sessions, refreshed at most daily. cookieCache serves getSession from a short-lived
+  // SIGNED cookie instead of a Postgres query — the single biggest auth read on the API (every
+  // console request calls getSession in requireAuth). Tradeoff: an admin ban / session revoke
+  // takes up to maxAge (default 5 min) to bite on an already-issued cookie. RBAC changes are
+  // NOT delayed — role/project resolution stays a live query in getUserProjectAccess.
+  session: {
+    expiresIn: 60 * 60 * 24 * 7,
+    updateAge: 60 * 60 * 24,
+    cookieCache: {
+      enabled: process.env.AUTH_COOKIE_CACHE_DISABLED !== "true",
+      maxAge: Number(process.env.AUTH_COOKIE_CACHE_MAX_AGE) || 300,
+    },
+  },
+  // Self-host posture: never phone home, explicitly (the default is off; this pins it).
+  telemetry: { enabled: false },
   // Brute-force protection on the auth routes (login/signup/reset). On by default in every
   // env (Better Auth only auto-enables in production). Backed by Redis (customStorage) so the
   // counter is shared across API replicas instead of per-process in-memory. Set
@@ -250,20 +295,37 @@ export const auth = betterAuth({
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
     },
+    // Pin the client-IP header to the one the fronting proxy controls (see ipHeaders above).
+    ...(ipHeaders.length > 0 ? { ipAddress: { ipAddressHeaders: ipHeaders } } : {}),
   },
   plugins: [
     // Reject passwords found in known breaches at signup/change (k-anonymity HIBP check).
-    haveIBeenPwned(),
-    // OAuth 2.1 authorization for remote MCP clients (memoturn cloud). Turns this Better Auth
-    // instance into the OAuth server that agent IDEs discover + sign into for the remote MCP
-    // endpoint (apps/api /v1/mcp/:projectId). `loginPage` is where the authorize flow bounces
-    // unauthenticated users — the console's sign-in page. Composes with sso() so enterprise
-    // users can complete the flow via their own IdP. Adds oauthApplication/oauthAccessToken/
-    // oauthConsent tables (see schema.prisma).
-    mcp({
-      loginPage:
-        process.env.MCP_LOGIN_PAGE ??
-        `${(process.env.AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000").split(",")[0]}/login`,
+    // The check FAILS CLOSED: if api.pwnedpasswords.com is unreachable, signup/password-change
+    // 500s — airgapped/offline self-hosts must set AUTH_HIBP_DISABLED=true.
+    haveIBeenPwned({ enabled: process.env.AUTH_HIBP_DISABLED !== "true" }),
+    // Signing keys for JWT OAuth access tokens (jwks table; served at /auth/jwks). Required
+    // by oauthProvider() below; its standalone /token endpoint is disabled via disabledPaths.
+    jwt(),
+    // OAuth 2.1 authorization for remote MCP clients (memoturn cloud) — replaces the
+    // deprecated mcp() plugin. Turns this Better Auth instance into the OAuth server that
+    // agent IDEs discover + sign into for the remote MCP endpoint (apps/api /v1/mcp/:projectId).
+    // PKCE (S256) is mandatory, refresh tokens rotate, and access tokens are JWTs verified
+    // statelessly by verifyMcpBearer below. `loginPage`/`consentPage` are console routes the
+    // authorize flow bounces to with a SIGNED query string the pages must round-trip verbatim.
+    // Composes with sso() so enterprise users can complete the flow via their own IdP.
+    // Adds oauthClient/oauthRefreshToken/oauthAccessToken/oauthConsent tables (schema.prisma).
+    oauthProvider({
+      loginPage: process.env.MCP_LOGIN_PAGE ?? `${consoleOrigin}/login`,
+      consentPage: process.env.MCP_CONSENT_PAGE ?? `${consoleOrigin}/consent`,
+      // MCP IDE clients self-register (RFC 7591). Unauthenticated registration is what the
+      // MCP spec currently requires of authorization servers; revisit when the protocol
+      // settles on Client ID Metadata Documents.
+      allowDynamicClientRegistration: true,
+      allowUnauthenticatedClientRegistration: true,
+      // Exact-match audience allowlist for requested `resource` values. The origin is the
+      // canonical resource for all per-project MCP URLs (prefix rule, RFC 9728); the issuer
+      // is accepted too for clients that default the audience to the auth server.
+      validAudiences: [apiOrigin, oauthIssuer],
     }),
     // Passwordless sign-in via an emailed one-time link. Delivery is best-effort through the
     // shared mailer (dev logs the link to stderr when email is unconfigured).
@@ -336,6 +398,13 @@ export const auth = betterAuth({
       ac,
       roles: orgRoles,
       creatorRole: "owner",
+      // The plugin's defaults (100 members, 100 pending invitations per org) are a wall an
+      // enterprise tenant hits mid-rollout. Raised here; tune per-deploy via env.
+      membershipLimit: Number(process.env.AUTH_ORG_MEMBERSHIP_LIMIT) || 10_000,
+      invitationLimit: Number(process.env.AUTH_ORG_INVITATION_LIMIT) || 1_000,
+      // Re-inviting someone supersedes their older pending invite instead of stacking a
+      // second live credential-bearing link.
+      cancelPendingInvitationsOnReInvite: true,
       // Email an invited teammate a link to accept. Without this, invitations were persisted
       // (pending row + UI badge) but never delivered. The console /accept-invite route reads
       // the id and calls authClient.organization.acceptInvitation.
@@ -446,9 +515,53 @@ export type AuthSession = typeof auth.$Infer.Session;
 
 /**
  * OAuth discovery documents for remote MCP clients, bound to this auth instance. The
- * mcp() plugin also serves these under /auth/.well-known/*, but MCP clients probe them at
- * the domain root — the API mounts these at `/.well-known/oauth-*` (see apps/api). Each
- * returns a Fetch handler `(Request) => Promise<Response>`.
+ * oauthProvider() plugin also serves auth-server + OIDC metadata under /auth/.well-known/*,
+ * but MCP clients probe them at the domain root — the API mounts these at `/.well-known/*`
+ * (see apps/api). Each is a Fetch handler `(Request) => Promise<Response>`.
  */
-export const mcpAuthorizationServerMetadata = oAuthDiscoveryMetadata(auth);
-export const mcpProtectedResourceMetadata = oAuthProtectedResourceMetadata(auth);
+export const mcpAuthorizationServerMetadata = oauthProviderAuthServerMetadata(auth);
+export const mcpOpenIdConfigMetadata = oauthProviderOpenIdConfigMetadata(auth);
+
+/**
+ * RFC 9728 protected-resource metadata for the MCP endpoints. The authorization server
+ * doesn't publish this (it describes the RESOURCE, not the auth server): `resource` is the
+ * canonical identifier MCP clients send as the `resource` param (a prefix of every
+ * /v1/mcp/:projectId URL), and `authorization_servers` points them at our issuer for
+ * the /.well-known/oauth-authorization-server discovery step.
+ */
+export const mcpProtectedResourceMetadata = async (_request: Request): Promise<Response> =>
+  Response.json({
+    resource: apiOrigin,
+    authorization_servers: [oauthIssuer],
+    bearer_methods_supported: ["header"],
+    scopes_supported: ["openid", "profile", "email", "offline_access"],
+  });
+
+// Stable identity for verifyJwsAccessToken's JWKS cache (keyed by object identity).
+const mcpJwksCacheKey = {};
+
+/**
+ * Verify an OAuth 2.1 bearer token (JWT access token) from an MCP request — statelessly,
+ * against the jwt plugin's local JWKS (no DB hit per call, unlike the old getMcpSession).
+ * Strict issuer + audience checks; expiry/nbf enforced by jose. Returns the token's user
+ * (`sub`) and granted scopes, or null for anything invalid.
+ */
+export async function verifyMcpBearer(
+  authorization: string | null | undefined,
+): Promise<{ userId: string; scopes: string[] } | null> {
+  if (!authorization?.startsWith("Bearer ")) return null;
+  const token = authorization.slice("Bearer ".length).trim();
+  if (!token) return null;
+  try {
+    const payload = await verifyJwsAccessToken(token, {
+      jwksFetch: async () => await auth.api.getJwks(),
+      jwksCacheKey: mcpJwksCacheKey,
+      verifyOptions: { issuer: oauthIssuer, audience: [apiOrigin, oauthIssuer] },
+    });
+    if (!payload.sub) return null;
+    const scopes = typeof payload.scope === "string" ? payload.scope.split(" ").filter(Boolean) : [];
+    return { userId: payload.sub, scopes };
+  } catch {
+    return null; // expired, bad signature, wrong issuer/audience — all just "unauthorized"
+  }
+}

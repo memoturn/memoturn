@@ -1,13 +1,13 @@
 import { StreamableHTTPTransport } from "@hono/mcp";
 import {
   authenticateKeys,
-  auth as betterAuth,
   checkRateLimit,
   getUserProjectAccess,
   mcpRateLimitConfig,
   parseBasicAuth,
   recordAudit,
   tools,
+  verifyMcpBearer,
 } from "@memoturn/server";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -26,9 +26,11 @@ import type { Context } from "hono";
  * Two auth paths, both resolving to `{ projectId, actor, allows }` for the URL's project:
  *  1. API-key Basic (`pk-mt-…:sk-mt-…`, self-host / headless) — the key must belong to the
  *     project; `allows(need)` checks the key's scopes.
- *  2. Better Auth OAuth bearer (memoturn cloud IDE click-through) — the mcp() plugin's token
- *     resolves to a userId, then getUserProjectAccess authorizes that user for the project and
- *     yields a role; `allows(need)` = reads for any member, writes for non-VIEWER roles.
+ *  2. OAuth 2.1 bearer (memoturn cloud IDE click-through) — a JWT access token from the
+ *     oauthProvider() plugin, verified statelessly (issuer + audience + signature) by
+ *     verifyMcpBearer; its `sub` is the userId, then getUserProjectAccess authorizes that
+ *     user for the project and yields a role; `allows(need)` = reads for any member, writes
+ *     for non-VIEWER roles.
  *
  * RBAC is per-tool, not per-HTTP-method: every tool call is a POST, so a method-based scope
  * gate can't distinguish reads from writes. The tool's `write` flag drives `allows(need)`.
@@ -48,8 +50,8 @@ async function resolveMcpAuth(c: Context, projectId: string): Promise<McpAuth | 
     return { projectId, actor: `apikey:${creds.publicKey}`, allows: (need) => ctx.scopes.includes(need) };
   }
 
-  // 2. Better Auth OAuth bearer token -> user -> project membership + role.
-  const token = await betterAuth.api.getMcpSession({ headers: c.req.raw.headers });
+  // 2. OAuth 2.1 JWT bearer -> user -> project membership + role.
+  const token = await verifyMcpBearer(c.req.header("authorization"));
   if (token) {
     const access = await getUserProjectAccess(token.userId, projectId);
     // Tenant isolation: getUserProjectAccess falls back to the user's default project when

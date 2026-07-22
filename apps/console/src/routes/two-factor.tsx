@@ -37,7 +37,9 @@ function TwoFactorPage() {
       toast.error(res.error.message ?? "Invalid code");
       return;
     }
-    navigate({ to: dest });
+    // Server-handled destinations (OAuth authorize continuation) need a full page load.
+    if (dest.startsWith("/api/")) window.location.assign(dest);
+    else navigate({ to: dest });
   }
 
   return (

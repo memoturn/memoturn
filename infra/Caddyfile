@@ -19,7 +19,7 @@
 	# OAuth discovery for remote MCP clients — served by the API at the domain root (not the
 	# console), so route these two well-known paths straight to the API with the path intact.
 	# (`handle` accepts a single matcher token, hence the named matcher for both paths.)
-	@oauthDiscovery path /.well-known/oauth-authorization-server /.well-known/oauth-protected-resource
+	@oauthDiscovery path /.well-known/oauth-authorization-server /.well-known/oauth-protected-resource /.well-known/openid-configuration
 	handle @oauthDiscovery {
 		reverse_proxy api:3001
 	}

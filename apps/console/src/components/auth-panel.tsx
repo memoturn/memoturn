@@ -65,7 +65,9 @@ export function AuthPanel({ mode, redirect }: { mode: Mode; redirect?: string })
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
 
-  const go = () => navigate({ to: dest });
+  // Server-handled destinations (e.g. the OAuth authorize continuation at
+  // /api/auth/oauth2/authorize?...) need a full page load — they aren't SPA routes.
+  const go = () => (dest.startsWith("/api/") ? window.location.assign(absDest) : navigate({ to: dest }));
   const fail = (m?: string) => toast.error(m ?? "Something went wrong");
   // When the account has 2FA enabled, sign-in returns twoFactorRedirect instead of a session;
   // finish on the dedicated challenge page (which keeps the post-auth destination).

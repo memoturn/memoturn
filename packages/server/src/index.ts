@@ -29,6 +29,7 @@ export * from "./mirror.js";
 export * from "./modelpricing.js";
 export * from "./mutablestate.js";
 export * from "./net.js";
+export * from "./oauthclients.js";
 export * from "./otel.js";
 export * from "./payloads.js";
 export * from "./playground.js";

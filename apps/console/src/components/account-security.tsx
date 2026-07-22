@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+import { api } from "../lib/api";
 import { authClient, useSession } from "../lib/auth";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -21,14 +22,16 @@ async function authApi<T>(path: string, init?: RequestInit): Promise<T> {
 type PasskeyRow = { id: string; name?: string | null; deviceType?: string; createdAt?: string };
 
 /**
- * Per-user account security: two-factor (TOTP + backup codes) and passkeys (WebAuthn).
- * Rendered in the Settings → Security tab. All state is the signed-in user's own.
+ * Per-user account security: two-factor (TOTP + backup codes), passkeys (WebAuthn), and
+ * connected OAuth clients (remote MCP IDEs/agents). Rendered in the Settings → Security
+ * tab. All state is the signed-in user's own.
  */
 export function AccountSecurity() {
   return (
     <div className="space-y-6">
       <TwoFactorCard />
       <PasskeysCard />
+      <McpConnectionsCard />
     </div>
   );
 }
@@ -226,6 +229,69 @@ function PasskeysCard() {
           </ul>
         ) : (
           <p className="text-sm text-muted-foreground">No passkeys registered yet.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function McpConnectionsCard() {
+  const qc = useQueryClient();
+  const { data: connections } = useQuery({
+    queryKey: ["mcp-connections"],
+    queryFn: () => api.listMcpConnections(),
+  });
+
+  const disconnect = useMutation({
+    mutationFn: (consentId: string) => api.disconnectMcpClient(consentId),
+    onSuccess: () => {
+      toast.success("Client disconnected — its tokens are revoked");
+      qc.invalidateQueries({ queryKey: ["mcp-connections"] });
+    },
+    onError: (e) => toast.error(`Could not disconnect: ${String(e)}`),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Connected MCP clients</CardTitle>
+        <CardDescription>
+          IDEs and agents you've authorized via OAuth to use memoturn's remote MCP endpoint. Disconnecting revokes the
+          client's refresh tokens; access ends within the hour as its last token expires.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {connections && connections.length > 0 ? (
+          <ul className="divide-y rounded border">
+            {connections.map((cn) => (
+              <li key={cn.consentId} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                <div className="min-w-0">
+                  <div className="truncate">
+                    {cn.clientName || cn.clientId}
+                    {cn.clientUri ? (
+                      <span className="ml-2 truncate text-xs text-muted-foreground">{cn.clientUri}</span>
+                    ) : null}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {cn.scopes.join(", ")}
+                    {cn.createdAt ? ` · authorized ${new Date(cn.createdAt).toLocaleDateString()}` : ""}
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={disconnect.isPending}
+                  onClick={() => disconnect.mutate(cn.consentId)}
+                >
+                  Disconnect
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No connected clients. When an IDE connects to the remote MCP endpoint with OAuth, it will appear here.
+          </p>
         )}
       </CardContent>
     </Card>

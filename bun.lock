@@ -43,6 +43,7 @@
       "name": "@memoturn/console",
       "version": "0.2.0",
       "dependencies": {
+        "@better-auth/oauth-provider": "1.6.20",
         "@better-auth/passkey": "1.6.20",
         "@better-auth/sso": "1.6.20",
         "@fontsource-variable/inter-tight": "^5",
@@ -226,6 +227,7 @@
       "name": "@memoturn/server",
       "version": "0.2.0",
       "dependencies": {
+        "@better-auth/oauth-provider": "1.6.20",
         "@better-auth/passkey": "1.6.20",
         "@better-auth/sso": "1.6.20",
         "@dsnp/parquetjs": "1.8.8",
@@ -522,6 +524,8 @@
     "@better-auth/memory-adapter": ["@better-auth/memory-adapter@1.6.20", "", { "peerDependencies": { "@better-auth/core": "^1.6.20", "@better-auth/utils": "0.4.2" } }, "sha512-J5Ni0LlFijbzXlwu2rFHaD8zEFocmajyzWkRnHsq8LhV/Dk4iWQwwnqzLrPoDQEj8roECAUF03hrIeMzqWRqJQ=="],
 
     "@better-auth/mongo-adapter": ["@better-auth/mongo-adapter@1.6.20", "", { "peerDependencies": { "@better-auth/core": "^1.6.20", "@better-auth/utils": "0.4.2", "mongodb": "^6.0.0 || ^7.0.0" }, "optionalPeers": ["mongodb"] }, "sha512-ClDBJf6h4g85WJswxwQwxLaiyRU67Gmz/uaIf19tY1gqlLJDykSGjmqRNSBMG5rWABNzcNqbO4KG31rYUldbIw=="],
+
+    "@better-auth/oauth-provider": ["@better-auth/oauth-provider@1.6.20", "", { "dependencies": { "jose": "^6.1.3", "zod": "^4.3.6" }, "peerDependencies": { "@better-auth/core": "^1.6.20", "@better-auth/utils": "0.4.2", "@better-fetch/fetch": "1.3.1", "better-auth": "^1.6.20", "better-call": "1.3.6" } }, "sha512-+YzrmMN9N5pv8s/nOaF6dUS3s0yH4PykZWLdaEeT7ZMWB+zEAa4E8TYKBH2CcWmlXmoYR4uAHtZYI+QiEu/guw=="],
 
     "@better-auth/passkey": ["@better-auth/passkey@1.6.20", "", { "dependencies": { "@simplewebauthn/browser": "^13.2.2", "@simplewebauthn/server": "^13.2.3", "zod": "^4.3.6" }, "peerDependencies": { "@better-auth/core": "^1.6.20", "@better-auth/utils": "0.4.2", "@better-fetch/fetch": "1.3.1", "better-auth": "^1.6.20", "better-call": "1.3.6", "nanostores": "^1.0.1" } }, "sha512-C3EZcQxVKJOjF7Wvfa1nRq3IBXReRDB4z36+OK1V/XjvBIEcIVLFcaG19JmsYVJorMPZ7x5JZNUjkU38CyYAcg=="],
 
