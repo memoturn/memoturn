@@ -1,6 +1,6 @@
 # ADR 0001 — Storage roles: Doris as analytical mirror, Postgres authoritative for mutable state
 
-- **Status:** Accepted — direction agreed; implementation **trigger-gated** (see [Trigger](#trigger)).
+- **Status:** Accepted and **Implemented** — all phases merged (see [Implementation status](#implementation-status)).
 - **Date:** 2026-07-21
 - **Context tags:** ingest pipeline, telemetry store, merge-on-write, data model
 
@@ -160,4 +160,32 @@ Execute the plan when any of these is true:
 2. Ingest throughput makes the read-merge base-fetch + entity lock a measured hot-path bottleneck, **or**
 3. A customer/compliance requirement demands provably-correct mutable state.
 
-Until then: keep #140, and keep this ADR current.
+The plan was executed (the correctness win landed ahead of the trigger — see below).
+
+## Implementation status
+
+Fully implemented and merged:
+
+- **Phase 1 — authoritative Postgres state:** `TraceState`/`ObservationState`/`ScoreState` + the
+  field-level merge (#142, #143, #144). **#147** was a correctness fix surfaced by a live local-stack
+  run: the API had been persisting the *zod-parsed* events to blob, so the merge couldn't tell a
+  client value from a filled-in default — defaulted fields (`environment`, score `source`/`dataType`)
+  were still over-written on partial updates (the same latent bug the old mapper had). The API now
+  persists the **pre-default** bodies (`apps/api/src/ingest-partition.ts`); the worker re-parses, so
+  the Doris path is unchanged.
+- **Phase 2 — mirror + cutover:** mirror builders (#145), an additive shadow-compare that proved
+  equivalence on real traffic (#146), then the **cutover** (#148) — Doris is written from the merged
+  state, and the read-merge base-fetch + the #140 entity lock were removed.
+- **Perf:** the per-row upserts are batched into one transaction (#149).
+- **Phase 3 — bounded working set:** hourly `state-prune` cron (#150) drops `*State` rows past
+  `STATE_RETENTION_HOURS` (default 72h); **rehydrate** (#151) seeds state from the Doris row before
+  merging a post-prune update, so no settled fields are lost.
+
+### Operational guidance
+
+- Set `STATE_RETENTION_HOURS` comfortably above the longest real mutation window. Long-running agents
+  that stream spans over hours/days need a larger value, or they hit the rehydrate path frequently —
+  correct, but each does a Doris read. Watch `mutable_state_rehydrated_total`; a sustained rise means
+  the window is too short.
+- The merge is load-bearing (a Postgres failure retries the ingest job); blob remains the replay
+  source, so both stores stay rebuildable.
