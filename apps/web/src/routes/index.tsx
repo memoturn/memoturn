@@ -163,7 +163,7 @@ function Landing() {
               </a>
             </Button>
             <Button asChild variant="outline" size="lg" className="group">
-              <a href={GITHUB_URL} className="no-underline" target="_blank" rel="noreferrer">
+              <a href={GITHUB_URL} className="no-underline" target="_blank" rel="noopener">
                 Star on GitHub
                 <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
               </a>
@@ -416,7 +416,7 @@ function Landing() {
               size="lg"
               className="border-(--on-gradient-border) bg-(--on-gradient-button-bg) text-(--on-gradient-fg) hover:border-(--on-gradient-fg) hover:bg-(--on-gradient-button-bg) hover:text-(--on-gradient-fg)"
             >
-              <a href={GITHUB_URL} className="no-underline" target="_blank" rel="noreferrer">
+              <a href={GITHUB_URL} className="no-underline" target="_blank" rel="noopener">
                 Star on GitHub
               </a>
             </Button>

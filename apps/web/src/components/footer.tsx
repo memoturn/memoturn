@@ -38,7 +38,7 @@ export default function Footer() {
           <span className="font-mono text-xs tracking-[0.04em] text-muted-foreground">Apache-2.0</span>
           <nav aria-label="Footer" className="ml-auto flex flex-wrap items-center gap-1">
             {FOOTER_LINKS.map((l) => (
-              <a key={l.label} href={l.href} className={FOOTER_LINK_CLASS} target="_blank" rel="noreferrer">
+              <a key={l.label} href={l.href} className={FOOTER_LINK_CLASS} target="_blank" rel="noopener">
                 {l.label}
               </a>
             ))}
