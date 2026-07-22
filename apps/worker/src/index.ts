@@ -3,6 +3,7 @@ import { QUEUE_NAMES, QUEUE_PREFIX } from "@memoturn/core";
 import { connectionOptions, type ExperimentJob, getDlqQueue, getIngestQueue, type IngestJob } from "@memoturn/db/queue";
 import {
   applyAllRetention,
+  consumeRehydrateRate,
   evaluateAllAlerts,
   evaluateBudgets,
   pruneMutableState,
@@ -134,11 +135,15 @@ const maintenanceWorker = new Worker(
     } else if (job.name === "alert-eval") {
       // Short TTL: this runs every minute, so a stuck holder shouldn't block the next tick long.
       const ran = await withLock("alert-eval", 120, async () => {
-        // dlq_depth alert rules read the global DLQ queue depth (jobs carry projectId, but
-        // the queue count is process-global) — inject it so the engine needn't touch BullMQ.
+        // Inject the process-global signals the engine can't get from a Doris window: the DLQ
+        // queue depth, and the rehydrate/min rate (a sustained rise = STATE_RETENTION_HOURS too short).
         const dlqCounts = await dlq.getJobCounts();
         const dlqDepth = (dlqCounts.waiting ?? 0) + (dlqCounts.completed ?? 0) + (dlqCounts.failed ?? 0);
-        const [alerts, budgets] = await Promise.all([evaluateAllAlerts({ dlqDepth }), evaluateBudgets()]);
+        const rehydrateRate = await consumeRehydrateRate();
+        const [alerts, budgets] = await Promise.all([
+          evaluateAllAlerts({ dlqDepth, rehydrateRate }),
+          evaluateBudgets(),
+        ]);
         if (alerts.fired > 0 || budgets.notified > 0)
           console.log(`[alerts] ${alerts.fired} fired, ${budgets.notified} budget step(s) notified`);
       });

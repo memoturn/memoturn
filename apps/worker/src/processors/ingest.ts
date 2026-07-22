@@ -16,6 +16,7 @@ import {
   getSamplingRate,
   getScoreStates,
   getTraceStates,
+  incrRehydrateCounter,
   listOnlineEvaluators,
   loadMaskingPolicy,
   loadProjectPriceOverrides,
@@ -164,6 +165,8 @@ async function rehydratePruned(
     await seedObservationStates(projectId, dorisObs);
     inc("mutable_state_rehydrated_total", { entity: "observation" }, dorisObs.length);
   }
+  // Cross-replica counter for the `rehydrate_rate` alert (best-effort).
+  await incrRehydrateCounter(dorisTraces.length + dorisObs.length);
 }
 
 export async function processIngest(job: Job<IngestJob>): Promise<void> {

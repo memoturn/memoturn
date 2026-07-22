@@ -1,5 +1,6 @@
 import type { GenerationBody, ScoreBody, TraceBody } from "@memoturn/core";
 import { prisma } from "@memoturn/db";
+import { redisConnection } from "@memoturn/db/queue";
 import type { ObservationRow, TraceRow } from "@memoturn/telemetry";
 
 /**
@@ -444,4 +445,32 @@ export async function pruneMutableState(cutoff: Date): Promise<StatePruneResult>
     prisma.scoreState.deleteMany({ where: { updatedAt: { lt: cutoff } } }),
   ]);
   return { traces: traces.count, observations: observations.count, scores: scores.count };
+}
+
+// A Redis counter (cross-replica) so the `rehydrate_rate` alert reflects GLOBAL rehydrations, not
+// one worker's in-process count — a sustained rate means STATE_RETENTION_HOURS is too short.
+const REHYDRATE_KEY = "memoturn:metric:rehydrated";
+const REHYDRATE_SEEN_KEY = "memoturn:metric:rehydrated:seen";
+
+/** Bump the global rehydrate counter (best-effort; never blocks ingest). */
+export async function incrRehydrateCounter(count: number): Promise<void> {
+  if (count <= 0) return;
+  try {
+    await redisConnection().incrby(REHYDRATE_KEY, count);
+  } catch {
+    // metric only — a Redis blip must not affect ingest
+  }
+}
+
+/** Rehydrations since the previous call (the per-tick rate the alert-eval cron injects). */
+export async function consumeRehydrateRate(): Promise<number> {
+  try {
+    const redis = redisConnection();
+    const [total, seen] = await Promise.all([redis.get(REHYDRATE_KEY), redis.get(REHYDRATE_SEEN_KEY)]);
+    const t = Number(total ?? 0);
+    await redis.set(REHYDRATE_SEEN_KEY, String(t));
+    return Math.max(0, t - Number(seen ?? 0));
+  } catch {
+    return 0;
+  }
 }
