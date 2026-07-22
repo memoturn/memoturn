@@ -6,8 +6,6 @@ import Header from "../components/header";
 
 import appCss from "../styles.css?url";
 
-const THEME_INIT_SCRIPT = `(function(){try{var stored=window.localStorage.getItem('theme');var mode=(stored==='light'||stored==='dark'||stored==='auto')?stored:'auto';var prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;var resolved=mode==='auto'?(prefersDark?'dark':'light'):mode;var root=document.documentElement;root.classList.remove('light','dark');root.classList.add(resolved);if(mode==='auto'){root.removeAttribute('data-theme')}else{root.setAttribute('data-theme',mode)}root.style.colorScheme=resolved;}catch(e){}})();`;
-
 const TITLE = "Memoturn — open-source LLM observability, evals & prompt management";
 const DESCRIPTION =
   "Trace every LLM call, track cost, tokens, and latency, run offline, online, and human evals, and ship versioned prompts with deployment channels. Self-hostable, OpenTelemetry-native, Apache-2.0.";
@@ -19,7 +17,7 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: TITLE },
       { name: "description", content: DESCRIPTION },
-      { name: "theme-color", content: "#328f97" },
+      { name: "theme-color", content: "#0d1417" },
       { property: "og:title", content: TITLE },
       { property: "og:description", content: DESCRIPTION },
       { property: "og:type", content: "website" },
@@ -110,11 +108,11 @@ function RootNotFound() {
 }
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  // The marketing surface is dark-only by design (DESIGN.md): the dark
+  // instrument panel IS the brand, so there is no theme toggle here.
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" data-theme="dark" style={{ colorScheme: "dark" }} suppressHydrationWarning>
       <head>
-        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static theme-init script, no user input */}
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <HeadContent />
       </head>
       <body className="font-sans antialiased [overflow-wrap:anywhere] selection:bg-selection">

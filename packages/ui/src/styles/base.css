@@ -19,7 +19,6 @@ body {
 	-moz-osx-font-smoothing: grayscale;
 	font-synthesis-weight: none;
 	text-rendering: optimizeLegibility;
-	font-feature-settings: "cv11", "ss01", "ss03";
 }
 
 /* Scrollbar — subtle by default, brand teal on hover/active. WebKit scrollbars
@@ -116,11 +115,81 @@ pre code {
 	padding-inline: clamp(1rem, 3vw, 3rem);
 }
 
+/* Display voice — Archivo pushed into its expanded width axis with tight
+ * tracking. The width shift (not just size) is what separates display from
+ * body when a single family carries the whole surface. */
 .display-title {
 	font-family: var(--font-heading);
 	font-weight: 700;
-	letter-spacing: -0.02em;
-	line-height: 1.05;
+	font-stretch: 110%;
+	letter-spacing: -0.03em;
+	line-height: 1.04;
+	text-wrap: balance;
+}
+
+/* Two-tone headline — the bright key phrase carries the sentence, the
+ * elaboration recedes. Compose as <h2 class="display-title">Key phrase.
+ * <span class="tone-soft">Elaboration.</span></h2> */
+.tone-soft {
+	color: var(--muted-foreground);
+}
+
+/* Framed console screenshot — hairline border, panel background, and a
+ * lagoon glow washing down from the top edge. The glow is the brand's
+ * dimensionality on dark surfaces; never use borders thicker than 1px. */
+.frame-shot {
+	position: relative;
+	isolation: isolate;
+	overflow: hidden;
+	border: 1px solid var(--rule);
+	border-radius: var(--radius-xl);
+	background: var(--card);
+}
+
+.frame-shot::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	background: var(--glow-lagoon);
+	pointer-events: none;
+}
+
+.frame-shot > img {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	object-position: top;
+}
+
+/* Glow panel — dark card lit by a faint lagoon wash from its top edge.
+ * Hover deepens the wash; motion is color only, no transforms. */
+.glow-panel {
+	position: relative;
+	isolation: isolate;
+	background: var(--card);
+}
+
+.glow-panel::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	background: var(--glow-lagoon);
+	opacity: 0;
+	transition: opacity 260ms var(--ease-swell, ease);
+	pointer-events: none;
+}
+
+.glow-panel:hover::before {
+	opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.glow-panel::before {
+		transition: none;
+	}
 }
 
 /* Kicker — small uppercase tracked label that sits above a heading or marks a section.

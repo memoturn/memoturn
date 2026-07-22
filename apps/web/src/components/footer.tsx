@@ -4,7 +4,16 @@ import { Link } from "@tanstack/react-router";
 import { DOCS_PUBLIC_URL, GITHUB_URL } from "../lib/public-urls.ts";
 
 const FOOTER_LINK_CLASS =
-  "rounded-md px-2.5 py-1.5 text-[13px] font-medium text-muted-foreground no-underline transition-colors hover:bg-foam hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:hover:bg-card";
+  "rounded-md px-2.5 py-1.5 text-[13px] font-medium text-muted-foreground no-underline transition-colors hover:bg-card hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+
+const FOOTER_LINKS = [
+  { label: "Docs", href: DOCS_PUBLIC_URL },
+  { label: "Getting started", href: `${DOCS_PUBLIC_URL}/getting-started/` },
+  { label: "Use cases", href: `${DOCS_PUBLIC_URL}/use-cases/` },
+  { label: "SDKs", href: `${DOCS_PUBLIC_URL}/sdk-typescript/` },
+  { label: "Roadmap", href: `${DOCS_PUBLIC_URL}/roadmap/` },
+  { label: "GitHub", href: GITHUB_URL },
+];
 
 export default function Footer() {
   const year = new Date().getFullYear();
@@ -26,14 +35,13 @@ export default function Footer() {
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-4 border-t border-border pt-[18px]">
-          <span className="kicker m-0 text-muted-foreground">Apache-2.0</span>
+          <span className="font-mono text-xs tracking-[0.04em] text-muted-foreground">Apache-2.0</span>
           <nav aria-label="Footer" className="ml-auto flex flex-wrap items-center gap-1">
-            <a href={DOCS_PUBLIC_URL} className={FOOTER_LINK_CLASS} target="_blank" rel="noreferrer">
-              Docs
-            </a>
-            <a href={GITHUB_URL} className={FOOTER_LINK_CLASS} target="_blank" rel="noreferrer">
-              GitHub
-            </a>
+            {FOOTER_LINKS.map((l) => (
+              <a key={l.label} href={l.href} className={FOOTER_LINK_CLASS} target="_blank" rel="noreferrer">
+                {l.label}
+              </a>
+            ))}
           </nav>
         </div>
       </div>
