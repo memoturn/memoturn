@@ -20,11 +20,22 @@ memoturn has **no generated API docs** (Scalar/OpenAPI are runtime-only). `CLAUD
 | `apps/worker/src/index.ts` crons | CLAUDE.md |
 | `packages/server/src/mcp-tools.ts` tool names | apps/mcp/README.md |
 | `apps/api/src/app.ts` routes | docs/api.md tables (checked by hand, not by the script) |
+| `docs/*.md` content | apps/docs/src/content/docs/*.md site mirror (checked by hand, not by the script) |
+| `apps/mcp/README.md` + `packages/server/src/mcp-tools.ts` + `apps/api/src/mcp.ts` | apps/docs/src/content/docs/mcp.md (no docs/mcp.md exists) |
 
 ## Rule
 
 **Code wins; docs follow.** When `docs:check` flags drift, read the code, then edit the doc to match — never the reverse. Re-run `bun run docs:check` until green, then `bun run format`.
 
-The drift checker covers five mechanical couplings; the `app.ts` → `docs/api.md` endpoint tables are not diffed automatically — review those by hand when routes change.
+The drift checker covers five mechanical couplings; two are hand-checked only:
 
-For a full sweep-and-fix pass, delegate to the **doc-sync-auditor** agent.
+- `app.ts` → `docs/api.md` endpoint tables — review when routes change.
+- `docs/*.md` → the **docs-site mirror** (`apps/docs/src/content/docs/`) — when a feature lands in
+  a source doc, the site page must be resynced by hand (whole-body replace, not line patches).
+  On site pages the script only validates the five mechanical facts, so content staleness is silent.
+
+## Site mirror conventions
+
+Site pages = Starlight frontmatter (`title`/`description`, kept) + the source body minus its `# H1`, with these adaptations: `./x.md` → `/x/` links (anchors `→ /x/#y`), repo-file refs → GitHub blob links, mermaid → ASCII (no mermaid plugin), images `./images/*` → `../../assets/screenshots/*` (omit if missing; keep site-only screenshots), and **no competitor names on public pages** (neutralize, don't copy — docs/roadmap.md's Horizon-3 intro is the known case). `mcp.md` is the exception with no `docs/` source — it mirrors `apps/mcp/README.md` + `packages/server/src/mcp-tools.ts` + `apps/api/src/mcp.ts`. Verify with `bun --filter @memoturn/docs build`.
+
+For a full sweep-and-fix pass (mechanical + site parity), delegate to the **doc-sync-auditor** agent.
