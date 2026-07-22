@@ -225,6 +225,7 @@ body {
  * outer page-frame slot only; otherwise the inner content row paints a
  * second short rule under the logo + search. */
 header.header {
+	position: relative;
 	background: var(--background);
 	border-bottom: 1px solid var(--border);
 	box-shadow: none;
@@ -232,6 +233,45 @@ header.header {
 
 header.header > .header {
 	border-bottom: 0;
+}
+
+/* Lit edge — the center-anchored lagoon hairline from the marketing site's
+ * vocabulary, lighting structural boundaries. Static, always paired with the
+ * existing hairline border it sits on. */
+header.header::after,
+.memoturn-hero::after,
+.m-hero-card::before {
+	content: "";
+	position: absolute;
+	left: 12%;
+	right: 12%;
+	height: 1px;
+	z-index: 1;
+	background: linear-gradient(
+		90deg,
+		transparent,
+		color-mix(in oklab, var(--lagoon) 35%, transparent) 50%,
+		transparent
+	);
+	pointer-events: none;
+}
+
+header.header::after {
+	bottom: -1px;
+}
+
+/* The hero band clips at its bounds, so its bottom light sits inside the
+ * border rather than on it. */
+.memoturn-hero::after {
+	bottom: 0;
+}
+
+.m-hero-card {
+	position: relative;
+}
+
+.m-hero-card::before {
+	top: -1px;
 }
 
 .site-title {

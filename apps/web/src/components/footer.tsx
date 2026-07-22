@@ -19,7 +19,7 @@ export default function Footer() {
   const year = new Date().getFullYear();
 
   return (
-    <footer className="border-t border-border bg-background pt-14 pb-10">
+    <footer className="lit-edge border-t border-border bg-background pt-14 pb-10">
       <div className="page-wrap grid gap-6">
         <div className="flex flex-wrap items-center gap-3">
           <Link

@@ -120,6 +120,6 @@ In brand-mark/logo lockups (web header + footer, docs site title, console sideba
 ## Reference
 
 - Tokens: [packages/ui/src/styles/tokens.css](../../packages/ui/src/styles/tokens.css)
-- Utility classes + keyframes (`.display-title`, `.tone-soft`, `.frame-shot`, `.glow-panel`, `.rise-in`, `.atoll-band`): [packages/ui/src/styles/base.css](../../packages/ui/src/styles/base.css)
+- Utility classes + keyframes (`.display-title`, `.tone-soft`, `.frame-shot`, `.glow-panel`, `.lit-edge`/`.lit-edge--bottom`, `.rise-in`, `.atoll-band`): [packages/ui/src/styles/base.css](../../packages/ui/src/styles/base.css). Lit edges run at 35% on structural boundaries (sections, header, footer, ledger tops) and 55% on `.frame-shot`; they light an existing hairline, never replace one.
 - BrandMark: [packages/ui/src/composite/BrandMark.tsx](../../packages/ui/src/composite/BrandMark.tsx)
 - Screenshot pipeline: [scripts/screenshots.ts](../../scripts/screenshots.ts)
