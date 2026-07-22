@@ -1,0 +1,13 @@
+# Edge headers for memoturn.ai static assets — Vite copies public/ into
+# dist/client (the Workers assets directory), and Workers Static Assets honors
+# this file. These rules only apply to asset responses; SSR HTML responses get
+# their headers from src/server.ts (assets are served before the worker runs,
+# so they'd otherwise carry no security headers at all).
+
+/*
+  X-Content-Type-Options: nosniff
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+# Hashed build assets are content-addressed — cache forever.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
