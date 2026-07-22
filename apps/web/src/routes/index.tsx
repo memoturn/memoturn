@@ -1,11 +1,11 @@
 import { BrandMark, Button } from "@memoturn/ui";
 import { createFileRoute } from "@tanstack/react-router";
 import { ArrowRightIcon } from "lucide-react";
-
 import heroDashboard from "../assets/shots/hero-dashboard.png";
 import shotEvaluators from "../assets/shots/shot-evaluators.png";
 import shotPrompt from "../assets/shots/shot-prompt.png";
 import shotWaterfall from "../assets/shots/shot-waterfall.png";
+import CopyChip from "../components/copy-chip";
 import { DOCS_PUBLIC_URL, GITHUB_URL } from "../lib/public-urls.ts";
 
 export const Route = createFileRoute("/")({
@@ -202,7 +202,7 @@ function Landing() {
               maskImage: "linear-gradient(to bottom, #000 78%, transparent 100%)",
             }}
           >
-            <div className="frame-shot">
+            <div className="frame-shot frame-shot--hero">
               <img
                 src={heroDashboard}
                 width={2880}
@@ -271,7 +271,10 @@ function Landing() {
           </div>
           <div className="grid border-t border-l border-[--rule] bg-background md:grid-cols-3">
             {FEATURES.map((f) => (
-              <article key={f.key} className="glow-panel flex flex-col gap-4 border-r border-b border-[--rule] pb-8">
+              <article
+                key={f.key}
+                className="group/card glow-panel flex flex-col gap-4 border-r border-b border-[--rule] pb-8"
+              >
                 <div className="overflow-hidden border-b border-[--rule]" style={{ aspectRatio: "16 / 10" }}>
                   <img
                     src={f.shot}
@@ -279,7 +282,7 @@ function Landing() {
                     height={f.shotSize.height}
                     alt={f.shotAlt}
                     loading="lazy"
-                    className="size-full object-cover object-top"
+                    className="size-full object-cover object-top motion-safe:transition-transform motion-safe:duration-500 motion-safe:ease-(--ease-tide,cubic-bezier(0.16,1,0.3,1)) motion-safe:group-hover/card:scale-[1.03]"
                   />
                 </div>
                 <div className="flex grow flex-col gap-3.5 px-7">
@@ -394,8 +397,8 @@ function Landing() {
             Trace your first LLM call in minutes.
           </h2>
           <p className="mx-auto mt-5 max-w-[56ch] text-pretty text-base leading-[1.6] text-(--on-gradient-fg-soft) sm:text-lg">
-            Open source, Apache-2.0. Run <code className="bg-white/12 text-inherit">bun run setup && bun run dev</code>{" "}
-            locally, or docker compose for production, with Helm on Kubernetes when you outgrow one host.
+            Open source, Apache-2.0. One command locally, docker compose for production, Helm on Kubernetes when you
+            outgrow one host.
           </p>
           <div className="mt-9 flex flex-wrap items-center justify-center gap-3.5">
             <Button
@@ -417,6 +420,9 @@ function Landing() {
                 Star on GitHub
               </a>
             </Button>
+          </div>
+          <div className="mt-5 flex justify-center">
+            <CopyChip command="bun run setup && bun run dev" />
           </div>
         </div>
       </section>
