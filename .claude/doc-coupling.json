@@ -58,6 +58,13 @@
     },
     {
       "match": [
+        ".claude/agents/*.md",
+        ".claude/skills/*/SKILL.md"
+      ],
+      "note": "The agent/skill rosters in .claude/README.md hand-restate every agent (name/model/color/use) and skill. If you added, renamed, or re-scoped an agent or skill, update the README tables. Agent↔skill pairs use `skills:` preloading — the skill is the knowledge source of truth; keep agent bodies procedure-only."
+    },
+    {
+      "match": [
         "packages/telemetry/src/store.ts",
         "packages/telemetry/src/doris/*.ts",
         "infra/doris/*.sql"

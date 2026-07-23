@@ -1,6 +1,7 @@
 ---
 name: sync-docs
 description: How memoturn keeps hand-written docs in sync with code — the coupling map between code facts and docs, how to run the drift checker, and how to fix drift. Use when editing package.json scripts, ports, dev credentials, worker crons, /v1 routes, or MCP tools, or when asked to check/update the docs.
+paths: docs/*.md, apps/docs/src/content/docs/**
 ---
 
 # Keep memoturn docs in sync
@@ -36,6 +37,6 @@ The drift checker covers five mechanical couplings; two are hand-checked only:
 
 ## Site mirror conventions
 
-Site pages = Starlight frontmatter (`title`/`description`, kept) + the source body minus its `# H1`, with these adaptations: `./x.md` → `/x/` links (anchors `→ /x/#y`), repo-file refs → GitHub blob links, mermaid → ASCII (no mermaid plugin), images `./images/*` → `../../assets/screenshots/*` (omit if missing; keep site-only screenshots), and **no competitor names on public pages** (neutralize, don't copy — docs/roadmap.md's Horizon-3 intro is the known case). `mcp.md` is the exception with no `docs/` source — it mirrors `apps/mcp/README.md` + `packages/server/src/mcp-tools.ts` + `apps/api/src/mcp.ts`. Verify with `bun --filter @memoturn/docs build`.
+Site pages = Starlight frontmatter (`title`/`description`, kept — update `description` only if the page's scope materially changed) + the source body minus its `# H1`, with these adaptations: `./x.md` → `/x/` links (anchors `→ /x/#y`), repo-file refs → GitHub blob links, mermaid → ASCII (no mermaid plugin), images `./images/*` → `../../assets/screenshots/*` (omit if missing; keep site-only screenshot enrichments), and **no competitor names on public pages** (neutralize, don't copy — docs/roadmap.md's Horizon-3 intro is the known case). Two exceptions: `mcp.md` has no `docs/` source — it mirrors `apps/mcp/README.md` + `packages/server/src/mcp-tools.ts` + `apps/api/src/mcp.ts` (incl. the OAuth story in `packages/server/src/betterauth.ts`); and site-only pages (`index.mdx`, `use-cases.mdx`, `getting-started.mdx`) are adaptations, not mirrors — leave their structure alone, only fix factual drift. Verify with `bun --filter @memoturn/docs build` (must exit 0, all pages).
 
 For a full sweep-and-fix pass (mechanical + site parity), delegate to the **doc-sync-auditor** agent.

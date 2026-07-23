@@ -1,6 +1,7 @@
 ---
 name: add-evaluator
 description: How to add or change an evaluator in memoturn — LLM-as-judge config, online vs offline runs, the deterministic per-trace sampling, the never-fail-ingestion rule, and how scores are written back. Use when working on evaluators (packages/server/src/evaluators.ts), online evals in the worker, or the EVAL score path.
+paths: packages/server/src/evaluators.ts
 ---
 
 # Add / change an evaluator

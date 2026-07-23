@@ -1,6 +1,7 @@
 ---
 name: change-prisma-schema
 description: How to change the Prisma/Postgres schema in memoturn — add a model/field/relation, run the migration with correct env loading, regenerate the client, and the Project reverse-relation convention. Use when editing packages/db/prisma/schema.prisma.
+paths: packages/db/prisma/**
 ---
 
 # Change the Prisma schema

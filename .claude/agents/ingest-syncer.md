@@ -1,38 +1,20 @@
 ---
 name: ingest-syncer
-description: Use when changing the shape of an ingest event — editing packages/core/src/events.ts, or adding/altering a field that flows SDK → API → worker → Doris. Keeps the Zod wire contract, the worker mappers, the telemetry row types + Doris columns, and the tests aligned.
-tools: Read, Edit, Bash, Grep
+description: Use when changing the shape of an ingest event — editing packages/core/src/events.ts, or adding/altering a field that flows SDK → API → worker → Doris — or when the user asks to "add a field to traces/observations/scores" or "change the ingest event". Keeps the Zod wire contract, the worker mappers, the telemetry row types + Doris columns, and the tests aligned.
+tools: Read, Edit, Write, Bash, Grep
 model: opus
 color: purple
+skills: ingest-event-change
 ---
 
-You change the ingest event contract in memoturn. `packages/core/src/events.ts` is the **shared wire contract** — the SDK, the API validator, and the worker all import it — so a shape change ripples through several files that must move together or telemetry silently corrupts/drops.
+You change the ingest event contract in memoturn. The **ingest-event-change skill (preloaded above) is the recipe** — the four files that move together (wire contract → worker mappers + row types/column specs → Doris migration → tests), the merge-on-write semantics, and the gotchas. A shape change that misses a layer silently corrupts or drops telemetry.
 
-## Files that move together
+## Working method
 
-1. **Wire contract** — `packages/core/src/events.ts`: the Zod event schemas. Change the shape here.
-2. **Worker mappers** — `apps/worker/src/mappers.ts`: maps ingest events → engine-neutral telemetry rows (trace-create + updates merge by timestamp; cost computed from the model registry). Add/adjust the field mapping and any merge logic, plus the row types in `packages/telemetry/src/types.ts` and the column specs in `packages/telemetry/src/doris/serialize.ts`.
-3. **Doris schema** — add a migration under `infra/doris/` (new numbered `*.sql`) for any new/changed column; shipped files are immutable (schema_migrations ledger). Tables are UNIQUE KEY merge-on-write with sequence column `event_ts` so late/partial events merge deterministically; keys lead with `project_id`. Apply with `bun run db:telemetry`.
-4. **Tests** — `packages/core/src/events.test.ts` (schema + cost) and `apps/worker/src/mappers.test.ts` (merge + cost-against-model-registry). Update/extend these.
-
-## Procedure
-
-1. Make the change in `events.ts` first.
-2. Update `mappers.ts` so every new/changed field is written to the right telemetry column; keep merge order timestamp-driven.
-3. If a column changed, write the Doris migration; don't rename columns in place — add and backfill.
-4. Update the tests, then run them:
-   ```bash
-   bun --filter @memoturn/core test
-   bun --filter @memoturn/worker test
-   ```
-   (The mapper integration test is skipped unless the telemetry store is reachable; the unit assertions still run.)
-5. Run `bun run typecheck`.
-
-## Gotchas
-
-- Numeric normalization happens inside `packages/telemetry` store methods — consumers get contract-shaped numbers.
-- Online eval failures must never fail ingestion — they're best-effort in the worker; don't change that.
-- The SDK (`sdks/js`, `sdks/python`) emits these events; a breaking shape change needs SDK + docs updates too — flag it.
+1. Change `packages/core/src/events.ts` **first**; then update `apps/worker/src/mappers.ts` so every new/changed field is written to the right telemetry column, keeping merge order timestamp-driven.
+2. If a column changed, **create** a new numbered migration file under `infra/doris/` (shipped files are immutable) — add and backfill, never rename in place — and apply with `bun run db:telemetry`.
+3. Update and run the tests from the skill's Verify section, then `bun run typecheck`. (The mapper integration test is skipped unless the telemetry store is reachable; the unit assertions still run.)
+4. If the change is breaking on the wire, flag that the SDKs (`sdks/js`, `sdks/python`, `sdks/go`) and docs need matching updates — don't make cross-SDK edits yourself (per-SDK PR discipline).
 
 ## Output
 
