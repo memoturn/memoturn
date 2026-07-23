@@ -55,6 +55,17 @@ body:
       description: OS, Bun version, how you run memoturn (local dev, Docker Compose, Helm), datastore versions.
     validations:
       required: false
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Telemetry engine
+      description: TELEMETRY_ENGINE, if relevant (`doris` is the default; `postgres` is the lightweight tier).
+      options:
+        - doris (default)
+        - postgres
+        - not sure / not relevant
+    validations:
+      required: false
   - type: textarea
     id: logs
     attributes:
