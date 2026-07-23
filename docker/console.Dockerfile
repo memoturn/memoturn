@@ -1,6 +1,7 @@
-# memoturn console (Vite SPA). Builds static assets and serves them with Vite preview
-# (SPA history fallback included). NOTE: production routing of /api -> the API service
-# and dashboard auth (Better Auth session) are wired in the platform phase; in dev the
+# memoturn console (Vite SPA). Builds static assets with Bun, serves them with Caddy
+# (static file server + SPA history fallback — `vite preview` is a dev convenience, not
+# a production server). NOTE: production routing of /api -> the API service and dashboard
+# auth (Better Auth session) are wired in the front proxy (infra/Caddyfile); in dev the
 # Vite proxy handles /api. Build-time API base is configurable via VITE_API_BASE.
 FROM oven/bun:1.3 AS base
 WORKDIR /app
@@ -33,11 +34,13 @@ ARG VITE_API_BASE=/api
 ENV VITE_API_BASE=$VITE_API_BASE
 RUN bun --filter @memoturn/console build
 
-FROM build AS runner
-# vite preview re-bundles its config into node_modules/.vite-temp at startup —
-# pre-create it writable for the non-root runtime user.
-RUN mkdir -p apps/console/node_modules/.vite-temp && chown -R bun:bun apps/console/node_modules/.vite-temp
-# Drop root for the runtime process (the oven/bun image ships a non-root `bun` user).
-USER bun
+FROM caddy:2-alpine AS runner
+COPY docker/console.Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/apps/console/dist /srv
+# Drop root for the runtime process. Caddy writes only to its XDG dirs (/config, /data).
+RUN adduser -D -u 1000 console && chown -R console:console /config /data
+USER console
 EXPOSE 3000
-CMD ["bun", "--filter", "@memoturn/console", "preview"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1
+# CMD inherited from the caddy base image: caddy run --config /etc/caddy/Caddyfile

@@ -304,9 +304,9 @@ services:
       context: ..
       dockerfile: docker/console.Dockerfile
     restart: unless-stopped
-    command: ["bun", "--filter", "@memoturn/console", "preview", "--host", "0.0.0.0"]
+    # No command override: the image's Caddy static server listens on :3000.
     healthcheck:
-      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
       interval: 10s
       timeout: 5s
       retries: 5
