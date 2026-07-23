@@ -35,9 +35,9 @@ surface too.
   `packages/telemetry` — *not* Prisma). The self-host footprint drops to Postgres + Redis + blob.
 - **`TELEMETRY_ENGINE=doris`** (scale): today's path, unchanged. Remains the default for
   production-scale guidance and the hosted service.
-- **Blob replay is the graduation path.** An install that outgrows the Postgres tier flips
-  `TELEMETRY_ENGINE=doris` and replays the raw event log from blob — the same proven path used
-  for backfills. No engine-to-engine data migration exists or is needed.
+- **Graduation is a defined, verifiable runbook** (mechanics in ADR-0004): the primary path is a
+  seam-to-seam row copy with blob replay as fallback/audit, cut over with no API downtime. An
+  install that outgrows the Postgres tier moves to Doris without an ad-hoc migration project.
 
 Both implementations pass the same `conformance.test.ts`; the API, worker, and console are
 unaware of the engine. This is a *profile* choice in config/compose, fully available in OSS —
@@ -52,8 +52,8 @@ The engine policy from `CLAUDE.md` is unchanged in spirit: all engine SQL stays 
 
 - Self-host footprint for small teams shrinks to infrastructure they already run and understand.
   Setup time, memory requirements, and operational surface all drop substantially.
-- Zero lock-in at the low end: graduation to Doris is a config flip + blob replay, not a
-  migration project.
+- Zero lock-in at the low end: graduation to Doris is a defined runbook (ADR-0004), not an
+  ad-hoc migration project.
 - The conformance suite gains a second consumer, which hardens it as the real engine contract
   (per the stated engine policy) and de-risks any *future* engine work.
 - CI can run the conformance suite against a Postgres service container cheaply — behavioral
@@ -81,7 +81,7 @@ The engine policy from `CLAUDE.md` is unchanged in spirit: all engine SQL stays 
   self-hosted installs.
 - **Graduate to Doris when:** trace-list facets and dashboard-builder queries get slow, sustained
   ingest reaches thousands of rows/sec, retention needs run long at high volume, or embedding
-  spaces grow past ~100 k vectors. The move is `TELEMETRY_ENGINE=doris` + blob replay.
+  spaces grow past ~100 k vectors. The move is the ADR-0004 graduation runbook.
 
 ## Implementation plan
 
@@ -117,8 +117,8 @@ All work sits behind the existing seam; the Doris path is untouched throughout.
   against the PG implementation.
 
 ### Phase 4 — Docs & guardrails
-- Self-host docs: profile choice, sizing table, the graduation runbook (flip engine + blob
-  replay), `pgvector` requirement.
+- Self-host docs: profile choice, sizing table, the graduation runbook (ADR-0004: seam-to-seam
+  copy + verification, with blob replay as fallback), `pgvector` requirement.
 - A CI/hook check that both engine directories are exercised by conformance (absence-of-parity
   guard), in the spirit of `rbac:check` / `docs:check`.
 - Update `docs/architecture.md`, `CLAUDE.md` (engine policy section), and run
