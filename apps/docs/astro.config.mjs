@@ -2,6 +2,7 @@
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 import remarkGfm from "remark-gfm";
+import starlightLlmsTxt from "starlight-llms-txt";
 
 const SITE = process.env.MEMOTURN_DOCS_URL ?? "https://docs.memoturn.ai";
 
@@ -19,7 +20,14 @@ export default defineConfig({
       logo: { src: "./src/assets/memoturn-mark.svg", replacesTitle: false },
       favicon: "/favicon.svg",
       customCss: ["./src/styles/memoturn.css"],
-      social: [{ icon: "github", label: "GitHub", href: "https://github.com/memoturn/memoturn" }],
+      // /llms.txt + /llms-full.txt for AI agents and answer engines.
+      plugins: [starlightLlmsTxt()],
+      lastUpdated: true,
+      editLink: { baseUrl: "https://github.com/memoturn/memoturn/edit/main/apps/docs/" },
+      social: [
+        { icon: "github", label: "GitHub", href: "https://github.com/memoturn/memoturn" },
+        { icon: "external", label: "memoturn.ai", href: "https://memoturn.ai" },
+      ],
       head: [
         { tag: "meta", attrs: { name: "theme-color", content: "#0f1213" } },
         { tag: "meta", attrs: { property: "og:type", content: "website" } },
@@ -28,6 +36,16 @@ export default defineConfig({
         { tag: "meta", attrs: { property: "og:image:height", content: "630" } },
         { tag: "meta", attrs: { name: "twitter:card", content: "summary_large_image" } },
         { tag: "meta", attrs: { name: "twitter:image", content: `${SITE}/og-image.png` } },
+        {
+          tag: "script",
+          attrs: { type: "application/ld+json" },
+          content: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "WebSite",
+            name: "memoturn docs",
+            url: "https://docs.memoturn.ai",
+          }),
+        },
       ],
       components: {
         Hero: "./src/components/Hero.astro",

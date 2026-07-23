@@ -20,7 +20,7 @@
 - [ ] Commits follow the conventional style (`feat(scope): …`, `fix(scope): …`, `chore: …`)
 - [ ] For a new/changed `/v1` route: it enforces `denyIfReadOnly` + declares a `403` (mutations) — `bun run rbac:check`
 - [ ] For changes to scripts/ports/creds/crons/routes/MCP tools: docs updated — `bun run docs:check`
-- [ ] For an ingest-shape change: updated `packages/core/src/events.ts`, the worker mappers, and the ClickHouse columns together
+- [ ] For an ingest-shape change: updated `packages/core/src/events.ts`, the worker mappers, and the Doris columns together
 
 ## Notes for reviewers
 

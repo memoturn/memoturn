@@ -1,4 +1,4 @@
-// memoturn relational metadata (OLTP). High-volume telemetry lives in ClickHouse.
+// memoturn relational metadata (OLTP). High-volume telemetry lives in Apache Doris.
 // Phase 1 ships tenancy + auth + API keys + the prompt/dataset/evaluator skeletons
 // that later phases fill in.
 
@@ -474,7 +474,7 @@ model DatasetItem {
 
 // An experiment run over a dataset (e.g. "gpt-4o-baseline"). Each run item links a
 // dataset item to the trace produced by running the task on it; scores against that
-// trace (in ClickHouse) are the experiment's results.
+// trace (in Doris) are the experiment's results.
 model DatasetRun {
   id        String           @id @default(cuid())
   datasetId String
@@ -679,7 +679,7 @@ model AuditLog {
 }
 
 // Human annotation: a queue of traces to be manually scored. Submitting a review
-// writes an ANNOTATION score (to ClickHouse) and marks the item done.
+// writes an ANNOTATION score (to Doris) and marks the item done.
 model ReviewQueue {
   id          String       @id @default(cuid())
   projectId   String
@@ -912,7 +912,7 @@ model SavedView {
 }
 
 // PII masking policy: redact sensitive data from trace/observation input/output at
-// ingest (worker), before ClickHouse. `builtins` are named patterns (email/…),
+// ingest (worker), before Doris. `builtins` are named patterns (email/…),
 // `customPatterns` are user-supplied regex sources.
 model MaskingPolicy {
   id             String   @id @default(cuid())

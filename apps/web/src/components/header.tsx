@@ -30,10 +30,10 @@ export default function Header() {
         </Link>
 
         <nav aria-label="Primary" className="ml-3 hidden items-center gap-1 md:flex">
-          <a href={DOCS_PUBLIC_URL} target="_blank" rel="noreferrer" className={NAV_LINK_CLASS}>
+          <a href={DOCS_PUBLIC_URL} target="_blank" rel="noopener" className={NAV_LINK_CLASS}>
             Docs
           </a>
-          <a href={GITHUB_URL} target="_blank" rel="noreferrer" className={NAV_LINK_CLASS}>
+          <a href={GITHUB_URL} target="_blank" rel="noopener" className={NAV_LINK_CLASS}>
             GitHub
           </a>
         </nav>
@@ -50,12 +50,12 @@ export default function Header() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-48">
             <DropdownMenuItem asChild>
-              <a href={DOCS_PUBLIC_URL} target="_blank" rel="noreferrer" className="no-underline">
+              <a href={DOCS_PUBLIC_URL} target="_blank" rel="noopener" className="no-underline">
                 Docs
               </a>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <a href={GITHUB_URL} target="_blank" rel="noreferrer" className="no-underline">
+              <a href={GITHUB_URL} target="_blank" rel="noopener" className="no-underline">
                 GitHub
               </a>
             </DropdownMenuItem>

@@ -8,7 +8,36 @@ import appCss from "../styles.css?url";
 
 const TITLE = "Memoturn — open-source LLM observability, evals & prompt management";
 const DESCRIPTION =
-  "Trace every LLM call, track cost, tokens, and latency, run offline, online, and human evals, and ship versioned prompts with deployment channels. Self-hostable, OpenTelemetry-native, Apache-2.0.";
+  "Open-source LLM observability, evals, and prompt management. Trace calls, track cost, tokens, and latency. OpenTelemetry-native and self-hostable.";
+
+// Structured data for search engines and AI answer engines (schema.org).
+const JSON_LD = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      name: "memoturn",
+      applicationCategory: "DeveloperApplication",
+      operatingSystem: "Self-hosted",
+      description: DESCRIPTION,
+      url: "https://memoturn.ai",
+      sameAs: ["https://github.com/memoturn/memoturn"],
+      license: "https://www.apache.org/licenses/LICENSE-2.0",
+      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    },
+    {
+      "@type": "Organization",
+      name: "memoturn",
+      url: "https://memoturn.ai",
+      logo: "https://memoturn.ai/favicon-512.png",
+    },
+    {
+      "@type": "WebSite",
+      name: "memoturn",
+      url: "https://memoturn.ai",
+    },
+  ],
+};
 
 export const Route = createRootRoute({
   head: () => ({
@@ -26,13 +55,24 @@ export const Route = createRootRoute({
       { property: "og:image:width", content: "1200" },
       { property: "og:image:height", content: "630" },
       { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: TITLE },
+      { name: "twitter:description", content: DESCRIPTION },
       { name: "twitter:image", content: "https://memoturn.ai/og-image.png" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
+      { rel: "canonical", href: "https://memoturn.ai/" },
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
       { rel: "icon", type: "image/x-icon", href: "/favicon.ico" },
+      { rel: "icon", type: "image/png", sizes: "256x256", href: "/favicon-256.png" },
+      { rel: "icon", type: "image/png", sizes: "512x512", href: "/favicon-512.png" },
+      { rel: "apple-touch-icon", href: "/favicon-180.png" },
+      { rel: "manifest", href: "/site.webmanifest" },
     ],
+    // Rendered in <head> by HeadContent (head() `scripts` maps to the match's
+    // headScripts); ld+json is a non-executing data block, so CSP script-src
+    // does not apply to it (see src/server.ts).
+    scripts: [{ type: "application/ld+json", children: JSON.stringify(JSON_LD) }],
   }),
   shellComponent: RootDocument,
   errorComponent: RootErrorBoundary,
@@ -66,7 +106,7 @@ function RootErrorBoundary({ error }: { error: Error }) {
             <Link to="/">Home</Link>
           </Button>
           <Button asChild variant="ghost">
-            <a href="https://github.com/memoturn/memoturn/issues" target="_blank" rel="noreferrer">
+            <a href="https://github.com/memoturn/memoturn/issues" target="_blank" rel="noopener">
               Open an issue
             </a>
           </Button>
@@ -92,12 +132,12 @@ function RootNotFound() {
             <Link to="/">Home</Link>
           </Button>
           <Button asChild variant="outline">
-            <a href="https://docs.memoturn.ai" target="_blank" rel="noreferrer">
+            <a href="https://docs.memoturn.ai" target="_blank" rel="noopener">
               Docs
             </a>
           </Button>
           <Button asChild variant="ghost">
-            <a href="https://github.com/memoturn/memoturn" target="_blank" rel="noreferrer">
+            <a href="https://github.com/memoturn/memoturn" target="_blank" rel="noopener">
               GitHub
             </a>
           </Button>

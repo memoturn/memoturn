@@ -30,4 +30,8 @@ RUN bun --filter @memoturn/db generate
 ENV NODE_ENV=production
 # Drop root for the runtime process (the oven/bun image ships a non-root `bun` user).
 USER bun
+# Compose/Helm probes override this; it covers bare `docker run` and other orchestrators.
+# The worker's health server binds 127.0.0.1 by default — in-container probes reach it.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
+  CMD ["bun", "-e", "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
 CMD ["bun", "--filter", "@memoturn/worker", "start"]

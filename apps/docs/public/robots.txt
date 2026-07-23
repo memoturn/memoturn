@@ -1,7 +1,8 @@
-# memoturn.ai — index everything; AI crawlers explicitly welcome.
+# docs.memoturn.ai — open docs, meant to be indexed and AI-readable.
 User-agent: *
 Allow: /
 
+# AI crawlers are explicitly welcome.
 User-agent: GPTBot
 Allow: /
 
@@ -20,4 +21,4 @@ Allow: /
 User-agent: CCBot
 Allow: /
 
-Sitemap: https://memoturn.ai/sitemap.xml
+Sitemap: https://docs.memoturn.ai/sitemap-index.xml

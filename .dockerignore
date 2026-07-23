@@ -1,6 +1,6 @@
 # Keep secrets, local state, and build junk out of the Docker build context. Without this,
 # the Dockerfiles' `COPY . .` would bake a local `.env` (dev credentials) into the images and
-# the ClickHouse migrate's `--env-file=../../.env` could pick up the wrong connection config.
+# the Doris migrate's `--env-file=../../.env` could pick up the wrong connection config.
 .env
 .env.*
 !.env.example

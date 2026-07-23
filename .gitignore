@@ -5,6 +5,9 @@ dist/
 coverage/
 *.tsbuildinfo
 
+# editor/agent scratch
+.cursor/
+
 # env
 .env
 .env.local
