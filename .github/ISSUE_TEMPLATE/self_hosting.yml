@@ -1,0 +1,58 @@
+name: Self-hosting / deployment
+description: Trouble deploying or operating a self-hosted memoturn — or feedback on the footprint
+labels: ["self-hosting"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Deploying memoturn and something's in the way? This form helps whether it's a hard
+        blocker or just "this part was heavier than I expected" — footprint feedback directly
+        shapes what we invest in ([deployment docs](https://docs.memoturn.ai/deployment/)).
+  - type: dropdown
+    id: method
+    attributes:
+      label: How are you deploying?
+      options:
+        - Local dev (bun run setup / infra:up)
+        - Single-VM production (docker-compose.prod.yml)
+        - Kubernetes (Helm)
+        - Custom / other
+    validations:
+      required: true
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Telemetry engine
+      description: TELEMETRY_ENGINE — `doris` is the default; `postgres` is the lightweight tier (no Doris containers).
+      options:
+        - doris (default)
+        - postgres
+        - not sure
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's in the way?
+      description: The error, the friction, or the thing that made you hesitate — logs and exact messages help.
+    validations:
+      required: true
+  - type: checkboxes
+    id: friction
+    attributes:
+      label: Which parts of the stack caused friction?
+      description: Optional — check anything that was hard to run, size, or understand (even if you got past it).
+      options:
+        - label: Apache Doris (FE/BE containers, memory, sizing)
+        - label: Postgres
+        - label: Redis / queue
+        - label: Blob storage (MinIO / S3)
+        - label: Reverse proxy / TLS (Caddy)
+        - label: Container images (pulling, building)
+        - label: Overall footprint — I'd want something even lighter (e.g. fully managed / serverless)
+  - type: input
+    id: version
+    attributes:
+      label: Version / image tag
+    validations:
+      required: false

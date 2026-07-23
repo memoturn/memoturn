@@ -1,8 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Documentation
-    url: https://github.com/memoturn/memoturn/tree/main/docs
+    url: https://docs.memoturn.ai
     about: Getting started, architecture, API, SDKs, deployment.
+  - name: Questions & ideas (Discussions)
+    url: https://github.com/memoturn/memoturn/discussions
+    about: Ask questions, share how you run memoturn, propose ideas — no bug required.
   - name: Security vulnerability
     url: https://github.com/memoturn/memoturn/security/advisories/new
     about: Report security issues privately — please do not open a public issue.
