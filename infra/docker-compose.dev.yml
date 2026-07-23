@@ -26,6 +26,9 @@ services:
   doris-fe:
     image: apache/doris:fe-4.1.2
     restart: unless-stopped
+    # Started only for the doris telemetry engine — `bun run infra:up` activates this
+    # profile unless TELEMETRY_ENGINE=postgres (ADR-0002; see scripts/infra.ts).
+    profiles: ["doris"]
     # Cap the FE heap for dev: the stock fe.conf asks for an 8 GB JVM, but the whole
     # dev VM is typically 6-8 GB shared with the BE + Postgres + MinIO. Without the cap,
     # sustained ingest starves the BE's memory watermark and queries fail (MEM_ALLOC_FAILED).
@@ -65,6 +68,7 @@ services:
   doris-be:
     image: apache/doris:be-4.1.2
     restart: unless-stopped
+    profiles: ["doris"]
     # Cap BE process memory for dev (default is ~90% of system memory, which assumes a
     # dedicated host). 6G is comfortable for the demo dataset while leaving room for the FE
     # and the other dev containers; a lower cap OOMs analytical queries with MEM_ALLOC_FAILED.

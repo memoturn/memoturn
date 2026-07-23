@@ -32,7 +32,9 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        # pgvector-enabled (drop-in postgres:16): the postgres telemetry engine's
+        # conformance run needs CREATE EXTENSION vector (ADR-0002).
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: memoturn
           POSTGRES_PASSWORD: memoturn
@@ -115,6 +117,13 @@ jobs:
           done
           echo "minio did not become ready" >&2; exit 1
       - run: bun run test
+      # Second-engine conformance (ADR-0002): the same behavioral suite against the
+      # postgres telemetry engine. Engine selection is process-wide (singleton factory),
+      # so this is a separate vitest invocation, not a matrix.
+      - name: Postgres telemetry migrations
+        run: TELEMETRY_ENGINE=postgres bun packages/telemetry/src/migrate.ts
+      - name: Postgres-engine conformance
+        run: TELEMETRY_ENGINE=postgres bun --filter @memoturn/telemetry test
       # Python SDK unit tests (stdlib-only SDK; pytest mocks urllib, no infra needed).
       - uses: astral-sh/setup-uv@v7
       - name: Python SDK tests

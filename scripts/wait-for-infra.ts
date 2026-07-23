@@ -27,13 +27,25 @@ async function http(url: string): Promise<boolean> {
   }
 }
 
+// The doris check only applies when the doris telemetry engine is active — the
+// postgres profile (ADR-0002, TELEMETRY_ENGINE=postgres) runs no Doris containers.
+const engine = (process.env.TELEMETRY_ENGINE ?? "doris").toLowerCase();
+const dorisActive = engine !== "postgres" && engine !== "pg";
+
 const checks: { name: string; check: () => Promise<boolean> }[] = [
   { name: "postgres", check: () => tcp("localhost", Number(process.env.PG_PORT ?? 5433)) },
   { name: "redis", check: () => tcp("localhost", Number(process.env.REDIS_PORT ?? 6380)) },
   // FE answers /api/bootstrap once metadata is ready; the BE registers itself shortly
   // after, and doris-fe reports queryable only when a BE heartbeat is alive (SELECT 1
   // works FE-only, so also require the MySQL port).
-  { name: "doris", check: async () => (await http("http://localhost:8030/api/bootstrap")) && tcp("localhost", 9030) },
+  ...(dorisActive
+    ? [
+        {
+          name: "doris",
+          check: async () => (await http("http://localhost:8030/api/bootstrap")) && tcp("localhost", 9030),
+        },
+      ]
+    : []),
   { name: "minio", check: () => http("http://localhost:9000/minio/health/live") },
 ];
 
