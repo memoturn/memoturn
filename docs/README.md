@@ -18,7 +18,8 @@ Bun-native.
 - [MCP server](../apps/mcp/README.md) — prompts, datasets, and review queues as agent-IDE tools
 - [Prompt management](./prompts.md)
 - [Evaluation](./evaluation.md) — offline, online, and human review
-- [Deployment](./deployment.md) — Docker, scaling, retention
+- [Deployment](./deployment.md) — Docker, scaling, upgrades, sizing, retention
+- [Security hardening](./hardening.md) — go-live checklist for self-host operators
 - [Troubleshooting](./troubleshooting.md) — common failure modes and fixes
 - [Roadmap](./roadmap.md) — shipped + prioritized backlog
 
