@@ -195,7 +195,7 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | GET | `/v1/audit-logs` | Recent audit entries. |
 | GET / POST | `/v1/retention` | Get / set retention (days; 0 = keep forever). |
 | POST | `/v1/retention/apply` | Apply retention now. |
-| GET / POST | `/v1/sampling` | Get / set head-based ingest sampling (`rate` 0–100 = percent of traces kept in the query store; 100 = all). Dropped traces stay in blob for replay. Audited. |
+| GET / POST | `/v1/sampling` | Get / set ingest sampling. Head: `rate` (0–100 = percent of traces kept in the query store; 100 = all, stable per-trace). Tail keep-rules (kept regardless of the head dice below 100): `keepOnError`, `keepLatencyMs`, `keepMinCostUsd` (null = off). Dropped traces stay in blob for replay. Audited. |
 | GET / POST | `/v1/model-prices` | List / create-update custom model price overrides (matched by name pattern, override built-ins). |
 | DELETE | `/v1/model-prices/{id}` | Delete a model price override. |
 | GET | `/v1/exports/traces` | Download traces as NDJSON (`application/x-ndjson`, default), CSV (`?format=csv`), or Parquet (`?format=parquet`, flat one-row-per-trace for BI); honors the trace-list filters: `limit`, `environment`, `search`, `userId`, `tag`, `scoreName`, `level`, `days`. |

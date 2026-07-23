@@ -373,7 +373,12 @@ export const scheduledExportResult = z.object({
 export type ScheduledExportResult = z.infer<typeof scheduledExportResult>;
 
 // Head-based ingest sampling: percent (0–100) of traces kept in the query store (100 = all).
-export const samplingPolicy = z.object({ rate: z.number() });
+export const samplingPolicy = z.object({
+  rate: z.number(), // head sampling: 0–100 percent of traces kept
+  keepOnError: z.boolean(), // tail: always keep traces with an ERROR-level span
+  keepLatencyMs: z.number().nullable(), // tail: always keep traces with a span >= this latency
+  keepMinCostUsd: z.number().nullable(), // tail: always keep traces with total cost >= this
+});
 export type SamplingPolicy = z.infer<typeof samplingPolicy>;
 
 export const maskingPolicy = z.object({

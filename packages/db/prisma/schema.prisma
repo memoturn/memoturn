@@ -707,12 +707,19 @@ model RetentionPolicy {
 
 // Per-project head-based ingest sampling: `rate` is the percent (0-100) of traces
 // KEPT in the query store (100 = keep all). Mirrors RetentionPolicy's shape.
+// Ingest sampling. `rate` is head sampling (percent of traces kept, stable per-id hash).
+// The keep-rules add tail sampling: a trace is ALSO kept — regardless of the head dice —
+// when it looks interesting (has an error span / is slow / is expensive), so a low rate
+// still preserves the traces worth debugging. null keep-fields = that rule is off.
 model SamplingPolicy {
-  id        String   @id @default(cuid())
-  projectId String   @unique
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  rate      Int      @default(100)
-  updatedAt DateTime @updatedAt
+  id             String   @id @default(cuid())
+  projectId      String   @unique
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  rate           Int      @default(100)
+  keepOnError    Boolean  @default(false)
+  keepLatencyMs  Int?
+  keepMinCostUsd Float?
+  updatedAt      DateTime @updatedAt
 }
 
 // Volume-based usage metering: bytes/events/traces ingested per project per UTC day.
