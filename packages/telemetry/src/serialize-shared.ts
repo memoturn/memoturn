@@ -30,6 +30,24 @@ export function parseTags(value: unknown): string[] {
   }
 }
 
+/**
+ * Keyset predicate for `scanRows`: rows strictly after `cursor` in primary-key order,
+ * as a tuple comparison expanded to plain AND/OR (engine-portable — Doris has no
+ * reliable row-value comparison). Column names come from TELEMETRY_PRIMARY_KEYS,
+ * never user input.
+ */
+export function keysetAfter(pk: string[], cursor: string[]): { frag: string; params: unknown[] } {
+  if (pk.length !== cursor.length) throw new Error(`scan cursor arity ${cursor.length} != key arity ${pk.length}`);
+  const alts: string[] = [];
+  const params: unknown[] = [];
+  for (let i = 0; i < pk.length; i++) {
+    const eqs = pk.slice(0, i).map((c) => `${c} = ?`);
+    alts.push(`(${[...eqs, `${pk[i]} > ?`].join(" AND ")})`);
+    params.push(...cursor.slice(0, i + 1));
+  }
+  return { frag: `(${alts.join(" OR ")})`, params };
+}
+
 /** Parse an engine float-array value (native array, JSON text, or pgvector '[…]' text). */
 export function parseVector(value: unknown): number[] {
   const arr = Array.isArray(value)

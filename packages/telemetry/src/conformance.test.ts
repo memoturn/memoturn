@@ -6,9 +6,11 @@ import type {
   EmbeddingRow,
   ObservationRow,
   RetrievalDocumentRow,
+  ScanCursor,
   ScoreWriteRow,
   TraceRow,
 } from "./types.js";
+import { TELEMETRY_PRIMARY_KEYS } from "./types.js";
 
 /**
  * Behavioral conformance suite for the telemetry store — the contract every engine
@@ -754,6 +756,64 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
 
     // Restore fixture state for the delete test below (cascades the sim-test embeddings).
     await store.deleteTraces(P, ["t2", "t3", "t4"]);
+  });
+
+  it("scanRows pages the keyset and scanned rows round-trip through insertRows (ADR-0004)", async () => {
+    // The graduation path's contract: scanRows (source) feeds insertRows (target) with
+    // full fidelity — sequence value preserved, so the copy is idempotent and resumable.
+    const P2 = `${P}-copy`;
+    const tables = [
+      "traces",
+      "observations",
+      "scores",
+      "retrieval_documents",
+      "embeddings",
+      "embedding_projections",
+    ] as const;
+    for (const table of tables) {
+      // Seek the cursor to just before project P (keys lead with project_id), then page
+      // with a tiny limit to exercise keyset continuation without scanning other data.
+      const pk = TELEMETRY_PRIMARY_KEYS[table];
+      // Synthetic seek values must be type-valid per column ("" fails int casts on strict
+      // engines): "" sorts before any id; -1 sorts before any rank.
+      let cursor: ScanCursor | undefined = { key: [P, ...pk.slice(1).map((c) => (c === "rank" ? "-1" : ""))] };
+      const mine: Record<string, unknown>[] = [];
+      while (cursor) {
+        const page: { rows: unknown[]; next: ScanCursor | null } = await store.scanRows(table, cursor, 2);
+        expect(page.rows.length).toBeLessThanOrEqual(2);
+        const inP = (page.rows as Record<string, unknown>[]).filter((r) => r.project_id === P);
+        mine.push(...inP);
+        // Stop once the scan passes beyond project P or the table is exhausted.
+        if (inP.length < page.rows.length || !page.next) break;
+        cursor = page.next;
+      }
+      expect(mine.length).toBeGreaterThan(0); // every table is seeded in beforeAll
+      // Copy into a fresh project id: identical rows, new identity, sequence intact.
+      await store.insertRows(table, mine.map((r) => ({ ...r, project_id: P2 })) as never[]);
+    }
+
+    // The copy reads identically (modulo project id), down to the ms-precision event_ts.
+    const [src] = await store.getTraceRowsByIds(P, ["t1"]);
+    const [dst] = await store.getTraceRowsByIds(P2, ["t1"]);
+    expect(dst).toBeDefined();
+    expect({ ...dst, project_id: P }).toEqual(src);
+    expect(new Date(dst!.event_ts).getTime()).toBe(new Date(src!.event_ts).getTime());
+    expect(await store.countProjectRows(P2)).toEqual(await store.countProjectRows(P));
+    // getTraceEmbeddings has no ORDER BY — compare as sets keyed by observation id.
+    const byObs = (rows: { observation_id: string; vector: number[] }[]) =>
+      Object.fromEntries(rows.map((e) => [e.observation_id, e.vector]));
+    expect(byObs(await store.getTraceEmbeddings(P2, "t1"))).toEqual(byObs(await store.getTraceEmbeddings(P, "t1")));
+
+    // Re-inserting the scanned rows at the SOURCE is a no-op (equal sequence ⇒ idempotent).
+    const before = await store.getScoreById(P, "sc1");
+    const scores = await store.scanRows("scores", { key: [P, ""] }, 100);
+    await store.insertRows(
+      "scores",
+      scores.rows.filter((r) => r.project_id === P),
+    );
+    expect(await store.getScoreById(P, "sc1")).toEqual(before);
+
+    await store.deleteProjectData(P2);
   });
 
   it("deletes by score id, by retention cutoff, and by trace ids", async () => {

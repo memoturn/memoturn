@@ -21,8 +21,11 @@ import type {
   WidgetMetric,
   WidgetPoint,
 } from "@memoturn/contracts";
+import { keysetAfter } from "../serialize-shared.js";
 import type { TelemetryStore } from "../store.js";
 import type {
+  EmbeddingProjectionRow,
+  EmbeddingRow,
   EmbeddingVectorRow,
   EvalScoreSummaryRow,
   EvalScoreTrendRow,
@@ -33,6 +36,10 @@ import type {
   ObservationRow,
   ProjectRowCounts,
   RetrievalDocumentDetail,
+  RetrievalDocumentRow,
+  ScanCursor,
+  ScanPage,
+  ScoreWriteRow,
   TelemetryRowMap,
   TelemetryTable,
   TraceEmbeddingRow,
@@ -43,6 +50,7 @@ import type {
   TraceScore,
   WindowMetric,
 } from "../types.js";
+import { TELEMETRY_PRIMARY_KEYS } from "../types.js";
 import { closeDorisPool, dorisQuery } from "./client.js";
 import { buildTraceFilterSql } from "./filters.js";
 import { compileQuery, validateQuery } from "./query.js";
@@ -1417,6 +1425,115 @@ export class DorisTelemetryStore implements TelemetryStore {
     for (const stmt of buildInserts(table, rows)) {
       await this.exec(stmt.sql, stmt.params);
     }
+  }
+
+  /** Write-shaped full-row SELECT list + row mapper per table (ms-precision timestamps). */
+  private scanSelect<T extends TelemetryTable>(
+    table: T,
+  ): { select: string; map: (r: Record<string, unknown>) => TelemetryRowMap[T] } {
+    const shapes: { [K in TelemetryTable]: { select: string; map: (r: never) => TelemetryRowMap[K] } } = {
+      traces: {
+        select: `project_id, id, DATE_FORMAT(\`timestamp\`, ${ISO_MS_FMT}) AS \`timestamp\`,
+          name, user_id, session_id, \`release\`, version, environment, \`public\`,
+          CAST(tags AS JSON) AS tags, COALESCE(metadata, '{}') AS metadata,
+          COALESCE(input, '') AS input, COALESCE(output, '') AS output,
+          DATE_FORMAT(event_ts, ${ISO_MS_FMT}) AS event_ts`,
+        map: (r: TraceRow & { tags: unknown }) => ({ ...r, tags: parseTags(r.tags), public: Number(r.public) }),
+      },
+      observations: {
+        select: `project_id, trace_id, id, type, parent_observation_id, name,
+          DATE_FORMAT(start_time, ${ISO_MS_FMT}) AS start_time,
+          IF(end_time IS NULL, NULL, DATE_FORMAT(end_time, ${ISO_MS_FMT})) AS end_time,
+          environment, level, COALESCE(status_message, '') AS status_message, model, provider,
+          COALESCE(model_parameters, '{}') AS model_parameters,
+          prompt_tokens, completion_tokens, total_tokens, cache_read_tokens, cache_creation_tokens,
+          input_cost, output_cost, total_cost, prompt_id, prompt_version,
+          COALESCE(input, '') AS input, COALESCE(output, '') AS output,
+          COALESCE(metadata, '{}') AS metadata, latency_ms,
+          DATE_FORMAT(event_ts, ${ISO_MS_FMT}) AS event_ts`,
+        map: (r: ObservationRow) => ({
+          ...r,
+          prompt_tokens: Number(r.prompt_tokens),
+          completion_tokens: Number(r.completion_tokens),
+          total_tokens: Number(r.total_tokens),
+          cache_read_tokens: Number(r.cache_read_tokens),
+          cache_creation_tokens: Number(r.cache_creation_tokens),
+          input_cost: Number(r.input_cost),
+          output_cost: Number(r.output_cost),
+          total_cost: Number(r.total_cost),
+          latency_ms: Number(r.latency_ms),
+        }),
+      },
+      scores: {
+        select: `project_id, id, trace_id, observation_id, name,
+          DATE_FORMAT(\`timestamp\`, ${ISO_MS_FMT}) AS \`timestamp\`,
+          environment, source, data_type, \`value\` AS value,
+          COALESCE(string_value, '') AS string_value, COALESCE(\`comment\`, '') AS comment,
+          config_id, DATE_FORMAT(event_ts, ${ISO_MS_FMT}) AS event_ts`,
+        map: (r: ScoreWriteRow) => ({ ...r, value: r.value === null ? null : Number(r.value) }),
+      },
+      retrieval_documents: {
+        select: `project_id, observation_id, rank, trace_id, doc_id, score,
+          COALESCE(content, '') AS content, COALESCE(metadata, '{}') AS metadata,
+          DATE_FORMAT(event_ts, ${ISO_MS_FMT}) AS event_ts`,
+        map: (r: RetrievalDocumentRow) => ({
+          ...r,
+          rank: Number(r.rank),
+          score: r.score === null ? null : Number(r.score),
+        }),
+      },
+      embeddings: {
+        select: `project_id, observation_id, trace_id, kind, model, dim,
+          CAST(vector AS JSON) AS vector, DATE_FORMAT(event_ts, ${ISO_MS_FMT}) AS event_ts`,
+        map: (r: EmbeddingRow & { vector: unknown }) => ({
+          ...r,
+          dim: Number(r.dim),
+          vector: parseVector(r.vector),
+        }),
+      },
+      embedding_projections: {
+        select: `project_id, run_id, observation_id, trace_id, x, y, z, cluster_id, method,
+          DATE_FORMAT(event_ts, ${ISO_MS_FMT}) AS event_ts`,
+        map: (r: EmbeddingProjectionRow) => ({
+          ...r,
+          x: Number(r.x),
+          y: Number(r.y),
+          z: r.z === null ? null : Number(r.z),
+          cluster_id: Number(r.cluster_id),
+        }),
+      },
+    };
+    const shape = shapes[table];
+    return { select: shape.select, map: shape.map as (r: Record<string, unknown>) => TelemetryRowMap[T] };
+  }
+
+  async scanRows<T extends TelemetryTable>(
+    table: T,
+    cursor?: ScanCursor,
+    limit = 1000,
+  ): Promise<ScanPage<TelemetryRowMap[T]>> {
+    const pk = TELEMETRY_PRIMARY_KEYS[table];
+    const { select, map } = this.scanSelect(table);
+    const conds: string[] = [];
+    const params: unknown[] = [];
+    if (cursor) {
+      const after = keysetAfter(pk, cursor.key);
+      conds.push(after.frag);
+      params.push(...after.params);
+    }
+    const n = Math.max(1, Math.floor(limit));
+    params.push(n);
+    const rows = await this.query<Record<string, unknown>>(
+      `SELECT ${select} FROM ${table}
+       ${conds.length ? `WHERE ${conds.join(" AND ")}` : ""}
+       ORDER BY ${pk.join(" ASC, ")} ASC
+       LIMIT ?`,
+      params,
+    );
+    const mapped = rows.map(map);
+    const last = mapped[mapped.length - 1] as Record<string, unknown> | undefined;
+    const next = mapped.length === n && last ? { key: pk.map((c) => String(last[c])) } : null;
+    return { rows: mapped, next };
   }
 
   async deleteScore(projectId: string, scoreId: string): Promise<void> {

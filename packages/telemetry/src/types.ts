@@ -137,6 +137,32 @@ export interface TelemetryRowMap {
 
 export type TelemetryTable = keyof TelemetryRowMap;
 
+/**
+ * Primary/unique key columns per table, in key order — the LWW identity shared by every
+ * engine (Doris UNIQUE KEYs, Postgres PRIMARY KEYs) and the keyset for `scanRows`.
+ */
+export const TELEMETRY_PRIMARY_KEYS: Record<TelemetryTable, string[]> = {
+  traces: ["project_id", "id"],
+  observations: ["project_id", "trace_id", "id"],
+  scores: ["project_id", "id"],
+  retrieval_documents: ["project_id", "observation_id", "rank"],
+  embeddings: ["project_id", "observation_id"],
+  embedding_projections: ["project_id", "run_id", "observation_id"],
+};
+
+// ── Bulk scan (ADR-0004 graduation path) ─────────────────────────────────────────
+
+/** Opaque scan position: the primary-key values of the last returned row, in key order. */
+export interface ScanCursor {
+  key: string[];
+}
+
+/** One page of a table scan; `next` is null when the table is exhausted. */
+export interface ScanPage<R> {
+  rows: R[];
+  next: ScanCursor | null;
+}
+
 // ── Read filters ─────────────────────────────────────────────────────────────────
 
 export interface TraceFilters {
