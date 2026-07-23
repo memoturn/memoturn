@@ -1,6 +1,7 @@
 ---
 name: add-mcp-tool
 description: How to add a tool to the memoturn MCP server (apps/mcp) — the ToolDef registry, plain JSON Schema inputs, handlers that call into @memoturn/server, the stderr-only logging rule, and keeping the README in sync. Use when exposing a new capability to agent IDEs via MCP.
+paths: packages/server/src/mcp-tools.ts, apps/mcp/**
 ---
 
 # Add an MCP tool

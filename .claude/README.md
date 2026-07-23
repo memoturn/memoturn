@@ -17,19 +17,22 @@ Delegated subagents for multi-file work that benefits from its own context. Invo
 
 ## Skills (`skills/`)
 
-Knowledge-first recipes loaded on demand, usable in the main thread or by the agents above.
+Knowledge-first recipes loaded on demand, usable in the main thread or by the agents above. Skills with a `paths:` frontmatter glob auto-load when a matching file is touched. Where an agent and a skill cover the same task (endpoint-builder↔add-endpoint, prisma-migrator↔change-prisma-schema, ingest-syncer↔ingest-event-change, doc-sync-auditor↔sync-docs), the agent preloads the skill via `skills:` frontmatter — **the skill is the knowledge source of truth; the agent adds only procedure + verification.** Update the skill, not both.
 
 | Skill | Covers |
 | --- | --- |
 | `add-endpoint` | The 4-layer endpoint recipe + the `app.openapi` contract type-check as the drift guard. |
 | `change-prisma-schema` | Prisma 7 driver-adapter workflow, `Project` reverse relation, migrate/generate/typecheck. |
-| `ingest-event-change` | The files that move together for an ingest shape change; ReplacingMergeTree `event_ts`. |
+| `ingest-event-change` | The files that move together for an ingest shape change; UNIQUE KEY merge-on-write (`event_ts`). |
 | `doris-query` | TelemetryStore methods, `?` parameterization, merge-on-write (no FINAL), boundary `Number(...)` normalization, `project_id`-first keys. |
 | `console-feature` | apps/console: file-based routes, the typed `api.ts` client, TanStack Query + cache invalidation. |
 | `add-evaluator` | LLM-as-judge config, online vs offline, deterministic FNV sampling, never-fail-ingest, `EVAL` write-back. |
 | `model-registry` | The USD-per-1M-token cost registry, first-match-wins ordering, per-project overrides. |
 | `add-mcp-tool` | The `ToolDef` registry, plain JSON Schema, handlers into `@memoturn/server`, stderr-only logging. |
 | `sync-docs` | The doc↔code coupling map, how to run/fix drift, and the docs-site mirror conventions. |
+| `sdk-change` | The three SDKs (js/python/go), per-SDK branch/PR isolation, wire-contract flow from `packages/core`, version parity. |
+| `auth-surface` | The two `requireAuth` paths, RBAC roles, the org plugin, SSO, and the OAuth 2.1 provider for remote MCP. |
+| `worker-ops` | DLQ inspect/replay, blob replay as recovery, the maintenance crons + Redis locks, worker metrics. |
 
 ## Hooks (`hooks/`, wired in `settings.json`)
 
@@ -53,4 +56,4 @@ Deterministic, read-only, exit non-zero on drift — safe to wire into lefthook 
 
 - **Code is the source of truth; docs follow.** When a checker flags drift, fix the doc to match the code.
 - Hook scripts are Bun TS run via `bun "$CLAUDE_PROJECT_DIR/.claude/hooks/<file>.ts"`.
-- Adding an agent/skill: drop a `*.md` (agents) or `<name>/SKILL.md` (skills) with frontmatter; no registration needed. Keep this README's roster in sync.
+- Adding an agent/skill: drop a `*.md` (agents) or `<name>/SKILL.md` (skills) with frontmatter; no registration needed. Keep this README's roster in sync (a `doc-coupling.json` entry reminds you on edit).

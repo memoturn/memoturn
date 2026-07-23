@@ -1,6 +1,7 @@
 ---
 name: model-registry
 description: How to add or update a model and its pricing in memoturn — the built-in cost registry in packages/core/src/models.ts (USD per 1M tokens, first-match-wins regex ordering) and per-project overrides. Use when a new LLM ships, costs change, or traces show $0 cost for a known model.
+paths: packages/core/src/models.ts
 ---
 
 # Model + pricing registry

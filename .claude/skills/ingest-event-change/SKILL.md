@@ -1,6 +1,7 @@
 ---
 name: ingest-event-change
 description: How to change the shape of an ingest event in memoturn — the files that must move together (events.ts wire contract, worker mappers, telemetry row types + Doris columns, tests) and the merge-on-write semantics. Use when editing packages/core/src/events.ts or any field flowing SDK → API → worker → Doris.
+paths: packages/core/src/events.ts, apps/worker/src/mappers.ts
 ---
 
 # Change an ingest event shape
@@ -26,6 +27,6 @@ bun run typecheck
 
 - Numeric normalization happens inside `packages/telemetry` store methods (`Number(...)` at the boundary) — consumers get contract-shaped numbers.
 - Online eval failures must **never** fail ingestion (best-effort in the worker) — don't change that.
-- The SDKs (`sdks/js`, `sdks/python`) emit these events; a breaking change needs SDK + docs updates too.
+- The SDKs (`sdks/js`, `sdks/python`, `sdks/go`) emit these events; a breaking change needs SDK + docs updates too (one PR per SDK — see the sdk-change skill).
 
 For the cross-file change with tests, delegate to the **ingest-syncer** agent.

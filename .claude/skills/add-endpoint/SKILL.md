@@ -1,6 +1,7 @@
 ---
 name: add-endpoint
 description: How to add or change a memoturn REST endpoint (a /v1 route) across the contracts → server → API → console layers, with the read-only guard and audit logging for mutations. Use when implementing a new API endpoint or extending an existing one in this repo.
+paths: apps/api/src/app.ts, packages/contracts/**
 ---
 
 # Add a memoturn endpoint

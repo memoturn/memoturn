@@ -1,6 +1,6 @@
 ---
 name: rbac-auditor
-description: Use after adding or changing /v1 routes in apps/api/src/app.ts, or when asked to audit API authorization/RBAC. Verifies every mutating route enforces the read-only role gate (denyIfReadOnly + 403) and reports audit-trail gaps. Runs `bun run rbac:check`.
+description: Use after adding or changing /v1 routes in apps/api/src/app.ts, or when the user asks to "audit RBAC", "check permissions/roles", or review API authorization. Verifies every mutating route enforces the read-only role gate (denyIfReadOnly + 403) and reports audit-trail gaps. Runs `bun run rbac:check`.
 tools: Read, Edit, Grep, Bash
 model: sonnet
 color: red

@@ -1,6 +1,7 @@
 ---
 name: doris-query
 description: Conventions and gotchas for the Apache Doris telemetry store in memoturn — adding TelemetryStore methods, `?` parameterization, merge-on-write (no FINAL needed), Number() normalization at the store boundary, project_id-leading keys, and the ARRAY insert pitfall. Use when writing or reviewing telemetry queries or extending packages/telemetry.
+paths: packages/telemetry/**, infra/doris/**
 ---
 
 # Doris telemetry queries in memoturn

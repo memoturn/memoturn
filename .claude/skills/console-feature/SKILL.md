@@ -1,6 +1,7 @@
 ---
 name: console-feature
 description: How to add or change a page/feature in the memoturn console (apps/console) — file-based TanStack Router routes, the typed api.ts client, and TanStack Query data fetching with cache invalidation. Use when building console UI, adding a route, or wiring a new endpoint into the dashboard.
+paths: apps/console/src/**
 ---
 
 # Add a console feature
