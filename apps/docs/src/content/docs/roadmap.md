@@ -3,14 +3,8 @@ title: Roadmap
 description: What memoturn has shipped and the prioritized backlog of candidate features.
 ---
 
-A prioritized backlog of candidate features, benchmarked against the broader
-LLM-engineering-platform category (July 2026 competitive analysis). Effort is rough
-(S = hours, M = a day or two, L = multi-day). Items are independent unless noted.
-
-**Strategy:** close the gaps that lose head-to-head evaluations (alerting, cost
-budgets, provider breadth, dashboards), deepen the two differentiators nobody else
-owns (trustworthy ingest, MCP-native platform), and build the enterprise compliance
-layer as the paid surface — everything else stays Apache-2.0.
+What memoturn has shipped, and a prioritized backlog of candidate features. Effort is
+rough (S = hours, M = a day or two, L = multi-day). Items are independent unless noted.
 
 ## Shipped
 
@@ -43,26 +37,13 @@ semconv ingestion**) · provider gateway (Anthropic, OpenAI, **Gemini, Bedrock, 
 OpenAI-compatible** for vLLM/Ollama/OpenRouter) · TypeScript + Python + **Go** SDKs (tracing,
 OpenAI, LangChain, prompts, OTel exporter, **LlamaIndex (Python)**).
 
-## Horizon 2 — differentiators (launch wave)
+## Up next
 
 | Feature | Effort | Notes |
 | --- | --- | --- |
-| **Volume-based usage metering** | M | Meter cloud billing by GB ingested, not per-observation — agent workloads emit 40–75 spans per interaction and unit pricing punishes them. Blob-first ingest makes byte-accurate metering cheap. Cloud-billing dependency. |
-| **Agent-graph v2** | S | Collapse/expand subgraphs, highlight failed paths. |
-
-## Horizon 3 — enterprise & monetization (post-launch)
-
-The paid tier mirrors the line the market accepts: compliance, not product features.
-**Monetization is deliberately deferred until there are paying customers** — these ship
-ungated as OSS until the `/ee` gate is justified.
-
-| Feature | Effort | Notes |
-| --- | --- | --- |
-| **SCIM provisioning** | L | The enterprise half of the existing SSO story (directory sync, deprovisioning). Composes with the org + admin plugins. |
-| **Extended audit retention + export** | M | Auth-lifecycle audit logs exist; retention tiers and bulk export are the paid part. |
-| **License-key gating (`/ee`)** | M | Same codebase/schema across OSS, enterprise self-host, and cloud; a key unlocks the compliance modules. **Not built until a customer needs a paid tier** — no premature paywall infra. |
-| **Data residency** | L | Region pinning for cloud (EU first). Multi-region HA deferred. |
+| **Volume-based usage metering** | M | Meter ingested volume by GB rather than per-observation — agent workloads emit 40–75 spans per interaction. Blob-first ingest makes byte-accurate metering cheap. |
 | **Tail sampling at ingest** | M | Head-based sampling shipped (per-project keep-rate, stable per trace, blob keeps everything for replay). Tail sampling — keep-on-error / keep-on-high-cost regardless of the head decision — is the remaining piece; it needs a per-trace buffering/decision window to stay orphan-free. |
+| **Agent-graph v2** | S | Collapse/expand subgraphs, highlight failed paths. |
 
 ## Improvements to existing features
 
@@ -70,12 +51,16 @@ ungated as OSS until the `/ee` gate is justified.
 | --- | --- | --- |
 | **Trace → dataset / fine-tuning** | M | One-click trace→dataset-item; export datasets as fine-tuning JSONL (OpenAI/Anthropic formats). |
 | **Inter-rater agreement** | M | Agreement metrics on review queues; keyboard-driven review UI. |
-| **More SDK integrations** | M | LlamaIndex + Vercel AI SDK (JS), Pydantic AI (Python) — framework breadth is a cited decision factor. (TS/Python/Go core SDKs shipped.) |
+| **More SDK integrations** | M | LlamaIndex + Vercel AI SDK (JS), Pydantic AI (Python). (TS/Python/Go core SDKs shipped.) |
 | **Project-wide cost-by-prompt** | S | Per-*version* cost shipped; a project-wide "spend per prompt" ranking on the prompts list is the small remaining half. |
 
-## Suggested next slices
+## Enterprise
 
-1. **Trace → dataset / fine-tuning** + **project-wide cost-by-prompt** — small, high-value loop closers on infra that already exists.
-2. **Tail sampling** + **volume-based metering** — the cloud cost-control pair, one ingest-path change (head sampling already shipped).
-3. **More SDK integrations** (LlamaIndex, Vercel AI, Pydantic AI) + **agent-graph v2** — framework breadth and the last launch-wave polish.
-4. **Compliance layer** (SCIM, extended audit, `/ee` gating) — scoped when cloud pricing lands and a customer needs it.
+Enterprise features (SSO, SAML, RBAC, audit logging, PII guardrails) ship ungated in the
+Apache-2.0 core. The items below extend that surface.
+
+| Feature | Effort | Notes |
+| --- | --- | --- |
+| **SCIM provisioning** | L | The enterprise half of the existing SSO story (directory sync, deprovisioning). Composes with the org + admin plugins. |
+| **Extended audit retention + export** | M | Auth-lifecycle audit logs exist; retention tiers and bulk export are the remaining piece. |
+| **Data residency** | L | Region pinning for hosted deployments (EU first). Multi-region HA deferred. |
