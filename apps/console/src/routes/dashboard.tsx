@@ -271,6 +271,11 @@ function DashboardPage() {
     queryFn: () => api.getCostBreakdown("session", days, 10),
     placeholderData: keepPreviousData,
   });
+  const { data: costByPrompt } = useQuery({
+    queryKey: ["cost-by-prompt", days],
+    queryFn: () => api.getCostBreakdown("prompt", days, 10),
+    placeholderData: keepPreviousData,
+  });
 
   if (isLoading) return <DashboardSkeleton days={days} />;
   if (error) return <EmptyState title="Failed to load dashboard" description={String(error)} />;
@@ -365,8 +370,10 @@ function DashboardPage() {
         </div>
       )}
 
-      {((costByUser && costByUser.length > 0) || (costBySession && costBySession.length > 0)) && (
-        <div className="grid gap-4 lg:grid-cols-2">
+      {((costByUser && costByUser.length > 0) ||
+        (costBySession && costBySession.length > 0) ||
+        (costByPrompt && costByPrompt.length > 0)) && (
+        <div className={`grid gap-4 ${costByPrompt && costByPrompt.length > 0 ? "lg:grid-cols-3" : "lg:grid-cols-2"}`}>
           <ModelBarChart
             title="Top users by cost"
             description="Highest-spend end users"
@@ -383,6 +390,16 @@ function DashboardPage() {
             color="var(--chart-4)"
             footer={`${costBySession?.length ?? 0} session${(costBySession?.length ?? 0) === 1 ? "" : "s"}`}
           />
+          {costByPrompt && costByPrompt.length > 0 && (
+            <ModelBarChart
+              title="Top prompts by cost"
+              description="Project-wide spend per prompt"
+              data={costByPrompt.map((r) => ({ model: r.key, value: r.total_cost }))}
+              metric="Cost"
+              color="var(--chart-5)"
+              footer={`${costByPrompt.length} prompt${costByPrompt.length === 1 ? "" : "s"}`}
+            />
+          )}
         </div>
       )}
 

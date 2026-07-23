@@ -312,6 +312,26 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(await store.costByUser(P, { limit: 0 })).toHaveLength(1); // floored to 1
   });
 
+  it("rolls up project-wide cost by prompt, ranked by spend", async () => {
+    // Shared fixture: o1 (GENERATION, prompt_id "p1", cost 0.003, tokens 300) and o2
+    // (prompt_id '' — must contribute nothing). Seed a pricier second prompt under a
+    // dedicated trace to pin the ranking, cleaned up by cascade after.
+    const pt = "t-prompt-cost";
+    await store.insertRows("observations", [
+      observation({ id: "op2", trace_id: pt, prompt_id: "p2", total_cost: 0.05, total_tokens: 500 }),
+    ]);
+    const byPrompt = await store.costByPrompt(P, { days: 7 });
+    expect(byPrompt).toHaveLength(2); // '' prompt_id rows are excluded
+    expect(byPrompt[0]!).toMatchObject({ key: "p2", trace_count: 1, total_tokens: 500 });
+    expect(byPrompt[0]!.total_cost).toBeCloseTo(0.05, 6);
+    expect(byPrompt[1]!).toMatchObject({ key: "p1", trace_count: 1, total_tokens: 300 });
+    // Limit bounds the ranking (top spender first).
+    const top1 = await store.costByPrompt(P, { limit: 1 });
+    expect(top1).toHaveLength(1);
+    expect(top1[0]!.key).toBe("p2");
+    await store.deleteTraces(P, [pt]);
+  });
+
   it("attributes spend to a prompt's versions, ranked by cost", async () => {
     // Own trace + observations so this is isolated from the shared fixture (and cleaned up after).
     await store.insertRows("traces", [trace({ id: "tc", name: "Cost Trace" })]);
