@@ -1,0 +1,49 @@
+# Postgres-tier production overlay (ADR-0002): run memoturn WITHOUT Apache Doris —
+# telemetry lives in the same Postgres, in the `telemetry` schema (pgvector image).
+#
+#   docker compose -f infra/docker-compose.prod.yml -f infra/docker-compose.prod.postgres.yml up -d
+#
+# What it does:
+#  * parks doris-fe / doris-be / doris-setup behind an inactive profile (never started)
+#  * resets api / worker / migrate dependencies to the non-Doris set (`!override` needs
+#    Docker Compose >= 2.24)
+#  * selects TELEMETRY_ENGINE=postgres so the migrate step applies
+#    infra/postgres-telemetry/*.sql and the stores use the Postgres engine
+#
+# Sizing and the graduation path back to Doris: docs/deployment.md + ADR-0004.
+#
+# Note: the base file's `${DORIS_PASSWORD:?}` interpolation still runs before this
+# overlay merges, so .env must define DORIS_PASSWORD — any placeholder value works
+# (nothing Doris-related starts).
+
+services:
+  doris-fe:
+    profiles: ["doris-disabled"]
+  doris-be:
+    profiles: ["doris-disabled"]
+  doris-setup:
+    profiles: ["doris-disabled"]
+
+  migrate:
+    depends_on: !override
+      postgres: { condition: service_healthy }
+    environment:
+      TELEMETRY_ENGINE: postgres
+
+  api:
+    depends_on: !override
+      migrate: { condition: service_completed_successfully }
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    environment:
+      TELEMETRY_ENGINE: postgres
+
+  worker:
+    depends_on: !override
+      migrate: { condition: service_completed_successfully }
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    environment:
+      TELEMETRY_ENGINE: postgres
