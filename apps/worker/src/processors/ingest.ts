@@ -13,7 +13,7 @@ import {
   extractTracePatch,
   forwardEvents,
   getObservationStates,
-  getSamplingRate,
+  getSamplingPolicy,
   getScoreStates,
   getTraceStates,
   incrRehydrateCounter,
@@ -40,7 +40,7 @@ import { type TelemetryRowMap, type TelemetryTable, telemetry } from "@memoturn/
 import type { Job } from "bullmq";
 import { mapEvents } from "../mappers.js";
 import { inc, logJson, observeInsert } from "../metrics.js";
-import { applyHeadSampling, sample } from "../sampling.js";
+import { applySampling, sample } from "../sampling.js";
 
 /** True for errors worth retrying (rate limits / transient upstream failures). */
 function isTransient(err: unknown): boolean {
@@ -231,7 +231,7 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
 
   const priceOverrides = compileModelPrices(await loadProjectPriceOverrides(projectId));
 
-  const rate = await getSamplingRate(projectId);
+  const samplingPolicy = await getSamplingPolicy(projectId);
 
   // ── Authoritative merge into Postgres, then mirror to Doris (ADR-0001) ────────────
   // Each mutable entity (trace/observation/score) merges field-by-field into its Postgres `*State`
@@ -288,10 +288,12 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
     embeddings: evented.embeddings,
   };
 
-  // Head-based sampling: keep only rate% of traces in the analytical store (whole traces, stable per
-  // id). Postgres keeps the full authoritative state; only the Doris mirror is sampled. No-op at 100.
-  const { rows, dropped } = applyHeadSampling(rate, mapped);
+  // Sampling (head + tail keep-rules): keep rate% of traces plus any that look worth debugging
+  // (error/slow/expensive) in the analytical store. Postgres keeps the full authoritative state;
+  // only the Doris mirror is sampled. No-op at rate 100.
+  const { rows, dropped, ruleKept } = applySampling(samplingPolicy, mapped);
   if (dropped > 0) inc("ingest_sampled_out_total", undefined, dropped);
+  if (ruleKept > 0) inc("ingest_rule_kept_total", undefined, ruleKept);
   const { traces, observations, scores, retrieval_documents, embeddings } = rows;
 
   // Insert each table independently so one table's failure is isolated and observable. Re-insert on

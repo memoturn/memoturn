@@ -157,6 +157,7 @@
       "name": "@memoturn/worker",
       "version": "0.2.0",
       "dependencies": {
+        "@memoturn/contracts": "workspace:*",
         "@memoturn/core": "workspace:*",
         "@memoturn/db": "workspace:*",
         "@memoturn/server": "workspace:*",

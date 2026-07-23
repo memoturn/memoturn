@@ -217,9 +217,21 @@ function SettingsPage() {
   // ── Ingest sampling ───────────────────────────────────────────────────────
   const { data: sampling } = useQuery({ queryKey: ["sampling"], queryFn: () => api.getSampling() });
   const [rate, setRate] = useState<number | null>(null);
+  const [keepOnError, setKeepOnError] = useState<boolean | null>(null);
+  const [keepLatency, setKeepLatency] = useState<string | null>(null);
+  const [keepCost, setKeepCost] = useState<string | null>(null);
   const rateValue = rate ?? sampling?.rate ?? 100;
+  const keepOnErrorValue = keepOnError ?? sampling?.keepOnError ?? false;
+  const keepLatencyValue = keepLatency ?? (sampling?.keepLatencyMs != null ? String(sampling.keepLatencyMs) : "");
+  const keepCostValue = keepCost ?? (sampling?.keepMinCostUsd != null ? String(sampling.keepMinCostUsd) : "");
   const saveSampling = useMutation({
-    mutationFn: () => api.setSampling(rateValue),
+    mutationFn: () =>
+      api.setSampling({
+        rate: rateValue,
+        keepOnError: keepOnErrorValue,
+        keepLatencyMs: keepLatencyValue.trim() === "" ? null : Math.max(0, Math.floor(Number(keepLatencyValue))),
+        keepMinCostUsd: keepCostValue.trim() === "" ? null : Math.max(0, Number(keepCostValue)),
+      }),
     onSuccess: () => {
       toast.success("Sampling saved");
       qc.invalidateQueries({ queryKey: ["sampling"] });
@@ -1033,7 +1045,7 @@ function SettingsPage() {
                 decision is stable per trace, so whole traces are kept or dropped.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-6">
               <div className="flex items-end gap-3">
                 <div className="space-y-2">
                   <Label htmlFor="sampling-rate">Keep %</Label>
@@ -1047,10 +1059,58 @@ function SettingsPage() {
                     onChange={(e) => setRate(Number(e.target.value))}
                   />
                 </div>
-                <Button disabled={readOnly || saveSampling.isPending} onClick={() => saveSampling.mutate()}>
-                  {saveSampling.isPending ? "Saving…" : "Save sampling"}
-                </Button>
               </div>
+
+              <div className="space-y-3 border-t pt-4">
+                <div>
+                  <p className="text-sm font-medium">Always keep (tail sampling)</p>
+                  <p className="text-xs text-muted-foreground">
+                    Below 100%, traces matching any rule are kept regardless of the dice — so a low keep % still
+                    preserves the traces worth debugging. Leave a field blank to disable that rule.
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="size-4"
+                    checked={keepOnErrorValue}
+                    disabled={readOnly}
+                    onChange={(e) => setKeepOnError(e.target.checked)}
+                  />
+                  Keep traces with an error-level span
+                </label>
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="keep-latency">Keep if latency ≥ (ms)</Label>
+                    <Input
+                      id="keep-latency"
+                      type="number"
+                      min="0"
+                      placeholder="off"
+                      className="w-40"
+                      value={keepLatencyValue}
+                      onChange={(e) => setKeepLatency(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="keep-cost">Keep if cost ≥ ($)</Label>
+                    <Input
+                      id="keep-cost"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="off"
+                      className="w-40"
+                      value={keepCostValue}
+                      onChange={(e) => setKeepCost(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <Button disabled={readOnly || saveSampling.isPending} onClick={() => saveSampling.mutate()}>
+                {saveSampling.isPending ? "Saving…" : "Save sampling"}
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

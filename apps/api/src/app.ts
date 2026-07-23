@@ -2633,7 +2633,7 @@ app.openapi(
   createRoute({
     method: "get",
     path: "/v1/sampling",
-    summary: "Get the project's head-sampling rate (percent of traces kept in the query store; 100 = all)",
+    summary: "Get the project's ingest sampling policy (head rate + tail keep-rules)",
     tags: ["platform"],
     security,
     responses: { 200: { description: "Policy", content: { "application/json": { schema: C.samplingPolicy } } } },
@@ -2645,11 +2645,22 @@ app.openapi(
   createRoute({
     method: "post",
     path: "/v1/sampling",
-    summary: "Set the project's head-sampling rate (0–100 percent of traces kept)",
+    summary: "Set the project's ingest sampling policy: head `rate` (0–100) + tail keep-rules",
     tags: ["platform"],
     security,
     request: {
-      body: { content: { "application/json": { schema: z.object({ rate: z.number().int().min(0).max(100) }) } } },
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              rate: z.number().int().min(0).max(100),
+              keepOnError: z.boolean().optional(),
+              keepLatencyMs: z.number().int().min(0).nullable().optional(),
+              keepMinCostUsd: z.number().min(0).nullable().optional(),
+            }),
+          },
+        },
+      },
     },
     responses: {
       200: { description: "Updated", content: { "application/json": { schema: C.samplingPolicy } } },
@@ -2659,9 +2670,14 @@ app.openapi(
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
-    const { rate } = c.req.valid("json");
-    const result = await setSampling(c.get("projectId"), rate);
-    await recordAudit(c.get("projectId"), c.get("actor"), "sampling.set", `rate:${rate}`);
+    const body = c.req.valid("json");
+    const result = await setSampling(c.get("projectId"), body);
+    await recordAudit(
+      c.get("projectId"),
+      c.get("actor"),
+      "sampling.set",
+      `rate:${result.rate} err:${result.keepOnError} lat:${result.keepLatencyMs ?? "-"} cost:${result.keepMinCostUsd ?? "-"}`,
+    );
     return c.json(result);
   },
 );
