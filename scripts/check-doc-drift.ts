@@ -40,6 +40,7 @@ const DOC_FILES = [
   "docs/configuration.md",
   "docs/deployment.md",
   "docs/evaluation.md",
+  "docs/hardening.md",
   "docs/api.md",
   "docs/integrations.md",
   "docs/prompts.md",
