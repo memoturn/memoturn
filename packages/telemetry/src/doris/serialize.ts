@@ -1,3 +1,17 @@
+/**
+ * Serialization between memoturn's engine-neutral row shapes and Doris SQL.
+ *
+ * Timestamps: rows carry ISO-8601 UTC strings; Doris DATETIME(3) wants
+ * 'YYYY-MM-DD HH:MM:SS.mmm' (sessions are pinned to UTC by the client).
+ * Arrays: `tags` is written as an array constructor with one placeholder per element —
+ * CAST('["…"]' AS ARRAY<STRING>) is NOT safe, its parser corrupts values containing
+ * escaped quotes and commas.
+ *
+ * The engine-neutral helpers (datetime conversion, array parsing) live in
+ * ../serialize-shared.ts, shared with the Postgres dialect; re-exported here so
+ * existing imports keep working.
+ */
+import { toDorisDateTime } from "../serialize-shared.js";
 import type {
   EmbeddingProjectionRow,
   EmbeddingRow,
@@ -9,55 +23,7 @@ import type {
   TraceRow,
 } from "../types.js";
 
-/**
- * Serialization between memoturn's engine-neutral row shapes and Doris SQL.
- *
- * Timestamps: rows carry ISO-8601 UTC strings; Doris DATETIME(3) wants
- * 'YYYY-MM-DD HH:MM:SS.mmm' (sessions are pinned to UTC by the client).
- * Arrays: `tags` is written as an array constructor with one placeholder per element —
- * CAST('["…"]' AS ARRAY<STRING>) is NOT safe, its parser corrupts values containing
- * escaped quotes and commas.
- */
-
-/** ISO-8601 → Doris DATETIME(3) literal ('YYYY-MM-DD HH:MM:SS.mmm', UTC). */
-export function toDorisDateTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) throw new Error(`invalid timestamp: ${iso}`);
-  return d.toISOString().slice(0, 23).replace("T", " ");
-}
-
-/** Doris DATETIME string (or ISO input) → ISO-8601 UTC. */
-export function toIso(dorisDateTime: string): string {
-  return `${dorisDateTime.replace(" ", "T").slice(0, 19)}Z`;
-}
-
-/** Parse a Doris ARRAY<STRING> value as returned over the MySQL protocol. */
-export function parseTags(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map(String);
-  if (typeof value !== "string" || value === "") return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.map(String) : [];
-  } catch {
-    return [];
-  }
-}
-
-/** Parse a Doris ARRAY<FLOAT> value (read via CAST(... AS JSON)) into numbers. */
-export function parseVector(value: unknown): number[] {
-  const arr = Array.isArray(value)
-    ? value
-    : typeof value === "string" && value !== ""
-      ? (() => {
-          try {
-            return JSON.parse(value);
-          } catch {
-            return [];
-          }
-        })()
-      : [];
-  return Array.isArray(arr) ? arr.map(Number).filter((n) => Number.isFinite(n)) : [];
-}
+export { parseTags, parseVector, toDorisDateTime, toIso } from "../serialize-shared.js";
 
 /**
  * Per-table column serialization: column order, the SQL placeholder for each column
