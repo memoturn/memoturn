@@ -11,6 +11,47 @@ bun run infra:down
 bun run infra:logs
 ```
 
+With `TELEMETRY_ENGINE=postgres` in `.env`, `infra:up` skips the Doris containers entirely
+(they sit behind a compose profile) — see [Telemetry engine](#telemetry-engine-doris-or-postgres).
+
+## Telemetry engine: Doris or Postgres
+
+memoturn runs its telemetry store on one of two engines, selected by `TELEMETRY_ENGINE`
+([ADR-0002](./adr/0002-postgres-telemetry-tier.md)). Both pass the same behavioral
+conformance suite; the product is identical on either.
+
+| | `doris` (default) | `postgres` |
+| --- | --- | --- |
+| Best for | Sustained volume, long retention, big scans | Small installs — the lightest possible footprint |
+| Telemetry lives in | Apache Doris FE + BE | The same Postgres you already run (schema `telemetry`) |
+| Extra containers | 2 (JVM-based, ~4 GB+ between them) | **None** (Postgres image must include pgvector — the shipped compose files use `pgvector/pgvector:pg16`) |
+| Comfortable up to | See [Doris sizing](#doris-sizing) | Roughly 10–50 M observation rows / low hundreds of GB |
+| Vector search | Exact cosine scan | Exact cosine scan (pgvector) |
+
+Selecting the engine:
+
+- **Dev**: set `TELEMETRY_ENGINE=postgres` in `.env` — `bun run infra:up`, `infra:wait`,
+  and `bun run db:telemetry` all follow it (Doris containers never start; migrations from
+  `infra/postgres-telemetry/` apply into the `telemetry` schema).
+- **Production**: layer the overlay on the single-VM stack —
+
+  ```bash
+  docker compose -f infra/docker-compose.prod.yml \
+                 -f infra/docker-compose.prod.postgres.yml up -d --build
+  ```
+
+  The overlay parks the Doris services (never started), rewires service dependencies, and
+  sets `TELEMETRY_ENGINE=postgres` for the API, worker, and migrate step. Requires Docker
+  Compose ≥ 2.24. `.env` must still define `DORIS_PASSWORD` (any placeholder — the base
+  file's variable interpolation runs before the overlay merges; nothing Doris-related runs).
+
+**When to graduate to Doris**: trace-list facets and dashboards getting slow, sustained
+ingest in the thousands of rows/sec, long retention at high volume, or embedding spaces
+past ~100k vectors. The move is a defined, verifiable runbook — a seam-level row copy with
+no API downtime and blob replay as the fallback
+([ADR-0004](./adr/0004-telemetry-graduation-path.md)); it also works in reverse (within the
+Postgres envelope) for downsizing. Retention and deletes behave identically on both engines.
+
 ## Full self-host stack
 
 `infra/docker-compose.yml` builds and runs the API + worker alongside all dependencies:
