@@ -15,16 +15,16 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@better-auth/oauth-provider": "1.6.20",
-    "@better-auth/passkey": "1.6.20",
-    "@better-auth/sso": "1.6.20",
+    "@better-auth/oauth-provider": "1.6.24",
+    "@better-auth/passkey": "1.6.24",
+    "@better-auth/sso": "1.6.24",
     "@dsnp/parquetjs": "1.8.8",
     "@memoturn/contracts": "workspace:*",
     "@memoturn/core": "workspace:*",
     "@memoturn/db": "workspace:*",
     "@memoturn/llm": "workspace:*",
     "@memoturn/telemetry": "workspace:*",
-    "better-auth": "^1.6.20",
+    "better-auth": "^1.6.24",
     "nodemailer": "^9.0.1"
   },
   "devDependencies": {

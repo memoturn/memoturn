@@ -17,9 +17,9 @@
     "clean": "rm -rf dist .turbo src/routeTree.gen.ts playwright-report test-results"
   },
   "dependencies": {
-    "@better-auth/oauth-provider": "1.6.20",
-    "@better-auth/passkey": "1.6.20",
-    "@better-auth/sso": "1.6.20",
+    "@better-auth/oauth-provider": "1.6.24",
+    "@better-auth/passkey": "1.6.24",
+    "@better-auth/sso": "1.6.24",
     "@fontsource-variable/inter-tight": "^5",
     "@fontsource-variable/jetbrains-mono": "^5",
     "@fontsource-variable/manrope": "^5",
@@ -32,7 +32,7 @@
     "@tanstack/react-query": "^5.101.1",
     "@tanstack/react-router": "^1.170.16",
     "@tanstack/react-table": "^8.21.3",
-    "better-auth": "^1.6.20",
+    "better-auth": "^1.6.24",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
