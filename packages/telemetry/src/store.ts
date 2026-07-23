@@ -31,6 +31,8 @@ import type {
   ObservationRow,
   ProjectRowCounts,
   RetrievalDocumentDetail,
+  ScanCursor,
+  ScanPage,
   TelemetryRowMap,
   TelemetryTable,
   TraceEmbeddingRow,
@@ -197,6 +199,19 @@ export interface TelemetryStore {
    * is a no-op after merge. Callers rely on this for safe job retries and corrections.
    */
   insertRows<T extends TelemetryTable>(table: T, rows: TelemetryRowMap[T][]): Promise<void>;
+  /**
+   * Keyset-paginated full-fidelity scan of one table in primary-key order — the bulk-read
+   * half of the engine-to-engine copy path (ADR-0004): `scanRows` from the source engine
+   * feeds `insertRows` on the target. Rows are write-shaped with the LWW sequence value
+   * (`event_ts`) preserved at millisecond precision, so a copy is idempotent, resumable,
+   * and can never regress a newer row on the target. Not project-scoped: migration moves
+   * the whole instance. `next` is null once the table is exhausted.
+   */
+  scanRows<T extends TelemetryTable>(
+    table: T,
+    cursor?: ScanCursor,
+    limit?: number,
+  ): Promise<ScanPage<TelemetryRowMap[T]>>;
   deleteScore(projectId: string, scoreId: string): Promise<void>;
   /** Delete the given traces plus their observations and scores. */
   deleteTraces(projectId: string, traceIds: string[]): Promise<void>;
