@@ -17,6 +17,9 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    # A healthy run is ~3–4 min; cap well above that so a hung step (e.g. a stalled
+    # Playwright browser download) fails fast instead of riding GitHub's 6-hour default.
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -91,9 +94,28 @@ jobs:
       # The plain `build` job deliberately unsets DORIS_* so these skip there.
       - name: Worker integration tests (real Doris)
         run: bun --filter @memoturn/worker test
-      - name: Install Playwright browser
+      # Cache the Playwright browser + OS deps so a transient download stall doesn't hang
+      # the run (the version key busts the cache on a Playwright bump).
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(bunx playwright --version | grep -oE '[0-9.]+')" >> "$GITHUB_OUTPUT"
+        working-directory: apps/console
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - name: Install Playwright browser (cache miss)
+        if: steps.pw-cache.outputs.cache-hit != 'true'
         run: bunx playwright install --with-deps chromium
         working-directory: apps/console
+        timeout-minutes: 5
+      - name: Install Playwright OS deps (cache hit — browser already cached)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: bunx playwright install-deps chromium
+        working-directory: apps/console
+        timeout-minutes: 5
       # Playwright boots the API (start) + console (dev) via webServer and seeds in globalSetup.
       - name: Run E2E tests
         run: bun --filter @memoturn/console test:e2e
