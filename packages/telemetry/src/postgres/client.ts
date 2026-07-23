@@ -114,12 +114,14 @@ export function rewritePlaceholders(sql: string, params: unknown[]): { text: str
         text += `$${values.length}`;
       } else if (Array.isArray(value)) {
         if (value.length === 0) throw new Error("empty array bound to IN (?) — guard the call site");
+        // Expand WITHOUT parens (mysql2 semantics) — the SQL already wraps the `?` in
+        // `IN (…)`; adding parens would turn a multi-element list into a record comparison.
         const parts: string[] = [];
         for (const v of value) {
           values.push(v);
           parts.push(`$${values.length}`);
         }
-        text += `(${parts.join(", ")})`;
+        text += parts.join(", ");
       } else {
         values.push(value);
         text += `$${values.length}`;
@@ -141,10 +143,7 @@ export function rewritePlaceholders(sql: string, params: unknown[]): { text: str
  * (server restart / network reset). Returns rows only — the callers' result shape is
  * normalized at the store boundary like the Doris impl.
  */
-export async function pgQuery<T extends Record<string, unknown> = Record<string, unknown>>(
-  sql: string,
-  params: unknown[] = [],
-): Promise<T[]> {
+export async function pgQuery<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
   const { text, values } = rewritePlaceholders(sql, params);
   try {
     const res = await pgPool().query(text, values);

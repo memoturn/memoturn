@@ -8,9 +8,9 @@ describe("rewritePlaceholders", () => {
     expect(values).toEqual(["x", 2]);
   });
 
-  it("expands plain-array params like mysql2 IN (?)", () => {
+  it("expands plain-array params like mysql2 IN (?) — no extra parens (a parenthesized list is a record)", () => {
     const { text, values } = rewritePlaceholders("WHERE project_id = ? AND id IN (?)", ["p", ["a", "b", "c"]]);
-    expect(text).toBe("WHERE project_id = $1 AND id IN (($2, $3, $4))");
+    expect(text).toBe("WHERE project_id = $1 AND id IN ($2, $3, $4)");
     expect(values).toEqual(["p", "a", "b", "c"]);
   });
 
