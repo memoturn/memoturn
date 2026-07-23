@@ -58,8 +58,8 @@ The profile matrix after ADR-0002 + ADR-0003:
 | **Edge (new)** | Workers | Postgres (ADR-0002) | Workers Queues | R2 |
 
 Doris remains the scale story; the edge profile deliberately targets the same envelope as the
-ADR-0002 Postgres tier and inherits its sizing guidance and its graduation path (move to the
-container-scale profile; blob replay rebuilds Doris).
+ADR-0002 Postgres tier and inherits its sizing guidance and its graduation path (the ADR-0004
+runbook, plus a compute move to the container-scale profile).
 
 ## Consequences
 
