@@ -69,6 +69,7 @@ import type {
   TracePage,
   TraceSummary,
   TraceTags,
+  UsageSummary,
   UserPage,
   Webhook,
   WebhookDelivery,
@@ -239,6 +240,7 @@ export const api = {
   ) => post<AnnotationResult>(`/v1/traces/${encodeURIComponent(id)}/annotate`, body),
   setTraceTags: (id: string, tags: string[]) => post<TraceTags>(`/v1/traces/${encodeURIComponent(id)}/tags`, { tags }),
   getMetrics: (days = 30) => get<MetricsSummary>(`/v1/metrics${qs({ days })}`),
+  getUsage: (days = 30) => get<UsageSummary>(`/v1/usage${qs({ days })}`),
   runAnalyticsQuery: (query: AnalyticsQuery) => post<QueryResult>(`/v1/metrics/query`, query),
   getToolAnalytics: (days = 30) =>
     get<{ data: ToolAnalyticsRow[] }>(`/v1/metrics/tools${qs({ days })}`).then((r) => r.data),

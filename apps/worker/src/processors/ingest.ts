@@ -29,6 +29,7 @@ import {
   type ObservationPatch,
   offloadLargePayload,
   offloadMedia,
+  recordUsage,
   runEvaluator,
   type ScorePatch,
   seedObservationStates,
@@ -179,6 +180,27 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
   // actually SENT (present keys) vs. zod-filled defaults — the two diverge (e.g. `environment`).
   const rawJson = JSON.parse(raw) as { batch: Array<{ body?: Record<string, unknown> }> };
   const parsed = ingestRequest.parse(rawJson);
+
+  // Volume-based usage metering (best-effort — never fails ingestion). Measured on the raw
+  // batch, so usage counts everything ingested regardless of sampling. Gated on the first
+  // attempt so a BullMQ retry (which re-runs this whole idempotent processor) can't
+  // double-count; a rare pre-count failure under-counts, the billing-safe direction.
+  if (job.attemptsMade === 0) {
+    const traceIds = new Set<string>();
+    for (const e of parsed.batch) {
+      const tid = e.type === "trace-create" ? e.body.id : (e.body as { traceId?: string }).traceId;
+      if (tid) traceIds.add(tid);
+    }
+    try {
+      await recordUsage(projectId, {
+        bytes: Buffer.byteLength(raw),
+        events: parsed.batch.length,
+        traces: traceIds.size,
+      });
+    } catch (err) {
+      logJson("warn", "usage metering failed", { projectId, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
 
   // Offload any inline base64 media (data: URIs) in input/output to blob storage.
   for (const e of parsed.batch) {

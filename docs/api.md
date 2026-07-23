@@ -50,6 +50,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/metrics` | Cost/token/latency rollups by day and model (`days` query). |
 | GET | `/v1/metrics/tools` | Per-tool analytics — call volume, error rate, and p50/p95/avg latency by tool name (named SPAN observations) over `days`. The top agent-debugging view. |
 | GET | `/v1/metrics/cost-breakdown` | Top spenders: cost rolled up by end user, session, or prompt, ranked by spend. Query: `by` (`user`\|`session`\|`prompt`, default `user`), `days`, `limit`. |
+| GET | `/v1/usage` | Volume-based usage metering — bytes / events / traces ingested per UTC day, measured on the raw batch **before sampling** (the GB-ingested billing signal). Returns `{ total_bytes, total_events, total_traces, byDay }`. Query: `days` (1–365, default 30). |
 | POST | `/v1/metrics/query` | Run a dashboard/widget analytics query (view × metrics × dimensions × time × filters) from a JSON body; returns result rows. Read-only. |
 
 ### Prompts
