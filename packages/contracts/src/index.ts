@@ -650,8 +650,8 @@ export const metricsSummary = z.object({
 });
 export type MetricsSummary = z.infer<typeof metricsSummary>;
 
-// Cost rollup: spend grouped by a dimension (user or session), ranked by cost. `key` is the
-// user_id or session_id; empty keys are excluded upstream.
+// Cost rollup: spend grouped by a dimension (user, session, or prompt), ranked by cost. `key`
+// is the user_id, session_id, or prompt name; empty keys are excluded upstream.
 export const costRollupRow = z.object({
   key: z.string(),
   trace_count: z.number(),

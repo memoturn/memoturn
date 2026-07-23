@@ -774,6 +774,35 @@ export class PostgresTelemetryStore implements TelemetryStore {
     }));
   }
 
+  async costByPrompt(projectId: string, opts: { days?: number; limit?: number } = {}): Promise<CostRollupRow[]> {
+    const { days = 0, limit = 20 } = opts;
+    // Project-wide rollup on observations.prompt_id (the prompt NAME — see
+    // costByPromptVersion below); no traces join needed, the cost lives on the rows.
+    const dayCond = days > 0 ? "AND start_time >= ?" : "";
+    const dayParam = days > 0 ? [cutoffDaysAgo(days)] : [];
+    const rows = await this.query<CostRollupRow>(
+      `
+      SELECT
+        prompt_id AS key,
+        COUNT(DISTINCT trace_id) AS trace_count,
+        COALESCE(SUM(total_cost), 0) AS total_cost,
+        COALESCE(SUM(total_tokens), 0) AS total_tokens
+      FROM observations
+      WHERE project_id = ? AND prompt_id != '' ${dayCond}
+      GROUP BY prompt_id
+      ORDER BY total_cost DESC
+      LIMIT ?
+      `,
+      [projectId, ...dayParam, Math.max(1, Math.floor(limit))],
+    );
+    return rows.map((r) => ({
+      key: r.key,
+      trace_count: Number(r.trace_count),
+      total_cost: Number(r.total_cost),
+      total_tokens: Number(r.total_tokens),
+    }));
+  }
+
   async costByPromptVersion(
     projectId: string,
     promptName: string,

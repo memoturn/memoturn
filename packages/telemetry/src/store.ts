@@ -110,6 +110,12 @@ export interface TelemetryStore {
   costByUser(projectId: string, opts?: { days?: number; limit?: number }): Promise<CostRollupRow[]>;
   /** Spend ranked by session_id (top spenders). Joins observation cost onto traces. */
   costBySession(projectId: string, opts?: { days?: number; limit?: number }): Promise<CostRollupRow[]>;
+  /**
+   * Project-wide spend ranked by prompt (top prompts across ALL prompts — the per-prompt
+   * per-version breakdown is costByPromptVersion). `key` is the prompt name (observations
+   * carry it in prompt_id); trace_count is DISTINCT traces that used the prompt.
+   */
+  costByPrompt(projectId: string, opts?: { days?: number; limit?: number }): Promise<CostRollupRow[]>;
   /** Per-version spend for one prompt (observations grouped by prompt_version), ranked by cost. */
   costByPromptVersion(projectId: string, promptName: string, opts?: { days?: number }): Promise<PromptVersionCost[]>;
   /**

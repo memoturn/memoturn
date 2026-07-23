@@ -46,12 +46,14 @@ export async function getToolAnalytics(projectId: string, days = 30): Promise<To
   return telemetry().toolAnalytics(projectId, days);
 }
 
-/** Top spenders: cost rolled up by end user or session over `days`, ranked by spend. */
+/** Top spenders: cost rolled up by end user, session, or prompt over `days`, ranked by spend. */
 export async function getCostBreakdown(
   projectId: string,
-  by: "user" | "session",
+  by: "user" | "session" | "prompt",
   opts: { days?: number; limit?: number } = {},
 ): Promise<CostRollupRow[]> {
   const store = telemetry();
-  return by === "session" ? store.costBySession(projectId, opts) : store.costByUser(projectId, opts);
+  if (by === "session") return store.costBySession(projectId, opts);
+  if (by === "prompt") return store.costByPrompt(projectId, opts);
+  return store.costByUser(projectId, opts);
 }
