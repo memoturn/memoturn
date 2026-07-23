@@ -4,7 +4,7 @@ name: memoturn-dev
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_USER: memoturn
