@@ -9,3 +9,4 @@ Each ADR is immutable once accepted; supersede it with a new one rather than edi
 |---|-------|--------|
 | [0001](0001-storage-roles-and-mutable-state.md) | Storage roles: Doris as analytical mirror, Postgres authoritative for mutable state | Accepted (implementation trigger-gated) |
 | [0002](0002-postgres-telemetry-tier.md) | A Postgres telemetry tier for small installs, Doris for scale | Proposed (implementation trigger-gated) |
+| [0003](0003-edge-deployment-profile.md) | An edge deployment profile (serverless runtimes, Cloudflare Workers reference target) | Proposed (trigger-gated, depends on 0002) |
