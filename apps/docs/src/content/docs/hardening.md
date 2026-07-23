@@ -57,6 +57,25 @@ See [Configuration](/configuration/) for the full variable reference and
 - [ ] Request body sizes are already capped (1 MB default; 12 MB for `/v1/ingest`, `/v1/otel/*`,
   and `/v1/media`). If your proxy adds its own limit, keep it at or above these.
 
+## Ingest sampling & usage
+
+Per-project settings (`/v1/sampling`, `/v1/usage`, or the console **Settings** page), not env vars:
+
+- [ ] **Head sampling** — `rate` (0–100) keeps that percent of traces in the query store, decided
+  by a stable per-trace hash so whole traces are kept or dropped consistently. 100 (default) keeps
+  everything. The raw batch always lands in blob regardless — sampling trims what's *queryable* to
+  control Doris/Postgres volume and cost, it never loses data (blob is the replay source).
+- [ ] **Tail keep-rules** — below 100%, a trace is kept regardless of the head dice when it looks
+  worth debugging: `keepOnError` (an error-level span), `keepLatencyMs` (a span at/over that
+  latency), `keepMinCostUsd` (total cost at/over that spend). So a low rate sheds routine volume
+  while always preserving the interesting traces. *Limitation:* keep-rules evaluate against each
+  batch as it arrives; if a keep-signal (e.g. an error span) lands in a **later** batch than
+  already-dropped spans of the same trace, the kept trace is partial — rare in practice (SDKs flush
+  a trace's spans together; terminal errors land with the trace), and blob replay is the
+  full-fidelity recovery path.
+- [ ] **Usage metering** (`/v1/usage`) records bytes/events/traces ingested per day, measured on the
+  raw batch **before** sampling — so it reflects everything you send. Always on; no configuration.
+
 ## Accounts & sign-in
 
 - [ ] `AUTH_MIN_PASSWORD_LENGTH` — 12-character floor for new passwords (length over
