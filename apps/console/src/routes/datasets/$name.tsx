@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Database, FlaskConical, GitBranch, Play } from "lucide-react";
+import { ChevronDown, Database, Download, FlaskConical, GitBranch, Play } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "../../components/empty-state";
@@ -27,12 +27,20 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../../components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../../components/ui/dropdown-menu";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
-import { api } from "../../lib/api";
+import { api, downloadDatasetExport } from "../../lib/api";
 import { useIsReadOnly } from "../../lib/role";
 
 export const Route = createFileRoute("/datasets/$name")({ component: DatasetDetailPage });
@@ -69,6 +77,15 @@ function DatasetDetailPage() {
     onError: (e) => toast.error(String(e)),
   });
 
+  const exportDataset = async (format: "items" | "oai-chat") => {
+    try {
+      const { skipped } = await downloadDatasetExport(name, format);
+      if (skipped > 0) toast.info(`${skipped} item${skipped === 1 ? "" : "s"} without an expected output skipped`);
+    } catch (e) {
+      toast.error(`Export failed: ${String(e)}`);
+    }
+  };
+
   if (isLoading) return <Skeleton className="h-64 w-full" />;
   if (error) return <EmptyState title="Failed to load dataset" description={String(error)} />;
   if (!data) return <EmptyState title="Dataset not found" />;
@@ -95,6 +112,27 @@ function DatasetDetailPage() {
           {data.description && <p className="text-sm text-muted-foreground">{data.description}</p>}
         </div>
         <div className="flex items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Download className="mr-1.5 size-4" />
+                Export
+                <ChevronDown className="ml-1 size-3.5 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Download {data.items.length} items</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => void exportDataset("items")}>
+                Items (JSONL)
+                <span className="ml-auto text-xs text-muted-foreground">backup</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void exportDataset("oai-chat")}>
+                Fine-tuning (OpenAI chat JSONL)
+                <span className="ml-auto text-xs text-muted-foreground">.jsonl</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {!readOnly && <CutVersionDialog pending={cutVersion.isPending} onCut={(body) => cutVersion.mutate(body)} />}
           {!readOnly && (
             <Button asChild size="sm">

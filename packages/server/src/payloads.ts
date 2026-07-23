@@ -63,3 +63,43 @@ export async function getOffloadedPayload(
   if (!obj) return null;
   return new TextDecoder().decode(obj.body);
 }
+
+/** True when `value` is an offload marker written by offloadLargePayload. */
+export function isTruncatedMarker(value: unknown): value is TruncatedPayload {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (value as { _truncated?: unknown })._truncated === true &&
+    typeof (value as { ref?: unknown }).ref === "string"
+  );
+}
+
+/**
+ * Replace an offload marker with the original payload it points at; any other value
+ * passes through unchanged. Accepts the marker object itself or a JSON string that
+ * parses to one (trace IO columns store payloads as JSON text). The fetched blob holds
+ * the original serialization — returned parsed when it is JSON, verbatim otherwise. A
+ * missing/out-of-scope blob leaves the marker in place rather than dropping data.
+ */
+export async function rehydratePayload(
+  projectId: string,
+  value: unknown,
+  fetch: (key: string) => Promise<{ body: Uint8Array } | null> = getBlobBytes,
+): Promise<unknown> {
+  let marker: unknown = value;
+  if (typeof value === "string") {
+    try {
+      marker = JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  if (!isTruncatedMarker(marker)) return value;
+  const body = await getOffloadedPayload(projectId, marker.ref, fetch);
+  if (body === null) return value;
+  try {
+    return JSON.parse(body);
+  } catch {
+    return body;
+  }
+}

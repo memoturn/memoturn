@@ -1,5 +1,6 @@
 import { telemetry } from "@memoturn/telemetry";
 import { addDatasetItems, createDataset } from "./datasets.js";
+import { rehydratePayload } from "./payloads.js";
 import { addReviewItems } from "./review.js";
 import { getTraceIO } from "./traces.js";
 
@@ -39,10 +40,18 @@ export async function runBatchAction(projectId: string, input: BatchInput) {
     if (!name) return null;
     await createDataset(projectId, { name });
     const io = await getTraceIO(projectId, ids);
-    const items = ids
-      .map((id) => io.get(id))
-      .filter((t): t is NonNullable<typeof t> => !!t)
-      .map((t) => ({ input: parseJson(t.input), expectedOutput: parseJson(t.output), metadata: { traceId: t.id } }));
+    // Rehydrate offload markers so items are self-contained — a >256 KB payload stores
+    // its full content on the dataset item, not the {_truncated, ref} marker.
+    const items = await Promise.all(
+      ids
+        .map((id) => io.get(id))
+        .filter((t): t is NonNullable<typeof t> => !!t)
+        .map(async (t) => ({
+          input: await rehydratePayload(projectId, parseJson(t.input)),
+          expectedOutput: await rehydratePayload(projectId, parseJson(t.output)),
+          metadata: { traceId: t.id },
+        })),
+    );
     const result = await addDatasetItems(projectId, name, items);
     return { action: "add-to-dataset", affected: result?.added ?? 0 };
   }

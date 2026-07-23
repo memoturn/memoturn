@@ -264,8 +264,10 @@ export const api = {
     get<ExperimentComparison>(`/v1/datasets/${encodeURIComponent(name)}/comparison${qs({ version })}`),
   createDataset: (name: string, description?: string) =>
     post<{ id: string; name: string }>(`/v1/datasets`, { name, description }),
-  addDatasetItems: (name: string, items: { input: unknown; expectedOutput?: unknown }[]) =>
-    post<{ added: number; itemIds: string[] }>(`/v1/datasets/${encodeURIComponent(name)}/items`, { items }),
+  addDatasetItems: (
+    name: string,
+    items: { input: unknown; expectedOutput?: unknown; metadata?: Record<string, unknown> }[],
+  ) => post<{ added: number; itemIds: string[] }>(`/v1/datasets/${encodeURIComponent(name)}/items`, { items }),
   recordRun: (name: string, runName: string, links: { datasetItemId: string; traceId: string }[], version?: number) =>
     post<{ run: string; linked: number }>(`/v1/datasets/${encodeURIComponent(name)}/runs`, { runName, links, version }),
   listDatasetVersions: (name: string) =>
@@ -582,6 +584,31 @@ export async function downloadTracesExport(
   a.download = `memoturn-traces.${format}`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Download a dataset as JSONL — `items` (backup dump) or `oai-chat` (OpenAI fine-tuning
+ * chat format; items without an expectedOutput are skipped). Returns the skipped count
+ * from the X-Memoturn-Skipped header so callers can surface it.
+ */
+export async function downloadDatasetExport(
+  name: string,
+  format: "items" | "oai-chat",
+  version?: number,
+): Promise<{ skipped: number }> {
+  const res = await fetch(`${API_BASE}/v1/datasets/${encodeURIComponent(name)}/export${qs({ format, version })}`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`export failed: ${res.status}`);
+  const skipped = Number(res.headers.get("x-memoturn-skipped") ?? 0);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `memoturn-dataset-${name}-${format}.jsonl`;
+  a.click();
+  URL.revokeObjectURL(url);
+  return { skipped };
 }
 
 const BLOB_REF_PREFIX = "memoturn-blob://";

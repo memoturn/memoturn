@@ -779,6 +779,8 @@ function AddToDatasetButton({ obs }: { obs: ObservationDetail }) {
         {
           input: tryParse(obs.input) ?? obs.input,
           expectedOutput: obs.output ? (tryParse(obs.output) ?? obs.output) : undefined,
+          // Provenance, matching the bulk add-to-dataset path (metadata.traceId).
+          metadata: { traceId: obs.trace_id, observationId: obs.id },
         },
       ]),
     onSuccess: (_res, name) => toast.success(`Added to dataset “${name}”`),
