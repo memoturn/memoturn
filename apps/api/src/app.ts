@@ -977,12 +977,12 @@ app.openapi(
   createRoute({
     method: "get",
     path: "/v1/metrics/cost-breakdown",
-    summary: "Top spenders: cost rolled up by end user or session, ranked by spend",
+    summary: "Top spenders: cost rolled up by end user, session, or prompt, ranked by spend",
     tags: ["metrics"],
     security,
     request: {
       query: z.object({
-        by: z.enum(["user", "session"]).optional(),
+        by: z.enum(["user", "session", "prompt"]).optional(),
         days: z.coerce.number().int().min(1).max(365).optional(),
         limit: z.coerce.number().int().min(1).max(100).optional(),
       }),

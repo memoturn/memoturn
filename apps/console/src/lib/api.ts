@@ -242,7 +242,7 @@ export const api = {
   runAnalyticsQuery: (query: AnalyticsQuery) => post<QueryResult>(`/v1/metrics/query`, query),
   getToolAnalytics: (days = 30) =>
     get<{ data: ToolAnalyticsRow[] }>(`/v1/metrics/tools${qs({ days })}`).then((r) => r.data),
-  getCostBreakdown: (by: "user" | "session", days = 30, limit = 20) =>
+  getCostBreakdown: (by: "user" | "session" | "prompt", days = 30, limit = 20) =>
     get<{ data: CostRollupRow[] }>(`/v1/metrics/cost-breakdown${qs({ by, days, limit })}`).then((r) => r.data),
   listPrompts: () => get<{ data: PromptListItem[] }>(`/v1/prompts`).then((r) => r.data),
   getPrompt: (name: string) => get<PromptDetail>(`/v1/prompts/${encodeURIComponent(name)}/detail`),
