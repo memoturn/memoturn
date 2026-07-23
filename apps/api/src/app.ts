@@ -56,6 +56,7 @@ import {
   deleteWidget,
   disconnectMcpClient,
   evaluateGate,
+  exportDatasetJsonl,
   exportTracesCsv,
   exportTracesJsonl,
   exportTracesParquet,
@@ -447,6 +448,26 @@ app.get("/v1/exports/traces", async (c) => {
   return c.body(body, 200, {
     "content-type": "application/x-ndjson",
     "content-disposition": "attachment; filename=memoturn-traces.jsonl",
+  });
+});
+
+// Dataset export (JSONL download) — plain route so we can set a file download header.
+// `format=items` is a generic backup dump; `format=oai-chat` emits OpenAI fine-tuning
+// chat lines (items without expectedOutput are skipped; count in X-Memoturn-Skipped).
+// `version=N` exports a frozen version's items instead of the live set.
+app.get("/v1/datasets/:name/export", async (c) => {
+  const name = c.req.param("name");
+  const q = new URL(c.req.url).searchParams;
+  const format = q.get("format") === "oai-chat" ? ("oai-chat" as const) : ("items" as const);
+  const versionRaw = q.get("version");
+  const version = versionRaw !== null && /^\d+$/.test(versionRaw) ? Number(versionRaw) : undefined;
+  const result = await exportDatasetJsonl(c.get("projectId"), name, { format, version });
+  if (!result) return c.json({ error: "dataset or version not found" }, 404);
+  const suffix = format === "oai-chat" ? "oai-chat" : "items";
+  return c.body(result.content, 200, {
+    "content-type": "application/x-ndjson",
+    "content-disposition": `attachment; filename=memoturn-dataset-${encodeURIComponent(name)}-${suffix}.jsonl`,
+    "x-memoturn-skipped": String(result.skipped),
   });
 });
 

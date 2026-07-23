@@ -1,4 +1,6 @@
 import { prisma } from "@memoturn/db";
+import { rehydratePayload } from "./payloads.js";
+import { messagesFromInput } from "./playground.js";
 import { getScoresByTraceIds, getTraceIO } from "./traces.js";
 
 /**
@@ -393,4 +395,81 @@ export async function evaluateGate(
     scores,
     failures,
   };
+}
+
+// ── Export (fine-tuning + backup) ──────────────────────────────────────────────────
+
+export type DatasetExportFormat = "items" | "oai-chat";
+
+export interface DatasetExportItem {
+  input: unknown;
+  expectedOutput: unknown;
+  metadata: unknown;
+}
+
+/**
+ * Shape dataset items into JSONL. `items` is a generic backup/re-import dump; `oai-chat`
+ * emits OpenAI fine-tuning chat lines — item input through messagesFromInput (the same
+ * normalization the experiment runner uses, so exports and experiments read items
+ * identically) with expectedOutput as the final assistant message. Items without an
+ * expectedOutput are skipped in oai-chat (a fine-tuning example needs a target). Pure —
+ * exported for tests; rehydration happens in exportDatasetJsonl.
+ */
+export function datasetItemsToJsonl(
+  items: DatasetExportItem[],
+  format: DatasetExportFormat,
+): { content: string; count: number; skipped: number } {
+  if (format === "items") {
+    const lines = items.map((i) =>
+      JSON.stringify({ input: i.input, expectedOutput: i.expectedOutput ?? null, metadata: i.metadata ?? {} }),
+    );
+    return { content: lines.length ? `${lines.join("\n")}\n` : "", count: lines.length, skipped: 0 };
+  }
+  const lines: string[] = [];
+  let skipped = 0;
+  for (const item of items) {
+    if (item.expectedOutput === null || item.expectedOutput === undefined) {
+      skipped++;
+      continue;
+    }
+    const target = typeof item.expectedOutput === "string" ? item.expectedOutput : JSON.stringify(item.expectedOutput);
+    lines.push(
+      JSON.stringify({ messages: [...messagesFromInput(item.input), { role: "assistant", content: target }] }),
+    );
+  }
+  return { content: lines.length ? `${lines.join("\n")}\n` : "", count: lines.length, skipped };
+}
+
+/**
+ * Export a dataset (live items, or a frozen version when `version` is given) as JSONL.
+ * Offload markers in item payloads are rehydrated from blob first, so >256 KB inputs
+ * export as their full content, not the marker. Returns null when the dataset (or the
+ * requested version) doesn't exist.
+ */
+export async function exportDatasetJsonl(
+  projectId: string,
+  name: string,
+  opts: { format: DatasetExportFormat; version?: number },
+): Promise<{ content: string; count: number; skipped: number } | null> {
+  let items: DatasetExportItem[];
+  if (opts.version !== undefined) {
+    const dv = await getDatasetVersion(projectId, name, opts.version);
+    if (!dv) return null;
+    items = dv.items;
+  } else {
+    const ds = await prisma.dataset.findUnique({
+      where: { projectId_name: { projectId, name } },
+      include: { items: { orderBy: { createdAt: "asc" } } },
+    });
+    if (!ds) return null;
+    items = ds.items.map((i) => ({ input: i.input, expectedOutput: i.expectedOutput, metadata: i.metadata }));
+  }
+  const rehydrated = await Promise.all(
+    items.map(async (i) => ({
+      ...i,
+      input: await rehydratePayload(projectId, i.input),
+      expectedOutput: i.expectedOutput == null ? i.expectedOutput : await rehydratePayload(projectId, i.expectedOutput),
+    })),
+  );
+  return datasetItemsToJsonl(rehydrated, opts.format);
 }

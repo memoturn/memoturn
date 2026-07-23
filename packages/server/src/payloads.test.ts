@@ -71,3 +71,38 @@ describe("getOffloadedPayload", () => {
     expect(await getOffloadedPayload("proj1", "payloads/proj1/2026/missing.json", fetch)).toBeNull();
   });
 });
+
+describe("rehydratePayload", () => {
+  const blob = (stored: Record<string, string>) => async (key: string) =>
+    stored[key] ? { body: new TextEncoder().encode(stored[key]) } : null;
+
+  it("passes non-marker values through unchanged", async () => {
+    const { rehydratePayload } = await import("./payloads.js");
+    expect(await rehydratePayload("p1", { q: "hi" }, blob({}))).toEqual({ q: "hi" });
+    expect(await rehydratePayload("p1", "plain string", blob({}))).toBe("plain string");
+    expect(await rehydratePayload("p1", null, blob({}))).toBeNull();
+  });
+
+  it("replaces a marker object with the original payload (parsed when JSON)", async () => {
+    const { rehydratePayload, PAYLOAD_REF_PREFIX } = await import("./payloads.js");
+    const key = "payloads/p1/2026-07-23/abc.json";
+    const marker = { _truncated: true, ref: `${PAYLOAD_REF_PREFIX}${key}`, bytes: 10, preview: "" };
+    const out = await rehydratePayload("p1", marker, blob({ [key]: '{"full":"payload"}' }));
+    expect(out).toEqual({ full: "payload" });
+  });
+
+  it("replaces a marker serialized as a JSON string (trace IO columns store text)", async () => {
+    const { rehydratePayload, PAYLOAD_REF_PREFIX } = await import("./payloads.js");
+    const key = "payloads/p1/2026-07-23/def.json";
+    const marker = JSON.stringify({ _truncated: true, ref: `${PAYLOAD_REF_PREFIX}${key}`, bytes: 3, preview: "" });
+    expect(await rehydratePayload("p1", marker, blob({ [key]: "raw text payload" }))).toBe("raw text payload");
+  });
+
+  it("leaves the marker in place when the blob is missing or cross-project", async () => {
+    const { rehydratePayload, PAYLOAD_REF_PREFIX } = await import("./payloads.js");
+    const missing = { _truncated: true, ref: `${PAYLOAD_REF_PREFIX}payloads/p1/x.json`, bytes: 1, preview: "" };
+    expect(await rehydratePayload("p1", missing, blob({}))).toEqual(missing);
+    const foreign = { _truncated: true, ref: `${PAYLOAD_REF_PREFIX}payloads/OTHER/x.json`, bytes: 1, preview: "" };
+    expect(await rehydratePayload("p1", foreign, blob({ "payloads/OTHER/x.json": "secret" }))).toEqual(foreign);
+  });
+});
