@@ -10,6 +10,8 @@ released together from `v*` tags.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-07-22
+
 - Auth: enterprise hardening pass and OAuth 2.1 provider migration for the remote
   MCP endpoint (mandatory PKCE, dynamic client registration, rotating refresh tokens).
 - Mutable-state rework (ADR-0001): Postgres is now authoritative for mutable
@@ -21,6 +23,16 @@ released together from `v*` tags.
   Chroma/Weaviate/Qdrant/Pinecone vector stores (JS + Python).
 - Public sites: dark-first rebrand of memoturn.ai and docs.memoturn.ai with real
   console captures; docs site brought to parity with the in-repo docs.
+- Public-release hardening: security headers + enforcing CSP on the docs site,
+  immutable caching for hashed assets, edge-cached marketing HTML, deploy smoke
+  tests; SEO/GEO scaffolding (robots, sitemaps, `llms.txt`, JSON-LD, canonical).
+- Self-hosting: the documented compose path now boots (secrets wired, one-shot
+  migrate service); the console image serves the built SPA from Caddy instead of
+  `vite preview` (~101 MB, non-root); all images gained `HEALTHCHECK`s.
+- Docs: new security-hardening checklist, operator upgrade runbook, Doris sizing
+  guidance, and a complete environment-variable reference.
+- Release engineering: CHANGELOG, auto-generated GitHub release notes on tags,
+  LICENSE bundled in the Python/PyPI and Go SDK artifacts.
 
 ## [0.3.0] — 2026-07-17
 
@@ -59,7 +71,8 @@ released together from `v*` tags.
   sampling, prompt management, playground, datasets, OTel/LangChain/OpenAI
   ingestion, and the TanStack console.
 
-[Unreleased]: https://github.com/memoturn/memoturn/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/memoturn/memoturn/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/memoturn/memoturn/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/memoturn/memoturn/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/memoturn/memoturn/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/memoturn/memoturn/releases/tag/v0.1.0
