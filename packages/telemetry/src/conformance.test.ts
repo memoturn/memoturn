@@ -15,6 +15,10 @@ import type {
  * implementation must satisfy: insert → read-back, last-writer-wins overwrite by
  * event_ts, stale-write rejection, filters, on-the-fly metrics, and deletes.
  * Skipped when no store is reachable (so the default `bun run test` stays infra-free).
+ *
+ * Engine-divergence rule: never assert exact percentile equality — Doris
+ * PERCENTILE_APPROX (t-digest) and Postgres percentile_cont (exact interpolation) may
+ * legally differ; percentile assertions must stay inequalities/ranges.
  */
 const store = telemetry();
 const reachable = await store.ping();
@@ -468,6 +472,44 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(s?.value).toBeCloseTo(0.95); // stale write must not win
   });
 
+  it("LWW edges: equal event_ts breaks by load order; one batch may carry the same id twice", async () => {
+    // Dedicated entity so the base fixtures (sc1 = 0.95) stay untouched for later tests.
+    const lww = (over: Partial<ScoreWriteRow>) => score({ id: "sc-lww", trace_id: "t-lww", ...over });
+
+    // Equal event_ts, different content: the later WRITE wins (sequence ties break by
+    // load order — Doris sequence-column semantics; PG reproduces via `>=` in the upsert).
+    const tieTs = iso(90_000);
+    await store.insertRows("scores", [lww({ value: 0.3, event_ts: tieTs })]);
+    await store.insertRows("scores", [lww({ value: 0.4, event_ts: tieTs })]);
+    expect((await store.getScoreById(P, "sc-lww"))?.value).toBeCloseTo(0.4);
+
+    // One insertRows batch carrying the same id twice (older + newer): must succeed with
+    // the newer row visible and no duplicate. (Engines that upsert per-statement have to
+    // pre-dedupe — worker patch batches produce exactly this shape.)
+    await store.insertRows("scores", [
+      lww({ value: 0.5, event_ts: iso(100_000) }),
+      lww({ value: 0.6, event_ts: iso(110_000) }),
+    ]);
+    expect((await store.getScoreById(P, "sc-lww"))?.value).toBeCloseTo(0.6);
+    expect(await store.listScoresByTrace(P, "t-lww")).toHaveLength(1);
+
+    await store.deleteScore(P, "sc-lww");
+  });
+
+  it("filters over malformed metadata JSON match nothing and never error", async () => {
+    // Doris get_json_string returns NULL on malformed JSON; other engines must reproduce
+    // that (not throw) even when the cast/parse would fail.
+    await store.insertRows("traces", [trace({ id: "t-badmeta", session_id: "", user_id: "", metadata: "not json {" })]);
+    const filters = (f: object) => ({ filters: [f] }) as Parameters<typeof store.countTraces>[1];
+    const badKey = { column: "metadata", type: "stringObject", key: "env", operator: "eq", value: "prod" };
+    const badNum = { column: "metadata", type: "numberObject", key: "n", operator: "gt", value: 1 };
+    // No error, and the malformed-metadata trace never matches.
+    const matched = await store.listTraces(P, filters(badKey));
+    expect(matched.every((t) => t.id !== "t-badmeta")).toBe(true);
+    expect(await store.countTraces(P, filters(badNum))).toBe(0);
+    await store.deleteTraces(P, ["t-badmeta"]);
+  });
+
   it("computes on-the-fly metrics, widget series, and evaluator analytics", async () => {
     const byDay = await store.metricsByDay(P, 7);
     expect(byDay).toHaveLength(1);
@@ -536,6 +578,17 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
 
     // v2: new metrics — error_rate (seeded obs is DEFAULT level) and score (avg of base score 0.8).
     expect((await store.widgetSeries(P, "error_rate", "by_day", 7))[0]!.value).toBe(0);
+    // Nonzero error_rate must be fractional (guards against integer division: 1 error of
+    // 2 generations = 0.5, not 0). Isolated under a dedicated trace + model, cleaned after.
+    const et = "error-rate-t";
+    await store.insertRows("traces", [trace({ id: et, session_id: "", user_id: "" })]);
+    await store.insertRows("observations", [
+      observation({ id: "er-1", trace_id: et, model: "err-model", level: "ERROR" }),
+      observation({ id: "er-2", trace_id: et, model: "err-model", level: "DEFAULT" }),
+    ]);
+    const errByModel = await store.widgetSeries(P, "error_rate", "by_model", 7);
+    expect(errByModel.find((r) => r.label === "err-model")?.value).toBeCloseTo(0.5, 6);
+    await store.deleteTraces(P, [et]);
     const scoreDay = await store.widgetSeries(P, "score", "by_day", 7);
     expect(scoreDay).toHaveLength(1);
     // sc1 was corrected to 0.95 by the score-correction test earlier in this suite (LWW).
