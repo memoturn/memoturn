@@ -9,7 +9,17 @@ defaults match `infra/docker-compose.dev.yml`.
 | --- | --- | --- |
 | `DATABASE_URL` | `postgresql://memoturn:memoturn@localhost:5433/memoturn?schema=public` | Host port is **5433** in dev to avoid clashing with other local Postgres |
 
+## Telemetry engine
+
+| Var | Default | Notes |
+| --- | --- | --- |
+| `TELEMETRY_ENGINE` | `doris` | `doris` (the scale engine, default) or `postgres` — the small-install tier that keeps telemetry in the `DATABASE_URL` Postgres, schema `telemetry`, with **no Doris containers at all**. Needs a pgvector-enabled image (the shipped compose files use `pgvector/pgvector:pg16`). Sizing + how to switch engines: [Deployment → Telemetry engine](./deployment.md#telemetry-engine-doris-or-postgres). |
+| `TELEMETRY_DATABASE_URL` | `DATABASE_URL` | Optional separate Postgres for the `postgres` engine's telemetry tables. |
+| `TELEMETRY_PG_SCHEMA` | `telemetry` | Schema holding the `postgres` engine's tables + migration ledger. |
+
 ## Apache Doris (OLAP)
+
+Applies when `TELEMETRY_ENGINE=doris` (the default).
 
 | Var | Default | Notes |
 | --- | --- | --- |

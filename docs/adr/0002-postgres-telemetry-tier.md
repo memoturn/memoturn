@@ -1,6 +1,6 @@
 # ADR 0002 — A Postgres telemetry tier for small installs, Doris for scale
 
-- **Status:** Proposed (implementation trigger-gated — see [Trigger](#trigger)).
+- **Status:** Accepted and **Implemented** — see [Implementation status](#implementation-status).
 - **Date:** 2026-07-22
 - **Context tags:** telemetry store, self-hosting, deployment profiles, TelemetryStore seam
 
@@ -159,4 +159,31 @@ Execute the plan when any of these is true:
 3. The conformance suite needs a second implementation anyway (e.g., an engine contingency from
    the alternatives above becomes live).
 
-Until then this ADR records the design so the option stays cheap and deliberate.
+The plan was executed on trigger 2 (a deliberate self-host push) — see below.
+
+## Implementation status
+
+Fully implemented and merged (2026-07-23):
+
+- **Phase 1 — Postgres implementation** (#178, #179): DDL in `infra/postgres-telemetry/`
+  (`telemetry` schema, PKs = the Doris UNIQUE KEYs, `timestamp(3)` UTC-naive columns,
+  dimensionless pgvector `vector`, safe-JSON accessors via `pg_input_is_valid`); chunked
+  LWW upserts (`ON CONFLICT … WHERE excluded.event_ts >= t.event_ts`, with mandatory
+  in-batch PK dedup — PG rejects duplicate keys per statement where Doris merges); a
+  mysql2-style `?` placeholder shim; the full ~35-method read port including the
+  filter/analytics compiler dialects.
+- **Phase 2 — conformance parity** (#179): suite green on **both** engines and extended
+  with the cross-engine edges (equal-`event_ts` tie → later write wins, in-batch duplicate
+  keys, nonzero `error_rate` guarding integer division, malformed-metadata JSON filters);
+  percentile assertions pinned to inequalities. The suite caught one real bug during the
+  port (`IN (?)` expansion parenthesization → record comparison).
+- **Phase 3 — profile plumbing** (#181): `doris` compose profile + `scripts/infra.ts`
+  (dev), `infra/docker-compose.prod.postgres.yml` overlay (prod, `!override` deps),
+  pgvector images everywhere, `wait-for-infra` engine awareness, and CI running the
+  conformance suite against **both** engines on every PR. End-to-end verified: the full
+  product (ingest → worker merge/mirror → API reads) ran against a Doris-free stack.
+- **Phase 4 — docs**: this PR (deployment/configuration/architecture + CLAUDE.md engine
+  policy + docs-site mirror).
+- **ADR-0004 groundwork** (#180): `scanRows` on both engines with a round-trip
+  conformance case; the `telemetry:migrate` CLI remains open (tracked for when the first
+  real graduation approaches).

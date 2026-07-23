@@ -40,9 +40,15 @@ apps/console (SPA) ── TanStack Query ──► apps/api ── reads ──�
 | Store | Tech | Holds |
 | --- | --- | --- |
 | OLTP | PostgreSQL (Prisma 7, pg driver adapter) | Workspaces, projects, users/sessions, API keys, prompts, datasets, evaluators, review queues, provider connections (encrypted), audit log, retention policies |
-| OLAP | Apache Doris | `traces`, `observations`, `scores` (`UNIQUE KEY` merge-on-write tables); dashboard metrics are aggregated on the fly from `observations` |
+| OLAP | Apache Doris **or** Postgres (`TELEMETRY_ENGINE`) | `traces`, `observations`, `scores` + RAG tables; dashboard metrics are aggregated on the fly from `observations`. Doris (default): `UNIQUE KEY` merge-on-write tables, the scale engine. Postgres: the small-install tier ([ADR-0002](https://github.com/memoturn/memoturn/blob/main/docs/adr/0002-postgres-telemetry-tier.md)) — same tables in the OLTP Postgres's `telemetry` schema, LWW upserts + pgvector, **no Doris containers** |
 | Queue / cache | Redis (Valkey) + BullMQ | Async ingest queue, API-key cache, retention cron |
 | Blob | S3-compatible (MinIO locally) | Raw replayable event log, exports |
+
+Both telemetry engines implement the same `TelemetryStore` interface and pass the same
+behavioral conformance suite (`packages/telemetry/src/conformance.test.ts`) — the API,
+worker, and console never know which engine is running. Moving an install between
+engines is a defined runbook, not a migration project
+([ADR-0004](https://github.com/memoturn/memoturn/blob/main/docs/adr/0004-telemetry-graduation-path.md)).
 
 ## Ingestion pipeline
 
@@ -74,7 +80,7 @@ apps/console (SPA) ── TanStack Query ──► apps/api ── reads ──�
 | `packages/core` | Zod **ingest** event contracts (SDK ↔ API ↔ worker), model/cost registry |
 | `packages/contracts` | Zod **API response** schemas + inferred types (API doc + console types) |
 | `packages/db` | Prisma client + blob / queue clients |
-| `packages/telemetry` | `TelemetryStore` interface + Apache Doris implementation (all telemetry SQL) |
+| `packages/telemetry` | `TelemetryStore` interface + both engine implementations, Apache Doris and Postgres (all telemetry SQL), selected by `TELEMETRY_ENGINE` |
 | `packages/server` | Shared server logic: auth, traces, metrics, prompts, datasets, evaluators, review, export, retention, Better Auth |
 | `packages/llm` | Provider gateway (mock / Anthropic / OpenAI via the AI SDK) + API-key encryption |
 | `sdks/js`, `sdks/python` | Client SDKs |
