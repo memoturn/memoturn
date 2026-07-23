@@ -31,4 +31,7 @@ ENV NODE_ENV=production
 # Drop root for the runtime process (the oven/bun image ships a non-root `bun` user).
 USER bun
 EXPOSE 3001
+# Compose/Helm probes override this; it covers bare `docker run` and other orchestrators.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
+  CMD ["bun", "-e", "fetch('http://127.0.0.1:3001/v1/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
 CMD ["bun", "--filter", "@memoturn/api", "start"]
