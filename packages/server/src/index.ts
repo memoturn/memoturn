@@ -45,5 +45,6 @@ export * from "./savedviews.js";
 export * from "./scheduledexports.js";
 export * from "./scoreconfigs.js";
 export * from "./traces.js";
+export * from "./usage.js";
 export * from "./webhooks.js";
 export * from "./widgets.js";

@@ -631,6 +631,24 @@ export const dailyMetric = z.object({
 });
 export type DailyMetric = z.infer<typeof dailyMetric>;
 
+// Volume-based usage metering: bytes/events/traces ingested per project per UTC day
+// (measured on the raw batch, independent of sampling — the GB-ingested billing signal).
+export const usagePoint = z.object({
+  date: z.string(),
+  bytes: z.number(),
+  events: z.number(),
+  traces: z.number(),
+});
+export type UsagePoint = z.infer<typeof usagePoint>;
+
+export const usageSummary = z.object({
+  total_bytes: z.number(),
+  total_events: z.number(),
+  total_traces: z.number(),
+  byDay: z.array(usagePoint),
+});
+export type UsageSummary = z.infer<typeof usageSummary>;
+
 export const modelMetric = z.object({
   model: z.string(),
   generations: z.number(),

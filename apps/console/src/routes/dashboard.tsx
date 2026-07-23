@@ -48,6 +48,19 @@ function money(n: number): string {
   return `$${Number(n).toFixed(4)}`;
 }
 
+/** Human-readable byte size (ingested-volume metering). */
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2)} ${units[i]}`;
+}
+
 const modelColumns: ColumnDef<ModelMetric>[] = [
   {
     accessorKey: "model",
@@ -255,6 +268,11 @@ function DashboardPage() {
     // Keep the prior dashboard on screen while a new time range loads — no full-page skeleton flash.
     placeholderData: keepPreviousData,
   });
+  const { data: usage } = useQuery({
+    queryKey: ["usage", days],
+    queryFn: () => api.getUsage(days),
+    placeholderData: keepPreviousData,
+  });
   const { data: tools } = useQuery({
     queryKey: ["tool-analytics", days],
     queryFn: () => api.getToolAnalytics(days),
@@ -347,6 +365,37 @@ function DashboardPage() {
         <EmptyState title="No generation data yet" description="Charts appear once traces are ingested." />
       ) : (
         <UsageChart series={series} totals={totals} days={days} />
+      )}
+
+      {usage && usage.total_bytes > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-1.5">
+              <CardTitle>Data volume ingested</CardTitle>
+              <HelpTip>
+                Raw bytes your project sent to /v1/ingest over this period, measured before sampling — the volume-based
+                usage signal (independent of what the query store keeps).
+              </HelpTip>
+            </div>
+            <CardDescription>Last {days} days, measured at ingest</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <div className="text-2xl font-semibold tabular-nums">{formatBytes(usage.total_bytes)}</div>
+                <div className="text-xs text-muted-foreground">ingested</div>
+              </div>
+              <div>
+                <div className="text-2xl font-semibold tabular-nums">{usage.total_events.toLocaleString()}</div>
+                <div className="text-xs text-muted-foreground">events</div>
+              </div>
+              <div>
+                <div className="text-2xl font-semibold tabular-nums">{usage.total_traces.toLocaleString()}</div>
+                <div className="text-xs text-muted-foreground">traces</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {data.byModel.length > 0 && (

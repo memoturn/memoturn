@@ -86,6 +86,7 @@ import {
   getScoresByTraceIds,
   getToolAnalytics,
   getTrace,
+  getUsage,
   ingestRateLimitConfig,
   instantiateEvaluatorTemplate,
   listAlertRules,
@@ -279,6 +280,7 @@ app.use("/v1/sessions", requireAuth);
 app.use("/v1/users", requireAuth);
 app.use("/v1/metrics", requireAuth);
 app.use("/v1/metrics/*", requireAuth);
+app.use("/v1/usage", requireAuth);
 app.use("/v1/prompts", requireAuth);
 app.use("/v1/prompts/*", requireAuth);
 app.use("/v1/datasets", requireAuth);
@@ -1020,6 +1022,21 @@ app.openapi(
     });
     return c.json({ data });
   },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/usage",
+    summary: "Volume-based usage: bytes / events / traces ingested per day (GB-ingested metering)",
+    tags: ["metrics"],
+    security,
+    request: { query: z.object({ days: z.coerce.number().int().min(1).max(365).optional() }) },
+    responses: {
+      200: { description: "Usage summary", content: { "application/json": { schema: C.usageSummary } } },
+    },
+  }),
+  async (c) => c.json(await getUsage(c.get("projectId"), c.req.valid("query").days ?? 30)),
 );
 
 app.openapi(

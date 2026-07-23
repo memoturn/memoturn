@@ -79,6 +79,7 @@ model Project {
   reviewQueues    ReviewQueue[]
   retention       RetentionPolicy?
   samplingPolicy  SamplingPolicy?
+  usageDaily      UsageDaily[]
   webhooks        Webhook[]
   webhookDeliveries WebhookDelivery[]
   widgets         Widget[]
@@ -712,6 +713,23 @@ model SamplingPolicy {
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   rate      Int      @default(100)
   updatedAt DateTime @updatedAt
+}
+
+// Volume-based usage metering: bytes/events/traces ingested per project per UTC day.
+// Measured on the raw batch at ingest time (independent of sampling — usage counts
+// everything sent), the foundation for cloud billing by GB ingested. `@@unique` makes
+// the worker's per-batch upsert-increment idempotent-by-key.
+model UsageDaily {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  date      String // 'YYYY-MM-DD' (UTC)
+  bytes     BigInt  @default(0)
+  events    Int     @default(0)
+  traces    Int     @default(0)
+
+  @@unique([projectId, date])
+  @@index([projectId, date])
 }
 
 // Outbound webhook / automation: POSTs to `url` when `event` fires. For score.created,
