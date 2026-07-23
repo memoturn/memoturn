@@ -162,6 +162,10 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
 
   afterAll(async () => {
     await store.deleteProjectData(P);
+    // The scanRows round-trip test copies into `${P}-copy` and cleans it inline — but a
+    // mid-test failure skips that line, leaking the copy project. Clean it here too so
+    // failed runs never leave rows behind in a shared dev database.
+    await store.deleteProjectData(`${P}-copy`);
   });
 
   it("lists traces with rollups, tag + search filters, and ISO timestamps", async () => {
