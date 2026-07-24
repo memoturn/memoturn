@@ -35,6 +35,8 @@ export interface TraceInput {
   name?: string;
   userId?: string;
   sessionId?: string;
+  /** Hierarchical, function-organized path within the session (e.g. "/rag/answer"). */
+  sessionPath?: string;
   release?: string;
   version?: string;
   environment?: string;
