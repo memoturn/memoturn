@@ -51,6 +51,11 @@ export function toneForKind(kind: string | undefined | null): KindBadgeTone {
       return "indigo";
     case "GUARDRAIL":
       return "rose";
+    case "MEMORY":
+      return "cyan";
+    case "HANDOFF":
+      return "violet";
+    case "THOUGHT":
     case "CHAIN":
     case "EVENT":
       return "neutral";
