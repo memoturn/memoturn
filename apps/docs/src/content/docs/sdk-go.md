@@ -19,7 +19,7 @@ mt := memoturn.New(
 )
 defer mt.Shutdown() // flush remaining events before exit
 
-tr := mt.Trace(memoturn.TraceInput{Name: "support-chat", UserID: "u_123", SessionID: "s_1"})
+tr := mt.Trace(memoturn.TraceInput{Name: "support-chat", UserID: "u_123", SessionID: "s_1", SessionPath: "/support/chat"})
 
 gen := tr.Generation(memoturn.GenerationInput{
 	Model:     "gpt-4o",

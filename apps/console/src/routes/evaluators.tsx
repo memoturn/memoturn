@@ -3,8 +3,8 @@ import type { Evaluator } from "@memoturn/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
-import { ClipboardCheck } from "lucide-react";
-import { useForm } from "react-hook-form";
+import { ClipboardCheck, Plus, X } from "lucide-react";
+import { useFieldArray, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 import { DataTable } from "../components/data-table";
@@ -24,18 +24,34 @@ import { useIsReadOnly } from "../lib/role";
 
 export const Route = createFileRoute("/evaluators")({ component: EvaluatorsPage });
 
+const PROVIDERS = ["mock", "anthropic", "openai", "gemini", "bedrock", "azure", "openai_compatible"] as const;
+const providerEnum = z.enum(PROVIDERS);
+
 const evaluatorSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  provider: z.enum(["mock", "anthropic", "openai", "gemini", "bedrock", "azure", "openai_compatible"]),
+  provider: providerEnum,
   model: z.string().min(1, "Model is required"),
   prompt: z.string().min(1, "Prompt is required"),
   online: z.boolean(),
   samplingRate: z.number().min(0).max(1),
+  scope: z.enum(["trace", "thread"]),
+  cooldownSeconds: z.number().int().min(0),
+  // Optional LLM jury: when non-empty, the evaluator becomes an ensemble (mean of votes).
+  jurors: z.array(z.object({ provider: providerEnum, model: z.string().min(1, "Model required") })),
 });
 type EvaluatorForm = z.infer<typeof evaluatorSchema>;
 
 const columns: ColumnDef<Evaluator>[] = [
-  { accessorKey: "name", header: "Name", cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
+  {
+    accessorKey: "name",
+    header: "Name",
+    cell: ({ row }) => (
+      <div className="flex items-center gap-1.5">
+        <span className="font-medium">{row.original.name}</span>
+        {row.original.jurors.length > 0 && <KindBadge tone="violet">jury ×{row.original.jurors.length}</KindBadge>}
+      </div>
+    ),
+  },
   {
     accessorKey: "version",
     header: "Version",
@@ -48,10 +64,22 @@ const columns: ColumnDef<Evaluator>[] = [
   },
   { accessorKey: "model", header: "Model" },
   {
+    accessorKey: "scope",
+    header: "Scope",
+    cell: ({ row }) =>
+      row.original.scope === "thread" ? <KindBadge tone="amber">thread</KindBadge> : <span>trace</span>,
+  },
+  {
     accessorKey: "online",
     header: "Online",
-    cell: ({ row }) =>
-      row.original.online ? <KindBadge tone="green">{Math.round(row.original.samplingRate * 100)}%</KindBadge> : "—",
+    cell: ({ row }) => {
+      if (!row.original.online) return "—";
+      return row.original.scope === "thread" ? (
+        <KindBadge tone="green">every {row.original.cooldownSeconds}s idle</KindBadge>
+      ) : (
+        <KindBadge tone="green">{Math.round(row.original.samplingRate * 100)}%</KindBadge>
+      );
+    },
   },
   {
     accessorKey: "prompt",
@@ -82,9 +110,14 @@ function EvaluatorsPage() {
       prompt: "Score how well the output answers the input. 1 = perfect, 0 = wrong.",
       online: false,
       samplingRate: 1,
+      scope: "trace",
+      cooldownSeconds: 900,
+      jurors: [],
     },
   });
   const online = form.watch("online");
+  const scope = form.watch("scope");
+  const jurors = useFieldArray({ control: form.control, name: "jurors" });
 
   const create = useMutation({
     mutationFn: (values: EvaluatorForm) => api.createEvaluator(values),
@@ -220,7 +253,37 @@ function EvaluatorsPage() {
                     </FormItem>
                   )}
                 />
-                {online && (
+                <FormField
+                  control={form.control}
+                  name="scope"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        <span className="inline-flex items-center gap-1">
+                          Scope
+                          <HelpTip>
+                            <strong>Trace</strong> scores each trace's input/output. <strong>Thread</strong> scores a
+                            whole conversation (all traces sharing a session id) once it has been idle for the cooldown
+                            — use it for conversation-quality metrics.
+                          </HelpTip>
+                        </span>
+                      </FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="trace">trace (per trace)</SelectItem>
+                          <SelectItem value="thread">thread (per conversation)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                {online && scope === "trace" && (
                   <FormField
                     control={form.control}
                     name="samplingRate"
@@ -250,6 +313,36 @@ function EvaluatorsPage() {
                     )}
                   />
                 )}
+                {online && scope === "thread" && (
+                  <FormField
+                    control={form.control}
+                    name="cooldownSeconds"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          <span className="inline-flex items-center gap-1">
+                            Cooldown (seconds)
+                            <HelpTip>
+                              How long a session must be idle before the whole conversation is judged, so multi-turn
+                              chats settle before scoring. Default 900 (15 min).
+                            </HelpTip>
+                          </span>
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            step="60"
+                            min="0"
+                            {...field}
+                            onChange={(e) => field.onChange(Number(e.target.value))}
+                          />
+                        </FormControl>
+                        <FormDescription>Idle time before a conversation is scored.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
               </div>
               <FormField
                 control={form.control}
@@ -264,6 +357,74 @@ function EvaluatorsPage() {
                   </FormItem>
                 )}
               />
+
+              <div className="space-y-2 rounded-lg border border-dashed p-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <div className="inline-flex items-center gap-1 text-sm font-medium">
+                      LLM jury (optional)
+                      <HelpTip>
+                        Add jurors to turn this into an ensemble: the same prompt runs against every juror and the score
+                        is the mean of their votes, reducing single-judge variance. Leave empty for a single judge.
+                      </HelpTip>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      The provider/model above casts a vote too; jurors add more.
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => jurors.append({ provider: "mock", model: "mock-1" })}
+                  >
+                    <Plus className="mr-1 h-4 w-4" /> Add juror
+                  </Button>
+                </div>
+                {jurors.fields.map((f, i) => (
+                  <div key={f.id} className="flex items-end gap-2">
+                    <FormField
+                      control={form.control}
+                      name={`jurors.${i}.provider`}
+                      render={({ field }) => (
+                        <FormItem className="w-44">
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {PROVIDERS.map((p) => (
+                                <SelectItem key={p} value={p}>
+                                  {p}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name={`jurors.${i}.model`}
+                      render={({ field }) => (
+                        <FormItem className="flex-1">
+                          <FormControl>
+                            <Input placeholder="model id" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <Button type="button" variant="ghost" size="icon" onClick={() => jurors.remove(i)}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
               <Button type="submit" disabled={readOnly || create.isPending}>
                 {create.isPending ? "Saving…" : "Create"}
               </Button>
