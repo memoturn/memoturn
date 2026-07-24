@@ -23,6 +23,7 @@ export function mirrorTraceRow(s: TraceState): TraceRow {
     name: s.name ?? "",
     user_id: s.userId ?? "",
     session_id: s.sessionId ?? "",
+    session_path: s.sessionPath ?? "",
     release: s.release ?? "",
     version: s.version ?? "",
     environment: s.environment ?? "default",

@@ -16,6 +16,8 @@ export interface TraceRow {
   name: string;
   user_id: string;
   session_id: string;
+  /** Hierarchical, function-organized path within the session (e.g. "/task/search"); "" if unset. */
+  session_path: string;
   release: string;
   version: string;
   environment: string;
@@ -197,6 +199,7 @@ export interface TraceHeader {
   timestamp: string;
   user_id: string;
   session_id: string;
+  session_path: string;
   environment: string;
   release: string;
   version: string;

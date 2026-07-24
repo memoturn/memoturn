@@ -49,6 +49,24 @@ curl -u pk-mt-dev:sk-mt-dev -X POST http://localhost:3001/v1/evaluators/helpfuln
 
 The judge is asked to return strict JSON `{"score": 0..1, "reasoning": "…"}`.
 
+The prebuilt library (`GET /v1/evaluators/templates`, instantiate via `POST
+/v1/evaluators/from-template`) covers RAG/quality dimensions plus **conversation-quality**
+metrics (user frustration, knowledge retention, session completeness, conversational
+coherence) and **agent-trajectory** metrics (trajectory accuracy, tool correctness, task
+completion).
+
+### LLM juries (ensemble judging)
+
+Pass `jurors` — a list of `{provider, model}` — to turn an evaluator into an ensemble. The
+same judge prompt runs against every juror and the score is the **mean** of their votes
+(a juror that errors is dropped; the panel only fails if all jurors do). This reduces
+single-judge variance:
+
+```json
+{ "name": "quality", "prompt": "…", "model": "mock-1",
+  "jurors": [{ "provider": "openai", "model": "gpt-x" }, { "provider": "anthropic", "model": "claude-y" }] }
+```
+
 ### Online evaluation
 
 Enable `online` with a `samplingRate` (and optional `filterName`). After each ingest
@@ -59,6 +77,24 @@ batch, the worker runs enabled online evaluators on the batch's **completed** tr
 { "name": "auto-quality", "prompt": "…", "provider": "mock", "model": "mock-1",
   "online": true, "samplingRate": 1.0, "filterName": "" }
 ```
+
+### Thread (conversation) evaluation
+
+Set `scope: "thread"` (with `online: true`) to score whole conversations instead of single
+traces. A per-minute worker cron finds sessions that have been quiet for `cooldownSeconds`
+(default 900), assembles the session transcript, judges it, and writes one score to the
+session's latest trace — so multi-turn conversations "settle" before being judged:
+
+```json
+{ "name": "user-frustration", "prompt": "…", "provider": "mock", "model": "mock-1",
+  "online": true, "scope": "thread", "cooldownSeconds": 900 }
+```
+
+### CI gates (`mt eval`)
+
+`mt eval` (shipped with the JS SDK) gates a dataset run's evaluator score means against
+thresholds and exits non-zero on a regression — drop it into CI to fail a PR on eval drift.
+See the TypeScript SDK docs and `POST /v1/datasets/{name}/runs/{run}/gate`.
 
 ## Human review queues
 

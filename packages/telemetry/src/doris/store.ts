@@ -237,6 +237,7 @@ export class DorisTelemetryStore implements TelemetryStore {
         DATE_FORMAT(t.\`timestamp\`, ${ISO_FMT}) AS \`timestamp\`,
         t.user_id AS user_id,
         t.session_id AS session_id,
+        t.session_path AS session_path,
         t.environment AS environment,
         CAST(t.tags AS JSON) AS tags
       FROM traces t
@@ -527,7 +528,7 @@ export class DorisTelemetryStore implements TelemetryStore {
       SELECT
         id, name,
         DATE_FORMAT(\`timestamp\`, ${ISO_FMT}) AS \`timestamp\`,
-        user_id, session_id, environment, \`release\`, version, CAST(tags AS JSON) AS tags,
+        user_id, session_id, session_path, environment, \`release\`, version, CAST(tags AS JSON) AS tags,
         COALESCE(metadata, '{}') AS metadata,
         COALESCE(input, '') AS input,
         COALESCE(output, '') AS output
@@ -1463,7 +1464,7 @@ export class DorisTelemetryStore implements TelemetryStore {
     const shapes: { [K in TelemetryTable]: { select: string; map: (r: never) => TelemetryRowMap[K] } } = {
       traces: {
         select: `project_id, id, DATE_FORMAT(\`timestamp\`, ${ISO_MS_FMT}) AS \`timestamp\`,
-          name, user_id, session_id, \`release\`, version, environment, \`public\`,
+          name, user_id, session_id, session_path, \`release\`, version, environment, \`public\`,
           CAST(tags AS JSON) AS tags, COALESCE(metadata, '{}') AS metadata,
           COALESCE(input, '') AS input, COALESCE(output, '') AS output,
           DATE_FORMAT(event_ts, ${ISO_MS_FMT}) AS event_ts`,

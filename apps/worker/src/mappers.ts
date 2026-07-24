@@ -111,6 +111,7 @@ export function mapEvents(
       name: b.name ?? base?.name ?? "",
       user_id: b.userId ?? base?.user_id ?? "",
       session_id: b.sessionId ?? base?.session_id ?? "",
+      session_path: b.sessionPath ?? base?.session_path ?? "",
       release: b.release ?? base?.release ?? "",
       version: b.version ?? base?.version ?? "",
       environment: b.environment ?? base?.environment ?? "default",
