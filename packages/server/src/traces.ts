@@ -1,6 +1,7 @@
 import type {
   ObservationDetail,
   ScoreRow,
+  SessionMessages,
   SessionSummary,
   SingleFilter,
   TraceDetail,
@@ -120,6 +121,37 @@ export async function getScoresByTraceIds(projectId: string, traceIds: string[])
     map.set(r.trace_id, arr);
   }
   return map;
+}
+
+/**
+ * A session's traces reconstructed as a conversation for the Memory Explorer: one turn per
+ * trace (oldest-first) with its input/output and roll-ups. Fetches the session's trace
+ * summaries, then their I/O in one bulk store call.
+ */
+export async function getSessionMessages(projectId: string, sessionId: string): Promise<SessionMessages> {
+  const store = telemetry();
+  const traces = await store.listTraces(projectId, { sessionId, limit: 500 });
+  const ordered = [...traces].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const io = await store.getTraceIO(
+    projectId,
+    ordered.map((t) => t.id),
+  );
+  const ioById = new Map(io.map((r) => [r.id, r]));
+  return {
+    session_id: sessionId,
+    messages: ordered.map((t) => {
+      const r = ioById.get(t.id);
+      return {
+        traceId: t.id,
+        name: t.name,
+        timestamp: t.timestamp,
+        input: r?.input ?? "",
+        output: r?.output ?? "",
+        total_tokens: Number(t.total_tokens),
+        total_cost: Number(t.total_cost),
+      };
+    }),
+  };
 }
 
 export async function getTrace(projectId: string, traceId: string): Promise<TraceDetail | null> {

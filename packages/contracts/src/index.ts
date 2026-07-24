@@ -623,6 +623,25 @@ export const sessionPage = z.object({
 });
 export type SessionPage = z.infer<typeof sessionPage>;
 
+// Memory Explorer: a session's traces reconstructed as a conversation (one turn per trace,
+// oldest-first) with their input/output and roll-ups.
+export const sessionMessage = z.object({
+  traceId: z.string(),
+  name: z.string(),
+  timestamp: z.string(),
+  input: z.string(),
+  output: z.string(),
+  total_tokens: z.number(),
+  total_cost: z.number(),
+});
+export type SessionMessage = z.infer<typeof sessionMessage>;
+
+export const sessionMessages = z.object({
+  session_id: z.string(),
+  messages: z.array(sessionMessage),
+});
+export type SessionMessages = z.infer<typeof sessionMessages>;
+
 // Per-end-user rollup (traces grouped by user_id) — the Users view.
 export const userSummary = z.object({
   user_id: z.string(),
