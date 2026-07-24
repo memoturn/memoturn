@@ -158,6 +158,7 @@ import {
   streamPlayground,
   submitBatch,
   submitReviewScore,
+  subscribeLiveTraces,
   traceFacets,
   traceHistogram,
   UserPatternError,
@@ -280,6 +281,7 @@ app.use("/v1/traces", requireAuth);
 app.use("/v1/traces/*", requireAuth);
 app.use("/v1/sessions", requireAuth);
 app.use("/v1/sessions/*", requireAuth);
+app.use("/v1/live/*", requireAuth);
 app.use("/v1/users", requireAuth);
 app.use("/v1/metrics", requireAuth);
 app.use("/v1/metrics/*", requireAuth);
@@ -364,6 +366,29 @@ app.post("/v1/playground/stream", async (c) => {
     } catch (err) {
       console.error(JSON.stringify({ level: "error", scope: "playground.stream", message: String(err) }));
       await s.writeSSE({ data: JSON.stringify({ error: String(err instanceof Error ? err.message : err) }) });
+    }
+  });
+});
+
+// Live tail (SSE) — plain route (streaming). Streams a `trace` event per trace as it lands,
+// plus periodic `ping` heartbeats to keep the connection open through proxies. The project is
+// resolved by requireAuth (via header or the `?project=` query for EventSource clients).
+app.get("/v1/live/traces", (c) => {
+  const projectId = c.get("projectId");
+  return streamSSE(c, async (s) => {
+    let unsubscribe: (() => Promise<void>) | null = null;
+    let open = true;
+    s.onAbort(() => {
+      open = false;
+      void unsubscribe?.();
+    });
+    unsubscribe = subscribeLiveTraces(projectId, (e) => {
+      void s.writeSSE({ event: "trace", data: JSON.stringify(e) }).catch(() => {});
+    });
+    // Heartbeat until the client disconnects (onAbort flips `open`).
+    while (open) {
+      await s.writeSSE({ event: "ping", data: "" });
+      await s.sleep(15_000);
     }
   });
 });

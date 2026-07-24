@@ -29,6 +29,7 @@ import {
   type ObservationPatch,
   offloadLargePayload,
   offloadMedia,
+  publishLiveTraces,
   recordUsage,
   runEvaluator,
   type ScorePatch,
@@ -326,6 +327,17 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
   const scorePayloads = scores.map((s) => ({ traceId: s.trace_id, name: s.name, value: s.value, source: s.source }));
   const completedTraces = traces.filter((t) => t.output);
   await Promise.allSettled([
+    // Live tail: emit a compact event per trace as it lands (best-effort, read-side only).
+    publishLiveTraces(
+      projectId,
+      traces.map((t) => ({
+        id: t.id,
+        name: t.name,
+        timestamp: t.timestamp,
+        environment: t.environment,
+        sessionId: t.session_id,
+      })),
+    ),
     dispatchWebhooksBatch(projectId, "score.created", scorePayloads),
     dispatchAutomationsBatch(projectId, "score.created", scorePayloads),
     dispatchAutomationsBatch(
