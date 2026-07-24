@@ -14,8 +14,12 @@
   "routes": [{ "pattern": "docs.memoturn.com", "custom_domain": true }],
   /**
    * Staging — `wrangler deploy --env staging` ships to
-   * `memoturn-docs-staging` on `docs-staging.memoturn.com`. Custom domain
-   * is provisioned once in the Cloudflare dashboard.
+   * `memoturn-docs-staging` on `docs-staging.memoturn.com`.
+   *
+   * `custom_domain: true` means wrangler provisions the custom domain, its DNS
+   * record, and the TLS cert on deploy — no dashboard step. Prerequisites: the
+   * zone must already exist in the account, and CLOUDFLARE_API_TOKEN must be
+   * scoped to it (a token scoped to only one zone can't attach domains on another).
    */
   "env": {
     "staging": {
