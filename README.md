@@ -8,7 +8,7 @@
 Open-source **AI engineering platform** — LLM observability, evals, metrics, prompt
 management, playground, and datasets. Self-hostable, OpenTelemetry-native, Bun-native.
 
-**[memoturn.ai](https://memoturn.ai)** · **[docs.memoturn.ai](https://docs.memoturn.ai)** · **[Documentation (in-repo)](./docs/README.md)** — getting started, architecture, API, SDKs, integrations, evaluation, deployment.
+**[memoturn.com](https://memoturn.com)** · **[docs.memoturn.com](https://docs.memoturn.com)** · **[Documentation (in-repo)](./docs/README.md)** — getting started, architecture, API, SDKs, integrations, evaluation, deployment.
 
 ![memoturn dashboard](./docs/images/dashboard.png)
 

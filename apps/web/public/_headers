@@ -1,4 +1,4 @@
-# Edge headers for memoturn.ai static assets — Vite copies public/ into
+# Edge headers for memoturn.com static assets — Vite copies public/ into
 # dist/client (the Workers assets directory), and Workers Static Assets honors
 # this file. These rules only apply to asset responses; SSR HTML responses get
 # their headers from src/server.ts (assets are served before the worker runs,

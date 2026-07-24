@@ -1,7 +1,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: Documentation
-    url: https://docs.memoturn.ai
+    url: https://docs.memoturn.com
     about: Getting started, architecture, API, SDKs, deployment.
   - name: Questions & ideas (Discussions)
     url: https://github.com/memoturn/memoturn/discussions

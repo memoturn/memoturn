@@ -1,6 +1,6 @@
-# Deploys the public sites (memoturn.ai + docs.memoturn.ai) to Cloudflare Workers
+# Deploys the public sites (memoturn.com + docs.memoturn.com) to Cloudflare Workers
 # on merges to main that touch them. Inert until the CLOUDFLARE_API_TOKEN secret is
-# set (a scoped token: Workers Scripts:Edit + the memoturn.ai zone's Workers Routes:Edit).
+# set (a scoped token: Workers Scripts:Edit + the memoturn.com zone's Workers Routes:Edit).
 # Manual deploys remain available via `bun run deploy:site`.
 name: Deploy sites
 
@@ -32,10 +32,10 @@ jobs:
         include:
           - app: "@memoturn/web"
             dir: apps/web
-            url: https://memoturn.ai
+            url: https://memoturn.com
           - app: "@memoturn/docs"
             dir: apps/docs
-            url: https://docs.memoturn.ai
+            url: https://docs.memoturn.com
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2

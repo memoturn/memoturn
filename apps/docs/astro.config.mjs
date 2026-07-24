@@ -4,7 +4,7 @@ import { defineConfig } from "astro/config";
 import remarkGfm from "remark-gfm";
 import starlightLlmsTxt from "starlight-llms-txt";
 
-const SITE = process.env.MEMOTURN_DOCS_URL ?? "https://docs.memoturn.ai";
+const SITE = process.env.MEMOTURN_DOCS_URL ?? "https://docs.memoturn.com";
 
 // https://astro.build/config
 export default defineConfig({
@@ -26,7 +26,7 @@ export default defineConfig({
       editLink: { baseUrl: "https://github.com/memoturn/memoturn/edit/main/apps/docs/" },
       social: [
         { icon: "github", label: "GitHub", href: "https://github.com/memoturn/memoturn" },
-        { icon: "external", label: "memoturn.ai", href: "https://memoturn.ai" },
+        { icon: "external", label: "memoturn.com", href: "https://memoturn.com" },
       ],
       head: [
         { tag: "meta", attrs: { name: "theme-color", content: "#0f1213" } },
@@ -43,7 +43,7 @@ export default defineConfig({
             "@context": "https://schema.org",
             "@type": "WebSite",
             name: "memoturn docs",
-            url: "https://docs.memoturn.ai",
+            url: "https://docs.memoturn.com",
           }),
         },
       ],

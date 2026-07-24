@@ -10,7 +10,7 @@
     "lint": "biome check .",
     "typecheck": "astro check",
     "deploy": "astro build && wrangler deploy",
-    "deploy:staging": "MEMOTURN_DOCS_URL=https://docs-staging.memoturn.ai astro build && wrangler deploy --env staging",
+    "deploy:staging": "MEMOTURN_DOCS_URL=https://docs-staging.memoturn.com astro build && wrangler deploy --env staging",
     "cf-typegen": "wrangler types"
   },
   "dependencies": {

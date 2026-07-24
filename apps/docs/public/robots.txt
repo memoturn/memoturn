@@ -1,4 +1,4 @@
-# docs.memoturn.ai — open docs, meant to be indexed and AI-readable.
+# docs.memoturn.com — open docs, meant to be indexed and AI-readable.
 User-agent: *
 Allow: /
 
@@ -21,4 +21,4 @@ Allow: /
 User-agent: CCBot
 Allow: /
 
-Sitemap: https://docs.memoturn.ai/sitemap-index.xml
+Sitemap: https://docs.memoturn.com/sitemap-index.xml

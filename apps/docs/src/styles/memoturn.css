@@ -244,7 +244,7 @@ body {
 }
 
 /* Header: match the app shell — page surface anchored by a hairline bottom
- * border, so docs.memoturn.ai and the dashboard read as the same product.
+ * border, so docs.memoturn.com and the dashboard read as the same product.
  * The sidebar keeps its panel tint (--docs-nav-bg via --sl-color-bg-sidebar)
  * so the side rail still reads as chrome.
  *
