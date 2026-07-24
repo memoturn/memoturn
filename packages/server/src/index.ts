@@ -11,6 +11,7 @@ export * from "./comments.js";
 export * from "./concurrency.js";
 export * from "./dashboards.js";
 export * from "./datasets.js";
+export * from "./demo.js";
 export * from "./demodata.js";
 export * from "./embeddings.js";
 export * from "./env.js";

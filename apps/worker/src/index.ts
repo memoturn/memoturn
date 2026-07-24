@@ -1,11 +1,20 @@
 import { createServer } from "node:http";
 import { QUEUE_NAMES, QUEUE_PREFIX } from "@memoturn/core";
-import { connectionOptions, type ExperimentJob, getDlqQueue, getIngestQueue, type IngestJob } from "@memoturn/db/queue";
+import {
+  connectionOptions,
+  type ExperimentJob,
+  getDlqQueue,
+  getIngestQueue,
+  type IngestJob,
+  type SandboxJob,
+} from "@memoturn/db/queue";
 import {
   applyAllRetention,
   consumeRehydrateRate,
+  demoModeEnabled,
   evaluateAllAlerts,
   evaluateBudgets,
+  pruneExpiredSandboxes,
   pruneMutableState,
   runAllEmbeddingProjections,
   runAllScheduledExports,
@@ -18,6 +27,7 @@ import { shouldDeadLetter } from "./dlq.js";
 import { logJson, snapshot } from "./metrics.js";
 import { processExperiment } from "./processors/experiment.js";
 import { processIngest } from "./processors/ingest.js";
+import { processSandbox } from "./processors/sandbox.js";
 
 /**
  * memoturn worker — consumes BullMQ queues and writes telemetry to the Doris store.
@@ -72,6 +82,21 @@ const experimentWorker = new Worker<ExperimentJob>(QUEUE_NAMES.experiment, proce
 experimentWorker.on("ready", () => console.log(`[worker] experiment ready (concurrency=${experimentConcurrency})`));
 experimentWorker.on("failed", (job, err) =>
   logJson("error", "experiment job failed", { jobId: job?.id, attemptsMade: job?.attemptsMade, error: err.message }),
+);
+
+// ── Demo sandboxes (public demo only) ────────────────────────────────────────────
+// Seeds a freshly provisioned sandbox with generated telemetry. Only runs when the
+// deployment opts into DEMO_MODE — a normal install never starts this worker.
+const sandboxWorker = demoModeEnabled()
+  ? new Worker<SandboxJob>(QUEUE_NAMES.sandbox, processSandbox, {
+      connection: connectionOptions(),
+      prefix: QUEUE_PREFIX,
+      concurrency: Number(process.env.SANDBOX_CONCURRENCY ?? 2),
+    })
+  : null;
+sandboxWorker?.on("ready", () => console.log("[worker] sandbox seeder ready (DEMO_MODE)"));
+sandboxWorker?.on("failed", (job, err) =>
+  logJson("error", "sandbox job failed", { jobId: job?.id, attemptsMade: job?.attemptsMade, error: err.message }),
 );
 
 // ── Daily maintenance crons (retention + scheduled exports) ──────────────────────
@@ -132,6 +157,19 @@ const maintenanceWorker = new Worker(
         { failClosed: true },
       );
       if (ran === null) console.log("[state-prune] skipped — lock held or (Redis down) fail-closed");
+    } else if (job.name === "sandbox-prune") {
+      // Public demo: hard-delete expired sandboxes (telemetry + blob + the whole Prisma
+      // tenant). Destructive, so lock-guarded fail-closed like the other sweeps.
+      const ran = await withLock(
+        "sandbox-prune",
+        30 * 60,
+        async () => {
+          const r = await pruneExpiredSandboxes();
+          console.log(`[sandbox-prune] deleted ${r.deleted} sandbox(es), ${r.failed} failed`);
+        },
+        { failClosed: true },
+      );
+      if (ran === null) console.log("[sandbox-prune] skipped — lock held or (Redis down) fail-closed");
     } else if (job.name === "alert-eval") {
       // Short TTL: this runs every minute, so a stuck holder shouldn't block the next tick long.
       const ran = await withLock("alert-eval", 120, async () => {
@@ -192,6 +230,18 @@ await maintenanceQueue.add(
     removeOnComplete: true,
   },
 );
+// Demo sandboxes: hard-delete expired tenants daily (public demo only).
+if (demoModeEnabled()) {
+  await maintenanceQueue.add(
+    "sandbox-prune",
+    {},
+    {
+      repeat: { pattern: "30 3 * * *" },
+      jobId: "sandbox-prune-daily",
+      removeOnComplete: true,
+    },
+  );
+}
 // Alert rules + cost budgets: evaluated every minute (stateful firing/resolved, dedup).
 await maintenanceQueue.add(
   "alert-eval",
@@ -252,7 +302,13 @@ healthServer.listen(healthPort, healthHost, () =>
 async function shutdown(signal: string) {
   console.log(`[worker] ${signal} received, draining…`);
   healthServer.close();
-  await Promise.all([ingestWorker.close(), experimentWorker.close(), maintenanceWorker.close(), dlq.close()]);
+  await Promise.all([
+    ingestWorker.close(),
+    experimentWorker.close(),
+    maintenanceWorker.close(),
+    sandboxWorker?.close(),
+    dlq.close(),
+  ]);
   process.exit(0);
 }
 

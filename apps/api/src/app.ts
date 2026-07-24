@@ -82,6 +82,7 @@ import {
   getRetention,
   getReviewAnalytics,
   getSampling,
+  getSandboxForUser,
   getScheduledExport,
   getScoresByTraceIds,
   getToolAnalytics,
@@ -281,6 +282,7 @@ app.use("/v1/users", requireAuth);
 app.use("/v1/metrics", requireAuth);
 app.use("/v1/metrics/*", requireAuth);
 app.use("/v1/usage", requireAuth);
+app.use("/v1/demo/*", requireAuth);
 app.use("/v1/prompts", requireAuth);
 app.use("/v1/prompts/*", requireAuth);
 app.use("/v1/datasets", requireAuth);
@@ -413,6 +415,15 @@ app.get("/v1/payloads/*", async (c) => {
   const body = await getOffloadedPayload(c.get("projectId"), key);
   if (body === null) return c.json({ error: "not found" }, 404);
   return c.body(body, 200, { "content-type": "application/json", "cache-control": "private, max-age=31536000" });
+});
+
+// Public-demo sandbox status — powers the console's "preparing your sandbox" screen.
+// User-scoped (not project-scoped) and only meaningful when DEMO_MODE is on; returns
+// null elsewhere so the console can treat "no sandbox" as the normal case.
+app.get("/v1/demo/status", async (c) => {
+  const userId = c.get("userId");
+  if (!userId) return c.json({ sandbox: null });
+  return c.json({ sandbox: await getSandboxForUser(userId) });
 });
 
 // Batch export (NDJSON download) — plain route so we can set a file download header.
