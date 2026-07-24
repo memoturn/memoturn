@@ -1012,6 +1012,13 @@ model GuardrailPolicy {
   requireValidJson Boolean  @default(false) // require the text to be valid JSON
   requiredJsonKeys String[] @default([]) // top-level keys that must be present when parsed as JSON
   evaluatorGuards  Json     @default("[]") // EvaluatorGuard[] — { name, comparator, threshold }
+  // Built-in model guards (LLM-backed, fail-open) — the two categories the deterministic
+  // scan can't cover. `judgeProvider`/`judgeModel` is the LLM they call.
+  restrictedTopics  String[] @default([]) // block content about any of these topics
+  toxicity          Boolean  @default(false) // detect toxic/unsafe content
+  toxicityThreshold Float    @default(0.5) // block when the toxicity score ≥ this
+  judgeProvider     String   @default("mock") // provider for the topic/toxicity model guards
+  judgeModel        String   @default("mock-1") // model for the topic/toxicity model guards
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
