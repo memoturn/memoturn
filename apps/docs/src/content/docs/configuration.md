@@ -176,6 +176,23 @@ credentials and prints them once.
 | `SEED_ADMIN_EMAIL` | `admin@memoturn.dev` | Override the seeded admin email. In production a random value is generated unless this is set. |
 | `SEED_ADMIN_PASSWORD` | `memoturn-dev-123` | Override the seeded admin password. In production a random value is generated unless this is set. |
 
+## Public demo (`DEMO_MODE`)
+
+Off by default and inert on a normal install. When enabled, a visitor who signs in with an
+email that has no organization gets a throwaway **sandbox** provisioned automatically —
+their own organization + project, seeded with generated telemetry — which is hard-deleted
+after `DEMO_TTL_DAYS`. Used to run the public demo; see the worker's `sandbox-prune` cron.
+
+| Var | Default | Notes |
+| --- | --- | --- |
+| `DEMO_MODE` | unset | `true`/`1` enables per-visitor sandbox provisioning, the sandbox seeder, and the daily prune cron. Leave unset for every normal deployment. |
+| `DEMO_TTL_DAYS` | `7` | Sandbox lifetime. The prune cron hard-deletes telemetry, blob objects, the organization (Prisma cascade), and the visitor's user row. |
+| `DEMO_MAX_SANDBOXES` | `500` | Cap on concurrently-active sandboxes; signups past it are refused. |
+| `DEMO_SEED_DAYS` | `3` | Days of backdated demo telemetry generated per sandbox. |
+| `DEMO_SEED_TRACES_PER_DAY` | `15` | Traces per day per sandbox — keep small; every sandbox pays this ingest cost. |
+| `DEMO_MEMBER_ROLE` | `viewer` | Role the visitor gets. `viewer` is read-only (every mutating route is gated), which is what stops a public sandbox from ingesting, spending on the playground, or minting API keys. |
+| `SANDBOX_CONCURRENCY` | `2` | Worker concurrency for the sandbox seed queue. |
+
 ## Dev tooling
 
 | Var | Default | Notes |

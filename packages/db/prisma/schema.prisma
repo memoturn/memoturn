@@ -24,8 +24,37 @@ model Organization {
   projects    Project[]
   members     Member[]
   invitations Invitation[]
+  demoSandbox DemoSandbox?
 
   @@map("organization")
+}
+
+// Public-demo sandbox (DEMO_MODE only): one throwaway tenant per visitor, seeded with
+// generated telemetry and hard-deleted after `expiresAt` by the sandbox-prune cron.
+// Absent on every normal install — nothing here runs unless DEMO_MODE is enabled.
+enum DemoSandboxStatus {
+  PENDING
+  SEEDING
+  READY
+  FAILED
+}
+
+model DemoSandbox {
+  id             String            @id @default(cuid())
+  organizationId String            @unique
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // The visitor's user + email. Not a relation: teardown deletes the user, and we keep
+  // the row's own lifecycle tied to the organization instead.
+  userId         String
+  email          String
+  status         DemoSandboxStatus @default(PENDING)
+  error          String            @default("")
+  expiresAt      DateTime
+  seededAt       DateTime?
+  createdAt      DateTime          @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
 }
 
 model Member {

@@ -85,6 +85,36 @@ export function getExperimentQueue(): Queue<ExperimentJob> {
   return experimentQueue;
 }
 
+/** Payload enqueued when a demo sandbox is provisioned — the worker seeds it. */
+export interface SandboxJob {
+  organizationId: string;
+  projectId: string;
+}
+
+let sandboxQueue: Queue<SandboxJob> | undefined;
+
+/**
+ * Queue for seeding public-demo sandboxes (DEMO_MODE only). Seeding generates a few
+ * hundred events and submits them through the normal ingest path, so a job is seconds
+ * of work; retries are safe because the generated entity ids are deterministic and the
+ * store merges last-writer-wins.
+ */
+export function getSandboxQueue(): Queue<SandboxJob> {
+  if (!sandboxQueue) {
+    sandboxQueue = new Queue<SandboxJob>(QUEUE_NAMES.sandbox, {
+      connection: connectionOptions(),
+      prefix: QUEUE_PREFIX,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 2000 },
+        removeOnComplete: 100,
+        removeOnFail: 500,
+      },
+    });
+  }
+  return sandboxQueue;
+}
+
 let dlqQueue: Queue<IngestDlqJob> | undefined;
 
 /** Dead-letter queue for ingest batches that exhaust their retries (inspect/replay). */

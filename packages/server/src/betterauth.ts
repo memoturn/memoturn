@@ -17,6 +17,7 @@ import { haveIBeenPwned } from "better-auth/plugins/haveibeenpwned";
 import { organization } from "better-auth/plugins/organization";
 import { adminAc, defaultStatements, memberAc, ownerAc } from "better-auth/plugins/organization/access";
 import { recordAuthAudit } from "./audit.js";
+import { demoModeEnabled, provisionSandboxForUser } from "./demo.js";
 import { isProduction } from "./env.js";
 import { mailerStatus, sendEmail } from "./mailer.js";
 
@@ -493,7 +494,16 @@ export const auth = betterAuth({
             where: { userId: session.userId },
             orderBy: { createdAt: "asc" },
           });
-          return { data: { ...session, activeOrganizationId: m?.organizationId ?? null } };
+          if (m) return { data: { ...session, activeOrganizationId: m.organizationId } };
+          // Public demo: a visitor with no membership gets a throwaway sandbox provisioned
+          // here — before the session lands — so they skip the create-an-organization
+          // onboarding bounce and go straight to seeded data. No-op unless DEMO_MODE.
+          if (demoModeEnabled()) {
+            const user = await prisma.user.findUnique({ where: { id: session.userId }, select: { email: true } });
+            const organizationId = await provisionSandboxForUser(session.userId, user?.email ?? "");
+            if (organizationId) return { data: { ...session, activeOrganizationId: organizationId } };
+          }
+          return { data: { ...session, activeOrganizationId: null } };
         },
         // Auth-lifecycle audit: every new session is a sign-in — regardless of method
         // (password, social, SSO, magic-link, OTP, passkey). Attaches to the active org.
