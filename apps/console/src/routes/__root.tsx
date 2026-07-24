@@ -47,6 +47,7 @@ import {
 import { useEffect } from "react";
 import { AssistantDrawer } from "../components/assistant-chat";
 import { CommandPalette } from "../components/CommandPalette";
+import { DemoBanner } from "../components/demo-banner";
 import { KeyboardHelp } from "../components/keyboard-help";
 import { Logo } from "../components/logo";
 import { ModeToggle } from "../components/mode-toggle";
@@ -428,6 +429,7 @@ const PUBLIC_AUTH_ROUTES = [
   "/reset-password",
   "/accept-invite",
   "/two-factor",
+  "/demo", // public-demo landing (DEMO_MODE); also the post-magic-link "preparing sandbox" screen
 ];
 // Entry points a signed-in user should be bounced away from (they're already authenticated).
 const AUTH_ENTRY_ROUTES = ["/login", "/signup"];
@@ -471,6 +473,7 @@ function RootComponent() {
     <SidebarProvider>
       <AppSidebar email={email} initials={initials} />
       <SidebarInset>
+        <DemoBanner />
         <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/70">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-1 !h-5" />

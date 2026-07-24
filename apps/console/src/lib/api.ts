@@ -97,6 +97,14 @@ export type AuthConfig = {
   emailConfigured: boolean;
 };
 
+/** Public-demo sandbox status (DEMO_MODE). Not a /v1 contract route — shape lives here. */
+export type DemoStatus = {
+  status: "PENDING" | "SEEDING" | "READY" | "FAILED";
+  error: string;
+  expiresAt: string;
+  seededAt: string | null;
+};
+
 export function getActiveProject(): string {
   return (typeof localStorage !== "undefined" && localStorage.getItem(PROJECT_KEY)) || "";
 }
@@ -242,6 +250,7 @@ export const api = {
   setTraceTags: (id: string, tags: string[]) => post<TraceTags>(`/v1/traces/${encodeURIComponent(id)}/tags`, { tags }),
   getMetrics: (days = 30) => get<MetricsSummary>(`/v1/metrics${qs({ days })}`),
   getUsage: (days = 30) => get<UsageSummary>(`/v1/usage${qs({ days })}`),
+  getDemoStatus: () => get<{ sandbox: DemoStatus | null }>(`/v1/demo/status`).then((r) => r.sandbox),
   runAnalyticsQuery: (query: AnalyticsQuery) => post<QueryResult>(`/v1/metrics/query`, query),
   getToolAnalytics: (days = 30) =>
     get<{ data: ToolAnalyticsRow[] }>(`/v1/metrics/tools${qs({ days })}`).then((r) => r.data),
