@@ -460,6 +460,9 @@ export const api = {
     online?: boolean;
     samplingRate?: number;
     filterName?: string;
+    jurors?: { provider: string; model: string }[];
+    scope?: "trace" | "thread";
+    cooldownSeconds?: number;
   }) => post(`/v1/evaluators`, body),
   listEvaluatorTemplates: () => get<{ data: EvaluatorTemplate[] }>(`/v1/evaluators/templates`).then((r) => r.data),
   listEvaluatorVersions: (name: string) =>
