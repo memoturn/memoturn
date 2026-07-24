@@ -88,6 +88,13 @@ export const traceBody = z.object({
   timestamp: ISO_DATETIME.optional(),
   userId: z.string().max(MAX_IDENTIFIER_LEN).optional(),
   sessionId: z.string().max(MAX_IDENTIFIER_LEN).optional(),
+  /**
+   * Hierarchical path locating this trace within its session, organized by function not
+   * time — e.g. "/support/lookup-order/search". Traces that repeat the same work share a
+   * path, so a session's traces can be grouped/collapsed by path rather than read as a flat
+   * timeline. Free-form; "/"-delimited by convention. Requires `sessionId` to be meaningful.
+   */
+  sessionPath: z.string().max(MAX_IDENTIFIER_LEN).optional(),
   release: z.string().max(MAX_IDENTIFIER_LEN).optional(),
   version: z.string().max(MAX_IDENTIFIER_LEN).optional(),
   environment: z.string().max(MAX_IDENTIFIER_LEN).default("default"),

@@ -1,6 +1,13 @@
 export { wrapChroma } from "./chroma.js";
 export { Memoturn, MemoturnSpan, MemoturnTrace } from "./client.js";
-export type { DatasetHandle, DatasetItem, GateResult, GateThreshold } from "./dataset.js";
+export type {
+  DatasetHandle,
+  DatasetItem,
+  GateFailure,
+  GateResult,
+  GateScore,
+  GateThreshold,
+} from "./dataset.js";
 export { addDatasetItems, createDataset, evaluateGate, getDataset } from "./dataset.js";
 export type { GuardrailFinding, GuardrailVerdict, OnGuardFailure, RunGuardedOptions } from "./guardrails.js";
 export { checkGuardrails, GuardrailBlockedError, runGuarded } from "./guardrails.js";

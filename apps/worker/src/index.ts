@@ -18,6 +18,7 @@ import {
   pruneMutableState,
   runAllEmbeddingProjections,
   runAllScheduledExports,
+  runAllThreadEvaluations,
   statePruneWindowHours,
   validateRuntimeEnv,
   withLock,
@@ -178,12 +179,20 @@ const maintenanceWorker = new Worker(
         const dlqCounts = await dlq.getJobCounts();
         const dlqDepth = (dlqCounts.waiting ?? 0) + (dlqCounts.completed ?? 0) + (dlqCounts.failed ?? 0);
         const rehydrateRate = await consumeRehydrateRate();
-        const [alerts, budgets] = await Promise.all([
+        const [alerts, budgets, threads] = await Promise.all([
           evaluateAllAlerts({ dlqDepth, rehydrateRate }),
           evaluateBudgets(),
+          // Thread-scope evaluators: score conversations that just crossed their cooldown.
+          // Best-effort — its own errors are swallowed internally, per-session.
+          runAllThreadEvaluations().catch((e) => {
+            console.error("[thread-eval] sweep failed:", e instanceof Error ? e.message : e);
+            return { evaluated: 0, scored: 0 };
+          }),
         ]);
-        if (alerts.fired > 0 || budgets.notified > 0)
-          console.log(`[alerts] ${alerts.fired} fired, ${budgets.notified} budget step(s) notified`);
+        if (alerts.fired > 0 || budgets.notified > 0 || threads.scored > 0)
+          console.log(
+            `[alerts] ${alerts.fired} fired, ${budgets.notified} budget step(s) notified, ${threads.scored} thread(s) scored`,
+          );
       });
       if (ran === null) console.log("[alerts] skipped — another run holds the lock");
     }

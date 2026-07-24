@@ -23,8 +23,12 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "bin": {
+    "mt": "./dist/cli.js"
+  },
   "exports": {
     ".": "./src/index.ts",
+    "./cli": "./src/cli.ts",
     "./openai": "./src/openai.ts",
     "./anthropic": "./src/anthropic.ts",
     "./gemini": "./src/gemini.ts",
@@ -60,6 +64,10 @@
       ".": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
+      },
+      "./cli": {
+        "types": "./dist/cli.d.ts",
+        "default": "./dist/cli.js"
       },
       "./openai": {
         "types": "./dist/openai.d.ts",

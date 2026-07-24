@@ -44,6 +44,7 @@ const traceColumns: ColumnSpec<TraceRow>[] = [
   { name: "name", values: (r) => [r.name] },
   { name: "user_id", values: (r) => [r.user_id] },
   { name: "session_id", values: (r) => [r.session_id] },
+  { name: "session_path", values: (r) => [r.session_path] },
   { name: "`release`", values: (r) => [r.release] },
   { name: "version", values: (r) => [r.version] },
   { name: "environment", values: (r) => [r.environment] },

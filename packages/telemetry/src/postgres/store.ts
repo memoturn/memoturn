@@ -231,6 +231,7 @@ export class PostgresTelemetryStore implements TelemetryStore {
         to_char(t."timestamp", ${ISO_FMT}) AS "timestamp",
         t.user_id AS user_id,
         t.session_id AS session_id,
+        t.session_path AS session_path,
         t.environment AS environment,
         t.tags AS tags
       FROM traces t
@@ -521,7 +522,7 @@ export class PostgresTelemetryStore implements TelemetryStore {
       SELECT
         id, name,
         to_char("timestamp", ${ISO_FMT}) AS "timestamp",
-        user_id, session_id, environment, "release", version, tags,
+        user_id, session_id, session_path, environment, "release", version, tags,
         COALESCE(metadata, '{}') AS metadata,
         COALESCE(input, '') AS input,
         COALESCE(output, '') AS output
@@ -1449,7 +1450,7 @@ export class PostgresTelemetryStore implements TelemetryStore {
     const shapes: { [K in TelemetryTable]: { select: string; map: (r: never) => TelemetryRowMap[K] } } = {
       traces: {
         select: `project_id, id, to_char("timestamp", ${ISO_MS_FMT}) AS "timestamp",
-          name, user_id, session_id, "release", version, environment, "public",
+          name, user_id, session_id, session_path, "release", version, environment, "public",
           tags, COALESCE(metadata, '{}') AS metadata,
           COALESCE(input, '') AS input, COALESCE(output, '') AS output,
           to_char(event_ts, ${ISO_MS_FMT}) AS event_ts`,
