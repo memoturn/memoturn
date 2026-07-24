@@ -31,6 +31,11 @@ export const ObservationType = z.enum([
   "EMBEDDING",
   "CHAIN",
   "GUARDRAIL",
+  // Agent reasoning-step kinds: a planning/reasoning step, a working-memory read/write, and a
+  // sub-agent handoff/delegation. Set explicitly via `observationType` or mapped from OTel.
+  "THOUGHT",
+  "MEMORY",
+  "HANDOFF",
 ]);
 export type ObservationType = z.infer<typeof ObservationType>;
 

@@ -528,7 +528,9 @@ function barColor(type: string): string {
   if (type === "RERANKER") return "bg-teal-500";
   if (type === "EMBEDDING") return "bg-indigo-500";
   if (type === "GUARDRAIL") return "bg-rose-500";
-  return "bg-slate-400"; // CHAIN / EVENT / unknown
+  if (type === "MEMORY") return "bg-cyan-600";
+  if (type === "HANDOFF") return "bg-violet-400";
+  return "bg-slate-400"; // THOUGHT / CHAIN / EVENT / unknown
 }
 
 /** Human duration: sub-second in ms, otherwise seconds (2 sig figs). */

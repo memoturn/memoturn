@@ -85,6 +85,7 @@ import {
   getSandboxForUser,
   getScheduledExport,
   getScoresByTraceIds,
+  getSessionMessages,
   getToolAnalytics,
   getTrace,
   getUsage,
@@ -278,6 +279,7 @@ app.use("/v1/otel/*", requireAuth);
 app.use("/v1/traces", requireAuth);
 app.use("/v1/traces/*", requireAuth);
 app.use("/v1/sessions", requireAuth);
+app.use("/v1/sessions/*", requireAuth);
 app.use("/v1/users", requireAuth);
 app.use("/v1/metrics", requireAuth);
 app.use("/v1/metrics/*", requireAuth);
@@ -909,6 +911,21 @@ app.openapi(
     ]);
     return c.json({ data, total });
   },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/sessions/{id}/messages",
+    summary: "A session's traces as a conversation (Memory Explorer)",
+    tags: ["traces"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Session messages", content: { "application/json": { schema: C.sessionMessages } } },
+    },
+  }),
+  async (c) => c.json(await getSessionMessages(c.get("projectId"), c.req.valid("param").id)),
 );
 
 // ── Users ────────────────────────────────────────────────────────────────────────
