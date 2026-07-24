@@ -8,7 +8,7 @@ describe("evaluator templates", () => {
 
   it("has unique keys and non-empty prompts + valid requirements", () => {
     const keys = new Set<string>();
-    const allowed = new Set(["input", "output", "expectedOutput", "context"]);
+    const allowed = new Set(["input", "output", "expectedOutput", "context", "history", "trajectory"]);
     for (const t of EVALUATOR_TEMPLATES) {
       expect(keys.has(t.key), `duplicate key ${t.key}`).toBe(false);
       keys.add(t.key);
@@ -32,5 +32,22 @@ describe("evaluator templates", () => {
     // context-precision needs the question + retrieved context; recall needs the expected answer.
     expect(getEvaluatorTemplate("context-precision")?.requires).toEqual(["input", "context"]);
     expect(getEvaluatorTemplate("context-recall")?.requires).toEqual(["expectedOutput", "context"]);
+  });
+
+  it("ships the conversation-quality + agent-trajectory metrics", () => {
+    for (const key of [
+      "user-frustration",
+      "knowledge-retention",
+      "session-completeness",
+      "conversational-coherence",
+      "trajectory-accuracy",
+      "tool-correctness",
+      "task-completion",
+    ]) {
+      expect(getEvaluatorTemplate(key), `missing ${key}`).toBeDefined();
+    }
+    // conversation metrics judge the whole transcript; trajectory metrics judge the agent's steps.
+    expect(getEvaluatorTemplate("knowledge-retention")?.requires).toEqual(["history"]);
+    expect(getEvaluatorTemplate("tool-correctness")?.requires).toEqual(["input", "trajectory"]);
   });
 });

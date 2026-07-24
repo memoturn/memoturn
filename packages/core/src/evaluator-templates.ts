@@ -11,8 +11,13 @@
  * the prompt is phrased so 1 = absence of the bad thing (inverse), keeping "higher = better".
  */
 
-/** What signals a template needs present on the scored item to produce a meaningful score. */
-export type EvaluatorRequirement = "input" | "output" | "expectedOutput" | "context";
+/**
+ * What signals a template needs present on the scored item to produce a meaningful score.
+ * `history` = the multi-turn conversation transcript; `trajectory` = the agent's ordered
+ * steps/tool-calls. Both are carried in the judged item's `input` (the runner passes only
+ * input/output/expectedOutput to the judge), so these are UI/authoring hints, not a schema.
+ */
+export type EvaluatorRequirement = "input" | "output" | "expectedOutput" | "context" | "history" | "trajectory";
 
 export interface EvaluatorTemplate {
   /** Stable key used to instantiate (e.g. "faithfulness"). */
@@ -127,6 +132,70 @@ export const EVALUATOR_TEMPLATES: EvaluatorTemplate[] = [
     requires: ["input", "output"],
     prompt:
       "You are grading SUMMARIZATION QUALITY. Given the source text (input) and the summary (output), judge whether the summary is faithful (no invented content), captures the key points, and omits nothing essential. Score 1.0 for a faithful, complete, well-focused summary, 0.0 for one that distorts, omits key points, or adds content not in the source.",
+  },
+
+  // ── Conversation-quality metrics (multi-turn / thread-level) ──────────────────────────
+  // These judge over a whole conversation transcript (supplied in the item's input), not a
+  // single request/response. Pair them with thread-aware online evaluation.
+  {
+    key: "user-frustration",
+    name: "user-frustration",
+    description: "Is the conversation free of user frustration signals? (higher = less frustration)",
+    requires: ["history"],
+    prompt:
+      "You are grading USER FRUSTRATION across a multi-turn conversation transcript (in the input). Look for signals that the user is becoming frustrated: repeating themselves, rephrasing the same request, expressing annoyance, correcting the assistant, or abandoning the task. Score 1.0 when the conversation shows NO frustration (smooth, the user's needs are met), 0.0 when the user is clearly frustrated. Higher is better (less frustration).",
+  },
+  {
+    key: "knowledge-retention",
+    name: "knowledge-retention",
+    description: "Does the assistant remember facts the user established earlier in the conversation?",
+    requires: ["history"],
+    prompt:
+      "You are grading KNOWLEDGE RETENTION across a multi-turn conversation transcript (in the input). Judge whether the assistant correctly remembers and uses facts, preferences, and constraints the user established in earlier turns, rather than forgetting them or asking again. Score 1.0 when the assistant fully retains prior context, 0.0 when it repeatedly forgets or contradicts earlier-established facts.",
+  },
+  {
+    key: "session-completeness",
+    name: "session-completeness",
+    description: "Did the conversation ultimately accomplish everything the user set out to do?",
+    requires: ["history"],
+    prompt:
+      "You are grading SESSION COMPLETENESS across a multi-turn conversation transcript (in the input). Identify the user's goals over the whole session and judge whether, by the end, every goal was satisfied. Score 1.0 when all of the user's goals were fully accomplished, 0.0 when the primary goal was left unresolved; give partial credit proportional to how many goals were met.",
+  },
+  {
+    key: "conversational-coherence",
+    name: "conversational-coherence",
+    description: "Do the assistant's turns stay coherent and on-track across the conversation?",
+    requires: ["history"],
+    prompt:
+      "You are grading CONVERSATIONAL COHERENCE across a multi-turn conversation transcript (in the input). Judge whether the assistant's turns are consistent with each other and with the conversation's flow — no contradictions between turns, no losing the thread, no abrupt topic drift. Score 1.0 for a coherent, on-track dialogue, 0.0 for a disjointed or self-contradictory one. This is turn-to-turn consistency, distinct from single-response coherence.",
+  },
+
+  // ── Agent-trajectory metrics (tool-using agents) ─────────────────────────────────────
+  // These judge the agent's ordered steps / tool calls (supplied in the item's input) rather
+  // than only its final answer.
+  {
+    key: "trajectory-accuracy",
+    name: "trajectory-accuracy",
+    description: "Did the agent take a sensible sequence of steps toward the goal?",
+    requires: ["input", "trajectory"],
+    prompt:
+      "You are grading TRAJECTORY ACCURACY for a tool-using agent. Given the user's goal and the agent's ordered trajectory of steps/tool-calls (in the input), judge whether the sequence of steps was sensible and efficient for reaching the goal — no needless detours, loops, or clearly wrong turns. Score 1.0 for an efficient, well-chosen path, 0.0 for a path that was confused, circular, or misdirected. Judge the PATH, not just whether it eventually succeeded.",
+  },
+  {
+    key: "tool-correctness",
+    name: "tool-correctness",
+    description: "Did the agent call the right tools with correct arguments?",
+    requires: ["input", "trajectory"],
+    prompt:
+      "You are grading TOOL CORRECTNESS for a tool-using agent. Given the user's goal and the agent's tool calls with their arguments (in the input), judge whether the agent selected appropriate tools for each step and supplied correct, well-formed arguments. Score 1.0 when every tool call was the right tool with correct arguments, 0.0 when tools were misused or wrong; give partial credit proportional to the fraction of correct calls.",
+  },
+  {
+    key: "task-completion",
+    name: "task-completion",
+    description: "Did the agent actually complete the task it was asked to do?",
+    requires: ["input", "output"],
+    prompt:
+      "You are grading TASK COMPLETION for an agent. Given the requested task (input) and the agent's final result/output, judge whether the task was actually completed — the deliverable exists, is correct, and satisfies the request. Score 1.0 for a fully completed task, 0.0 for an abandoned or failed one; give partial credit for partial completion. This measures the outcome, complementing trajectory metrics that measure the path.",
   },
 ].map((t) => ({ ...t, defaultModel: DEFAULT_JUDGE_MODEL }) as EvaluatorTemplate);
 
