@@ -263,6 +263,39 @@ header.header > .header {
 	border-bottom: 0;
 }
 
+/* Landing header — contain the header row to the marketing site's page
+ * envelope (page-wrap: 1800px cap + clamp gutters), centered, instead of
+ * spanning the full viewport. Splash template only ([data-has-hero]): the bar
+ * and its lit edge still span edge-to-edge, but the logo, search, and controls
+ * line up inside the same column the hero copy uses. Content pages keep the
+ * logo anchored to the sidebar rail, so this stays scoped to the landing. */
+html[data-has-hero] header.header {
+	padding-inline: 0;
+}
+
+html[data-has-hero] header.header > .header {
+	max-width: 1800px;
+	margin-inline: auto;
+	padding-inline: clamp(1rem, 3vw, 3rem);
+	box-sizing: border-box;
+}
+
+/* Keep the search trigger from ballooning across the contained row — cap it to
+ * a tidy pill centered in the middle column, so the header breathes like the
+ * marketing header's uncluttered center. The middle grid child is the search
+ * wrapper (title-wrapper · search · right-group). */
+@media (min-width: 50rem) {
+	html[data-has-hero] header.header > .header > :nth-child(2) {
+		display: flex;
+		justify-content: center;
+	}
+
+	html[data-has-hero] header.header site-search {
+		width: 100%;
+		max-width: 22rem;
+	}
+}
+
 /* Lit edge — the center-anchored lagoon hairline from the marketing site's
  * vocabulary, lighting structural boundaries. Static, always paired with the
  * existing hairline border it sits on. */

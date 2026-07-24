@@ -14,28 +14,38 @@ const { kicker, title, primary, secondary, command } = Astro.props;
 
 <section class="m-cta">
 	<div class="m-cta__inner">
-		{kicker && <p class="m-cta__kicker">{kicker}</p>}
-		<h2 class="m-cta__title">{title}</h2>
-		<div class="m-cta__body">
-			<slot />
+		<div class="m-cta__pattern" aria-hidden="true"></div>
+		<div class="m-cta__content">
+			<span class="m-cta__mark" aria-hidden="true">
+				<svg viewBox="0 0 128 128" fill="currentColor">
+					<path fill-rule="evenodd" d="M 64 10 a 54 54 0 1 0 0 108 a 54 54 0 1 0 0 -108 M 64 24 a 40 40 0 1 1 0 80 a 40 40 0 1 1 0 -80" />
+					<path fill-rule="evenodd" d="M 64 34 a 30 30 0 1 0 0 60 a 30 30 0 1 0 0 -60 M 64 48 a 16 16 0 1 1 0 32 a 16 16 0 1 1 0 -32" />
+					<circle cx="64" cy="64" r="8" />
+				</svg>
+			</span>
+			{kicker && <p class="m-cta__kicker">{kicker}</p>}
+			<h2 class="m-cta__title">{title}</h2>
+			<div class="m-cta__body">
+				<slot />
+			</div>
+			{
+				(primary || secondary || command) && (
+					<div class="m-cta__actions">
+						{primary && (
+							<a class="m-cta__action m-cta__action--primary" href={primary.href}>
+								{primary.text}
+							</a>
+						)}
+						{secondary && (
+							<a class="m-cta__action m-cta__action--secondary" href={secondary.href}>
+								{secondary.text}
+							</a>
+						)}
+						{command && <CopyChip command={command} />}
+					</div>
+				)
+			}
 		</div>
-		{
-			(primary || secondary || command) && (
-				<div class="m-cta__actions">
-					{primary && (
-						<a class="m-cta__action m-cta__action--primary" href={primary.href}>
-							{primary.text}
-						</a>
-					)}
-					{secondary && (
-						<a class="m-cta__action m-cta__action--secondary" href={secondary.href}>
-							{secondary.text}
-						</a>
-					)}
-					{command && <CopyChip command={command} />}
-				</div>
-			)
-		}
 	</div>
 </section>
 
@@ -48,35 +58,73 @@ const { kicker, title, primary, secondary, command } = Astro.props;
 		margin-block: 3rem 1rem;
 	}
 	.m-cta__inner {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-		padding: 3rem 1.5rem;
+		position: relative;
+		isolation: isolate;
+		overflow: hidden;
+		padding: 3.25rem 1.5rem;
 		border-radius: var(--radius-lg);
 		background: var(--gradient-atoll);
 		color: var(--on-gradient-fg);
 	}
 	@media (min-width: 768px) {
 		.m-cta__inner {
-			padding: 3.5rem 3rem;
+			padding: 4rem 3rem;
 		}
 	}
+
+	/* Topo contour wash — the marketing closing band's texture, so the empty
+	 * right of the panel reads as brand surface instead of dead gradient. */
+	.m-cta__pattern {
+		position: absolute;
+		inset: 0;
+		z-index: -1;
+		background-image: var(--pattern-topo-light);
+		background-size: 460px 460px;
+		background-position: center;
+		mix-blend-mode: screen;
+		opacity: 0.16;
+		pointer-events: none;
+	}
+
+	.m-cta__content {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 1rem;
+		text-align: center;
+	}
+
+	.m-cta__mark {
+		display: inline-flex;
+		color: var(--on-gradient-fg);
+		filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.28));
+	}
+	.m-cta__mark svg {
+		width: clamp(3rem, 6vw, 3.75rem);
+		height: auto;
+		transition: transform 2400ms var(--ease-swell, cubic-bezier(0.16, 1, 0.3, 1));
+	}
+	.m-cta__inner:hover .m-cta__mark svg {
+		transform: rotate(360deg);
+	}
+
 	.m-cta__kicker {
 		margin: 0;
-		font-size: 0.69rem;
-		letter-spacing: 0.16em;
+		font-family: var(--font-mono-stack);
+		font-size: 0.72rem;
+		letter-spacing: 0.08em;
 		text-transform: uppercase;
-		font-weight: 700;
-		color: var(--on-gradient-fg);
+		font-weight: 600;
+		color: var(--on-gradient-fg-soft);
 	}
 	.m-cta__title {
 		margin: 0;
 		font-family: var(--font-heading-stack);
-		font-size: clamp(1.75rem, 3vw, 2.25rem);
+		font-size: clamp(1.75rem, 3.4vw, 2.5rem);
 		font-weight: 700;
 		font-stretch: 110%;
-		line-height: 1.15;
-		max-width: 22ch;
+		line-height: 1.12;
+		max-width: 20ch;
 		color: var(--on-gradient-fg);
 		letter-spacing: -0.02em;
 		text-wrap: balance;
@@ -85,7 +133,7 @@ const { kicker, title, primary, secondary, command } = Astro.props;
 		font-size: 0.95rem;
 		line-height: 1.65;
 		color: var(--on-gradient-fg-soft);
-		max-width: 50ch;
+		max-width: 52ch;
 		text-wrap: pretty;
 	}
 	.m-cta__body :global(p) {
@@ -112,8 +160,18 @@ const { kicker, title, primary, secondary, command } = Astro.props;
 	.m-cta__actions {
 		display: flex;
 		flex-wrap: wrap;
+		justify-content: center;
 		gap: 0.75rem;
 		margin-top: 0.5rem;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.m-cta__mark svg {
+			transition: none;
+		}
+		.m-cta__inner:hover .m-cta__mark svg {
+			transform: none;
+		}
 	}
 	/* Button spec matches the marketing home's closing band: 40px height,
 	 * 6px radius, 14px/500 type. */

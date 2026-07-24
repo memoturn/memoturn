@@ -28,7 +28,39 @@ const { kicker, title, href, code } = Astro.props;
 	</div>
 	{
 		code && (
-			<pre class="m-hero-card__code"><code>{code}</code></pre>
+			<button type="button" class="m-hero-card__code" data-command={code} aria-label={`Copy command: ${code}`}>
+				<code class="m-hero-card__code-text">{code}</code>
+				<span class="m-hero-card__code-icon m-hero-card__code-icon--copy" aria-hidden="true">
+					<svg
+						width="15"
+						height="15"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					>
+						<rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+						<path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+					</svg>
+				</span>
+				<span class="m-hero-card__code-icon m-hero-card__code-icon--check" aria-hidden="true">
+					<svg
+						width="15"
+						height="15"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					>
+						<path d="M20 6 9 17l-5-5" />
+					</svg>
+				</span>
+				<span class="m-hero-card__code-status sr-only" aria-live="polite" data-copy-status />
+			</button>
 		)
 	}
 </section>
@@ -114,9 +146,16 @@ const { kicker, title, href, code } = Astro.props;
 		padding: 0.1em 0.35em;
 	}
 
+	/* Click-to-copy command block: the whole panel is the affordance, with a
+	 * copy icon that flips to a check on success. Copy is wired by the shared
+	 * delegated handler (data-command), so it survives view transitions. */
 	.m-hero-card__code {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		width: 100%;
 		margin: 0;
-		padding: 1rem 1.25rem;
+		padding: 0.85rem 1rem;
 		background: var(--background);
 		border: 1px solid var(--docs-line);
 		border-radius: var(--radius-md);
@@ -124,6 +163,84 @@ const { kicker, title, href, code } = Astro.props;
 		font-size: 0.875rem;
 		line-height: 1.55;
 		color: var(--foreground);
-		overflow-x: auto;
+		text-align: left;
+		cursor: pointer;
+		transition:
+			border-color 180ms var(--ease-swell, ease),
+			background-color 180ms var(--ease-swell, ease);
+	}
+
+	.m-hero-card__code:hover {
+		border-color: color-mix(in oklab, var(--primary) 45%, var(--docs-line));
+	}
+
+	.m-hero-card__code:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 3px;
+	}
+
+	.m-hero-card__code.is-copied {
+		border-color: color-mix(in oklab, var(--primary) 55%, var(--docs-line));
+	}
+
+	.m-hero-card__code-text {
+		flex: 1 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	/* Each icon SVG lives inside a fixed 15px box: a bare SVG as a flex item
+	 * carries a phantom intrinsic height that inflates the row and drops the
+	 * glyph, so the overflow-clipped HTML box is the flex item instead and the
+	 * copy → check swap stays centered on the command line. */
+	.m-hero-card__code-icon {
+		flex: 0 0 auto;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 15px;
+		height: 15px;
+		overflow: hidden;
+		line-height: 0;
+		color: var(--muted-foreground);
+		transition: color 180ms var(--ease-swell, ease);
+	}
+
+	.m-hero-card__code-icon svg {
+		display: block;
+		width: 15px;
+		height: 15px;
+	}
+
+	.m-hero-card__code:hover .m-hero-card__code-icon {
+		color: var(--primary);
+	}
+
+	.m-hero-card__code-icon--check {
+		display: none;
+	}
+
+	.m-hero-card__code.is-copied .m-hero-card__code-icon--copy {
+		display: none;
+	}
+
+	.m-hero-card__code.is-copied .m-hero-card__code-icon--check {
+		display: inline-flex;
+		color: var(--primary);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.m-hero-card__code,
+		.m-hero-card__code-copy {
+			transition: none;
+		}
 	}
 </style>
+
+<script>
+	import { initCopyToClipboard } from "./copy-to-clipboard.ts";
+
+	initCopyToClipboard();
+</script>
