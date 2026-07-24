@@ -49,6 +49,11 @@ export function ProjectGuardrails() {
   const [requireValidJson, setRequireValidJson] = useState(false);
   const [requiredJsonKeys, setRequiredJsonKeys] = useState("");
   const [evaluatorGuards, setEvaluatorGuards] = useState<EvaluatorGuard[]>([]);
+  const [restrictedTopics, setRestrictedTopics] = useState("");
+  const [toxicity, setToxicity] = useState(false);
+  const [toxicityThreshold, setToxicityThreshold] = useState(0.5);
+  const [judgeProvider, setJudgeProvider] = useState("mock");
+  const [judgeModel, setJudgeModel] = useState("mock-1");
 
   // Seed local state once the policy loads.
   useEffect(() => {
@@ -66,7 +71,14 @@ export function ProjectGuardrails() {
     setRequireValidJson(policy.requireValidJson);
     setRequiredJsonKeys(policy.requiredJsonKeys.join(", "));
     setEvaluatorGuards(policy.evaluatorGuards);
+    setRestrictedTopics(policy.restrictedTopics.join("\n"));
+    setToxicity(policy.toxicity);
+    setToxicityThreshold(policy.toxicityThreshold);
+    setJudgeProvider(policy.judgeProvider);
+    setJudgeModel(policy.judgeModel);
   }, [policy]);
+
+  const modelGuardsOn = toxicity || restrictedTopics.trim().length > 0;
 
   const toggleBuiltin = (b: string) =>
     setBuiltins((prev) => (prev.includes(b) ? prev.filter((x) => x !== b) : [...prev, b]));
@@ -111,6 +123,14 @@ export function ProjectGuardrails() {
           .map((s) => s.trim())
           .filter(Boolean),
         evaluatorGuards,
+        restrictedTopics: restrictedTopics
+          .split("\n")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        toxicity,
+        toxicityThreshold,
+        judgeProvider,
+        judgeModel,
       }),
     onSuccess: () => {
       toast.success("Guardrail policy saved");
@@ -125,7 +145,7 @@ export function ProjectGuardrails() {
         <CardHeader>
           <CardTitle>Runtime guardrails</CardTitle>
           <CardDescription>
-            Scan text for PII, prompt injection, and blocked terms at request time. Call{" "}
+            Scan text for PII, prompt injection, blocked terms, restricted topics, and toxicity at request time. Call{" "}
             <code className="text-xs">POST /v1/guardrails/check</code> from the SDK (
             <code className="text-xs">checkGuardrails</code> / <code className="text-xs">check_guardrails</code>). While
             disabled, checks return "allow".
@@ -301,6 +321,81 @@ export function ProjectGuardrails() {
             <Button variant="outline" size="sm" onClick={addEvaluatorGuard}>
               Add evaluator guard
             </Button>
+          </div>
+
+          <div className="space-y-3 border-t pt-4">
+            <div>
+              <Label>Model guards (topics + toxicity)</Label>
+              <p className="text-xs text-muted-foreground">
+                LLM-backed checks for what the pattern scanners can't see. They run in parallel with a short timeout and
+                fail open (never block) if the judge errors or times out, and always block on a hit.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="gr-topics">Restricted topics (one per line; blocks content about any of them)</Label>
+              <Textarea
+                id="gr-topics"
+                rows={2}
+                placeholder={"medical advice\nlegal advice\ncompetitor pricing"}
+                value={restrictedTopics}
+                onChange={(e) => setRestrictedTopics(e.target.value)}
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="gr-toxicity">Detect toxicity</Label>
+                <p className="text-xs text-muted-foreground">Blocks harmful/unsafe content above the threshold.</p>
+              </div>
+              <Switch id="gr-toxicity" checked={toxicity} onCheckedChange={setToxicity} />
+            </div>
+            {toxicity && (
+              <div className="flex items-center gap-2 pl-1">
+                <span className="text-sm text-muted-foreground">Block when toxicity ≥</span>
+                <Input
+                  type="number"
+                  step="0.05"
+                  min={0}
+                  max={1}
+                  className="w-24"
+                  value={toxicityThreshold}
+                  onChange={(e) => setToxicityThreshold(Number(e.target.value))}
+                />
+              </div>
+            )}
+
+            {modelGuardsOn && (
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="space-y-1.5">
+                  <Label>Judge provider</Label>
+                  <Select value={judgeProvider} onValueChange={setJudgeProvider}>
+                    <SelectTrigger className="w-44">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {["mock", "anthropic", "openai", "gemini", "bedrock", "azure", "openai_compatible"].map((p) => (
+                        <SelectItem key={p} value={p}>
+                          {p}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="gr-judge-model">Judge model</Label>
+                  <Input
+                    id="gr-judge-model"
+                    className="w-56"
+                    value={judgeModel}
+                    onChange={(e) => setJudgeModel(e.target.value)}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  The <code>mock</code> provider never blocks — set a real provider to enable these checks.
+                </p>
+              </div>
+            )}
           </div>
 
           <Button onClick={() => save.mutate()} disabled={save.isPending}>

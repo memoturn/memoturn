@@ -54,7 +54,7 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | `EXPERIMENT_CONCURRENCY` | `2` | Concurrent experiment jobs per worker process. Kept low on purpose — each job fans out over dataset items and must not starve ingest. |
 | `EXPERIMENT_ITEM_CONCURRENCY` | `4` | Dataset items executed in parallel within one experiment run. |
 | `MAINTENANCE_CONCURRENCY` | `4` | Maintenance-queue concurrency, so the per-minute alert tick isn't blocked behind a long daily sweep (retention/export/embeddings). Each job type is lock-guarded. |
-| `GUARDRAIL_EVALUATOR_TIMEOUT_MS` | `3000` | Per-evaluator timeout for synchronous guardrail checks (they sit on the request path, so a slow LLM judge must not hang the caller). |
+| `GUARDRAIL_EVALUATOR_TIMEOUT_MS` | `3000` | Per-check timeout for the LLM-backed guardrails (evaluator guards + the built-in restricted-topic/toxicity model guards). They sit on the request path, so a slow judge must not hang the caller — each fails open on timeout. |
 | `ALERT_ANOMALY_BUCKETS` | `12` | Number of trailing time buckets used as the baseline for anomaly-type alert rules. |
 | `ALERT_ANOMALY_MIN_BASELINE` | `5` | Minimum baseline events before an anomaly rule can fire (suppresses noise on quiet projects). |
 | `EMBEDDING_PROJECTION_DAYS` | `30` | Lookback window for the daily embedding-projection reduction. |
