@@ -117,7 +117,10 @@ function OrganizationsPage() {
   const qc = useQueryClient();
   const { data: orgs } = useQuery({
     queryKey: ["orgs"],
-    queryFn: () => unwrap(authClient.organization.list()),
+    // Defensively drop null entries: a backend hiccup (e.g. an org row a stale
+    // index can't resolve) can return holes in the list, and a null here would
+    // crash the whole page on `o.name` below.
+    queryFn: () => unwrap(authClient.organization.list()).then((rows) => (rows ?? []).filter(Boolean)),
   });
   const { data: active } = useQuery({
     queryKey: ["active-org"],
