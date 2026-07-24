@@ -44,10 +44,12 @@ type RetrievedDocument struct {
 
 // TraceInput describes a trace to start (all fields optional).
 type TraceInput struct {
-	ID          string   `json:"id,omitempty"`
-	Name        string   `json:"name,omitempty"`
-	UserID      string   `json:"userId,omitempty"`
-	SessionID   string   `json:"sessionId,omitempty"`
+	ID        string `json:"id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	UserID    string `json:"userId,omitempty"`
+	SessionID string `json:"sessionId,omitempty"`
+	// SessionPath is a hierarchical, function-organized path within the session (e.g. "/rag/answer").
+	SessionPath string   `json:"sessionPath,omitempty"`
 	Release     string   `json:"release,omitempty"`
 	Version     string   `json:"version,omitempty"`
 	Environment string   `json:"environment,omitempty"`

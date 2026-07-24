@@ -31,7 +31,7 @@ def rag(question):
 
 ```python
 mt = Memoturn()
-trace = mt.trace(name="chat", user_id="u1", session_id="s1")
+trace = mt.trace(name="chat", userId="u1", sessionId="s1", sessionPath="/chat")
 gen = trace.generation(name="answer", model="claude-sonnet-4-6", input=messages)
 gen.end(output=reply, usage={"promptTokens": 100, "completionTokens": 20})
 trace.score("user-feedback", value=1, comment="helpful")
