@@ -8,7 +8,7 @@ If you're touching UI, this doc tells you what's deliberate vs incidental, what 
 
 Memoturn is a **dark instrument panel**: a sea-ink-tinted near-black canvas, hairline-ledger structure, one surgical lagoon accent, a single loud atoll-gradient moment per page, and the real console — captured, framed, and glowing faintly — as the imagery.
 
-Dark is not a theme option on the marketing surface; it IS the brand. memoturn.ai ships dark-only. The docs default dark and keep a light reading mode. The console has carried this identity all along; the public sites now match the product instead of inverting it.
+Dark is not a theme option on the marketing surface; it IS the brand. memoturn.com ships dark-only. The docs default dark and keep a light reading mode. The console has carried this identity all along; the public sites now match the product instead of inverting it.
 
 ## Voice
 

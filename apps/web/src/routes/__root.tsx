@@ -20,7 +20,7 @@ const JSON_LD = {
       applicationCategory: "DeveloperApplication",
       operatingSystem: "Self-hosted",
       description: DESCRIPTION,
-      url: "https://memoturn.ai",
+      url: "https://memoturn.com",
       sameAs: ["https://github.com/memoturn/memoturn"],
       license: "https://www.apache.org/licenses/LICENSE-2.0",
       offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
@@ -28,13 +28,13 @@ const JSON_LD = {
     {
       "@type": "Organization",
       name: "memoturn",
-      url: "https://memoturn.ai",
-      logo: "https://memoturn.ai/favicon-512.png",
+      url: "https://memoturn.com",
+      logo: "https://memoturn.com/favicon-512.png",
     },
     {
       "@type": "WebSite",
       name: "memoturn",
-      url: "https://memoturn.ai",
+      url: "https://memoturn.com",
     },
   ],
 };
@@ -50,18 +50,18 @@ export const Route = createRootRoute({
       { property: "og:title", content: TITLE },
       { property: "og:description", content: DESCRIPTION },
       { property: "og:type", content: "website" },
-      { property: "og:url", content: "https://memoturn.ai" },
-      { property: "og:image", content: "https://memoturn.ai/og-image.png" },
+      { property: "og:url", content: "https://memoturn.com" },
+      { property: "og:image", content: "https://memoturn.com/og-image.png" },
       { property: "og:image:width", content: "1200" },
       { property: "og:image:height", content: "630" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: TITLE },
       { name: "twitter:description", content: DESCRIPTION },
-      { name: "twitter:image", content: "https://memoturn.ai/og-image.png" },
+      { name: "twitter:image", content: "https://memoturn.com/og-image.png" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "canonical", href: "https://memoturn.ai/" },
+      { rel: "canonical", href: "https://memoturn.com/" },
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
       { rel: "icon", type: "image/x-icon", href: "/favicon.ico" },
       { rel: "icon", type: "image/png", sizes: "256x256", href: "/favicon-256.png" },
@@ -132,7 +132,7 @@ function RootNotFound() {
             <Link to="/">Home</Link>
           </Button>
           <Button asChild variant="outline">
-            <a href="https://docs.memoturn.ai" target="_blank" rel="noopener">
+            <a href="https://docs.memoturn.com" target="_blank" rel="noopener">
               Docs
             </a>
           </Button>

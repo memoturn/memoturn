@@ -1,4 +1,4 @@
-# memoturn.ai — index everything; AI crawlers explicitly welcome.
+# memoturn.com — index everything; AI crawlers explicitly welcome.
 User-agent: *
 Allow: /
 
@@ -20,4 +20,4 @@ Allow: /
 User-agent: CCBot
 Allow: /
 
-Sitemap: https://memoturn.ai/sitemap.xml
+Sitemap: https://memoturn.com/sitemap.xml

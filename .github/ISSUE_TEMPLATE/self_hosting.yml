@@ -7,7 +7,7 @@ body:
       value: |
         Deploying memoturn and something's in the way? This form helps whether it's a hard
         blocker or just "this part was heavier than I expected" — footprint feedback directly
-        shapes what we invest in ([deployment docs](https://docs.memoturn.ai/deployment/)).
+        shapes what we invest in ([deployment docs](https://docs.memoturn.com/deployment/)).
   - type: dropdown
     id: method
     attributes:

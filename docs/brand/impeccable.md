@@ -18,7 +18,7 @@ canonical: BRAND.md, DESIGN.md, DESIGN.json
 
 **Three-word personality:** dark, precise, live.
 
-**CTA hierarchy:** primary CTA is the getting-started guide (`docs.memoturn.ai/getting-started/`), secondary is GitHub (`github.com/memoturn/memoturn`).
+**CTA hierarchy:** primary CTA is the getting-started guide (`docs.memoturn.com/getting-started/`), secondary is GitHub (`github.com/memoturn/memoturn`).
 
 **Anti-references (any of these = redesign with different structure):**
 1. Generic SaaS gradient-hero (Cursor.com, Vercel-style).

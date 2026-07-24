@@ -1,6 +1,6 @@
 /**
  * Memoturn marketing site — TanStack Start on Workers, canonical at
- * memoturn.ai. Static/SSR-light: no API service binding (the runtime is
+ * memoturn.com. Static/SSR-light: no API service binding (the runtime is
  * self-hosted; the site only links out to docs + GitHub).
  *
  * Wrangler config reference:
@@ -14,7 +14,7 @@
   "main": "./src/server.ts",
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "upload_source_maps": true,
-  "routes": [{ "pattern": "memoturn.ai", "custom_domain": true }]
+  "routes": [{ "pattern": "memoturn.com", "custom_domain": true }]
   // Staging: no `env.staging` block here — the Cloudflare vite plugin flattens
   // this config at build time and drops env.* overrides. Deploy to staging via
   // `CF_ENV=staging` (see vite.config.ts), which rewrites the worker name +

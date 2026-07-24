@@ -1,6 +1,6 @@
 # memoturn Go SDK
 
-Go client for [memoturn](https://memoturn.ai) — LLM observability, evals, prompt management, datasets with CI quality gates, runtime guardrails, and OpenTelemetry export. Dependency-free (stdlib only).
+Go client for [memoturn](https://memoturn.com) — LLM observability, evals, prompt management, datasets with CI quality gates, runtime guardrails, and OpenTelemetry export. Dependency-free (stdlib only).
 
 ```bash
 go get github.com/memoturn/memoturn/sdks/go

@@ -8,7 +8,15 @@
 import { createStartHandler, defaultStreamHandler, defineHandlerCallback } from "@tanstack/react-start/server";
 import { createServerEntry } from "@tanstack/react-start/server-entry";
 
-const ALLOWED_ORIGINS = new Set(["https://memoturn.ai", "https://staging.memoturn.ai"]);
+// memoturn.com is canonical; the .ai entries are transitional — the old domain 301s to
+// .com at the edge, so these only matter until those redirects are verified live. Drop
+// the .ai pair in the follow-up cleanup.
+const ALLOWED_ORIGINS = new Set([
+  "https://memoturn.com",
+  "https://staging.memoturn.com",
+  "https://memoturn.ai",
+  "https://staging.memoturn.ai",
+]);
 
 /**
  * Allow requests whose Origin matches the deploy hostname directly. Browsers

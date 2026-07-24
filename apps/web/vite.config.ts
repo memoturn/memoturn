@@ -20,7 +20,7 @@ const config = defineConfig({
       config: (cfg) => {
         if (STAGING) {
           cfg.name = "memoturn-web-staging";
-          cfg.routes = [{ pattern: "staging.memoturn.ai", custom_domain: true }];
+          cfg.routes = [{ pattern: "staging.memoturn.com", custom_domain: true }];
         }
       },
     }),
