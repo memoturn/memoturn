@@ -36,6 +36,7 @@ const trace = (over: Partial<TraceRow> = {}): TraceRow => ({
   name: "Conformance Trace",
   user_id: "u1",
   session_id: "s1",
+  session_path: "/root",
   release: "",
   version: "",
   environment: "default",
@@ -176,6 +177,8 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(t.total_tokens).toBe(300);
     expect(t.latency_ms).toBe(1234);
     expect(t.tags).toEqual(["alpha", 'tricky "quoted", comma']);
+    expect(t.session_id).toBe("s1");
+    expect(t.session_path).toBe("/root"); // hierarchical session path round-trips through the store
     expect(t.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
     // Non-matching filters exclude the trace.
     expect(await store.listTraces(P, { tag: "nope" })).toHaveLength(0);

@@ -102,6 +102,7 @@ function SessionDetailPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Trace Name</TableHead>
+                  <TableHead>Path</TableHead>
                   <TableHead>Trace ID</TableHead>
                   <TableHead>Timestamp</TableHead>
                   <TableHead>Tokens</TableHead>
@@ -125,6 +126,7 @@ function SessionDetailPage() {
                     <TableCell>
                       <span className="font-medium text-primary">{t.name || "(unnamed trace)"}</span>
                     </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{t.session_path || "—"}</TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">{t.id}</TableCell>
                     <TableCell className="text-muted-foreground">{t.timestamp}</TableCell>
                     <TableCell className="tabular-nums">{Number(t.total_tokens).toLocaleString()}</TableCell>

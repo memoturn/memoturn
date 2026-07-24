@@ -61,6 +61,52 @@ describe("judgeWithEvaluator", () => {
     expect(result).toEqual({ evaluator: "quality", score: 0.75, reasoning: "solid answer" });
     expect(submitBatch).not.toHaveBeenCalled();
   });
+
+  it("aggregates an LLM jury as the mean of its members' votes", async () => {
+    findUnique.mockResolvedValue(
+      evaluatorRow({
+        provider: "openai",
+        jurors: [
+          { provider: "openai", model: "gpt-a" },
+          { provider: "anthropic", model: "claude-b" },
+        ],
+      }),
+    );
+    generate
+      .mockResolvedValueOnce({ content: '{"score": 0.6, "reasoning": "ok"}' })
+      .mockResolvedValueOnce({ content: '{"score": 1.0, "reasoning": "great"}' });
+    const result = await judgeWithEvaluator("p1", "quality", { input: "in", output: "out" });
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(result?.score).toBeCloseTo(0.8, 5);
+    expect(result?.votes).toHaveLength(2);
+    expect(result?.votes?.map((v) => v.model)).toEqual(["gpt-a", "claude-b"]);
+  });
+
+  it("drops a juror that errors but still scores from the survivors", async () => {
+    findUnique.mockResolvedValue(
+      evaluatorRow({
+        provider: "openai",
+        jurors: [
+          { provider: "openai", model: "gpt-a" },
+          { provider: "openai", model: "gpt-b" },
+        ],
+      }),
+    );
+    generate
+      .mockResolvedValueOnce({ content: '{"score": 0.4, "reasoning": "meh"}' })
+      .mockRejectedValueOnce(new Error("provider 500"));
+    const result = await judgeWithEvaluator("p1", "quality", { input: "in", output: "out" });
+    expect(result?.score).toBeCloseTo(0.4, 5);
+    expect(result?.votes).toHaveLength(1);
+  });
+
+  it("throws when every juror fails (so best-effort/retry handling engages)", async () => {
+    findUnique.mockResolvedValue(
+      evaluatorRow({ provider: "openai", jurors: [{ provider: "openai", model: "gpt-a" }] }),
+    );
+    generate.mockRejectedValue(new Error("provider down"));
+    await expect(judgeWithEvaluator("p1", "quality", { input: "in", output: "out" })).rejects.toThrow("provider down");
+  });
 });
 
 describe("runEvaluator", () => {

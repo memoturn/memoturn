@@ -116,6 +116,51 @@ are documented at the top of the script. All datastores persist to named volumes
 **Note:** a single VM has no HA. If volume or uptime needs grow, move to the Helm chart below
 with managed datastores.
 
+## Public demo (per-visitor sandboxes)
+
+`DEMO_MODE` turns a deployment into a public demo: any visitor who signs in with an email
+gets a throwaway, **read-only** sandbox — their own organization + project, pre-seeded with
+generated telemetry — hard-deleted after `DEMO_TTL_DAYS` (default 7) by the `sandbox-prune`
+cron. Read-only (`viewer` role) means no ingest, no playground spend, and no API keys, so a
+public sandbox can't run up cost or be abused for storage.
+
+Run it on the **Postgres telemetry tier** (no Doris) — a demo's data volume sits far inside
+that tier's envelope, and it drops the box to ~4 GB RAM (a few €/month) versus the Doris
+footprint. That's what makes a hosted demo affordable.
+
+Prerequisites (do these first — they're outside the repo):
+
+- [ ] **Subdomain DNS** — an A/AAAA record for your demo host (e.g. `demo.example.com`)
+  pointing at the VM, ports 80+443 open. Caddy provisions the TLS cert on first boot.
+- [ ] **Email transport** — a working sender (Resend or SMTP) on your domain, with SPF/DKIM/
+  DMARC set. **This is a hard requirement:** magic-link sign-in is the only way into the
+  demo, and with no transport configured the console *hides* passwordless sign-in entirely
+  (it only offers what the server can send). Verify a `From` address on the domain.
+
+Then deploy the prod stack with the Postgres overlay and demo env. Add to `.env` (see
+`.env.production.example`):
+
+```bash
+MEMOTURN_DOMAIN=demo.example.com
+DEMO_MODE=true
+# DEMO_TTL_DAYS=7  DEMO_MAX_SANDBOXES=500  DEMO_SEED_DAYS=3  DEMO_SEED_TRACES_PER_DAY=15  (defaults)
+EMAIL_FROM=memoturn <hello@example.com>
+RESEND_API_KEY=re_...          # or the SMTP_* set
+```
+
+```bash
+docker compose -f infra/docker-compose.prod.yml \
+               -f infra/docker-compose.prod.postgres.yml --env-file .env up -d --build
+```
+
+Verify: open `https://demo.example.com/demo`, enter an email, follow the magic link — you
+should land on a "preparing your sandbox" screen and then a dashboard of seeded traces, with
+a "Demo sandbox · read-only · expires in N days" banner. The `sandbox-prune` cron
+(`30 3 * * *`) reclaims expired sandboxes automatically; nothing else to operate.
+
+Keep the standard [production checklist](#production-checklist) — a public demo is
+internet-facing, so the rate limits and secrets there still apply.
+
 ## Kubernetes (Helm)
 
 For production, the chart at `infra/helm/memoturn` deploys the stateless API (behind an HPA), the

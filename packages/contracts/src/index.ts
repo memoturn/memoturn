@@ -14,6 +14,7 @@ export const traceSummary = z.object({
   timestamp: z.string(),
   user_id: z.string(),
   session_id: z.string(),
+  session_path: z.string(),
   environment: z.string(),
   tags: z.array(z.string()),
   observation_count: z.number(),
@@ -929,14 +930,21 @@ export type EvaluatorTemplate = z.infer<typeof evaluatorTemplate>;
 export const providerConnection = z.object({ provider: z.string(), masked: z.string(), createdAt: z.string() });
 export type ProviderConnection = z.infer<typeof providerConnection>;
 
+/** One member of an LLM jury (ensemble judging). Empty jury = ordinary single judge. */
+export const juror = z.object({ provider: z.string(), model: z.string() });
+export type Juror = z.infer<typeof juror>;
+
 export const evaluator = z.object({
   name: z.string(),
   provider: z.string(),
   model: z.string(),
   prompt: z.string(),
+  jurors: z.array(juror),
   online: z.boolean(),
   samplingRate: z.number(),
   filterName: z.string(),
+  scope: z.string(),
+  cooldownSeconds: z.number(),
   version: z.number(),
   createdAt: z.string(),
 });
@@ -947,6 +955,7 @@ export const evaluatorVersion = z.object({
   prompt: z.string(),
   provider: z.string(),
   model: z.string(),
+  jurors: z.array(juror),
   createdAt: z.string(),
 });
 export type EvaluatorVersion = z.infer<typeof evaluatorVersion>;
