@@ -1,7 +1,9 @@
 import { prisma } from "@memoturn/db";
 import { redisConnection } from "@memoturn/db/queue";
+import { generate, type Provider } from "@memoturn/llm";
 import { judgeWithEvaluator, listEvaluators } from "./evaluators.js";
 import { applyMasking, assertSafeUserPatterns, BUILTIN_NAMES, BUILTIN_PATTERNS, compileMaskers } from "./masking.js";
+import { resolveProviderConfig } from "./providers.js";
 
 /**
  * Runtime guardrails — the request-time sibling of masking. An SDK-callable endpoint
@@ -52,7 +54,15 @@ const SQL_INJECTION_PATTERNS: { name: string; re: RegExp }[] = [
 export type GuardrailVerdict = "allow" | "redact" | "block";
 
 export interface GuardrailFinding {
-  category: "pii" | "injection" | "blocked_term" | "sql_injection" | "json_invalid" | "evaluator";
+  category:
+    | "pii"
+    | "injection"
+    | "blocked_term"
+    | "sql_injection"
+    | "json_invalid"
+    | "evaluator"
+    | "topic"
+    | "toxicity";
   /** Pattern/term name, e.g. "email", "ignore-instructions", or the blocked term itself. */
   type: string;
   count: number;
@@ -86,6 +96,18 @@ export interface GuardrailPolicy {
   requiredJsonKeys: string[];
   /** Opt-in LLM-judge guards, run only when the local scan hasn't already blocked. */
   evaluatorGuards: EvaluatorGuard[];
+  // ── Built-in model guards (LLM-backed, fail-open) — the categories the deterministic scan
+  // can't cover. `judgeProvider`/`judgeModel` is the LLM that classifies them.
+  /** Block content about any of these topics (empty = off). */
+  restrictedTopics: string[];
+  /** Enable toxicity detection. */
+  toxicity: boolean;
+  /** Block when the toxicity score (0..1, 1 = clearly toxic) is ≥ this. */
+  toxicityThreshold: number;
+  /** Provider for the built-in topic/toxicity model guards. */
+  judgeProvider: string;
+  /** Model for the built-in topic/toxicity model guards. */
+  judgeModel: string;
 }
 
 export interface GuardrailResult {
@@ -97,6 +119,11 @@ export interface GuardrailResult {
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function clamp01(n: number): number {
+  const v = Number(n);
+  return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.5;
 }
 
 /**
@@ -289,6 +316,101 @@ export async function runEvaluatorGuards(
   return findings;
 }
 
+// ── Built-in model guards (restricted topics + toxicity) ──────────────────────────────
+
+const TOXICITY_JUDGE_PROMPT =
+  "You are a content-safety classifier. Given a piece of text, rate how TOXIC it is — " +
+  "harmful, hateful, harassing, threatening, violent, sexual, or otherwise unsafe content. " +
+  'Respond ONLY with strict JSON: {"score": <number 0..1, where 1 = clearly toxic and 0 = completely safe>, "reasoning": <string>}.';
+
+function topicJudgePrompt(topics: string[]): string {
+  return (
+    "You are a topic classifier. Decide whether the text is about any of these RESTRICTED topics: " +
+    `${topics.map((t) => `"${t}"`).join(", ")}. ` +
+    'Respond ONLY with strict JSON: {"score": <number 0..1 confidence the text IS about a restricted topic>, ' +
+    '"topic": <the matched restricted topic, or "">, "reasoning": <string>}.'
+  );
+}
+
+function parseModelJudge(text: string): { score: number; topic?: string; reasoning: string } {
+  try {
+    const m = text.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(m ? m[0] : text);
+    const score = Math.max(0, Math.min(1, Number(parsed.score)));
+    return {
+      score: Number.isFinite(score) ? score : 0,
+      topic: typeof parsed.topic === "string" ? parsed.topic : undefined,
+      reasoning: String(parsed.reasoning ?? ""),
+    };
+  } catch {
+    return { score: 0, reasoning: text.slice(0, 500) };
+  }
+}
+
+async function runOneModelGuard(
+  projectId: string,
+  policy: GuardrailPolicy,
+  prompt: string,
+  text: string,
+): Promise<{ score: number; topic?: string; reasoning: string }> {
+  // The mock provider can't classify — treat as safe (score 0) so it never spuriously blocks,
+  // and skip the model call entirely (the default judge in dev/tests).
+  if (policy.judgeProvider === "mock") return { score: 0, reasoning: "mock" };
+  const config = await resolveProviderConfig(projectId, policy.judgeProvider as Provider);
+  const result = await generate({
+    provider: policy.judgeProvider as Provider,
+    model: policy.judgeModel,
+    ...config,
+    temperature: 0,
+    messages: [
+      { role: "system", content: prompt },
+      { role: "user", content: text },
+    ],
+  });
+  return parseModelJudge(result.content);
+}
+
+/**
+ * Built-in model guards for the two categories the deterministic scan can't cover:
+ * restricted TOPICS and TOXICITY. LLM-backed and FAIL-OPEN (a timeout/error/missing key
+ * produces no finding), the same house rule as `runEvaluatorGuards`. A finding here always
+ * blocks — these are safety violations, not soft quality signals. Returns [] when neither is
+ * enabled. Seam note: this is the in-process GuardrailProvider for topic/toxicity; a Presidio
+ * (or cloud-DLP) adapter could replace `runOneModelGuard` without changing call sites.
+ */
+export async function runModelGuards(
+  projectId: string,
+  text: string,
+  policy: GuardrailPolicy,
+): Promise<GuardrailFinding[]> {
+  const checks: { kind: "topic" | "toxicity"; prompt: string }[] = [];
+  if (policy.restrictedTopics.length > 0)
+    checks.push({ kind: "topic", prompt: topicJudgePrompt(policy.restrictedTopics) });
+  if (policy.toxicity) checks.push({ kind: "toxicity", prompt: TOXICITY_JUDGE_PROMPT });
+  if (checks.length === 0) return [];
+
+  const settled = await Promise.allSettled(
+    checks.map((c) => withTimeout(runOneModelGuard(projectId, policy, c.prompt, text), GUARD_TIMEOUT_MS)),
+  );
+  const findings: GuardrailFinding[] = [];
+  settled.forEach((result, i) => {
+    const c = checks[i] as { kind: "topic" | "toxicity"; prompt: string };
+    if (result.status !== "fulfilled") {
+      const error = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      console.error(JSON.stringify({ scope: "guardrails.modelGuard", projectId, kind: c.kind, error }));
+      return; // fail-open
+    }
+    const { score, topic } = result.value;
+    if (c.kind === "toxicity") {
+      if (score >= policy.toxicityThreshold) findings.push({ category: "toxicity", type: "toxic", count: 1, score });
+    } else if (score >= 0.5) {
+      // topic: block when the classifier is confident the text is about a restricted topic.
+      findings.push({ category: "topic", type: topic || "restricted_topic", count: 1, score });
+    }
+  });
+  return findings;
+}
+
 /**
  * The orchestrator the /check endpoint calls: local `scanGuardrails` first (cheap,
  * deterministic), then — only if the local scan hasn't already blocked and the policy has
@@ -300,14 +422,27 @@ export async function checkGuardrails(projectId: string, text: string): Promise<
   if (!policy) return { verdict: "allow", findings: [] };
 
   const local = scanGuardrails(text, policy);
-  if (local.verdict === "block" || policy.evaluatorGuards.length === 0) return local;
+  // A hard deterministic block short-circuits the (paid, slower) LLM guards entirely.
+  if (local.verdict === "block") return local;
 
-  const evalFindings = await runEvaluatorGuards(projectId, text, policy.evaluatorGuards);
-  if (evalFindings.length === 0) return local;
+  const needEval = policy.evaluatorGuards.length > 0;
+  const needModel = policy.toxicity || policy.restrictedTopics.length > 0;
+  if (!needEval && !needModel) return local;
 
+  const [evalFindings, modelFindings] = await Promise.all([
+    needEval ? runEvaluatorGuards(projectId, text, policy.evaluatorGuards) : Promise.resolve<GuardrailFinding[]>([]),
+    needModel ? runModelGuards(projectId, text, policy) : Promise.resolve<GuardrailFinding[]>([]),
+  ]);
+  const extra = [...evalFindings, ...modelFindings];
+  if (extra.length === 0) return local;
+
+  // Topic/toxicity are safety violations → always block. Evaluator guards keep prior behavior
+  // (they don't upgrade a PII redact to a block).
+  const verdict: GuardrailVerdict =
+    modelFindings.length > 0 ? "block" : local.verdict === "redact" ? "redact" : "block";
   return {
-    verdict: local.verdict === "redact" ? "redact" : "block",
-    findings: [...local.findings, ...evalFindings],
+    verdict,
+    findings: [...local.findings, ...extra],
     ...(local.redactedText !== undefined ? { redactedText: local.redactedText } : {}),
   };
 }
@@ -329,6 +464,12 @@ const SCAN_DEFAULT: GuardrailPolicy = {
   requireValidJson: false,
   requiredJsonKeys: [],
   evaluatorGuards: [],
+  // Model guards stay off by default — they need a judge model + a topics list to be useful.
+  restrictedTopics: [],
+  toxicity: false,
+  toxicityThreshold: 0.5,
+  judgeProvider: "mock",
+  judgeModel: "mock-1",
 };
 
 // The starter config shown in the console when nothing is saved yet (disabled by default).
@@ -354,6 +495,11 @@ export interface SetGuardrailInput {
   requireValidJson?: boolean;
   requiredJsonKeys?: string[];
   evaluatorGuards?: EvaluatorGuard[];
+  restrictedTopics?: string[];
+  toxicity?: boolean;
+  toxicityThreshold?: number;
+  judgeProvider?: string;
+  judgeModel?: string;
 }
 
 const COMPARATORS = ["gt", "gte", "lt", "lte"] as const;
@@ -401,6 +547,11 @@ export async function setGuardrailPolicy(projectId: string, input: SetGuardrailI
     requireValidJson: input.requireValidJson ?? false,
     requiredJsonKeys: (input.requiredJsonKeys ?? []).map((k) => k.trim()).filter(Boolean),
     evaluatorGuards: (await validateEvaluatorGuards(projectId, input.evaluatorGuards ?? [])) as object,
+    restrictedTopics: (input.restrictedTopics ?? []).map((t) => t.trim()).filter(Boolean),
+    toxicity: input.toxicity ?? false,
+    toxicityThreshold: clamp01(input.toxicityThreshold ?? 0.5),
+    judgeProvider: (input.judgeProvider ?? "mock").trim() || "mock",
+    judgeModel: (input.judgeModel ?? "mock-1").trim() || "mock-1",
   };
   const p = await prisma.guardrailPolicy.upsert({ where: { projectId }, update: data, create: { projectId, ...data } });
   await bustCache(projectId);
@@ -442,6 +593,11 @@ function toPolicy(p: {
   requireValidJson: boolean;
   requiredJsonKeys: string[];
   evaluatorGuards: unknown;
+  restrictedTopics: string[];
+  toxicity: boolean;
+  toxicityThreshold: number;
+  judgeProvider: string;
+  judgeModel: string;
 }): GuardrailPolicy {
   return {
     enabled: p.enabled,
@@ -457,6 +613,11 @@ function toPolicy(p: {
     requireValidJson: p.requireValidJson,
     requiredJsonKeys: p.requiredJsonKeys,
     evaluatorGuards: Array.isArray(p.evaluatorGuards) ? (p.evaluatorGuards as EvaluatorGuard[]) : [],
+    restrictedTopics: p.restrictedTopics,
+    toxicity: p.toxicity,
+    toxicityThreshold: p.toxicityThreshold,
+    judgeProvider: p.judgeProvider,
+    judgeModel: p.judgeModel,
   };
 }
 

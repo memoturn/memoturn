@@ -9,13 +9,19 @@ const judgeWithEvaluator = vi.fn();
 const listEvaluators = vi.fn();
 vi.mock("./evaluators.js", () => ({ judgeWithEvaluator, listEvaluators }));
 
+const generate = vi.fn();
+vi.mock("@memoturn/llm", () => ({ generate }));
+
+const resolveProviderConfig = vi.fn().mockResolvedValue({});
+vi.mock("./providers.js", () => ({ resolveProviderConfig }));
+
 const guardrailPolicyFindUnique = vi.fn();
 vi.mock("@memoturn/db", () => ({ prisma: { guardrailPolicy: { findUnique: guardrailPolicyFindUnique } } }));
 
 const redis = { get: vi.fn(), set: vi.fn(), del: vi.fn() };
 vi.mock("@memoturn/db/queue", () => ({ redisConnection: () => redis }));
 
-const { scanGuardrails, runEvaluatorGuards, checkGuardrails } = await import("./guardrails.js");
+const { scanGuardrails, runEvaluatorGuards, runModelGuards, checkGuardrails } = await import("./guardrails.js");
 
 const policy = (over: Partial<GuardrailPolicy> = {}): GuardrailPolicy => ({
   enabled: true,
@@ -31,6 +37,11 @@ const policy = (over: Partial<GuardrailPolicy> = {}): GuardrailPolicy => ({
   requireValidJson: false,
   requiredJsonKeys: [],
   evaluatorGuards: [],
+  restrictedTopics: [],
+  toxicity: false,
+  toxicityThreshold: 0.5,
+  judgeProvider: "mock",
+  judgeModel: "mock-1",
   ...over,
 });
 
@@ -314,6 +325,70 @@ describe("checkGuardrails", () => {
     expect(r.verdict).toBe("block");
     expect(r.findings).toEqual(
       expect.arrayContaining([{ category: "evaluator", type: "quality", count: 1, score: 0.1 }]),
+    );
+  });
+});
+
+describe("runModelGuards — topic + toxicity", () => {
+  beforeEach(() => {
+    generate.mockReset();
+    resolveProviderConfig.mockClear().mockResolvedValue({});
+  });
+
+  it("returns no findings when neither topic nor toxicity is enabled", async () => {
+    const r = await runModelGuards("p1", "anything", policy({ judgeProvider: "openai" }));
+    expect(r).toEqual([]);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("flags toxic content at/above the threshold, not below", async () => {
+    generate.mockResolvedValueOnce({ content: '{"score": 0.9, "reasoning": "hateful"}' });
+    const hit = await runModelGuards("p1", "you are trash", policy({ judgeProvider: "openai", toxicity: true }));
+    expect(hit).toEqual([{ category: "toxicity", type: "toxic", count: 1, score: 0.9 }]);
+
+    generate.mockResolvedValueOnce({ content: '{"score": 0.2, "reasoning": "fine"}' });
+    const miss = await runModelGuards("p1", "hello there", policy({ judgeProvider: "openai", toxicity: true }));
+    expect(miss).toEqual([]);
+  });
+
+  it("flags a restricted topic and names it", async () => {
+    generate.mockResolvedValueOnce({ content: '{"score": 0.8, "topic": "medical advice", "reasoning": "diagnosis"}' });
+    const r = await runModelGuards(
+      "p1",
+      "what dose of X should I take?",
+      policy({ judgeProvider: "openai", restrictedTopics: ["medical advice"] }),
+    );
+    expect(r).toEqual([{ category: "topic", type: "medical advice", count: 1, score: 0.8 }]);
+  });
+
+  it("fails OPEN — a judge error yields no finding (never a false block)", async () => {
+    generate.mockRejectedValueOnce(new Error("provider down"));
+    const r = await runModelGuards("p1", "x", policy({ judgeProvider: "openai", toxicity: true }));
+    expect(r).toEqual([]);
+  });
+
+  it("mock judge never calls the model and never blocks", async () => {
+    const r = await runModelGuards("p1", "x", policy({ toxicity: true, restrictedTopics: ["guns"] }));
+    expect(generate).not.toHaveBeenCalled();
+    expect(r).toEqual([]);
+  });
+});
+
+describe("checkGuardrails — model guards block", () => {
+  beforeEach(() => {
+    generate.mockReset();
+    judgeWithEvaluator.mockReset();
+  });
+
+  it("blocks toxic input that passed the deterministic scan", async () => {
+    redis.get.mockResolvedValue(
+      JSON.stringify(policy({ pii: false, injection: false, judgeProvider: "openai", toxicity: true })),
+    );
+    generate.mockResolvedValueOnce({ content: '{"score": 0.95, "reasoning": "toxic"}' });
+    const r = await checkGuardrails("p1", "some nasty text");
+    expect(r.verdict).toBe("block");
+    expect(r.findings).toEqual(
+      expect.arrayContaining([{ category: "toxicity", type: "toxic", count: 1, score: 0.95 }]),
     );
   });
 });

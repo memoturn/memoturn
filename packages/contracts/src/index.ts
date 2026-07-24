@@ -413,6 +413,11 @@ export const guardrailPolicy = z.object({
   requireValidJson: z.boolean(),
   requiredJsonKeys: z.array(z.string()),
   evaluatorGuards: z.array(evaluatorGuard),
+  restrictedTopics: z.array(z.string()),
+  toxicity: z.boolean(),
+  toxicityThreshold: z.number(),
+  judgeProvider: z.string(),
+  judgeModel: z.string(),
   available: z.array(z.string()),
 });
 export type GuardrailPolicy = z.infer<typeof guardrailPolicy>;
@@ -421,7 +426,16 @@ export const guardrailVerdict = z.object({
   verdict: z.enum(["allow", "redact", "block"]),
   findings: z.array(
     z.object({
-      category: z.enum(["pii", "injection", "blocked_term", "sql_injection", "json_invalid", "evaluator"]),
+      category: z.enum([
+        "pii",
+        "injection",
+        "blocked_term",
+        "sql_injection",
+        "json_invalid",
+        "evaluator",
+        "topic",
+        "toxicity",
+      ]),
       type: z.string(),
       count: z.number(),
       score: z.number().optional(),

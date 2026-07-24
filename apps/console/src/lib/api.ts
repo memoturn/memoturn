@@ -358,6 +358,11 @@ export const api = {
     requireValidJson?: boolean;
     requiredJsonKeys?: string[];
     evaluatorGuards?: EvaluatorGuard[];
+    restrictedTopics?: string[];
+    toxicity?: boolean;
+    toxicityThreshold?: number;
+    judgeProvider?: string;
+    judgeModel?: string;
   }) => post<GuardrailPolicy>(`/v1/guardrails`, body),
   checkGuardrails: (text: string) => post<GuardrailVerdict>(`/v1/guardrails/check`, { text }),
   getAnalyticsSink: () => get<AnalyticsSink>(`/v1/analytics-sink`),
