@@ -52,7 +52,22 @@ if (image) {
 		{rawHtml && <div class="memoturn-hero__image" set:html={rawHtml} />}
 
 		<div class="memoturn-hero__copy">
-			<p class="memoturn-hero__kicker">open source</p>
+			<p class="memoturn-hero__eyebrow">
+				<svg class="memoturn-hero__mark" viewBox="0 0 128 128" role="img" aria-label="Memoturn" fill="none">
+					<defs>
+						<linearGradient id="memoturn-hero-mark-grad" x1="0" y1="0" x2="1" y2="1">
+							<stop offset="0%" stop-color="#4fb8b2" />
+							<stop offset="100%" stop-color="#328f97" />
+						</linearGradient>
+					</defs>
+					<g fill="url(#memoturn-hero-mark-grad)">
+						<path fill-rule="evenodd" d="M 64 10 a 54 54 0 1 0 0 108 a 54 54 0 1 0 0 -108 M 64 24 a 40 40 0 1 1 0 80 a 40 40 0 1 1 0 -80" />
+						<path fill-rule="evenodd" d="M 64 34 a 30 30 0 1 0 0 60 a 30 30 0 1 0 0 -60 M 64 48 a 16 16 0 1 1 0 32 a 16 16 0 1 1 0 -32" />
+						<circle cx="64" cy="64" r="8" />
+					</g>
+				</svg>
+				<span>open source · Apache-2.0</span>
+			</p>
 			<h1 class="memoturn-hero__title" set:html={title} />
 			{tagline && <p class="memoturn-hero__tagline" set:html={tagline} />}
 			{
@@ -75,6 +90,24 @@ if (image) {
 					</div>
 				)
 			}
+			<dl class="memoturn-hero__meta">
+				<div>
+					<dt class="sr-only">License</dt>
+					<dd>Apache-2.0</dd>
+				</div>
+				<div>
+					<dt class="sr-only">Telemetry</dt>
+					<dd>OpenTelemetry-native</dd>
+				</div>
+				<div>
+					<dt class="sr-only">SDKs</dt>
+					<dd>TS + Python + Go</dd>
+				</div>
+				<div>
+					<dt class="sr-only">Analytics store</dt>
+					<dd>Apache Doris-backed</dd>
+				</div>
+			</dl>
 		</div>
 	</div>
 </div>
@@ -131,13 +164,23 @@ if (image) {
 		gap: 1rem;
 	}
 
-	.memoturn-hero__kicker {
+	/* Eyebrow — the marketing hero's mono chip: teal wordmark + lowercase
+	 * mono label, not a tracked all-caps kicker. Same voice as memoturn.com. */
+	.memoturn-hero__eyebrow {
 		margin: 0;
-		font-size: 0.69rem;
-		letter-spacing: 0.16em;
-		text-transform: uppercase;
-		font-weight: 700;
-		color: var(--kicker);
+		display: inline-flex;
+		align-items: center;
+		gap: 0.75rem;
+		font-family: var(--font-mono-stack);
+		font-size: 0.75rem;
+		letter-spacing: 0.04em;
+		color: var(--muted-foreground);
+	}
+
+	.memoturn-hero__mark {
+		width: 1.75rem;
+		height: 1.75rem;
+		flex: 0 0 auto;
 	}
 
 	.memoturn-hero__title {
@@ -166,7 +209,40 @@ if (image) {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.75rem;
-		margin-top: 0.75rem;
+		margin-top: 0.5rem;
+	}
+
+	/* Signal row — the marketing hero's mono metadata line: teal dots + short
+	 * facts. Reinforces the same claims the console makes, in the same voice. */
+	.memoturn-hero__meta {
+		margin: 0.75rem 0 0;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.375rem 1rem;
+		font-family: var(--font-mono-stack);
+		font-size: 0.75rem;
+		letter-spacing: 0.04em;
+		color: var(--muted-foreground);
+	}
+
+	.memoturn-hero__meta > div {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.memoturn-hero__meta > div::before {
+		content: "";
+		width: 0.25rem;
+		height: 0.25rem;
+		border-radius: 999px;
+		background: color-mix(in oklab, var(--primary) 70%, transparent);
+		flex: 0 0 auto;
+	}
+
+	.memoturn-hero__meta dd {
+		margin: 0;
 	}
 
 	/* Button spec matches the marketing home: 40px height, 6px radius,
