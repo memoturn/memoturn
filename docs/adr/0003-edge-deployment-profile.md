@@ -7,7 +7,7 @@
 
 ## Context
 
-memoturn today assumes long-running server processes: the API on Bun (with a Node entrypoint as a
+Memoturn today assumes long-running server processes: the API on Bun (with a Node entrypoint as a
 secondary), and a worker process that holds BullMQ consumers, cron schedules, and Redis locks. The
 self-host story is therefore "run containers" — even after ADR-0002 removes Doris from the small
 tier, an operator still provisions compute for the API and worker, plus Redis.
@@ -24,7 +24,7 @@ looks — several past decisions align accidentally well:
 |---|---|---|---|
 | `apps/api` | Hono on Bun (`server.bun.ts`, `server.node.ts`) | Hono is runtime-portable; a third entrypoint is idiomatic — two are already maintained | Small |
 | Telemetry engine | Doris via mysql2 (TCP) | Not viable on Workers → the edge profile **is** `TELEMETRY_ENGINE=postgres` (ADR-0002) over a serverless Postgres driver / connection pooler | Covered by ADR-0002 |
-| Ingest ack path | batch → blob, enqueue a **pointer**, 207 | Already queue-agnostic: edge queues cap message size (Workers Queues: 128 KB), but memoturn never enqueues payloads — only blob references | Nearly free |
+| Ingest ack path | batch → blob, enqueue a **pointer**, 207 | Already queue-agnostic: edge queues cap message size (Workers Queues: 128 KB), but Memoturn never enqueues payloads — only blob references | Nearly free |
 | Queue (`@memoturn/db/queue`) | BullMQ over Redis (`getIngestQueue` / `getExperimentQueue` / `getDlqQueue`) | **The real work**: BullMQ cannot run on Workers. Needs a queue *port* with the BullMQ implementation as today's adapter and a Workers Queues adapter (native retries + DLQ) | Medium |
 | `apps/worker` | long-running BullMQ consumer + cron schedules | Queue-consumer handler + platform cron triggers (`scheduled()`); `withLock` (Redis) is unnecessary where the platform serializes cron invocations, or maps to a Durable Object | Medium |
 | Blob | S3/MinIO SDK | R2 is S3-compatible — `@memoturn/db/blob` largely unchanged | Small |
@@ -41,7 +41,7 @@ configuration work.
 **Introduce an edge deployment profile as OSS configuration, enabled by two pieces of work:**
 
 1. **A queue port.** Define a minimal queue interface (enqueue with retry policy, consume,
-   dead-letter) sized to what memoturn actually uses — not BullMQ's surface. The BullMQ/Redis
+   dead-letter) sized to what Memoturn actually uses — not BullMQ's surface. The BullMQ/Redis
    implementation becomes the default adapter (behavior unchanged for existing profiles); a
    Workers Queues adapter is the second implementation. Like the `TelemetryStore` seam, nothing
    above the port may know which queue is running.
@@ -73,7 +73,7 @@ runbook, plus a compute move to the container-scale profile).
 - Native platform primitives replace hand-rolled ones where they're strictly better: Queues
   retries + DLQ replace BullMQ retry bookkeeping; cron triggers replace in-process schedules;
   single-flight cron delivery replaces `withLock` for that use.
-- A hosted deployment of memoturn could reuse this profile rather than a separate stack.
+- A hosted deployment of Memoturn could reuse this profile rather than a separate stack.
 
 **Negative / cost**
 
@@ -150,7 +150,7 @@ Execute when **ADR-0002 is implemented** and any of these is true:
 
 1. Zero-infra deployment is requested by real self-host users (issues/discussions naming the
    container/Redis requirement as the blocker), **or**
-2. A hosted deployment of memoturn is being built and would run on this profile, **or**
+2. A hosted deployment of Memoturn is being built and would run on this profile, **or**
 3. The queue port is wanted independently (e.g. to support a managed queue in containers) — in
    which case Phase 1 can ship alone, ahead of the rest.
 

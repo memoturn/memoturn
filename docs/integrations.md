@@ -1,6 +1,6 @@
 # Integrations
 
-memoturn ingests from any source that can speak its batched `/v1/ingest` API or
+Memoturn ingests from any source that can speak its batched `/v1/ingest` API or
 OpenTelemetry. All paths funnel through the same pipeline → Doris.
 
 ## OpenTelemetry (universal)

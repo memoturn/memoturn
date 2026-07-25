@@ -31,7 +31,7 @@ See [Configuration](./configuration.md) for the full variable reference and
 - [ ] Session cookies are automatically `Secure` in production, `httpOnly`, and `SameSite=Lax`
   (prefix `memoturn.`) — no action needed, but don't serve the console over plain HTTP or the
   Secure cookies won't be sent.
-- [ ] Tell memoturn how many proxies it sits behind: `RATE_LIMIT_TRUSTED_PROXIES` (default `1`,
+- [ ] Tell Memoturn how many proxies it sits behind: `RATE_LIMIT_TRUSTED_PROXIES` (default `1`,
   matching the shipped Caddy deploy) controls how the real client IP is derived from the right of
   `X-Forwarded-For`. Set `0` if the API is directly internet-exposed — otherwise a spoofed XFF
   prefix could evade per-IP limits.

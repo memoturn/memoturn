@@ -33,7 +33,7 @@ function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <Logo className="size-9" />
-          <CardTitle>Sign in to memoturn</CardTitle>
+          <CardTitle>Sign in to Memoturn</CardTitle>
           <CardDescription>Welcome back — choose how you'd like to sign in.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -44,7 +44,7 @@ function LoginPage() {
             Forgot your password?
           </Link>
           <span>
-            New to memoturn?{" "}
+            New to Memoturn?{" "}
             <Link to="/signup" className="text-foreground hover:underline">
               Create an account
             </Link>

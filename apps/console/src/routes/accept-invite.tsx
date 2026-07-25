@@ -39,9 +39,9 @@ function AcceptInvitePage() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <Logo className="size-9" />
-          <CardTitle>Join your team on memoturn</CardTitle>
+          <CardTitle>Join your team on Memoturn</CardTitle>
           <CardDescription>
-            {!id ? "This invitation link is missing or malformed." : "You've been invited to a memoturn organization."}
+            {!id ? "This invitation link is missing or malformed." : "You've been invited to a Memoturn organization."}
           </CardDescription>
         </CardHeader>
         <CardContent>

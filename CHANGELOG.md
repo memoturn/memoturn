@@ -1,6 +1,6 @@
 # Changelog
 
-Notable changes to memoturn. Full commit-level detail lives in the
+Notable changes to Memoturn. Full commit-level detail lives in the
 [GitHub releases](https://github.com/memoturn/memoturn/releases) (auto-generated
 notes per tag) and the git history.
 

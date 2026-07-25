@@ -256,7 +256,7 @@ function McpConnectionsCard() {
       <CardHeader>
         <CardTitle>Connected MCP clients</CardTitle>
         <CardDescription>
-          IDEs and agents you've authorized via OAuth to use memoturn's remote MCP endpoint. Disconnecting revokes the
+          IDEs and agents you've authorized via OAuth to use Memoturn's remote MCP endpoint. Disconnecting revokes the
           client's refresh tokens; access ends within the hour as its last token expires.
         </CardDescription>
       </CardHeader>

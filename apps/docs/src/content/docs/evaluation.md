@@ -3,7 +3,7 @@ title: Evaluation
 description: Offline, online, and human evaluation modes that all write scores onto your traces.
 ---
 
-memoturn supports three evaluation modes; all write **scores** into Doris, surfaced
+Memoturn supports three evaluation modes; all write **scores** into Doris, surfaced
 on the trace alongside `API` feedback scores.
 
 ```

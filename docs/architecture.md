@@ -1,6 +1,6 @@
 # Architecture
 
-memoturn is an async, decoupled, Bun-native system. Ingestion is fire-and-forget: the
+Memoturn is an async, decoupled, Bun-native system. Ingestion is fire-and-forget: the
 API persists raw events and acks immediately; a worker does the heavy writes.
 
 ```mermaid

@@ -1,9 +1,9 @@
 ---
 title: Roadmap
-description: What memoturn has shipped and the prioritized backlog of candidate features.
+description: What Memoturn has shipped and the prioritized backlog of candidate features.
 ---
 
-What memoturn has shipped, and a prioritized backlog of candidate features. Effort is
+What Memoturn has shipped, and a prioritized backlog of candidate features. Effort is
 rough (S = hours, M = a day or two, L = multi-day). Items are independent unless noted.
 
 ## Shipped

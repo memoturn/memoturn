@@ -11,7 +11,7 @@ function AssistantPage() {
       <PageHeader
         title="Assistant"
         description="Ask about your project's telemetry — the assistant queries your traces, metrics, and scores (read-only) to answer."
-        help="A copilot that runs an agentic loop over memoturn's own read-only tools (traces, metrics, scores, prompts, datasets), scoped to this project. It also sees your current console context: organization, project, page, and time range."
+        help="A copilot that runs an agentic loop over Memoturn's own read-only tools (traces, metrics, scores, prompts, datasets), scoped to this project. It also sees your current console context: organization, project, page, and time range."
       />
       <AssistantChat chat={chat} />
     </div>

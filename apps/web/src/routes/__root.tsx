@@ -16,7 +16,7 @@ const JSON_LD = {
   "@graph": [
     {
       "@type": "SoftwareApplication",
-      name: "memoturn",
+      name: "Memoturn",
       applicationCategory: "DeveloperApplication",
       operatingSystem: "Self-hosted",
       description: DESCRIPTION,
@@ -27,13 +27,13 @@ const JSON_LD = {
     },
     {
       "@type": "Organization",
-      name: "memoturn",
+      name: "Memoturn",
       url: "https://memoturn.com",
       logo: "https://memoturn.com/favicon-512.png",
     },
     {
       "@type": "WebSite",
-      name: "memoturn",
+      name: "Memoturn",
       url: "https://memoturn.com",
     },
   ],

@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-memoturn is pre-1.0 and under active development. Security fixes land on `main` and ship in
+Memoturn is pre-1.0 and under active development. Security fixes land on `main` and ship in
 the next release. Please run a recent version before reporting.
 
 ## Reporting a vulnerability

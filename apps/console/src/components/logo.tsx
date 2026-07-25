@@ -14,12 +14,12 @@ export function Logo({ className, mono = false, ...props }: React.SVGProps<SVGSV
     <svg
       viewBox="0 0 128 128"
       role="img"
-      aria-label="memoturn"
+      aria-label="Memoturn"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       {...props}
     >
-      <title>memoturn</title>
+      <title>Memoturn</title>
       <defs>
         <linearGradient id="memoturn-logo" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="#4fb8b2" />

@@ -292,7 +292,7 @@ function AppSidebar({ email, initials }: { email: string; initials: string }) {
                   <Logo className="size-8" />
                 </div>
                 <div className="grid flex-1 text-left leading-tight">
-                  <span className="truncate text-sm font-semibold uppercase tracking-[0.08em]">memoturn</span>
+                  <span className="truncate text-sm font-semibold uppercase tracking-[0.08em]">Memoturn</span>
                   <span className="truncate text-xs text-muted-foreground">AI engineering</span>
                 </div>
               </Link>
