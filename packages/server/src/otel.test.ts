@@ -119,6 +119,68 @@ describe("otlpToEvents (JSON)", () => {
     expect((span.metadata as Record<string, unknown>)["mcp.method.name"]).toBe("tools/call");
   });
 
+  it("maps Claude Code beta spans: bare input/output/cache tokens + tool naming", () => {
+    const cc = {
+      resourceSpans: [
+        {
+          resource: { attributes: [{ key: "service.name", value: { stringValue: "claude-code" } }] },
+          scopeSpans: [
+            {
+              spans: [
+                {
+                  traceId: "0af7651916cd43dd8448eb211c80319c",
+                  spanId: "aaaaaaaaaaaaaaaa",
+                  name: "claude_code.llm_request",
+                  startTimeUnixNano: "1700000000000000000",
+                  endTimeUnixNano: "1700000001000000000",
+                  status: { code: 1 },
+                  attributes: [
+                    { key: "gen_ai.system", value: { stringValue: "anthropic" } },
+                    { key: "gen_ai.request.model", value: { stringValue: "claude-sonnet-4-5" } },
+                    { key: "input_tokens", value: { intValue: "1200" } },
+                    { key: "output_tokens", value: { intValue: "340" } },
+                    { key: "cache_read_tokens", value: { intValue: "800" } },
+                    { key: "cache_creation_tokens", value: { intValue: "50" } },
+                    { key: "session.id", value: { stringValue: "cc-sess-1" } },
+                    { key: "user.id", value: { stringValue: "cc-user" } },
+                  ],
+                },
+                {
+                  traceId: "0af7651916cd43dd8448eb211c80319c",
+                  spanId: "bbbbbbbbbbbbbbbb",
+                  name: "claude_code.tool",
+                  startTimeUnixNano: "1700000000000000000",
+                  endTimeUnixNano: "1700000000200000000",
+                  status: { code: 1 },
+                  attributes: [
+                    { key: "gen_ai.tool.call.id", value: { stringValue: "call-1" } },
+                    { key: "tool_name", value: { stringValue: "Edit" } },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const events = otlpToEvents(cc);
+    const trace = events.find((e) => e.type === "trace-create")?.body as Record<string, unknown>;
+    const gen = events.find((e) => e.type === "generation-create")?.body as Record<string, unknown>;
+    const tool = events.find((e) => e.type === "span-create")?.body as Record<string, unknown>;
+
+    expect(gen.model).toBe("claude-sonnet-4-5");
+    expect(gen.provider).toBe("anthropic");
+    const usage = gen.usage as Record<string, number>;
+    expect(usage.promptTokens).toBe(1200); // bare input_tokens
+    expect(usage.completionTokens).toBe(340); // bare output_tokens
+    expect(usage.totalTokens).toBe(1540);
+    expect(usage.cacheReadTokens).toBe(800);
+    expect(usage.cacheCreationTokens).toBe(50);
+    expect(trace.sessionId).toBe("cc-sess-1"); // session.id → session grouping
+    expect(trace.userId).toBe("cc-user");
+    expect(tool.name).toBe("tool:Edit"); // claude_code.tool renamed after the actual tool
+  });
+
   it("names non-tool MCP methods after the method", () => {
     const p = {
       resourceSpans: [
