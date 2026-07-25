@@ -1,13 +1,9 @@
 import { Link } from "@tanstack/react-router";
 import type { ExperimentComparison } from "../lib/api";
+import { JsonValue } from "./json-value";
 import { KindBadge } from "./kind-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
-
-function j(value: unknown): string {
-  if (value == null) return "—";
-  return typeof value === "string" ? value : JSON.stringify(value);
-}
 
 function trunc(s: string, n = 80): string {
   return s.length > n ? `${s.slice(0, n)}…` : s;
@@ -41,8 +37,12 @@ export function RunComparison({ data, title = "Run comparison" }: { data: Experi
             <TableBody>
               {data.items.map((it) => (
                 <TableRow key={it.id}>
-                  <TableCell className="text-muted-foreground">{trunc(j(it.input))}</TableCell>
-                  <TableCell className="text-muted-foreground">{trunc(j(it.expectedOutput))}</TableCell>
+                  <TableCell className="max-w-md align-top text-muted-foreground">
+                    <JsonValue value={it.input} maxHeight="max-h-40" />
+                  </TableCell>
+                  <TableCell className="max-w-md align-top text-muted-foreground">
+                    <JsonValue value={it.expectedOutput} maxHeight="max-h-40" />
+                  </TableCell>
                   {it.cells.map((cell, i) => (
                     <TableCell key={data.runs[i] ?? i}>
                       {cell ? (
