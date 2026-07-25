@@ -141,7 +141,7 @@ function UsageChart({
               <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                 {usageConfig[m].label}
               </span>
-              <span className="text-sm font-semibold tabular-nums sm:text-lg">{totals[m]}</span>
+              <span className="whitespace-nowrap text-sm font-semibold tabular-nums sm:text-lg">{totals[m]}</span>
             </button>
           ))}
         </div>
@@ -828,7 +828,7 @@ function WidgetCard({ widget, onDelete, disabled }: { widget: Widget; onDelete: 
           <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
             {isPeak ? "Peak" : "Total"}
           </div>
-          <div className="text-2xl font-semibold tabular-nums">{headline}</div>
+          <div className="whitespace-nowrap text-2xl font-semibold tabular-nums">{headline}</div>
         </div>
         {series.length === 0 ? (
           <p className="text-sm text-muted-foreground">no data</p>

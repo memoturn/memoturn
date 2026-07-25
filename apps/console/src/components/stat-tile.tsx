@@ -26,7 +26,7 @@ export function StatTile({
         {label}
         {help ? <HelpTip>{help}</HelpTip> : null}
       </div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums">{display}</div>
+      <div className="mt-1 whitespace-nowrap text-2xl font-semibold tabular-nums">{display}</div>
     </div>
   );
 }
