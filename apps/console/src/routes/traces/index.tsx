@@ -629,7 +629,7 @@ function TracesPage() {
       />
 
       {(isLoading || (traces && traces.length > 0)) && (
-        <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
+        <div className="grid grid-cols-3 gap-4">
           <StatTile
             label="Traces"
             value={traces ? total : <Skeleton className="h-6 w-16" />}

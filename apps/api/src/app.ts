@@ -54,6 +54,7 @@ import {
   deleteScoreConfig,
   deleteWebhook,
   deleteWidget,
+  demoModeEnabled,
   disconnectMcpClient,
   evaluateGate,
   exportDatasetJsonl,
@@ -152,6 +153,7 @@ import {
   setScheduledExport,
   setTraceTags,
   skipReviewItem,
+  startDemoSandbox,
   startExperiment,
   stopExperiment,
   storeDataUri,
@@ -171,7 +173,7 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
 import { partitionIngestBatch } from "./ingest-partition.js";
-import { handleMcp } from "./mcp.js";
+import { clientIpFrom, handleMcp } from "./mcp.js";
 import { logJson, recordRequest, requestStarted, snapshot } from "./metrics.js";
 import { type AuthVars, denyIfNotAdmin, denyIfReadOnly, requireAuth } from "./middleware/auth.js";
 import { rateLimit } from "./middleware/ratelimit.js";
@@ -266,6 +268,36 @@ app.all("/v1/mcp/:projectId", handleMcp);
 app.get("/.well-known/oauth-authorization-server", (c) => mcpAuthorizationServerMetadata(c.req.raw));
 app.get("/.well-known/openid-configuration", (c) => mcpOpenIdConfigMetadata(c.req.raw));
 app.get("/.well-known/oauth-protected-resource", (c) => mcpProtectedResourceMetadata(c.req.raw));
+
+// ── Public-demo pre-provision (DEMO_MODE only) ───────────────────────────────────
+// UNAUTHENTICATED: a visitor POSTs their email and we provision + seed a sandbox async,
+// emailing the sign-in link only once it's READY. Registered BEFORE the `/v1/demo/*`
+// requireAuth guard below — Hono runs matching handlers in registration order and this one
+// returns without calling next(), so the guard (and the post-auth per-project rate limiter)
+// never fire for this path. Per-IP throttled since it writes before any auth resolves.
+const DEMO_TRUSTED_PROXIES = Math.max(0, Math.floor(Number(process.env.RATE_LIMIT_TRUSTED_PROXIES ?? 1)));
+function demoStartRateLimit(): number {
+  const raw = process.env.DEMO_START_RATE_LIMIT_PER_MINUTE;
+  return raw === undefined ? 10 : Number(raw);
+}
+app.post("/v1/demo/start", async (c) => {
+  // rbac-exempt: public unauthenticated pre-provision — no session role exists to gate, and
+  // DEMO_MODE is off in every normal install (route 404s). Its own per-IP throttle is the guard.
+  if (!demoModeEnabled()) return c.json({ error: "not found" }, 404);
+  const ip = clientIpFrom(c.req.header("x-forwarded-for"), c.req.header("x-real-ip"), DEMO_TRUSTED_PROXIES);
+  const rl = await checkRateLimit(`demo-start:${ip}`, demoStartRateLimit(), 60);
+  if (!rl.allowed) return c.json({ error: "rate limited" }, 429, { "retry-after": String(rl.resetSeconds) });
+  const body = (await c.req.json().catch(() => ({}))) as { email?: unknown };
+  const email = typeof body?.email === "string" ? body.email : "";
+  if (!email.trim()) return c.json({ error: "email is required" }, 400);
+  try {
+    const { status } = await startDemoSandbox(email);
+    // capacity → 503 so the client can show a "try later" message; seeding/ready → 200.
+    return status === "capacity" ? c.json({ status }, 503) : c.json({ status }, 200);
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : "failed to start demo" }, 400);
+  }
+});
 
 // ── Security scheme + auth on everything under /v1 (except health) ──────────────
 app.openAPIRegistry.registerComponent("securitySchemes", "apiKey", {

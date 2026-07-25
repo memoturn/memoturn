@@ -1,8 +1,12 @@
+import { newId } from "@memoturn/core";
 import { prisma } from "@memoturn/db";
 import { deleteBlobPrefixOlderThan } from "@memoturn/db/blob";
 import { getSandboxQueue } from "@memoturn/db/queue";
 import { telemetry } from "@memoturn/telemetry";
+import { sendDemoMagicLink } from "./betterauth.js";
+import { seedSandboxEntities } from "./demo-entities.js";
 import { generateDemoBatches } from "./demodata.js";
+import { runProjectionForProject } from "./embeddings.js";
 import { submitBatch } from "./ingest.js";
 
 /**
@@ -33,6 +37,11 @@ export function demoConfig() {
     maxSandboxes: intEnv("DEMO_MAX_SANDBOXES", 500),
     seedDays: intEnv("DEMO_SEED_DAYS", 3),
     seedTracesPerDay: intEnv("DEMO_SEED_TRACES_PER_DAY", 15),
+    // How long the "finalize" job waits after seeding before it seeds entities + the 3D
+    // projection and marks the sandbox READY. The delay lets the async ingest pipeline drain
+    // the seed batches into the telemetry store first, so experiments/review-items reference
+    // real traces and the embedding projection has vectors to reduce.
+    finalizeDelayMs: intEnv("DEMO_FINALIZE_DELAY_MS", 120_000),
     // `viewer` is read-only (every mutating route is denyIfReadOnly-gated), which is what
     // keeps a public sandbox from ingesting, spending on the playground, or minting keys.
     memberRole: process.env.DEMO_MEMBER_ROLE || "viewer",
@@ -49,13 +58,23 @@ export class DemoCapacityError extends Error {
 /**
  * Provision a sandbox for a brand-new demo visitor. Returns the organization id to use
  * as the session's active org, or null when the user already belongs to one (a returning
- * visitor — nothing to do).
+ * visitor — nothing to do). Idempotent: the member check makes it a safe fallback for the
+ * session-create hook even after the public /v1/demo/start endpoint already provisioned.
  *
  * The organization is created with raw Prisma rather than the Better Auth org API (which
  * needs a request/Origin context we don't have inside a database hook), so the default
  * project is created explicitly here — the `afterCreateOrganization` hook won't fire.
+ *
+ * `opts.deferMagicLink` is the email-after-ready path (change 2): the visitor is NOT yet
+ * signed in, so the sign-in link must be emailed only once the sandbox finishes seeding.
+ * We thread the email + a sendMagicLink flag through the seed job so the worker's finalize
+ * phase sends it. The legacy session-hook path leaves it off (the visitor is already in).
  */
-export async function provisionSandboxForUser(userId: string, email: string): Promise<string | null> {
+export async function provisionSandboxForUser(
+  userId: string,
+  email: string,
+  opts: { deferMagicLink?: boolean } = {},
+): Promise<string | null> {
   const existing = await prisma.member.findFirst({ where: { userId }, select: { organizationId: true } });
   if (existing) return null;
 
@@ -79,7 +98,12 @@ export async function provisionSandboxForUser(userId: string, email: string): Pr
   });
 
   // Enqueue AFTER the transaction commits so the worker can never read a half-built tenant.
-  await getSandboxQueue().add("seed", { organizationId, projectId });
+  await getSandboxQueue().add("seed", {
+    organizationId,
+    projectId,
+    phase: "seed",
+    ...(opts.deferMagicLink ? { email, sendMagicLink: true } : {}),
+  });
   return organizationId;
 }
 
@@ -96,11 +120,22 @@ export async function getSandboxForUser(userId: string) {
 }
 
 /**
- * Seed a sandbox's project with generated telemetry. Submits through the normal ingest
- * path (`submitBatch` → blob + queue → worker), so the demo data exercises the real
- * pipeline — including cost computation — exactly like customer traffic.
+ * Phase 1 of two. Seed a sandbox's project with generated telemetry, then enqueue a DELAYED
+ * "finalize" job (change 1). Submits through the normal ingest path (`submitBatch` → blob +
+ * queue → worker), so the demo data exercises the real pipeline — including cost computation
+ * — exactly like customer traffic.
+ *
+ * Deliberately does NOT seed entities, run the projection, or mark READY here: those all need
+ * the telemetry to have DRAINED into the store (ingest is async), which it hasn't yet. The
+ * finalize job, delayed by `DEMO_FINALIZE_DELAY_MS`, does that work once the store has caught
+ * up. The sandbox stays SEEDING until then. `opts` is threaded straight to the finalize job so
+ * the email-after-ready flow (change 2) sends the magic link at the right moment.
  */
-export async function seedSandbox(organizationId: string, projectId: string): Promise<void> {
+export async function seedSandbox(
+  organizationId: string,
+  projectId: string,
+  opts: { email?: string; sendMagicLink?: boolean } = {},
+): Promise<void> {
   const cfg = demoConfig();
   await prisma.demoSandbox.updateMany({ where: { organizationId }, data: { status: "SEEDING" } });
   try {
@@ -111,16 +146,134 @@ export async function seedSandbox(organizationId: string, projectId: string): Pr
       seed: `sandbox-${organizationId}`,
     });
     for (const batch of batches) await submitBatch(projectId, { batch });
-    await prisma.demoSandbox.updateMany({
-      where: { organizationId },
-      data: { status: "READY", seededAt: new Date(), error: "" },
-    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await prisma.demoSandbox.updateMany({
       where: { organizationId },
       data: { status: "FAILED", error: message.slice(0, 500) },
     });
+    throw err;
+  }
+
+  // Hand off to the delayed finalize job (after the batches are submitted, so a submit failure
+  // above marks FAILED without ever scheduling finalize). The delay lets ingest drain first.
+  await getSandboxQueue().add(
+    "finalize",
+    {
+      organizationId,
+      projectId,
+      phase: "finalize",
+      ...(opts.email ? { email: opts.email } : {}),
+      ...(opts.sendMagicLink ? { sendMagicLink: true } : {}),
+    },
+    { delay: cfg.finalizeDelayMs },
+  );
+}
+
+/**
+ * Phase 2 of two (change 1). Runs after the seed batches have drained into the telemetry
+ * store: seeds the remaining product entities (which reference real trace ids) and the 3D
+ * embedding projection, then marks the sandbox READY. Every step is best-effort — a cosmetic
+ * failure must NEVER leave a sandbox stuck in SEEDING, so each is wrapped and the function
+ * always reaches the READY update. Idempotent + retry-safe.
+ *
+ * When `opts.sendMagicLink` is set (email-after-ready, change 2), the deferred sign-in link is
+ * emailed here — but only once: the send is claimed atomically via `DemoSandbox.linkSentAt` so
+ * a BullMQ retry can never email the visitor twice, and the claim is released on send failure
+ * so a genuine retry can try again.
+ */
+export async function finalizeSandbox(
+  organizationId: string,
+  projectId: string,
+  opts: { email?: string; sendMagicLink?: boolean } = {},
+): Promise<void> {
+  try {
+    await seedSandboxEntities(projectId);
+  } catch (err) {
+    console.error("[demo] finalize seedSandboxEntities failed:", err instanceof Error ? err.message : err);
+  }
+  try {
+    await runProjectionForProject(projectId);
+  } catch (err) {
+    console.error("[demo] finalize runProjectionForProject failed:", err instanceof Error ? err.message : err);
+  }
+
+  if (opts.sendMagicLink && opts.email) {
+    try {
+      // Claim the send atomically (linkSentAt: null → now) so concurrent/retried finalize jobs
+      // can never both send. count > 0 means THIS call won the claim.
+      const claim = await prisma.demoSandbox.updateMany({
+        where: { organizationId, linkSentAt: null },
+        data: { linkSentAt: new Date() },
+      });
+      if (claim.count > 0) {
+        try {
+          await sendDemoMagicLink(opts.email);
+        } catch (sendErr) {
+          console.error(
+            "[demo] finalize sendDemoMagicLink failed:",
+            sendErr instanceof Error ? sendErr.message : sendErr,
+          );
+          // Release the claim so a subsequent finalize retry can retry the send.
+          await prisma.demoSandbox
+            .updateMany({ where: { organizationId }, data: { linkSentAt: null } })
+            .catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.error("[demo] finalize magic-link claim failed:", err instanceof Error ? err.message : err);
+    }
+  }
+
+  // Always reach READY — the sandbox must never be stranded in SEEDING by a cosmetic failure.
+  await prisma.demoSandbox.updateMany({
+    where: { organizationId },
+    data: { status: "READY", seededAt: new Date(), error: "" },
+  });
+}
+
+/**
+ * Public pre-provision entrypoint (change 2) for the console's `/demo` email form. Unlike the
+ * legacy flow (email sent immediately, provisioning in the session hook), this provisions the
+ * sandbox FIRST and defers the sign-in link until the sandbox is READY, so the visitor doesn't
+ * stare at a "preparing" screen through the whole seed.
+ *
+ * Find-or-creates the user by email (unverified — Better Auth's magic-link verify signs in this
+ * existing user rather than duplicating it, and flips emailVerified true then). A returning
+ * visitor who already has a membership just gets a fresh link. Otherwise provisioning enqueues
+ * the seed job with the deferred-magic-link flag and returns "seeding".
+ */
+export async function startDemoSandbox(email: string): Promise<{ status: "seeding" | "ready" | "capacity" }> {
+  const normalized = email.trim().toLowerCase();
+  // Minimal shape check — the real gate is deliverability (the link only works if the address
+  // receives it). Better Auth applies its own validation on verify. The endpoint is PUBLIC, so
+  // the pattern must be backtracking-free (no ReDoS): the domain labels exclude `.`, so `\.`
+  // is the only thing that can match a dot — no overlapping quantifiers. Plus a hard length cap.
+  if (normalized.length > 254 || !/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(normalized))
+    throw new Error("invalid email");
+
+  let user = await prisma.user.findUnique({ where: { email: normalized }, select: { id: true } });
+  if (!user) {
+    // Create unverified so magic-link verify (which flips emailVerified true) treats this as a
+    // sign-in of an existing user, not a new signup. id is app-generated (User.id has no default).
+    user = await prisma.user.create({
+      data: { id: newId(), name: "", email: normalized, emailVerified: false },
+      select: { id: true },
+    });
+  }
+
+  const member = await prisma.member.findFirst({ where: { userId: user.id }, select: { id: true } });
+  if (member) {
+    // Returning visitor — the sandbox already exists. Just email a fresh sign-in link.
+    await sendDemoMagicLink(normalized);
+    return { status: "ready" };
+  }
+
+  try {
+    await provisionSandboxForUser(user.id, normalized, { deferMagicLink: true });
+    return { status: "seeding" };
+  } catch (err) {
+    if (err instanceof DemoCapacityError) return { status: "capacity" };
     throw err;
   }
 }

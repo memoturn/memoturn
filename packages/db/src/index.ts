@@ -8,7 +8,19 @@ import { PrismaClient } from "@prisma/client";
  */
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
-export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });
+export const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    adapter,
+    // The authoritative mutable-state upsert (server/src/mutablestate.ts) batches many
+    // row upserts into ONE transaction; under bulk ingest on a modest DB (e.g. the
+    // single-VM Postgres-telemetry tier) those batches can exceed Prisma's aggressive 5s
+    // default and dead-letter otherwise-fine events. Give them headroom (env-tunable).
+    transactionOptions: {
+      timeout: Number(process.env.PRISMA_TRANSACTION_TIMEOUT_MS ?? 20_000),
+      maxWait: Number(process.env.PRISMA_TRANSACTION_MAX_WAIT_MS ?? 10_000),
+    },
+  });
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
 export * from "@prisma/client";

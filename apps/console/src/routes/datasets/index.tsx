@@ -66,7 +66,7 @@ function DatasetsPage() {
         />
       ) : (
         <div className="space-y-6">
-          <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
+          <div className="grid grid-cols-3 gap-4">
             <StatTile label="Datasets" value={datasets.length} icon={Database} />
             <StatTile
               label="Items"

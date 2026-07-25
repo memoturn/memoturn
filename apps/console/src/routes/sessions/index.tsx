@@ -83,7 +83,7 @@ function SessionsPage() {
       />
 
       {(isLoading || (sessions && sessions.length > 0)) && (
-        <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
+        <div className="grid grid-cols-3 gap-4">
           <StatTile
             label="Sessions"
             value={sessions ? total : <Skeleton className="h-6 w-16" />}

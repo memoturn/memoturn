@@ -79,7 +79,7 @@ function UserDetailPage() {
         <EmptyState icon={Activity} title="No traces for this user" description="This user has no traces yet." />
       ) : (
         <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
+          <div className="grid grid-cols-3 gap-4">
             <StatTile label="Traces" value={traces.length} icon={Activity} help="Number of traces from this user." />
             <StatTile
               label="Tokens"

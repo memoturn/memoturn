@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "../components/ui/input";
 import { Skeleton } from "../components/ui/skeleton";
 import { api } from "../lib/api";
-import { authClient, useSession } from "../lib/auth";
+import { useSession } from "../lib/auth";
 
 export const Route = createFileRoute("/demo")({ component: DemoPage });
 
@@ -38,9 +38,17 @@ function DemoSignIn() {
     if (!email.trim()) return;
     setBusy(true);
     try {
-      // callbackURL returns to /demo, where the preparing screen takes over.
-      const res = await authClient.signIn.magicLink({ email: email.trim(), callbackURL: `${origin}/demo` });
-      if (res.error) throw new Error(res.error.message || "Failed to send the link");
+      // Pre-provision: the server seeds the sandbox first and emails the sign-in link only
+      // once it's READY, so the visitor doesn't wait on a "preparing" screen the whole time.
+      const res = await api.startDemo(email.trim());
+      if (res.capacity) {
+        toast.error("The demo is at capacity right now — please try again in a little while.");
+        return;
+      }
+      if (res.rateLimited) {
+        toast.error("Too many requests from your network. Please wait a minute and try again.");
+        return;
+      }
       setSent(true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -63,10 +71,11 @@ function DemoSignIn() {
         <CardContent>
           {sent ? (
             <div className="space-y-2 text-sm">
-              <p className="font-medium">Check your inbox</p>
+              <p className="font-medium">We're preparing your sandbox</p>
               <p className="text-muted-foreground">
-                We sent a sign-in link to <span className="font-medium text-foreground">{email}</span>. Open it on this
-                device to enter your sandbox.
+                Your sign-in link will arrive at <span className="font-medium text-foreground">{email}</span> in a
+                minute or two, once your sandbox is loaded with realistic traces, dashboards, prompts, and evals. Open
+                it on this device to jump straight in.
               </p>
             </div>
           ) : (

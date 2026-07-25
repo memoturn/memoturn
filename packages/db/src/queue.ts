@@ -85,10 +85,26 @@ export function getExperimentQueue(): Queue<ExperimentJob> {
   return experimentQueue;
 }
 
-/** Payload enqueued when a demo sandbox is provisioned — the worker seeds it. */
+/**
+ * Payload enqueued when a demo sandbox is provisioned — the worker seeds it.
+ *
+ * Two-phase lifecycle (defaults to "seed" for back-compat with any job already on the queue):
+ *  - "seed": submit telemetry batches, then enqueue a DELAYED "finalize" job for the same
+ *    sandbox. Kept short so the visitor's dashboard has data quickly.
+ *  - "finalize": runs once the telemetry has drained into the store — seeds the remaining
+ *    product entities + the 3D embedding projection (both need real trace ids), marks the
+ *    sandbox READY, and (for the email-after-ready flow) emails the deferred magic link.
+ *
+ * `email`/`sendMagicLink` are threaded from seed → finalize so the sign-in link is emailed
+ * only when the sandbox is actually ready (change 2). `sendMagicLink` is false for the
+ * legacy session-hook path (the visitor is already signed in there).
+ */
 export interface SandboxJob {
   organizationId: string;
   projectId: string;
+  phase?: "seed" | "finalize";
+  email?: string;
+  sendMagicLink?: boolean;
 }
 
 let sandboxQueue: Queue<SandboxJob> | undefined;

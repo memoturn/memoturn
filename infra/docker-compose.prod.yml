@@ -268,6 +268,8 @@ services:
       DEMO_SEED_DAYS: ${DEMO_SEED_DAYS:-}
       DEMO_SEED_TRACES_PER_DAY: ${DEMO_SEED_TRACES_PER_DAY:-}
       DEMO_MEMBER_ROLE: ${DEMO_MEMBER_ROLE:-}
+      DEMO_FINALIZE_DELAY_MS: ${DEMO_FINALIZE_DELAY_MS:-}
+      DEMO_START_RATE_LIMIT_PER_MINUTE: ${DEMO_START_RATE_LIMIT_PER_MINUTE:-}
     # Probe with bun itself — the oven/bun base image doesn't guarantee curl/wget.
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3001/v1/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
@@ -334,6 +336,8 @@ services:
       DEMO_SEED_DAYS: ${DEMO_SEED_DAYS:-}
       DEMO_SEED_TRACES_PER_DAY: ${DEMO_SEED_TRACES_PER_DAY:-}
       DEMO_MEMBER_ROLE: ${DEMO_MEMBER_ROLE:-}
+      DEMO_FINALIZE_DELAY_MS: ${DEMO_FINALIZE_DELAY_MS:-}
+      DEMO_START_RATE_LIMIT_PER_MINUTE: ${DEMO_START_RATE_LIMIT_PER_MINUTE:-}
     # The worker's health server binds 127.0.0.1 by default — in-container probes still reach it.
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]

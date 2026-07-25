@@ -51,6 +51,9 @@ model DemoSandbox {
   error          String            @default("")
   expiresAt      DateTime
   seededAt       DateTime?
+  // At-most-once guard for the worker's deferred magic-link send (change 2): claimed
+  // atomically before the send so a finalize-job retry can never email the visitor twice.
+  linkSentAt     DateTime?
   createdAt      DateTime          @default(now())
 
   @@index([expiresAt])

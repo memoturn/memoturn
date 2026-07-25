@@ -90,7 +90,7 @@ function PromptsPage() {
         <EmptyState icon={FileText} title="No prompts yet" description="Create one with POST /v1/prompts or the SDK." />
       ) : (
         <div className="space-y-6">
-          <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
+          <div className="grid grid-cols-3 gap-4">
             <StatTile label="Prompts" value={prompts.length} icon={FileText} />
             <StatTile label="Versions" value={prompts.reduce((a, p) => a + Number(p.versions), 0)} icon={GitBranch} />
             <StatTile label="Channels" value={prompts.reduce((a, p) => a + p.channels.length, 0)} icon={Radio} />
