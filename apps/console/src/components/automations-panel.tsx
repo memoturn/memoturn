@@ -41,6 +41,11 @@ export function AutomationsPanel() {
     resolver: zodResolver(automationSchema),
     defaultValues: { name: "", trigger: "score.created", action: "webhook", target: "", threshold: "", filter: "" },
   });
+  const action = automationForm.watch("action");
+  const targetLabel =
+    action === "email" ? "Email address" : action === "pagerduty" ? "PagerDuty routing key" : "Target URL";
+  const targetPlaceholder =
+    action === "email" ? "alerts@example.com" : action === "pagerduty" ? "routing key" : "https://…";
   const addAutomation = useMutation({
     mutationFn: (v: AutomationForm) =>
       api.createAutomation({
@@ -119,8 +124,8 @@ export function AutomationsPanel() {
           </CardTitle>
           <CardDescription>
             Run an action when a trigger fires. Triggers: score.created, trace.created, eval.completed. Actions: a
-            generic webhook (POST JSON) or a Slack message (to an incoming-webhook URL). Threshold fires only on low
-            scores; filter is a substring match on the entity name.
+            generic webhook (POST JSON), a Slack message (incoming-webhook URL), a PagerDuty event (routing key), or an
+            email. Threshold fires only on low scores; filter is a substring match on the entity name.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -177,6 +182,8 @@ export function AutomationsPanel() {
                         <SelectContent>
                           <SelectItem value="webhook">webhook</SelectItem>
                           <SelectItem value="slack">slack</SelectItem>
+                          <SelectItem value="pagerduty">pagerduty</SelectItem>
+                          <SelectItem value="email">email</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -188,9 +195,9 @@ export function AutomationsPanel() {
                   name="target"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Target URL</FormLabel>
+                      <FormLabel>{targetLabel}</FormLabel>
                       <FormControl>
-                        <Input placeholder="target URL" {...field} />
+                        <Input placeholder={targetPlaceholder} {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>

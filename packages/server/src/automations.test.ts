@@ -6,6 +6,9 @@ vi.mock("@memoturn/db", () => ({ prisma: { automation: { findMany } } }));
 const redis = { get: vi.fn(), set: vi.fn(), del: vi.fn() };
 vi.mock("@memoturn/db/queue", () => ({ redisConnection: () => redis }));
 
+const sendEmail = vi.fn().mockResolvedValue(true);
+vi.mock("./mailer.js", () => ({ sendEmail }));
+
 const { automationMatches, dispatchAutomationsBatch } = await import("./automations.js");
 
 describe("automationMatches", () => {
@@ -99,5 +102,31 @@ describe("dispatchAutomationsBatch", () => {
     findMany.mockResolvedValue([rule()]);
     fetchMock.mockRejectedValue(new Error("ECONNREFUSED"));
     await expect(dispatchAutomationsBatch("p1", "score.created", [{ name: "x", value: 0 }])).resolves.toBe(0);
+  });
+
+  it("dispatches a PagerDuty action via the Events API (routing key target, no SSRF check)", async () => {
+    findMany.mockResolvedValue([rule({ action: "pagerduty", target: "R0UTING_KEY" })]);
+    const fired = await dispatchAutomationsBatch("p1", "score.created", [{ name: "quality", value: 0.1 }]);
+    expect(fired).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, opts] = fetchMock.mock.calls[0] as [string, { body: string }];
+    expect(url).toContain("events.pagerduty.com");
+    const payload = JSON.parse(opts.body) as { routing_key: string; event_action: string };
+    expect(payload).toMatchObject({ routing_key: "R0UTING_KEY", event_action: "trigger" });
+  });
+
+  it("dispatches an email action via the mailer (no fetch)", async () => {
+    sendEmail.mockClear();
+    findMany.mockResolvedValue([rule({ action: "email", target: "alerts@example.com" })]);
+    const fired = await dispatchAutomationsBatch("p1", "score.created", [
+      { name: "quality", value: 0.1, traceId: "t1" },
+    ]);
+    expect(fired).toBe(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    const arg = sendEmail.mock.calls[0]![0] as { to: string; subject: string };
+    expect(arg.to).toBe("alerts@example.com");
+    expect(arg.subject).toContain("score.created"); // plain-text summary, no markdown
+    expect(arg.subject).not.toContain("*");
   });
 });

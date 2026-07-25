@@ -3566,28 +3566,48 @@ app.openapi(
   createRoute({
     method: "post",
     path: "/v1/automations",
-    summary: "Create an automation (trigger: score.created/trace.created/eval.completed; action: webhook/slack)",
+    summary:
+      "Create an automation (trigger: score.created/trace.created/eval.completed; action: webhook/slack/pagerduty/email)",
     tags: ["platform"],
     security,
     request: {
       body: {
         content: {
           "application/json": {
-            schema: z.object({
-              name: z.string().min(1),
-              trigger: z.enum(["score.created", "trace.created", "eval.completed"]).optional(),
-              action: z.enum(["webhook", "slack"]).optional(),
-              target: z.string().url(),
-              threshold: z.number().nullable().optional(),
-              filter: z.string().optional(),
-            }),
+            schema: z
+              .object({
+                name: z.string().min(1),
+                trigger: z.enum(["score.created", "trace.created", "eval.completed"]).optional(),
+                action: z.enum(["webhook", "slack", "pagerduty", "email"]).optional(),
+                // Target shape depends on the action: a URL (webhook/slack), an email address
+                // (email), or a PagerDuty routing key (pagerduty). Validated in superRefine.
+                target: z.string().min(1),
+                threshold: z.number().nullable().optional(),
+                filter: z.string().optional(),
+              })
+              .superRefine((v, ctx) => {
+                const action = v.action ?? "webhook";
+                if (action === "webhook" || action === "slack") {
+                  try {
+                    new URL(v.target);
+                  } catch {
+                    ctx.addIssue({
+                      code: "custom",
+                      message: "target must be a URL for webhook/slack",
+                      path: ["target"],
+                    });
+                  }
+                } else if (action === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.target)) {
+                  ctx.addIssue({ code: "custom", message: "target must be an email address", path: ["target"] });
+                }
+              }),
           },
         },
       },
     },
     responses: {
       201: { description: "Created", content: { "application/json": { schema: C.automation } } },
-      400: { description: "Invalid or disallowed target URL" },
+      400: { description: "Invalid or disallowed target" },
       403: { description: "Forbidden" },
     },
   }),
@@ -3595,10 +3615,15 @@ app.openapi(
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
     const body = c.req.valid("json");
-    try {
-      await assertPublicUrl(body.target);
-    } catch {
-      return c.json({ error: "target must be a public https endpoint (private/loopback targets are blocked)" }, 400);
+    // URL actions (webhook/slack) get the SSRF/public-endpoint check; email/pagerduty targets
+    // aren't URLs so they skip it.
+    const action = body.action ?? "webhook";
+    if (action === "webhook" || action === "slack") {
+      try {
+        await assertPublicUrl(body.target);
+      } catch {
+        return c.json({ error: "target must be a public https endpoint (private/loopback targets are blocked)" }, 400);
+      }
     }
     const result = await createAutomation(c.get("projectId"), body);
     await recordAudit(c.get("projectId"), c.get("actor"), "automation.create", `${result.trigger}->${result.action}`);
