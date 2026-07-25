@@ -48,7 +48,7 @@ export function RouteErrorComponent({ error, reset }: ErrorComponentProps) {
       </h1>
       <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
         {stale
-          ? "memoturn was updated while this page was open. Reload to pick up the latest version — your place is saved."
+          ? "Memoturn was updated while this page was open. Reload to pick up the latest version — your place is saved."
           : "An unexpected error interrupted this page. You can retry, reload, or head back to your dashboard."}
       </p>
 
@@ -86,7 +86,7 @@ export function RouteErrorComponent({ error, reset }: ErrorComponentProps) {
 
       <div className="mt-10 flex items-center justify-center gap-2 text-xs text-muted-foreground">
         <Logo className="size-4" />
-        <span>memoturn</span>
+        <span>Memoturn</span>
       </div>
     </Shell>
   );

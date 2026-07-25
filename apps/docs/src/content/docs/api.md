@@ -224,7 +224,7 @@ A remote [Model Context Protocol](https://modelcontextprotocol.io) endpoint expo
 Two auth paths resolve to the same per-project authorization:
 
 - **API-key Basic** (`pk-mt-…:sk-mt-…`, self-host / headless) — the key must belong to the `{projectId}` in the URL; the tool's permission is checked against the key's `read`/`write` scope.
-- **OAuth 2.1 bearer** (memoturn cloud, IDE click-through) — the Better Auth `@better-auth/oauth-provider` plugin issues a JWT access token (authorization-code flow with mandatory PKCE S256, rotating refresh tokens, dynamic client registration per RFC 7591); the API verifies it statelessly (signature via `/auth/jwks`, issuer, audience) and resolves its `sub` to a user, who is then authorized against `{projectId}` (org membership → role). Any member may run read tools; only non-`VIEWER` roles may run write tools. Clients discover the flow via the `.well-known` documents below; an unauthenticated request returns `401` with `WWW-Authenticate: Bearer resource_metadata="…"`.
+- **OAuth 2.1 bearer** (Memoturn cloud, IDE click-through) — the Better Auth `@better-auth/oauth-provider` plugin issues a JWT access token (authorization-code flow with mandatory PKCE S256, rotating refresh tokens, dynamic client registration per RFC 7591); the API verifies it statelessly (signature via `/auth/jwks`, issuer, audience) and resolves its `sub` to a user, who is then authorized against `{projectId}` (org membership → role). Any member may run read tools; only non-`VIEWER` roles may run write tools. Clients discover the flow via the `.well-known` documents below; an unauthenticated request returns `401` with `WWW-Authenticate: Bearer resource_metadata="…"`.
 
 | Method | Path | Description |
 | --- | --- | --- |

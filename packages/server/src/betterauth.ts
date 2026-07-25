@@ -228,8 +228,8 @@ export const auth = betterAuth({
       await sendEmail({
         to: user.email,
         ...actionEmail({
-          subject: "Reset your memoturn password",
-          intro: "We received a request to reset the password on your memoturn account.",
+          subject: "Reset your Memoturn password",
+          intro: "We received a request to reset the password on your Memoturn account.",
           action: "Reset password",
           url,
         }),
@@ -244,8 +244,8 @@ export const auth = betterAuth({
       await sendEmail({
         to: user.email,
         ...actionEmail({
-          subject: "Verify your memoturn email",
-          intro: "Confirm your email address to finish setting up your memoturn account.",
+          subject: "Verify your Memoturn email",
+          intro: "Confirm your email address to finish setting up your Memoturn account.",
           action: "Verify email",
           url,
         }),
@@ -335,9 +335,9 @@ export const auth = betterAuth({
         await sendEmail({
           to: email,
           ...actionEmail({
-            subject: "Your memoturn sign-in link",
-            intro: "Click below to sign in to memoturn. This link expires shortly.",
-            action: "Sign in to memoturn",
+            subject: "Your Memoturn sign-in link",
+            intro: "Click below to sign in to Memoturn. This link expires shortly.",
+            action: "Sign in to Memoturn",
             url,
           }),
         });
@@ -349,13 +349,13 @@ export const auth = betterAuth({
       sendVerificationOTP: async ({ email, otp, type }) => {
         const purpose =
           type === "sign-in"
-            ? "sign in to memoturn"
+            ? "sign in to Memoturn"
             : type === "email-verification"
               ? "verify your email"
               : "reset your password";
         await sendEmail({
           to: email,
-          subject: `Your memoturn code: ${otp}`,
+          subject: `Your Memoturn code: ${otp}`,
           text: `Your one-time code to ${purpose} is: ${otp}\n\nIt expires in 5 minutes. If you didn't request this, you can ignore this email.`,
           html: `<div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#0f172a">
   <p style="font-size:15px">Your one-time code to ${purpose}:</p>
@@ -369,19 +369,19 @@ export const auth = betterAuth({
     // repeated failures. The optional email-OTP factor reuses the shared mailer. Secrets and
     // backup codes are stored encrypted by the plugin (twoFactor table).
     twoFactor({
-      issuer: "memoturn",
+      issuer: "Memoturn",
       otpOptions: {
         sendOTP: async ({ user, otp }) => {
           await sendEmail({
             to: user.email,
-            subject: `Your memoturn verification code: ${otp}`,
+            subject: `Your Memoturn verification code: ${otp}`,
             text: `Your two-factor verification code is: ${otp}\n\nIt expires shortly. If you didn't try to sign in, change your password.`,
           });
         },
       },
     }),
     // Passkeys (WebAuthn/FIDO2) — phishing-resistant passwordless sign-in. rpID/origin above.
-    passkey({ rpID: passkeyRpId, rpName: "memoturn", origin: passkeyOrigin }),
+    passkey({ rpID: passkeyRpId, rpName: "Memoturn", origin: passkeyOrigin }),
     // Platform administration (cloud ops): list/ban/unban users, force session revoke, and
     // impersonation for support. Authorizes callers whose user.role is "admin" or whose id is
     // in SUPERADMIN_USER_IDS. This is a global platform role, distinct from org member roles.
@@ -414,8 +414,8 @@ export const auth = betterAuth({
         await sendEmail({
           to: data.email,
           ...actionEmail({
-            subject: `You're invited to ${data.organization.name} on memoturn`,
-            intro: `${data.inviter.user.name || data.inviter.user.email} invited you to join ${data.organization.name} on memoturn as ${data.role}.`,
+            subject: `You're invited to ${data.organization.name} on Memoturn`,
+            intro: `${data.inviter.user.name || data.inviter.user.email} invited you to join ${data.organization.name} on Memoturn as ${data.role}.`,
             action: "Accept invitation",
             url,
           }),

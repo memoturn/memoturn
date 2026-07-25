@@ -1,9 +1,9 @@
 ---
 title: Architecture
-description: How memoturn's async ingest pipeline splits storage across Postgres, Apache Doris, Redis, and blob.
+description: How Memoturn's async ingest pipeline splits storage across Postgres, Apache Doris, Redis, and blob.
 ---
 
-memoturn is an async, decoupled, Bun-native system. Ingestion is fire-and-forget: the
+Memoturn is an async, decoupled, Bun-native system. Ingestion is fire-and-forget: the
 API persists raw events and acks immediately; a worker does the heavy writes.
 
 ```

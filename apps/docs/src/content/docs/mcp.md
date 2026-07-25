@@ -89,7 +89,7 @@ Two auth paths resolve to the same per-project authorization:
 - **API-key Basic** (`pk-mt-…:sk-mt-…`, self-host / headless) — the key must belong to the
   `{projectId}` in the URL; the tool's permission is checked against the key's `read`/`write`
   scope.
-- **OAuth 2.1 bearer** (memoturn cloud, IDE click-through) — memoturn is its own OAuth 2.1
+- **OAuth 2.1 bearer** (Memoturn cloud, IDE click-through) — Memoturn is its own OAuth 2.1
   authorization server: PKCE (S256) is mandatory, IDE clients self-register via dynamic client
   registration (RFC 7591), and refresh tokens rotate. Access tokens are JWTs verified
   **statelessly** (signature against the server's JWKS, strict issuer `{AUTH_BASE_URL}/auth` +

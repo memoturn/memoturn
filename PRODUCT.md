@@ -10,7 +10,7 @@ AI engineers and platform teams instrumenting LLM applications. They arrive mid-
 
 ## Product Purpose
 
-memoturn is an open-source, self-hostable AI engineering platform: LLM observability (traces, spans, generations, scores), metrics dashboards, prompt management, playground, datasets, and evals. Success means an engineer can go from "something's off in production" to the exact generation, payload, and cost that explains it in a few clicks.
+Memoturn is an open-source, self-hostable AI engineering platform: LLM observability (traces, spans, generations, scores), metrics dashboards, prompt management, playground, datasets, and evals. Success means an engineer can go from "something's off in production" to the exact generation, payload, and cost that explains it in a few clicks.
 
 ## Brand Personality
 

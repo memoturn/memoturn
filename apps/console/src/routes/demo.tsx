@@ -62,7 +62,7 @@ function DemoSignIn() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <Logo className="size-9" />
-          <CardTitle>Try memoturn</CardTitle>
+          <CardTitle>Try Memoturn</CardTitle>
           <CardDescription>
             Enter your email and we'll spin up a private sandbox pre-loaded with realistic traces, dashboards, prompts,
             and evals — no install, no credit card.

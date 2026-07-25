@@ -54,7 +54,7 @@ function PlaygroundPage() {
   const [sourceTraceId, setSourceTraceId] = useState(replay ?? "");
   // Shared prompt drives every column.
   const [system, setSystem] = useState("You are a helpful assistant.");
-  const [userMsg, setUserMsg] = useState("Explain what memoturn is in one sentence.");
+  const [userMsg, setUserMsg] = useState("Explain what Memoturn is in one sentence.");
   const [mode, setMode] = useState<Mode>("chat");
   const [schemaText, setSchemaText] = useState(
     JSON.stringify({ type: "object", properties: { answer: { type: "string" } }, required: ["answer"] }, null, 2),

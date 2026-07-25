@@ -42,7 +42,7 @@ export default defineConfig({
           content: JSON.stringify({
             "@context": "https://schema.org",
             "@type": "WebSite",
-            name: "memoturn docs",
+            name: "Memoturn docs",
             url: "https://docs.memoturn.com",
           }),
         },

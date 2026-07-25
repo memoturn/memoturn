@@ -6,7 +6,7 @@
 
 ## Context
 
-memoturn splits storage by access pattern (see `docs/architecture.md`): relational metadata in
+Memoturn splits storage by access pattern (see `docs/architecture.md`): relational metadata in
 **Postgres**, high-volume telemetry in **Apache Doris**, the raw replayable event log in **blob**.
 Doris holds `traces`, `observations`, `scores`, `retrieval_documents`, `embeddings` as `UNIQUE KEY`
 **merge-on-write** tables keyed on `(project_id, id)`, with `event_ts` (the client event timestamp)

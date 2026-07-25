@@ -1570,7 +1570,7 @@ function SettingsPage() {
             <CardHeader>
               <CardTitle>Monthly cost budget</CardTitle>
               <CardDescription>
-                Get notified as month-to-date spend crosses 50% / 80% / 100% of this budget. Soft only — memoturn never
+                Get notified as month-to-date spend crosses 50% / 80% / 100% of this budget. Soft only — Memoturn never
                 caps or blocks traffic.
               </CardDescription>
             </CardHeader>

@@ -1,6 +1,6 @@
 # Evaluation
 
-memoturn supports three evaluation modes; all write **scores** into Doris, surfaced
+Memoturn supports three evaluation modes; all write **scores** into Doris, surfaced
 on the trace alongside `API` feedback scores.
 
 ```mermaid

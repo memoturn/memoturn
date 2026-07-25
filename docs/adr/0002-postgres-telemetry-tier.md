@@ -6,7 +6,7 @@
 
 ## Context
 
-memoturn splits storage by access pattern (see `docs/architecture.md` and ADR-0001): relational
+Memoturn splits storage by access pattern (see `docs/architecture.md` and ADR-0001): relational
 metadata and authoritative mutable state in **Postgres**, high-volume telemetry analytics in
 **Apache Doris**, the raw replayable event log in **blob**. All engine SQL lives behind the
 `TelemetryStore` interface in `packages/telemetry` (~40 domain methods), and
@@ -18,9 +18,9 @@ also by far the **heaviest dependency in the self-host footprint** — a JVM-bas
 significant memory requirements and unfamiliar operational characteristics for most teams. For an
 installation tracing thousands (not millions) of LLM calls per day, Doris is massively
 overprovisioned, and "you must run Doris" is the largest single cost of adopting self-hosted
-memoturn.
+Memoturn.
 
-Meanwhile, every memoturn install **already requires Postgres**. At small-install row counts
+Meanwhile, every Memoturn install **already requires Postgres**. At small-install row counts
 (tens of millions of telemetry rows and below), Postgres with partitioned tables handles the
 entire `TelemetryStore` read surface comfortably — and with `pgvector`, the vector-similarity
 surface too.

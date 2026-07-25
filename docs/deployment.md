@@ -1,6 +1,6 @@
 # Deployment
 
-memoturn is self-hostable with no cloud lock-in. Dev uses Docker Compose; production is
+Memoturn is self-hostable with no cloud lock-in. Dev uses Docker Compose; production is
 the same components (managed or self-run).
 
 ## Local / dev dependencies
@@ -16,7 +16,7 @@ With `TELEMETRY_ENGINE=postgres` in `.env`, `infra:up` skips the Doris container
 
 ## Telemetry engine: Doris or Postgres
 
-memoturn runs its telemetry store on one of two engines, selected by `TELEMETRY_ENGINE`
+Memoturn runs its telemetry store on one of two engines, selected by `TELEMETRY_ENGINE`
 ([ADR-0002](./adr/0002-postgres-telemetry-tier.md)). Both pass the same behavioral
 conformance suite; the product is identical on either.
 
@@ -160,7 +160,7 @@ internet-facing, so the rate limits and secrets there still apply.
 For production, the chart at `infra/helm/memoturn` deploys the stateless API (behind an
 HPA), the worker, and the console; Postgres / Doris / Redis / blob are expected to be
 external (managed services or operators — e.g. the community doris-operator or any managed
-Doris; memoturn only needs the FE MySQL endpoint). A pre-install/upgrade hook Job runs the
+Doris; Memoturn only needs the FE MySQL endpoint). A pre-install/upgrade hook Job runs the
 Prisma + Doris migrations (`bun run db:migrate && bun packages/telemetry/src/migrate.ts`)
 before pods roll. Published images come from `ghcr.io/memoturn/*`.
 

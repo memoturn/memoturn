@@ -1,6 +1,6 @@
-# Contributing to memoturn
+# Contributing to Memoturn
 
-Thanks for helping build memoturn! This is a Bun-native monorepo.
+Thanks for helping build Memoturn! This is a Bun-native monorepo.
 
 ## Prerequisites
 

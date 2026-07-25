@@ -29,7 +29,7 @@ const FEATURES = [
     tags: ["traces", "waterfall", "OTel"],
     shot: shotWaterfall,
     shotAlt:
-      "An agent-loop trace in the memoturn console: eight observations on a waterfall timeline, tool spans in green, generations in blue, the failing final-answer call accented in red.",
+      "An agent-loop trace in the Memoturn console: eight observations on a waterfall timeline, tool spans in green, generations in blue, the failing final-answer call accented in red.",
     shotSize: { width: 2880, height: 1400 },
   },
   {
@@ -39,7 +39,7 @@ const FEATURES = [
     tags: ["offline", "online", "human review"],
     shot: shotEvaluators,
     shotAlt:
-      "The evaluators page in the memoturn console: score trends per evaluator and the evaluator registry with online sampling rates.",
+      "The evaluators page in the Memoturn console: score trends per evaluator and the evaluator registry with online sampling rates.",
     shotSize: { width: 2880, height: 1500 },
   },
   {
@@ -49,7 +49,7 @@ const FEATURES = [
     tags: ["versioned", "channels", "A/B tests"],
     shot: shotPrompt,
     shotAlt:
-      "A prompt in the memoturn console: deployment channels, an A/B experiment form splitting traffic between versions, and cost attributed per version.",
+      "A prompt in the Memoturn console: deployment channels, an A/B experiment form splitting traffic between versions, and cost attributed per version.",
     shotSize: { width: 2880, height: 1500 },
   },
 ];
@@ -207,7 +207,7 @@ function Landing() {
                 src={heroDashboard}
                 width={2880}
                 height={1660}
-                alt="The memoturn dashboard: traces, generations, errors, tokens, and cost tiles above a 30-day cost chart, with p95 latency at hand."
+                alt="The Memoturn dashboard: traces, generations, errors, tokens, and cost tiles above a 30-day cost chart, with p95 latency at hand."
                 fetchPriority="high"
               />
             </div>
@@ -327,7 +327,7 @@ function Landing() {
                 The enterprise tier <span className="tone-soft">is the free tier.</span>
               </h2>
               <p className="max-w-[44ch] text-[0.9375rem] leading-[1.7] text-muted-foreground">
-                SSO, RBAC, audit logs, and PII masking are where observability vendors put the paywall. In memoturn,
+                SSO, RBAC, audit logs, and PII masking are where observability vendors put the paywall. In Memoturn,
                 every one of these ships in the Apache-2.0 core. Self-host it, pass your security review, and pay
                 nobody.
               </p>

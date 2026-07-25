@@ -19,7 +19,7 @@ function SignupPage() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <Logo className="size-9" />
-          <CardTitle>Create your memoturn account</CardTitle>
+          <CardTitle>Create your Memoturn account</CardTitle>
           <CardDescription>Start capturing traces, evals, and metrics in minutes.</CardDescription>
         </CardHeader>
         <CardContent>

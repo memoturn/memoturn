@@ -8,7 +8,7 @@
 
 ## Context
 
-memoturn ships as a self-hostable stack today. A hosted, multi-tenant **memoturn cloud** is
+Memoturn ships as a self-hostable stack today. A hosted, multi-tenant **Memoturn cloud** is
 planned alongside it. This ADR records *how* cloud is built on the existing codebase and *when*
 each layer gets built — not the pricing, packaging, or go-to-market, which are product/business
 concerns kept in the internal roadmap (deliberately out of the public repo).
@@ -102,7 +102,7 @@ this ADR gates the *build* of each layer behind an explicit trigger and does not
 - **Fork a cloud codebase.** Rejected outright — divergence is exactly what the `TelemetryStore`,
   queue, and deployment-profile seams were built to avoid.
 - **A third-party multi-tenant/billing platform for the whole offering.** Doesn't fit — the
-  isolation and data-plane routing are memoturn-specific; only the *payment* piece (a later phase)
+  isolation and data-plane routing are Memoturn-specific; only the *payment* piece (a later phase)
   is a candidate for a third party (e.g. Stripe).
 
 ## Build phases & triggers

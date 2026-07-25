@@ -96,7 +96,7 @@ function ConsentPage() {
                   </a>
                 ) : null}
                 {clientUri ? " " : ""}
-                wants to access your memoturn account.
+                wants to access your Memoturn account.
               </>
             )}
           </CardDescription>

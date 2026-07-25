@@ -1,6 +1,6 @@
-# memoturn documentation
+# Memoturn documentation
 
-memoturn is an open-source AI engineering platform: LLM observability, evals, metrics,
+Memoturn is an open-source AI engineering platform: LLM observability, evals, metrics,
 prompt management, playground, and datasets. Self-hostable, OpenTelemetry-native, and
 Bun-native.
 

@@ -1,6 +1,6 @@
 ---
 title: Data model
-description: The entities memoturn stores — traces, observations, scores, prompts, datasets, evaluators — and how they relate.
+description: The entities Memoturn stores — traces, observations, scores, prompts, datasets, evaluators — and how they relate.
 ---
 
 ## Data model

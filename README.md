@@ -1,4 +1,4 @@
-# memoturn
+# Memoturn
 
 [![CI](https://github.com/memoturn/memoturn/actions/workflows/ci.yml/badge.svg)](https://github.com/memoturn/memoturn/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
@@ -10,7 +10,7 @@ management, playground, and datasets. Self-hostable, OpenTelemetry-native, Bun-n
 
 **[memoturn.com](https://memoturn.com)** · **[docs.memoturn.com](https://docs.memoturn.com)** · **[Documentation (in-repo)](./docs/README.md)** — getting started, architecture, API, SDKs, integrations, evaluation, deployment.
 
-![memoturn dashboard](./docs/images/dashboard.png)
+![Memoturn dashboard](./docs/images/dashboard.png)
 
 ## Features
 

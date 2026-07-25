@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: Every memoturn environment variable — defaults, production requirements, and what they do.
+description: Every Memoturn environment variable — defaults, production requirements, and what they do.
 ---
 
 All configuration is via environment variables. Copy `.env.example` to `.env`; the

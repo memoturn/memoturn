@@ -1,10 +1,10 @@
 ---
 title: Troubleshooting
-description: Common failure modes when running memoturn locally or self-hosted, and how to get unstuck.
+description: Common failure modes when running Memoturn locally or self-hosted, and how to get unstuck.
 ---
 
 
-Common failure modes when running memoturn locally or self-hosted, and how to get unstuck.
+Common failure modes when running Memoturn locally or self-hosted, and how to get unstuck.
 Each symptom lists the usual cause first.
 
 ## Setup & infrastructure
