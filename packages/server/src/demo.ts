@@ -246,8 +246,11 @@ export async function finalizeSandbox(
 export async function startDemoSandbox(email: string): Promise<{ status: "seeding" | "ready" | "capacity" }> {
   const normalized = email.trim().toLowerCase();
   // Minimal shape check — the real gate is deliverability (the link only works if the address
-  // receives it). Better Auth applies its own validation on verify.
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalized)) throw new Error("invalid email");
+  // receives it). Better Auth applies its own validation on verify. The endpoint is PUBLIC, so
+  // the pattern must be backtracking-free (no ReDoS): the domain labels exclude `.`, so `\.`
+  // is the only thing that can match a dot — no overlapping quantifiers. Plus a hard length cap.
+  if (normalized.length > 254 || !/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(normalized))
+    throw new Error("invalid email");
 
   let user = await prisma.user.findUnique({ where: { email: normalized }, select: { id: true } });
   if (!user) {
