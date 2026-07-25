@@ -66,7 +66,7 @@ function DatasetsPage() {
         />
       ) : (
         <div className="space-y-6">
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatTile label="Datasets" value={datasets.length} icon={Database} />
             <StatTile
               label="Items"
@@ -79,6 +79,13 @@ function DatasetsPage() {
               value={datasets.reduce((a, d) => a + Number(d.runs), 0)}
               icon={FlaskConical}
               help="A run executes a dataset's items through a model and links each result back to its trace."
+            />
+            <StatTile
+              label="Avg items"
+              value={
+                datasets.length ? Math.round(datasets.reduce((a, d) => a + Number(d.items), 0) / datasets.length) : 0
+              }
+              help="Average examples per dataset."
             />
           </div>
           <DataTable columns={columns} data={datasets} filterColumn="name" filterPlaceholder="Filter datasets…" />

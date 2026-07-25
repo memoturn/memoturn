@@ -83,7 +83,7 @@ function SessionsPage() {
       />
 
       {(isLoading || (sessions && sessions.length > 0)) && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile
             label="Sessions"
             value={sessions ? total : <Skeleton className="h-6 w-16" />}
@@ -109,6 +109,17 @@ function SessionsPage() {
             }
             icon={DollarSign}
             help="Estimated spend for the sessions on this page, from the model price table."
+          />
+          <StatTile
+            label="Avg traces"
+            value={
+              sessions ? (
+                Math.round(sessions.reduce((a, s) => a + Number(s.trace_count), 0) / sessions.length)
+              ) : (
+                <Skeleton className="h-6 w-16" />
+              )
+            }
+            help="Average traces per session on this page."
           />
         </div>
       )}

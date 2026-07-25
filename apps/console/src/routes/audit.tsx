@@ -54,9 +54,19 @@ function AuditPage() {
         <EmptyState icon={ScrollText} title="No audit entries yet" description="Mutating actions will appear here." />
       ) : (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatTile label="Entries" value={logs.length} icon={ScrollText} />
             <StatTile label="Actors" value={new Set(logs.map((l) => l.actor)).size} icon={Users} />
+            <StatTile
+              label="Actions"
+              value={new Set(logs.map((l) => l.action)).size}
+              help="Distinct audit action types."
+            />
+            <StatTile
+              label="Targets"
+              value={new Set(logs.map((l) => l.target)).size}
+              help="Distinct targets acted on."
+            />
           </div>
           <DataTable columns={columns} data={logs} filterColumn="actor" filterPlaceholder="Filter by actor…" />
         </div>
