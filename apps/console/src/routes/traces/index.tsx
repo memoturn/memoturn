@@ -629,7 +629,7 @@ function TracesPage() {
       />
 
       {(isLoading || (traces && traces.length > 0)) && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile
             label="Traces"
             value={traces ? total : <Skeleton className="h-6 w-16" />}
@@ -649,6 +649,13 @@ function TracesPage() {
             }
             icon={DollarSign}
             help="Estimated spend for the traces on this page, from the model price table."
+          />
+          <StatTile
+            label="Observations (page)"
+            value={
+              traces ? traces.reduce((a, t) => a + Number(t.observation_count), 0) : <Skeleton className="h-6 w-16" />
+            }
+            help="Sum of observations (spans) across the traces on this page."
           />
         </div>
       )}
