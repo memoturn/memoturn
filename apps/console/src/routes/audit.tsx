@@ -54,7 +54,7 @@ function AuditPage() {
         <EmptyState icon={ScrollText} title="No audit entries yet" description="Mutating actions will appear here." />
       ) : (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-4 sm:max-w-md">
+          <div className="grid grid-cols-2 gap-4">
             <StatTile label="Entries" value={logs.length} icon={ScrollText} />
             <StatTile label="Actors" value={new Set(logs.map((l) => l.actor)).size} icon={Users} />
           </div>

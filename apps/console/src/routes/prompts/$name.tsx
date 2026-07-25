@@ -277,7 +277,7 @@ function PromptDetailPage() {
         {prompt.folder && <p className="text-sm text-muted-foreground">{prompt.folder}</p>}
       </div>
 
-      <div className="grid grid-cols-3 gap-4 sm:max-w-xl">
+      <div className="grid grid-cols-3 gap-4">
         <StatTile label="Latest" value={`v${prompt.latestVersion}`} icon={Tag} />
         <StatTile label="Versions" value={prompt.allVersions.length} icon={GitBranch} />
         <StatTile label="Channels" value={prompt.channels.length} icon={Radio} />

@@ -144,7 +144,7 @@ function DatasetDetailPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 sm:max-w-lg">
+      <div className="grid grid-cols-3 gap-4">
         <StatTile
           label="Runs"
           value={data.runs.length}
