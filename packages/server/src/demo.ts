@@ -2,6 +2,7 @@ import { prisma } from "@memoturn/db";
 import { deleteBlobPrefixOlderThan } from "@memoturn/db/blob";
 import { getSandboxQueue } from "@memoturn/db/queue";
 import { telemetry } from "@memoturn/telemetry";
+import { seedSandboxEntities } from "./demo-entities.js";
 import { generateDemoBatches } from "./demodata.js";
 import { submitBatch } from "./ingest.js";
 
@@ -111,6 +112,15 @@ export async function seedSandbox(organizationId: string, projectId: string): Pr
       seed: `sandbox-${organizationId}`,
     });
     for (const batch of batches) await submitBatch(projectId, { batch });
+    // Populate every OTHER product entity (prompts, datasets, evaluators, experiments,
+    // monitors, automations, review queues, …) so the whole console is alive for demos.
+    // Best-effort: entity-seeding must NEVER fail the sandbox — telemetry is the critical
+    // part, so a failure here is logged and swallowed rather than marking the sandbox FAILED.
+    try {
+      await seedSandboxEntities(projectId);
+    } catch (err) {
+      console.error("[demo] seedSandboxEntities failed:", err instanceof Error ? err.message : err);
+    }
     await prisma.demoSandbox.updateMany({
       where: { organizationId },
       data: { status: "READY", seededAt: new Date(), error: "" },
