@@ -41,8 +41,23 @@ vi.mock("@memoturn/telemetry", () => ({ telemetry: () => ({ deleteProjectData })
 const submitBatch = vi.fn().mockResolvedValue({ batchId: "b" });
 vi.mock("./ingest.js", () => ({ submitBatch }));
 
-const { provisionSandboxForUser, pruneExpiredSandboxes, demoConfig, demoModeEnabled, DemoCapacityError, seedSandbox } =
-  await import("./demo.js");
+// Finalize-phase collaborators (change 1/2): entity seed, 3D projection, deferred magic link.
+const seedSandboxEntitiesMock = vi.fn().mockResolvedValue(undefined);
+vi.mock("./demo-entities.js", () => ({ seedSandboxEntities: seedSandboxEntitiesMock }));
+const runProjectionMock = vi.fn().mockResolvedValue(null);
+vi.mock("./embeddings.js", () => ({ runProjectionForProject: runProjectionMock }));
+const sendDemoMagicLinkMock = vi.fn().mockResolvedValue(undefined);
+vi.mock("./betterauth.js", () => ({ sendDemoMagicLink: sendDemoMagicLinkMock }));
+
+const {
+  provisionSandboxForUser,
+  pruneExpiredSandboxes,
+  demoConfig,
+  demoModeEnabled,
+  DemoCapacityError,
+  seedSandbox,
+  finalizeSandbox,
+} = await import("./demo.js");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -100,7 +115,7 @@ describe("provisionSandboxForUser", () => {
     expect(days).toBeGreaterThan(6.9);
     expect(days).toBeLessThan(7.1);
     // Enqueued only after the transaction, so the worker never sees a half-built tenant.
-    expect(queueAdd).toHaveBeenCalledWith("seed", { organizationId: "org1", projectId: "proj1" });
+    expect(queueAdd).toHaveBeenCalledWith("seed", { organizationId: "org1", projectId: "proj1", phase: "seed" });
   });
 
   it("is a no-op for a user who already belongs to an org (returning visitor)", async () => {
@@ -130,15 +145,21 @@ describe("provisionSandboxForUser", () => {
 });
 
 describe("seedSandbox", () => {
-  it("marks SEEDING, submits batches, then READY", async () => {
+  it("marks SEEDING, submits batches, then enqueues the delayed finalize job (no READY here)", async () => {
     process.env.DEMO_SEED_DAYS = "2";
     process.env.DEMO_SEED_TRACES_PER_DAY = "3";
-    await seedSandbox("org1", "proj1");
+    await seedSandbox("org1", "proj1", { email: "a@b.c", sendMagicLink: true });
     expect(submitBatch).toHaveBeenCalled();
     expect(submitBatch.mock.calls[0]![0]).toBe("proj1");
     const statuses = sandboxUpdateMany.mock.calls.map((c) => c[0].data.status);
     expect(statuses[0]).toBe("SEEDING");
-    expect(statuses.at(-1)).toBe("READY");
+    // seedSandbox no longer marks READY — the finalize job does.
+    expect(statuses).not.toContain("READY");
+    expect(queueAdd).toHaveBeenCalledWith(
+      "finalize",
+      expect.objectContaining({ organizationId: "org1", projectId: "proj1", phase: "finalize", email: "a@b.c" }),
+      expect.objectContaining({ delay: expect.any(Number) }),
+    );
     delete process.env.DEMO_SEED_DAYS;
     delete process.env.DEMO_SEED_TRACES_PER_DAY;
   });
@@ -149,6 +170,29 @@ describe("seedSandbox", () => {
     const last = sandboxUpdateMany.mock.calls.at(-1)![0].data;
     expect(last.status).toBe("FAILED");
     expect(last.error).toContain("blob down");
+  });
+});
+
+describe("finalizeSandbox", () => {
+  it("seeds entities + projection, marks READY, and sends the deferred link once", async () => {
+    await finalizeSandbox("org1", "proj1", { email: "a@b.c", sendMagicLink: true });
+    expect(seedSandboxEntitiesMock).toHaveBeenCalledWith("proj1");
+    expect(runProjectionMock).toHaveBeenCalledWith("proj1");
+    expect(sandboxUpdateMany.mock.calls.find((c) => c[0].data.status === "READY")).toBeTruthy();
+    expect(sendDemoMagicLinkMock).toHaveBeenCalledWith("a@b.c");
+  });
+
+  it("never double-sends: skips the link when the linkSentAt claim is lost", async () => {
+    sandboxUpdateMany.mockResolvedValue({ count: 0 }); // claim not won
+    await finalizeSandbox("org1", "proj1", { email: "a@b.c", sendMagicLink: true });
+    expect(sendDemoMagicLinkMock).not.toHaveBeenCalled();
+  });
+
+  it("still reaches READY when a cosmetic step throws (never stuck in SEEDING)", async () => {
+    seedSandboxEntitiesMock.mockRejectedValueOnce(new Error("entities boom"));
+    runProjectionMock.mockRejectedValueOnce(new Error("proj boom"));
+    await expect(finalizeSandbox("org1", "proj1")).resolves.toBeUndefined();
+    expect(sandboxUpdateMany.mock.calls.find((c) => c[0].data.status === "READY")).toBeTruthy();
   });
 });
 
