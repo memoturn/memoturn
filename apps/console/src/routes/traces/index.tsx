@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { Fragment, type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { Timestamp } from "@/components/timestamp";
 import { EmptyState } from "../../components/empty-state";
 import { FilterBuilder } from "../../components/filter-builder";
 import { HelpTip } from "../../components/help-tip";
@@ -443,7 +444,7 @@ function TracesPage() {
 
   // Per-column cell renderers — the table header/body iterate `visibleCols` in the persisted order.
   const cellContent: Record<ColKey, (t: TraceSummary) => ReactNode> = {
-    timestamp: (t) => t.timestamp,
+    timestamp: (t) => <Timestamp value={t.timestamp} />,
     obs: (t) => Number(t.observation_count).toLocaleString(),
     tokens: (t) => Number(t.total_tokens).toLocaleString(),
     cost: (t) => fmtCost(Number(t.total_cost)),

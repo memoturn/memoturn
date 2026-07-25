@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Activity, Coins, DollarSign } from "lucide-react";
+import { Timestamp } from "@/components/timestamp";
 import { EmptyState } from "../../components/empty-state";
 import { PageHeader } from "../../components/page-header";
 import { ScoreBadges } from "../../components/score-badges";
@@ -124,7 +125,9 @@ function UserDetailPage() {
                       <span className="font-medium text-primary">{t.name || "(unnamed trace)"}</span>
                     </TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">{t.id}</TableCell>
-                    <TableCell className="text-muted-foreground">{t.timestamp}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      <Timestamp value={t.timestamp} />
+                    </TableCell>
                     <TableCell className="tabular-nums">{Number(t.total_tokens).toLocaleString()}</TableCell>
                     <TableCell className="tabular-nums">{fmtCost(Number(t.total_cost))}</TableCell>
                     <TableCell className="tabular-nums">{t.latency_ms} ms</TableCell>

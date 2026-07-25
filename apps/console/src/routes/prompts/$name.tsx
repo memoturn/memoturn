@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { GitBranch, Radio, Tag } from "lucide-react";
 import { useState } from "react";
+import { Timestamp } from "@/components/timestamp";
 import { EmptyState } from "../../components/empty-state";
 import { HelpTip } from "../../components/help-tip";
 import { JsonValue } from "../../components/json-value";
@@ -88,7 +89,9 @@ function PromptUsage({ name }: { name: string }) {
                       <TableCell>
                         <span className="font-medium text-primary">{t.name || t.id.slice(0, 8)}</span>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{t.timestamp}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        <Timestamp value={t.timestamp} />
+                      </TableCell>
                       <TableCell>{t.total_tokens}</TableCell>
                       <TableCell>{fmtCost(Number(t.total_cost))}</TableCell>
                       <TableCell>{t.latency_ms} ms</TableCell>
