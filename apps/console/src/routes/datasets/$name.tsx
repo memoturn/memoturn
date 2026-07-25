@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "../../components/empty-state";
 import { HelpTip } from "../../components/help-tip";
+import { JsonValue } from "../../components/json-value";
 import { KindBadge } from "../../components/kind-badge";
 import { RunComparison } from "../../components/run-comparison";
 import { StatTile } from "../../components/stat-tile";
@@ -44,11 +45,6 @@ import { api, downloadDatasetExport } from "../../lib/api";
 import { useIsReadOnly } from "../../lib/role";
 
 export const Route = createFileRoute("/datasets/$name")({ component: DatasetDetailPage });
-
-function j(value: unknown): string {
-  if (value == null) return "—";
-  return typeof value === "string" ? value : JSON.stringify(value);
-}
 
 function DatasetDetailPage() {
   const { name } = Route.useParams();
@@ -253,8 +249,12 @@ function DatasetDetailPage() {
                 <TableBody>
                   {data.items.map((it) => (
                     <TableRow key={it.id}>
-                      <TableCell>{j(it.input)}</TableCell>
-                      <TableCell>{j(it.expectedOutput)}</TableCell>
+                      <TableCell className="max-w-md align-top">
+                        <JsonValue value={it.input} maxHeight="max-h-40" />
+                      </TableCell>
+                      <TableCell className="max-w-md align-top">
+                        <JsonValue value={it.expectedOutput} maxHeight="max-h-40" />
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
