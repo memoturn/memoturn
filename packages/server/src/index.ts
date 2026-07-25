@@ -12,6 +12,7 @@ export * from "./concurrency.js";
 export * from "./dashboards.js";
 export * from "./datasets.js";
 export * from "./demo.js";
+export * from "./demo-entities.js";
 export * from "./demodata.js";
 export * from "./embeddings.js";
 export * from "./env.js";
