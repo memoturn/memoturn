@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Activity, Coins, DollarSign, MessagesSquare } from "lucide-react";
 import { useState } from "react";
+import { Timestamp } from "@/components/timestamp";
 import { EmptyState } from "../../components/empty-state";
 import { JsonValue } from "../../components/json-value";
 import { PageHeader } from "../../components/page-header";
@@ -48,7 +49,9 @@ function Conversation({ sessionId, onPeek }: { sessionId: string; onPeek: (id: s
         >
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span className="font-medium text-foreground">{m.name || "(unnamed turn)"}</span>
-            <span>{m.timestamp}</span>
+            <span>
+              <Timestamp value={m.timestamp} />
+            </span>
           </div>
           {m.input && (
             <div className="rounded-md bg-muted/60 p-2">
@@ -188,7 +191,9 @@ function SessionDetailPage() {
                           {t.session_path || "—"}
                         </TableCell>
                         <TableCell className="font-mono text-xs text-muted-foreground">{t.id}</TableCell>
-                        <TableCell className="text-muted-foreground">{t.timestamp}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          <Timestamp value={t.timestamp} />
+                        </TableCell>
                         <TableCell className="tabular-nums">{Number(t.total_tokens).toLocaleString()}</TableCell>
                         <TableCell className="tabular-nums">{fmtCost(Number(t.total_cost))}</TableCell>
                         <TableCell className="tabular-nums">{t.latency_ms} ms</TableCell>
