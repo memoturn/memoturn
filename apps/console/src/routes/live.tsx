@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Radio } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Timestamp } from "@/components/timestamp";
 import { EmptyState } from "../components/empty-state";
 import { PageHeader } from "../components/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
@@ -109,7 +110,9 @@ function LivePage() {
                     )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">{t.environment}</TableCell>
-                  <TableCell className="text-muted-foreground">{t.timestamp}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    <Timestamp value={t.timestamp} />
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
