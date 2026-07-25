@@ -3,6 +3,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Activity, Coins, DollarSign, MessagesSquare } from "lucide-react";
 import { useState } from "react";
 import { EmptyState } from "../../components/empty-state";
+import { JsonValue } from "../../components/json-value";
 import { PageHeader } from "../../components/page-header";
 import { ScoreBadges } from "../../components/score-badges";
 import { StatTile } from "../../components/stat-tile";
@@ -22,16 +23,6 @@ import { api } from "../../lib/api";
 
 interface SessionSearch {
   peek?: string;
-}
-
-/** Best-effort pretty-print: JSON gets indented, everything else passes through. */
-function prettyText(raw: string): string {
-  if (!raw) return "";
-  try {
-    return JSON.stringify(JSON.parse(raw), null, 2);
-  } catch {
-    return raw;
-  }
 }
 
 /** The Memory Explorer conversation view: each trace is a turn (input → output), oldest-first. */
@@ -62,17 +53,13 @@ function Conversation({ sessionId, onPeek }: { sessionId: string; onPeek: (id: s
           {m.input && (
             <div className="rounded-md bg-muted/60 p-2">
               <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Input</div>
-              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs">
-                {prettyText(m.input)}
-              </pre>
+              <JsonValue value={m.input} maxHeight="max-h-40" />
             </div>
           )}
           {m.output && (
             <div className="rounded-md border border-primary/20 bg-primary/5 p-2">
               <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">Output</div>
-              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs">
-                {prettyText(m.output)}
-              </pre>
+              <JsonValue value={m.output} maxHeight="max-h-40" />
             </div>
           )}
         </button>

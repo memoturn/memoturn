@@ -4,6 +4,7 @@ import { GitBranch, Radio, Tag } from "lucide-react";
 import { useState } from "react";
 import { EmptyState } from "../../components/empty-state";
 import { HelpTip } from "../../components/help-tip";
+import { JsonValue } from "../../components/json-value";
 import { KindBadge } from "../../components/kind-badge";
 import { PromptExperiments } from "../../components/prompt-experiments";
 import { StatTile } from "../../components/stat-tile";
@@ -341,9 +342,7 @@ function PromptDetailPage() {
                 <AccordionContent className="space-y-3">
                   <pre className="overflow-auto border bg-muted/50 p-3 text-xs max-h-80">{renderContent(v)}</pre>
                   {v.config != null && Object.keys(v.config as object).length > 0 && (
-                    <pre className="overflow-auto border bg-muted/50 p-3 text-xs max-h-80">
-                      {JSON.stringify(v.config, null, 2)}
-                    </pre>
+                    <JsonValue value={v.config} maxHeight="max-h-80" />
                   )}
                 </AccordionContent>
               </AccordionItem>
