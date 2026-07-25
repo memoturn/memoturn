@@ -6,6 +6,12 @@
 # Routing mirrors the dev Vite proxy (apps/console/vite.config.ts): `/api/*` is forwarded to
 # the API with the `/api` prefix stripped (handle_path), so /api/v1/* -> /v1/* and
 # /api/auth/* -> /auth/*. Everything else serves the console SPA.
+#
+# Root-level `/auth/*` is ALSO forwarded to the API (path intact): Better Auth mounts at
+# basePath `/auth` (AUTH_BASE_URL is the origin, no `/api`), so the absolute links it emits —
+# magic-link verify, OAuth authorize/callback, JWKS, discovery — live at https://DOMAIN/auth/*.
+# Those must reach the API, not the SPA. The console still calls /api/auth/* (Caddy strips
+# `/api` -> /auth/*), so both entry paths land on the same Better Auth handler.
 
 {
 	email {$ACME_EMAIL}
@@ -13,6 +19,12 @@
 
 {$MEMOTURN_DOMAIN} {
 	handle_path /api/* {
+		reverse_proxy api:3001
+	}
+
+	# Better Auth's public surface (magic-link verify, OAuth authorize/callback, JWKS, its own
+	# discovery docs) lives at the domain root under /auth/* — forward it to the API, path intact.
+	handle /auth/* {
 		reverse_proxy api:3001
 	}
 
