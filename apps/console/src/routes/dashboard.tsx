@@ -141,7 +141,7 @@ function UsageChart({
               <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                 {usageConfig[m].label}
               </span>
-              <span className="text-sm font-semibold tabular-nums sm:text-lg">{totals[m]}</span>
+              <span className="whitespace-nowrap text-sm font-semibold tabular-nums sm:text-lg">{totals[m]}</span>
             </button>
           ))}
         </div>
