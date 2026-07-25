@@ -35,6 +35,7 @@ import {
   MessagesSquare,
   Plus,
   Radar,
+  Radio,
   ScatterChart,
   ScrollText,
   Search,
@@ -84,6 +85,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: "Observability",
     items: [
+      { to: "/live", label: "Live", icon: Radio },
       { to: "/traces", label: "Traces", icon: Activity },
       { to: "/sessions", label: "Sessions", icon: MessagesSquare },
       { to: "/users", label: "Users", icon: Users },
