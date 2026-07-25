@@ -73,11 +73,12 @@ import {
 } from "../components/ui/dropdown-menu";
 import { api, getActiveProject, setActiveProject } from "../lib/api";
 import { signOut, useSession } from "../lib/auth";
+import { useIsWorkspaceAdmin } from "../lib/role";
 import { cn } from "../lib/utils";
 
 export const Route = createRootRoute({ component: RootComponent });
 
-type NavItem = { to: string; label: string; icon: typeof Activity };
+type NavItem = { to: string; label: string; icon: typeof Activity; adminOnly?: boolean };
 
 // Primary navigation — mirrors the product's mental model (observe → author → evaluate)
 // rather than a flat bar. Each group renders as a labeled SidebarGroup.
@@ -122,8 +123,11 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
 
 // Secondary navigation — pinned to the bottom (sidebar-08 NavSecondary pattern):
 // operate/admin surfaces that shouldn't compete with the primary workflow groups.
+// `adminOnly` entries hit endpoints gated by the server's denyIfNotAdmin (OWNER/ADMIN); they're
+// hidden for MEMBER/VIEWER so read-only users (e.g. demo sandboxes) don't land on a 403'd page.
+// (Audit-logs is NOT admin-gated — any authenticated role can read it — so it stays visible.)
 const NAV_SECONDARY: NavItem[] = [
-  { to: "/ops", label: "Ingest health", icon: HeartPulse },
+  { to: "/ops", label: "Ingest health", icon: HeartPulse, adminOnly: true },
   { to: "/audit", label: "Audit", icon: History },
   { to: "/organizations", label: "Organizations", icon: Building2 },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
@@ -272,6 +276,8 @@ function AppSidebar({ email, initials }: { email: string; initials: string }) {
   // Platform-admin nav is shown to users with the global admin role; superadmins designated
   // only by SUPERADMIN_USER_IDS can still reach /admin/users directly.
   const isAdmin = (session?.user as { role?: string } | undefined)?.role === "admin";
+  // Workspace-admin (OWNER/ADMIN) gate for adminOnly nav entries — hides them from MEMBER/VIEWER.
+  const isWorkspaceAdmin = useIsWorkspaceAdmin();
   return (
     <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader className="gap-2">
@@ -340,7 +346,7 @@ function AppSidebar({ email, initials }: { email: string; initials: string }) {
         <SidebarGroup className="mt-auto">
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV_SECONDARY.map((item) => (
+              {NAV_SECONDARY.filter((item) => !item.adminOnly || isWorkspaceAdmin).map((item) => (
                 <SidebarMenuItem key={item.to}>
                   <SidebarMenuButton asChild size="sm" isActive={isActivePath(pathname, item.to)} tooltip={item.label}>
                     <Link to={item.to}>

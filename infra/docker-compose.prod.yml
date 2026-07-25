@@ -245,6 +245,10 @@ services:
       # volume (0 = off) for deployments that need to bound a single project's ingest.
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
       INGEST_EVENTS_PER_MINUTE: ${INGEST_EVENTS_PER_MINUTE:-0}
+      # Ingest-health page probes the worker's /metrics over HTTP. api + worker are separate
+      # containers here, so point it at the worker by service name (the default 127.0.0.1 only
+      # works in `bun run dev`, where both share one host). Requires WORKER_HOST=0.0.0.0 below.
+      WORKER_METRICS_URL: http://worker:3002/metrics
       # Email transport (magic-link sign-in, invitations, alerts). Empty = disabled; the
       # mailer auto-selects Resend when RESEND_API_KEY is set, else SMTP. See docs.
       EMAIL_FROM: ${EMAIL_FROM:-}
@@ -308,6 +312,10 @@ services:
       AUTH_TRUSTED_ORIGINS: https://${MEMOTURN_DOMAIN:?}
       ALLOW_PRIVATE_WEBHOOK_TARGETS: ${ALLOW_PRIVATE_WEBHOOK_TARGETS:-0}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-10}
+      # Bind the health/metrics server on all interfaces so the api container (ingest-health
+      # page) can reach it across the Docker network. Only exposed on the internal network —
+      # no host port is published for 3002 — so this isn't internet-reachable.
+      WORKER_HOST: 0.0.0.0
       # Email transport — the worker sends alert emails and runs the demo seed/prune jobs.
       EMAIL_FROM: ${EMAIL_FROM:-}
       ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-}
