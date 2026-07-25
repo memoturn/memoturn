@@ -576,11 +576,22 @@ model Evaluator {
   provider     String   @default("mock")
   model        String
   outputSchema Json     @default("{}")
+  // LLM jury: when non-empty, this evaluator is an ensemble — the same judge prompt is run
+  // against every juror ({provider, model}) and the scores are aggregated (mean) into one
+  // score, reducing single-judge variance. Empty ([]) = ordinary single-judge evaluator
+  // using the provider/model above. Shape: [{ "provider": string, "model": string }].
+  jurors       Json     @default("[]")
   // Online evaluation: when enabled, the worker runs this evaluator on a sampled
   // fraction of incoming completed traces (optionally filtered by trace name).
   online       Boolean  @default(false)
   samplingRate Float    @default(1.0)
   filterName   String   @default("")
+  // Evaluation scope. "trace" (default): score each sampled trace inline at ingest.
+  // "thread": score the whole conversation (all traces sharing a session id) once, after
+  // the session has been quiet for `cooldownSeconds` — run by a per-minute worker cron so
+  // multi-turn conversations "settle" before being judged as a whole.
+  scope           String @default("trace")
+  cooldownSeconds Int    @default(900)
   // Monotonic version, bumped whenever the judge prompt/model/provider changes. The
   // immutable history lives in EvaluatorVersion so online score drift is attributable
   // (correlate a score-trend shift to when a version was published).
@@ -602,6 +613,7 @@ model EvaluatorVersion {
   prompt       String
   provider     String
   model        String
+  jurors       Json      @default("[]")
   createdAt    DateTime  @default(now())
 
   @@unique([evaluatorId, version])
@@ -1000,6 +1012,13 @@ model GuardrailPolicy {
   requireValidJson Boolean  @default(false) // require the text to be valid JSON
   requiredJsonKeys String[] @default([]) // top-level keys that must be present when parsed as JSON
   evaluatorGuards  Json     @default("[]") // EvaluatorGuard[] — { name, comparator, threshold }
+  // Built-in model guards (LLM-backed, fail-open) — the two categories the deterministic
+  // scan can't cover. `judgeProvider`/`judgeModel` is the LLM they call.
+  restrictedTopics  String[] @default([]) // block content about any of these topics
+  toxicity          Boolean  @default(false) // detect toxic/unsafe content
+  toxicityThreshold Float    @default(0.5) // block when the toxicity score ≥ this
+  judgeProvider     String   @default("mock") // provider for the topic/toxicity model guards
+  judgeModel        String   @default("mock-1") // model for the topic/toxicity model guards
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -1068,6 +1087,7 @@ model TraceState {
   timestamp   DateTime?
   userId      String?
   sessionId   String?
+  sessionPath String?
   release     String?
   version     String?
   environment String?

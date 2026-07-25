@@ -63,7 +63,10 @@ export async function requireAuth(c: Context<{ Variables: AuthVars }>, next: Nex
     }
   }
 
-  const requested = c.req.header("x-memoturn-project") || undefined;
+  // Prefer the switcher header; fall back to a `?project=` query so EventSource / SSE clients
+  // (which can't set custom headers) can still target a specific project. Access is validated
+  // by getUserProjectAccess either way.
+  const requested = c.req.header("x-memoturn-project") || c.req.query("project") || undefined;
   const access = await getUserProjectAccess(session.user.id, requested, session.session.activeOrganizationId);
   if (!access) return c.json({ error: "no accessible project" }, 403);
 

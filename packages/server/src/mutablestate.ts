@@ -110,6 +110,7 @@ const TRACE_COLS: readonly ColDef[] = [
   ["timestamp", "timestamp"],
   ["userId", "text"],
   ["sessionId", "text"],
+  ["sessionPath", "text"],
   ["release", "text"],
   ["version", "text"],
   ["environment", "text"],
@@ -134,6 +135,7 @@ export function extractTracePatch(
   if (has("timestamp") && maskedBody.timestamp) s.timestamp = new Date(maskedBody.timestamp);
   if (has("userId")) s.userId = maskedBody.userId ?? "";
   if (has("sessionId")) s.sessionId = maskedBody.sessionId ?? "";
+  if (has("sessionPath")) s.sessionPath = maskedBody.sessionPath ?? "";
   if (has("release")) s.release = maskedBody.release ?? "";
   if (has("version")) s.version = maskedBody.version ?? "";
   if (has("environment")) s.environment = maskedBody.environment;
@@ -376,6 +378,7 @@ export async function seedTraceStates(projectId: string, rows: TraceRow[]): Prom
         timestamp: r.timestamp ? new Date(r.timestamp) : null,
         userId: r.user_id,
         sessionId: r.session_id,
+        sessionPath: r.session_path,
         release: r.release,
         version: r.version,
         environment: r.environment,

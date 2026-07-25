@@ -11,6 +11,7 @@ describe("stream load serialization", () => {
       name: "n",
       user_id: "u",
       session_id: "s",
+      session_path: "/n",
       release: "",
       version: "",
       environment: "default",

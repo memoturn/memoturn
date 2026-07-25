@@ -10,6 +10,7 @@ const trace = (id: string, eventTs: string, overrides: Partial<TraceRow> = {}): 
   name: "t",
   user_id: "",
   session_id: "",
+  session_path: "",
   release: "",
   version: "",
   environment: "default",

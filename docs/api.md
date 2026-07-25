@@ -46,6 +46,8 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | POST | `/v1/traces/{id}/annotate` | Add a manual ANNOTATION score to a trace. Body: `{ name, dataType, value?, stringValue?, comment? }`. Audited. |
 | POST | `/v1/traces/{id}/tags` | Replace a trace's tags (merge-on-write). Body: `{ tags: string[] }`. Audited. |
 | GET | `/v1/sessions` | Paginated sessions `{ data, total }` (traces grouped by `sessionId`); paging: `page`, `pageSize` (or legacy `limit`); scoped by `days`; `search` filters by `sessionId` substring. |
+| GET | `/v1/sessions/{id}/messages` | The session's traces as a conversation (Memory Explorer): `{ session_id, messages }`, one turn per trace (oldest-first) with `input`/`output` and token/cost roll-ups. |
+| GET | `/v1/live/traces` | Live tail (SSE): streams a `trace` event per trace as it's ingested, plus `ping` heartbeats. Best-effort read-side (Redis pub/sub); EventSource clients pass `?project=` since they can't set the switcher header. |
 | GET | `/v1/users` | Paginated end users `{ data, total }` (traces grouped by `userId`); paging: `page`, `pageSize` (or legacy `limit`); scoped by `days`; `search` filters by `userId` substring. |
 | GET | `/v1/metrics` | Cost/token/latency rollups by day and model (`days` query). |
 | GET | `/v1/metrics/tools` | Per-tool analytics — call volume, error rate, and p50/p95/avg latency by tool name (named SPAN observations) over `days`. The top agent-debugging view. |
@@ -165,7 +167,7 @@ Webhook and automation target URLs are SSRF-validated on write: private IP range
 | GET / POST | `/v1/webhooks` | List (includes `lastStatus`/`lastError`/`lastAttemptAt`/`failureCount` delivery tracking) / create a webhook (POSTs on an event; `score.created` supports a low-score threshold). `secret` returned once on `201`. |
 | DELETE | `/v1/webhooks/{id}` | Delete a webhook. |
 | GET | `/v1/webhooks/{id}/deliveries` | A webhook's recent delivery log (historical; newest first). Query: `limit` (≤200). |
-| GET / POST | `/v1/automations` | List / create a trigger→action automation (trigger: `score.created`/`trace.created`/`eval.completed`; action: `webhook`/`slack`). Target URL is SSRF-validated. |
+| GET / POST | `/v1/automations` | List / create a trigger→action automation (trigger: `score.created`/`trace.created`/`eval.completed`; action: `webhook`/`slack`/`pagerduty`/`email`). The `target` is a URL (webhook/slack — SSRF-validated), an email address (email), or a PagerDuty routing key (pagerduty). |
 | DELETE | `/v1/automations/{id}` | Delete an automation. |
 | GET / POST | `/v1/alerts` | List / create a stateful alert rule. A worker cron evaluates `metric` (`error_rate`/`latency_p95`/`cost_per_day`/`ingest_volume`/`dlq_depth`) over a trailing `window` (minutes) against `threshold` per `comparator` (`gt`/`gte`/`lt`/`lte`), notifying `channels` (`[{ type, target }]`; type = `slack`/`webhook` (URL, SSRF-validated), `pagerduty` (Events-API routing key; auto-resolves), or `email` (address; needs an email transport configured)) once on firing and once on resolve. |
 | PATCH / DELETE | `/v1/alerts/{id}` | Update (e.g. toggle `enabled`, adjust `threshold`/`channels`) / delete an alert rule. |
@@ -202,8 +204,8 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | GET / POST | `/v1/scheduled-exports` | Get / configure the recurring daily NDJSON export of traces to blob storage. |
 | POST | `/v1/scheduled-exports/run` | Run the export now and write the NDJSON to blob storage. |
 | GET / POST | `/v1/masking` | Get / configure the PII redaction policy (built-in + custom patterns) applied to trace input/output at ingest. |
-| POST | `/v1/guardrails/check` | Runtime guardrails: scan `{ text }` for PII / prompt injection / SQL injection / blocked terms / required-match / JSON shape, plus opt-in evaluator (LLM-judge) guards; returns `{ verdict: allow\|redact\|block, findings, redactedText? }`. Read-only compute (the evaluator-guard LLM calls write nothing and fail open on timeout/error). SDK: `checkGuardrails` / `check_guardrails`. |
-| GET / POST | `/v1/guardrails` | Get / configure the project's guardrail policy (PII action, prompt-injection/SQL-injection detection, blocked terms, `requireMatch`, `requireValidJson`/`requiredJsonKeys`, evaluator-backed `evaluatorGuards`). |
+| POST | `/v1/guardrails/check` | Runtime guardrails: scan `{ text }` for PII / prompt injection / SQL injection / blocked terms / required-match / JSON shape, plus opt-in LLM guards — evaluator (judge) guards and built-in **restricted-topic** + **toxicity** model guards; returns `{ verdict: allow\|redact\|block, findings, redactedText? }`. Read-only compute (the LLM guard calls write nothing and fail open on timeout/error). SDK: `checkGuardrails` / `check_guardrails`. |
+| GET / POST | `/v1/guardrails` | Get / configure the project's guardrail policy (PII action, prompt-injection/SQL-injection detection, blocked terms, `requireMatch`, `requireValidJson`/`requiredJsonKeys`, evaluator-backed `evaluatorGuards`, and model guards `restrictedTopics`/`toxicity`+`toxicityThreshold` judged by `judgeProvider`/`judgeModel`). |
 | GET / POST | `/v1/analytics-sink` | Get / configure the event sink — forwarding trace/score events to a product-analytics/CDP endpoint (PostHog-compatible capture API). POST `host` URL is SSRF-validated (400 on private/loopback targets). |
 | GET / POST | `/v1/api-keys` | List project API keys (public key + hint) / mint a new pair (secret returned once). |
 | DELETE | `/v1/api-keys/{id}` | Revoke an API key. |

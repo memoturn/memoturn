@@ -56,6 +56,21 @@ describe("mapEvents", () => {
     expect(o.latency_ms).toBe(1000); // endTime − startTime, computed by the mapper
   });
 
+  it("maps sessionId + hierarchical sessionPath onto the trace row (defaulting to '')", () => {
+    const withPath = mapEvents(PROJECT, [
+      {
+        id: "e1",
+        type: "trace-create",
+        timestamp: "2026-06-25T00:00:00.000Z",
+        body: { id: "tp", environment: "default", sessionId: "sess-1", sessionPath: "/support/lookup" },
+      },
+    ]);
+    expect(withPath.traces[0]).toMatchObject({ session_id: "sess-1", session_path: "/support/lookup" });
+    // Absent on the wire → empty string, never undefined (so the NOT NULL column is satisfied).
+    const withoutPath = mapEvents(PROJECT, sampleBatch("t1"));
+    expect(withoutPath.traces[0]!.session_path).toBe("");
+  });
+
   it("derives observation type from the event kind, honoring an observationType override", () => {
     const events: IngestEvent[] = [
       {

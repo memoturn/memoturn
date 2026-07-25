@@ -130,8 +130,9 @@ class Memoturn:
     def trace(self, **body: Any) -> "Trace":
         """Start a trace. Returns a handle for adding child observations + scores.
 
-        Accepted kwargs: ``id``, ``name``, ``userId``, ``sessionId``, ``input``,
-        ``output``, ``metadata``, ``tags``, ``environment``, ``release``, ``version``.
+        Accepted kwargs: ``id``, ``name``, ``userId``, ``sessionId``, ``sessionPath``,
+        ``input``, ``output``, ``metadata``, ``tags``, ``environment``, ``release``,
+        ``version``.
         """
         tid = body.pop("id", None) or _id()
         env = body.setdefault("environment", self.environment)

@@ -52,10 +52,27 @@ export interface GateThreshold {
   maxRegression?: number;
 }
 
+export interface GateScore {
+  name: string;
+  mean: number;
+  count: number;
+}
+
+export interface GateFailure {
+  scoreName: string;
+  reason: "below_min" | "above_max" | "regression" | "missing_score";
+  value: number | null;
+  bound: number;
+  baseline?: number;
+}
+
 export interface GateResult {
+  dataset: string;
+  run: string;
+  baselineRun: string | null;
   passed: boolean;
-  failures: unknown[];
-  scores: unknown[];
+  scores: GateScore[];
+  failures: GateFailure[];
 }
 
 export async function createDataset(creds: Creds, name: string, description?: string): Promise<void> {

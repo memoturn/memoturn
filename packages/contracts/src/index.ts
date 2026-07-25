@@ -14,6 +14,7 @@ export const traceSummary = z.object({
   timestamp: z.string(),
   user_id: z.string(),
   session_id: z.string(),
+  session_path: z.string(),
   environment: z.string(),
   tags: z.array(z.string()),
   observation_count: z.number(),
@@ -412,6 +413,11 @@ export const guardrailPolicy = z.object({
   requireValidJson: z.boolean(),
   requiredJsonKeys: z.array(z.string()),
   evaluatorGuards: z.array(evaluatorGuard),
+  restrictedTopics: z.array(z.string()),
+  toxicity: z.boolean(),
+  toxicityThreshold: z.number(),
+  judgeProvider: z.string(),
+  judgeModel: z.string(),
   available: z.array(z.string()),
 });
 export type GuardrailPolicy = z.infer<typeof guardrailPolicy>;
@@ -420,7 +426,16 @@ export const guardrailVerdict = z.object({
   verdict: z.enum(["allow", "redact", "block"]),
   findings: z.array(
     z.object({
-      category: z.enum(["pii", "injection", "blocked_term", "sql_injection", "json_invalid", "evaluator"]),
+      category: z.enum([
+        "pii",
+        "injection",
+        "blocked_term",
+        "sql_injection",
+        "json_invalid",
+        "evaluator",
+        "topic",
+        "toxicity",
+      ]),
       type: z.string(),
       count: z.number(),
       score: z.number().optional(),
@@ -607,6 +622,25 @@ export const sessionPage = z.object({
   total: z.number(),
 });
 export type SessionPage = z.infer<typeof sessionPage>;
+
+// Memory Explorer: a session's traces reconstructed as a conversation (one turn per trace,
+// oldest-first) with their input/output and roll-ups.
+export const sessionMessage = z.object({
+  traceId: z.string(),
+  name: z.string(),
+  timestamp: z.string(),
+  input: z.string(),
+  output: z.string(),
+  total_tokens: z.number(),
+  total_cost: z.number(),
+});
+export type SessionMessage = z.infer<typeof sessionMessage>;
+
+export const sessionMessages = z.object({
+  session_id: z.string(),
+  messages: z.array(sessionMessage),
+});
+export type SessionMessages = z.infer<typeof sessionMessages>;
 
 // Per-end-user rollup (traces grouped by user_id) — the Users view.
 export const userSummary = z.object({
@@ -929,14 +963,21 @@ export type EvaluatorTemplate = z.infer<typeof evaluatorTemplate>;
 export const providerConnection = z.object({ provider: z.string(), masked: z.string(), createdAt: z.string() });
 export type ProviderConnection = z.infer<typeof providerConnection>;
 
+/** One member of an LLM jury (ensemble judging). Empty jury = ordinary single judge. */
+export const juror = z.object({ provider: z.string(), model: z.string() });
+export type Juror = z.infer<typeof juror>;
+
 export const evaluator = z.object({
   name: z.string(),
   provider: z.string(),
   model: z.string(),
   prompt: z.string(),
+  jurors: z.array(juror),
   online: z.boolean(),
   samplingRate: z.number(),
   filterName: z.string(),
+  scope: z.string(),
+  cooldownSeconds: z.number(),
   version: z.number(),
   createdAt: z.string(),
 });
@@ -947,6 +988,7 @@ export const evaluatorVersion = z.object({
   prompt: z.string(),
   provider: z.string(),
   model: z.string(),
+  jurors: z.array(juror),
   createdAt: z.string(),
 });
 export type EvaluatorVersion = z.infer<typeof evaluatorVersion>;

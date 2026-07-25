@@ -591,6 +591,23 @@ if (!gate.passed) {
 }
 ```
 
+### `mt eval` — gate from the command line
+
+Installing the package puts an `mt` binary on your PATH. `mt eval` runs the same gate and exits
+non-zero when a threshold is violated, so you can drop it straight into CI ("LLM unit tests"):
+
+```bash
+# thresholds inline
+mt eval --dataset qa --run pr-1234 --baseline main \
+  --min faithfulness=0.8 --max toxicity=0.1 --max-regression faithfulness=0.05
+
+# or from a config file: { "dataset", "run", "baseline?", "thresholds" }
+mt eval --config memoturn.eval.json
+```
+
+Auth comes from `MEMOTURN_PUBLIC_KEY` / `MEMOTURN_SECRET_KEY` (and `MEMOTURN_BASE_URL`). Exit codes:
+`0` gate passed · `1` gate failed · `2` usage/runtime error. Add `--json` for machine-readable output.
+
 ## Guardrails
 
 Scan text against the project's runtime guardrails (PII, prompt injection, blocked terms)

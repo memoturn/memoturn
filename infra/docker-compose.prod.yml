@@ -233,7 +233,11 @@ services:
       # Auth / encryption — mandatory in production (env.ts refuses to boot without them).
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env (openssl rand -base64 48)}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (openssl rand -base64 48)}
-      AUTH_BASE_URL: https://${MEMOTURN_DOMAIN:?}/api
+      # Origin only — NO /api suffix. Better Auth, given a baseURL with a path, would treat that
+      # path as its mount and ignore basePath "/auth" (endpoints would land at /api/* and never
+      # match the /auth/* the reverse proxy forwards). The origin lets it honor basePath "/auth",
+      # and Caddy routes both /api/auth/* (prefix stripped) and root /auth/* to this handler.
+      AUTH_BASE_URL: https://${MEMOTURN_DOMAIN:?}
       AUTH_TRUSTED_ORIGINS: https://${MEMOTURN_DOMAIN:?}
       ALLOW_PRIVATE_WEBHOOK_TARGETS: ${ALLOW_PRIVATE_WEBHOOK_TARGETS:-0}
       # Per-project request rate limit, ON by default in production (generous — raise/lower
@@ -241,6 +245,29 @@ services:
       # volume (0 = off) for deployments that need to bound a single project's ingest.
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
       INGEST_EVENTS_PER_MINUTE: ${INGEST_EVENTS_PER_MINUTE:-0}
+      # Ingest-health page probes the worker's /metrics over HTTP. api + worker are separate
+      # containers here, so point it at the worker by service name (the default 127.0.0.1 only
+      # works in `bun run dev`, where both share one host). Requires WORKER_HOST=0.0.0.0 below.
+      WORKER_METRICS_URL: http://worker:3002/metrics
+      # Email transport (magic-link sign-in, invitations, alerts). Empty = disabled; the
+      # mailer auto-selects Resend when RESEND_API_KEY is set, else SMTP. See docs.
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-}
+      EMAIL_TRANSPORT: ${EMAIL_TRANSPORT:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SMTP_CONNECTION_URL: ${SMTP_CONNECTION_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      # Public demo (per-visitor throwaway sandboxes). Unset/empty = normal install.
+      DEMO_MODE: ${DEMO_MODE:-}
+      DEMO_TTL_DAYS: ${DEMO_TTL_DAYS:-}
+      DEMO_MAX_SANDBOXES: ${DEMO_MAX_SANDBOXES:-}
+      DEMO_SEED_DAYS: ${DEMO_SEED_DAYS:-}
+      DEMO_SEED_TRACES_PER_DAY: ${DEMO_SEED_TRACES_PER_DAY:-}
+      DEMO_MEMBER_ROLE: ${DEMO_MEMBER_ROLE:-}
     # Probe with bun itself — the oven/bun base image doesn't guarantee curl/wget.
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3001/v1/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
@@ -285,6 +312,28 @@ services:
       AUTH_TRUSTED_ORIGINS: https://${MEMOTURN_DOMAIN:?}
       ALLOW_PRIVATE_WEBHOOK_TARGETS: ${ALLOW_PRIVATE_WEBHOOK_TARGETS:-0}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-10}
+      # Bind the health/metrics server on all interfaces so the api container (ingest-health
+      # page) can reach it across the Docker network. Only exposed on the internal network —
+      # no host port is published for 3002 — so this isn't internet-reachable.
+      WORKER_HOST: 0.0.0.0
+      # Email transport — the worker sends alert emails and runs the demo seed/prune jobs.
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-}
+      EMAIL_TRANSPORT: ${EMAIL_TRANSPORT:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SMTP_CONNECTION_URL: ${SMTP_CONNECTION_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      # Public demo — the worker owns the sandbox seed queue + the sandbox-prune cron.
+      DEMO_MODE: ${DEMO_MODE:-}
+      DEMO_TTL_DAYS: ${DEMO_TTL_DAYS:-}
+      DEMO_MAX_SANDBOXES: ${DEMO_MAX_SANDBOXES:-}
+      DEMO_SEED_DAYS: ${DEMO_SEED_DAYS:-}
+      DEMO_SEED_TRACES_PER_DAY: ${DEMO_SEED_TRACES_PER_DAY:-}
+      DEMO_MEMBER_ROLE: ${DEMO_MEMBER_ROLE:-}
     # The worker's health server binds 127.0.0.1 by default — in-container probes still reach it.
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]

@@ -20,7 +20,7 @@ const mt = new Memoturn({
   secretKey: "sk-mt-dev",
 });
 
-const trace = mt.trace({ name: "rag", userId: "u1", sessionId: "s1", input: { q } });
+const trace = mt.trace({ name: "rag", userId: "u1", sessionId: "s1", sessionPath: "/rag", input: { q } });
 
 const retrieval = trace.span({ name: "retrieve", input: { q } });
 retrieval.end({ output: docs });

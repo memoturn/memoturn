@@ -60,6 +60,7 @@ import type {
   ScheduledExportResult,
   ScoreConfig,
   ScoreCorrected,
+  SessionMessages,
   SessionPage,
   SessionSummary,
   SimilarTrace,
@@ -358,6 +359,11 @@ export const api = {
     requireValidJson?: boolean;
     requiredJsonKeys?: string[];
     evaluatorGuards?: EvaluatorGuard[];
+    restrictedTopics?: string[];
+    toxicity?: boolean;
+    toxicityThreshold?: number;
+    judgeProvider?: string;
+    judgeModel?: string;
   }) => post<GuardrailPolicy>(`/v1/guardrails`, body),
   checkGuardrails: (text: string) => post<GuardrailVerdict>(`/v1/guardrails/check`, { text }),
   getAnalyticsSink: () => get<AnalyticsSink>(`/v1/analytics-sink`),
@@ -460,6 +466,9 @@ export const api = {
     online?: boolean;
     samplingRate?: number;
     filterName?: string;
+    jurors?: { provider: string; model: string }[];
+    scope?: "trace" | "thread";
+    cooldownSeconds?: number;
   }) => post(`/v1/evaluators`, body),
   listEvaluatorTemplates: () => get<{ data: EvaluatorTemplate[] }>(`/v1/evaluators/templates`).then((r) => r.data),
   listEvaluatorVersions: (name: string) =>
@@ -479,6 +488,7 @@ export const api = {
   listSessions: () => get<{ data: SessionSummary[] }>(`/v1/sessions`).then((r) => r.data),
   listSessionsPage: (opts: { page?: number; pageSize?: number; days?: number; search?: string } = {}) =>
     get<SessionPage>(`/v1/sessions${qs(opts as Record<string, unknown>)}`),
+  getSessionMessages: (id: string) => get<SessionMessages>(`/v1/sessions/${encodeURIComponent(id)}/messages`),
   listUsersPage: (opts: { page?: number; pageSize?: number; days?: number; search?: string } = {}) =>
     get<UserPage>(`/v1/users${qs(opts as Record<string, unknown>)}`),
   listProjects: () => get<{ data: Project[] }>(`/v1/projects`).then((r) => r.data),

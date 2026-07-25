@@ -41,7 +41,7 @@ linked by `trace_id` / `project_id`.
 ## Observability
 
 - **Trace** — one logical request/run. Has a name, optional `userId`, `sessionId`,
-  `release`, `version`, `environment`, tags, metadata, input, output.
+  `sessionPath`, `release`, `version`, `environment`, tags, metadata, input, output.
 - **Observation** — a step inside a trace. Three kinds:
   - **span** — generic unit of work
   - **generation** — an LLM call (model, provider, token usage, cost, latency)
@@ -55,7 +55,9 @@ linked by `trace_id` / `project_id`.
   - `EVAL` — produced by an evaluator (LLM-as-judge)
   - `ANNOTATION` — produced by a human review
 - **Session** — traces sharing a `sessionId` (a conversation/thread). Sessions roll up
-  trace counts and cost.
+  trace counts and cost. An optional `sessionPath` (a "/"-delimited, function-organized
+  path like `/support/lookup-order`) groups a session's traces by function rather than time,
+  so repeated work shares a path — surfaced as a column in the session view.
 - **Environment** — free-form label (e.g. `production`, `staging`, `playground`) for
   separating and filtering telemetry.
 

@@ -85,6 +85,7 @@ import {
   getSandboxForUser,
   getScheduledExport,
   getScoresByTraceIds,
+  getSessionMessages,
   getToolAnalytics,
   getTrace,
   getUsage,
@@ -157,6 +158,7 @@ import {
   streamPlayground,
   submitBatch,
   submitReviewScore,
+  subscribeLiveTraces,
   traceFacets,
   traceHistogram,
   UserPatternError,
@@ -278,6 +280,8 @@ app.use("/v1/otel/*", requireAuth);
 app.use("/v1/traces", requireAuth);
 app.use("/v1/traces/*", requireAuth);
 app.use("/v1/sessions", requireAuth);
+app.use("/v1/sessions/*", requireAuth);
+app.use("/v1/live/*", requireAuth);
 app.use("/v1/users", requireAuth);
 app.use("/v1/metrics", requireAuth);
 app.use("/v1/metrics/*", requireAuth);
@@ -362,6 +366,29 @@ app.post("/v1/playground/stream", async (c) => {
     } catch (err) {
       console.error(JSON.stringify({ level: "error", scope: "playground.stream", message: String(err) }));
       await s.writeSSE({ data: JSON.stringify({ error: String(err instanceof Error ? err.message : err) }) });
+    }
+  });
+});
+
+// Live tail (SSE) — plain route (streaming). Streams a `trace` event per trace as it lands,
+// plus periodic `ping` heartbeats to keep the connection open through proxies. The project is
+// resolved by requireAuth (via header or the `?project=` query for EventSource clients).
+app.get("/v1/live/traces", (c) => {
+  const projectId = c.get("projectId");
+  return streamSSE(c, async (s) => {
+    let unsubscribe: (() => Promise<void>) | null = null;
+    let open = true;
+    s.onAbort(() => {
+      open = false;
+      void unsubscribe?.();
+    });
+    unsubscribe = subscribeLiveTraces(projectId, (e) => {
+      void s.writeSSE({ event: "trace", data: JSON.stringify(e) }).catch(() => {});
+    });
+    // Heartbeat until the client disconnects (onAbort flips `open`).
+    while (open) {
+      await s.writeSSE({ event: "ping", data: "" });
+      await s.sleep(15_000);
     }
   });
 });
@@ -909,6 +936,21 @@ app.openapi(
     ]);
     return c.json({ data, total });
   },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/sessions/{id}/messages",
+    summary: "A session's traces as a conversation (Memory Explorer)",
+    tags: ["traces"],
+    security,
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { description: "Session messages", content: { "application/json": { schema: C.sessionMessages } } },
+    },
+  }),
+  async (c) => c.json(await getSessionMessages(c.get("projectId"), c.req.valid("param").id)),
 );
 
 // ── Users ────────────────────────────────────────────────────────────────────────
@@ -2006,6 +2048,9 @@ app.openapi(
               online: z.boolean().optional(),
               samplingRate: z.number().min(0).max(1).optional(),
               filterName: z.string().optional(),
+              jurors: z.array(z.object({ provider: z.enum(RUN_PROVIDER_IDS), model: z.string().min(1) })).optional(),
+              scope: z.enum(["trace", "thread"]).optional(),
+              cooldownSeconds: z.number().int().min(0).optional(),
             }),
           },
         },
@@ -2049,6 +2094,9 @@ app.openapi(
               online: z.boolean().optional(),
               samplingRate: z.number().min(0).max(1).optional(),
               filterName: z.string().optional(),
+              jurors: z.array(z.object({ provider: z.enum(RUN_PROVIDER_IDS), model: z.string().min(1) })).optional(),
+              scope: z.enum(["trace", "thread"]).optional(),
+              cooldownSeconds: z.number().int().min(0).optional(),
             }),
           },
         },
@@ -3518,28 +3566,48 @@ app.openapi(
   createRoute({
     method: "post",
     path: "/v1/automations",
-    summary: "Create an automation (trigger: score.created/trace.created/eval.completed; action: webhook/slack)",
+    summary:
+      "Create an automation (trigger: score.created/trace.created/eval.completed; action: webhook/slack/pagerduty/email)",
     tags: ["platform"],
     security,
     request: {
       body: {
         content: {
           "application/json": {
-            schema: z.object({
-              name: z.string().min(1),
-              trigger: z.enum(["score.created", "trace.created", "eval.completed"]).optional(),
-              action: z.enum(["webhook", "slack"]).optional(),
-              target: z.string().url(),
-              threshold: z.number().nullable().optional(),
-              filter: z.string().optional(),
-            }),
+            schema: z
+              .object({
+                name: z.string().min(1),
+                trigger: z.enum(["score.created", "trace.created", "eval.completed"]).optional(),
+                action: z.enum(["webhook", "slack", "pagerduty", "email"]).optional(),
+                // Target shape depends on the action: a URL (webhook/slack), an email address
+                // (email), or a PagerDuty routing key (pagerduty). Validated in superRefine.
+                target: z.string().min(1),
+                threshold: z.number().nullable().optional(),
+                filter: z.string().optional(),
+              })
+              .superRefine((v, ctx) => {
+                const action = v.action ?? "webhook";
+                if (action === "webhook" || action === "slack") {
+                  try {
+                    new URL(v.target);
+                  } catch {
+                    ctx.addIssue({
+                      code: "custom",
+                      message: "target must be a URL for webhook/slack",
+                      path: ["target"],
+                    });
+                  }
+                } else if (action === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.target)) {
+                  ctx.addIssue({ code: "custom", message: "target must be an email address", path: ["target"] });
+                }
+              }),
           },
         },
       },
     },
     responses: {
       201: { description: "Created", content: { "application/json": { schema: C.automation } } },
-      400: { description: "Invalid or disallowed target URL" },
+      400: { description: "Invalid or disallowed target" },
       403: { description: "Forbidden" },
     },
   }),
@@ -3547,10 +3615,15 @@ app.openapi(
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
     const body = c.req.valid("json");
-    try {
-      await assertPublicUrl(body.target);
-    } catch {
-      return c.json({ error: "target must be a public https endpoint (private/loopback targets are blocked)" }, 400);
+    // URL actions (webhook/slack) get the SSRF/public-endpoint check; email/pagerduty targets
+    // aren't URLs so they skip it.
+    const action = body.action ?? "webhook";
+    if (action === "webhook" || action === "slack") {
+      try {
+        await assertPublicUrl(body.target);
+      } catch {
+        return c.json({ error: "target must be a public https endpoint (private/loopback targets are blocked)" }, 400);
+      }
     }
     const result = await createAutomation(c.get("projectId"), body);
     await recordAudit(c.get("projectId"), c.get("actor"), "automation.create", `${result.trigger}->${result.action}`);
@@ -3968,6 +4041,11 @@ app.openapi(
               requireValidJson: z.boolean().optional(),
               requiredJsonKeys: z.array(z.string()).optional(),
               evaluatorGuards: z.array(C.evaluatorGuard).optional(),
+              restrictedTopics: z.array(z.string()).optional(),
+              toxicity: z.boolean().optional(),
+              toxicityThreshold: z.number().min(0).max(1).optional(),
+              judgeProvider: z.string().optional(),
+              judgeModel: z.string().optional(),
             }),
           },
         },

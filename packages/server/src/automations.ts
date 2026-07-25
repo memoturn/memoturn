@@ -6,15 +6,17 @@ import { isPublicUrl } from "./net.js";
 
 /**
  * Generalized trigger->action automations. A successful trigger (score.created,
- * trace.created, eval.completed) runs each enabled automation's action: a webhook
- * (POST JSON) or a Slack message (POST { text } to an incoming webhook URL).
+ * trace.created, eval.completed) runs each enabled automation's action — a webhook
+ * (POST JSON), a Slack message (POST { text } to an incoming webhook URL), a PagerDuty
+ * event (Events API v2, keyed by target routing key), or an email — via the shared
+ * channel dispatcher (the same one the alert engine uses).
  *
  * Dispatch is best-effort — a failing target never breaks ingestion. Score triggers
  * honor an optional low-value `threshold`; any trigger honors an optional `filter`
  * substring matched against the entity name.
  */
 export const AUTOMATION_TRIGGERS = ["score.created", "trace.created", "eval.completed"] as const;
-export const AUTOMATION_ACTIONS = ["webhook", "slack"] as const;
+export const AUTOMATION_ACTIONS = ["webhook", "slack", "pagerduty", "email"] as const;
 
 export interface CreateAutomationInput {
   name: string;
@@ -137,6 +139,16 @@ function slackText(event: string, projectId: string, payload: AutomationEvent): 
   return bits.join(" · ");
 }
 
+/** Plain-text (markdown-free) one-liner for email subjects / PagerDuty summaries. */
+function summaryText(event: string, projectId: string, payload: AutomationEvent): string {
+  const bits = [`memoturn trigger ${event}`];
+  if (payload.name) bits.push(`name: ${payload.name}`);
+  if (payload.value != null) bits.push(`value: ${payload.value}`);
+  if (payload.traceId) bits.push(`trace: ${payload.traceId}`);
+  bits.push(`project: ${projectId}`);
+  return bits.join(" · ");
+}
+
 /**
  * Whether an automation should fire for a payload: an optional low-value `threshold`
  * (fire only when value < threshold) and an optional name-substring `filter`.
@@ -250,7 +262,13 @@ async function deliverAutomation(
 ): Promise<boolean> {
   return deliverToChannel(
     { type: a.action as ChannelType, target: a.target },
-    { slackText: slackText(event, projectId, payload), webhookBody: { event, projectId, ...payload } },
+    {
+      slackText: slackText(event, projectId, payload),
+      webhookBody: { event, projectId, ...payload },
+      // summary/body power the pagerduty + email channels (they fall back to slackText,
+      // but a markdown-free line reads better as an email subject / PagerDuty summary).
+      summary: summaryText(event, projectId, payload),
+    },
   );
 }
 
