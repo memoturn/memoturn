@@ -411,6 +411,10 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
         const mcpName = mcpMethod
           ? `mcp:${str(attrs["mcp.tool.name"]) ?? str(attrs["mcp.prompt.name"]) ?? mcpMethod}`
           : undefined;
+        // Claude Code emits generic `claude_code.tool` spans; name them after the actual tool so
+        // they land in by-tool analytics instead of all reading "claude_code.tool".
+        const ccToolName =
+          span.name === "claude_code.tool" ? (str(attrs["tool_name"]) ?? str(attrs["gen_ai.tool.name"])) : undefined;
 
         if (!seenTraces.has(span.traceId)) {
           seenTraces.add(span.traceId);
@@ -433,7 +437,7 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
           id: span.spanId,
           traceId: span.traceId,
           parentObservationId: span.parentSpanId || undefined,
-          name: mcpName ?? span.name,
+          name: mcpName ?? (ccToolName ? `tool:${ccToolName}` : span.name),
           startTime: start,
           endTime: end,
           environment,
@@ -450,6 +454,7 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
               attrs["gen_ai.usage.prompt_tokens"] ??
               attrs["llm.token_count.prompt"] ??
               attrs["ai.usage.promptTokens"] ??
+              attrs["input_tokens"] ?? // Claude Code emits bare input_tokens / output_tokens
               0,
           );
           const completionTokens = Number(
@@ -457,7 +462,16 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
               attrs["gen_ai.usage.completion_tokens"] ??
               attrs["llm.token_count.completion"] ??
               attrs["ai.usage.completionTokens"] ??
+              attrs["output_tokens"] ??
               0,
+          );
+          // Prompt-cache usage — Anthropic/Claude Code report these as bare keys; newer gen_ai
+          // semconv uses gen_ai.usage.cache_read_input_tokens. Both feed cost + the usage split.
+          const cacheReadTokens = Number(
+            attrs["gen_ai.usage.cache_read_input_tokens"] ?? attrs["cache_read_tokens"] ?? 0,
+          );
+          const cacheCreationTokens = Number(
+            attrs["gen_ai.usage.cache_creation_input_tokens"] ?? attrs["cache_creation_tokens"] ?? 0,
           );
           events.push({
             id: newId(),
@@ -481,7 +495,13 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
                   "",
               ),
               modelParameters: modelParameters(attrs),
-              usage: { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens },
+              usage: {
+                promptTokens,
+                completionTokens,
+                totalTokens: promptTokens + completionTokens,
+                ...(cacheReadTokens ? { cacheReadTokens } : {}),
+                ...(cacheCreationTokens ? { cacheCreationTokens } : {}),
+              },
               // Newer semconv uses gen_ai.input/output.messages; fall back to prompt/completion, then OpenInference.
               input:
                 attrs["gen_ai.input.messages"] ??
