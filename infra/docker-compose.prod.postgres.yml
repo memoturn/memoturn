@@ -12,9 +12,8 @@
 #
 # Sizing and the graduation path back to Doris: docs/deployment.md + ADR-0004.
 #
-# Note: the base file's `${DORIS_PASSWORD:?}` interpolation still runs before this
-# overlay merges, so .env must define DORIS_PASSWORD — any placeholder value works
-# (nothing Doris-related starts).
+# No DORIS_PASSWORD needed: the base file defaults it to empty, and the required-
+# password guard lives in doris-setup.sh, which this overlay parks (never starts).
 
 services:
   doris-fe:

@@ -8,6 +8,11 @@
 # NOTE: DORIS_PASSWORD must not contain single quotes or backslashes.
 set -eu
 
+# The Doris tier must run with a real root password. The base compose defaults
+# DORIS_PASSWORD to empty (so the Postgres-tier overlay, which never starts this
+# service, doesn't require it) — enforce non-empty here, where Doris actually runs.
+: "${DORIS_PASSWORD:?set DORIS_PASSWORD in .env (required for the Doris tier)}"
+
 FE_HOST="${FE_HOST:-doris-fe}"
 
 if mysql -h "$FE_HOST" -P 9030 -uroot -p"${DORIS_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; then
