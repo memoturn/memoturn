@@ -45,8 +45,8 @@ Selecting the engine:
 
   The overlay parks the Doris services (never started), rewires service dependencies, and
   sets `TELEMETRY_ENGINE=postgres` for the API, worker, and migrate step. Requires Docker
-  Compose ≥ 2.24. `.env` must still define `DORIS_PASSWORD` (any placeholder — the base
-  file's variable interpolation runs before the overlay merges; nothing Doris-related runs).
+  Compose ≥ 2.24. No `DORIS_PASSWORD` needed — the base file defaults it to empty and the
+  required-password guard lives in the (parked) `doris-setup` service.
 
 **When to graduate to Doris**: trace-list facets and dashboards getting slow, sustained
 ingest in the thousands of rows/sec, long retention at high volume, or embedding spaces

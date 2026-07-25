@@ -126,7 +126,9 @@ services:
       doris-fe:
         condition: service_healthy
     environment:
-      DORIS_PASSWORD: ${DORIS_PASSWORD:?set DORIS_PASSWORD in .env}
+      # Guard lives in doris-setup.sh (runtime), not here, so the Postgres-tier
+      # overlay — which parks this service — needs no DORIS_PASSWORD at all.
+      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
     volumes:
       - ./doris-setup.sh:/doris-setup.sh:ro
     entrypoint: ["/bin/sh", "/doris-setup.sh"]
@@ -192,7 +194,7 @@ services:
       DORIS_PORT: "9030"
       DORIS_HTTP_PORT: "8030"
       DORIS_USER: root
-      DORIS_PASSWORD: ${DORIS_PASSWORD:?}
+      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
       DORIS_DB: memoturn
     command: ["sh", "-c", "bun --filter @memoturn/db migrate && bun packages/telemetry/src/migrate.ts"]
     networks:
@@ -221,7 +223,7 @@ services:
       DORIS_PORT: "9030"
       DORIS_HTTP_PORT: "8030"
       DORIS_USER: root
-      DORIS_PASSWORD: ${DORIS_PASSWORD:?}
+      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
       DORIS_DB: memoturn
       REDIS_URL: redis://redis:6379
       BLOB_ENDPOINT: http://minio:9000
@@ -300,7 +302,7 @@ services:
       DORIS_PORT: "9030"
       DORIS_HTTP_PORT: "8030"
       DORIS_USER: root
-      DORIS_PASSWORD: ${DORIS_PASSWORD:?}
+      DORIS_PASSWORD: ${DORIS_PASSWORD:-}
       DORIS_DB: memoturn
       REDIS_URL: redis://redis:6379
       BLOB_ENDPOINT: http://minio:9000
