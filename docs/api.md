@@ -218,6 +218,8 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 
 A remote [Model Context Protocol](https://modelcontextprotocol.io) endpoint exposing the project's prompts, datasets, and review queues as tools for agent IDEs — the same tool registry (`packages/server/src/mcp-tools.ts`) the local stdio server (`apps/mcp`) serves, over Streamable HTTP. Each project is its own MCP resource, so clients connect per-project. RBAC is per-tool (not per-method — every call is a POST): a tool's mutating flag maps to a `read`/`write` permission, and write tools are audited.
 
+The endpoint speaks the stateless `2026-07-28` MCP protocol (no initialize handshake; every request is self-contained, so any replica can serve any call) and remains compatible with clients on earlier MCP revisions, which are served through the same per-request path.
+
 Two auth paths resolve to the same per-project authorization:
 
 - **API-key Basic** (`pk-mt-…:sk-mt-…`, self-host / headless) — the key must belong to the `{projectId}` in the URL; the tool's permission is checked against the key's `read`/`write` scope.
