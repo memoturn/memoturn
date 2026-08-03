@@ -15,6 +15,9 @@ import { getScoresByTraceIds, getTrace, getTraceIO, listTraces } from "./traces.
  * (read tools need the `read` scope, write tools the `write` scope) — the stdio
  * server ignores it (a project API key pair already grants full access).
  */
+/** A JSON value — schemas must be pure JSON so they can cross the MCP wire as-is. */
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
 export interface ToolDef {
   name: string;
   description: string;
@@ -22,7 +25,7 @@ export interface ToolDef {
   write?: boolean;
   inputSchema: {
     type: "object";
-    properties: Record<string, unknown>;
+    properties: Record<string, JsonValue>;
     required?: string[];
     additionalProperties?: boolean;
   };
