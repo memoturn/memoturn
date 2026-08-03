@@ -1,4 +1,3 @@
-import { StreamableHTTPTransport } from "@hono/mcp";
 import {
   authenticateKeys,
   checkRateLimit,
@@ -9,8 +8,7 @@ import {
   tools,
   verifyMcpBearer,
 } from "@memoturn/server";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { createMcpHandler, Server } from "@modelcontextprotocol/server";
 import type { Context } from "hono";
 
 /**
@@ -19,9 +17,12 @@ import type { Context } from "hono";
  *   POST|GET|DELETE /v1/mcp/:projectId
  *
  * Each project is its own MCP "resource" (RFC 8707), so a client connects per-project.
- * Transport is @hono/mcp's StreamableHTTPTransport (the SDK's own transport is Node
- * req/res; this app is Hono-on-Bun / Fetch). Stateless — a fresh Server + transport per
- * request (no sessionIdGenerator) so any API replica can serve any call.
+ * Speaks the stateless 2026-07-28 protocol (SEP-2575: no initialize handshake, per-request
+ * `_meta` envelope) via createMcpHandler's fetch face; `legacy: "stateless"` keeps serving
+ * pre-2026 clients (initialize handshake, no envelope) from the same per-request factory,
+ * so existing IDE integrations continue to work. A fresh Server per request means any API
+ * replica can serve any call. Legacy GET/DELETE session operations are answered 405 by the
+ * handler — there are no sessions on either path.
  *
  * Two auth paths, both resolving to `{ projectId, actor, allows }` for the URL's project:
  *  1. API-key Basic (`pk-mt-…:sk-mt-…`, self-host / headless) — the key must belong to the
@@ -35,7 +36,7 @@ import type { Context } from "hono";
  * RBAC is per-tool, not per-HTTP-method: every tool call is a POST, so a method-based scope
  * gate can't distinguish reads from writes. The tool's `write` flag drives `allows(need)`.
  */
-interface McpAuth {
+export interface McpAuth {
   projectId: string;
   actor: string;
   allows: (need: "read" | "write") => boolean;
@@ -72,14 +73,15 @@ async function resolveMcpAuth(c: Context, projectId: string): Promise<McpAuth | 
   return null;
 }
 
-function buildServer(mcpAuth: McpAuth): Server {
+/** Exported for tests — production traffic always goes through {@link handleMcp}. */
+export function buildServer(mcpAuth: McpAuth): Server {
   const server = new Server({ name: "memoturn", version: "0.1.0" }, { capabilities: { tools: {} } });
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  server.setRequestHandler("tools/list", async () => ({
     tools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+  server.setRequestHandler("tools/call", async (req) => {
     const tool = tools.find((t) => t.name === req.params.name);
     if (!tool) return { isError: true, content: [{ type: "text", text: `unknown tool: ${req.params.name}` }] };
 
@@ -155,8 +157,6 @@ export async function handleMcp(c: Context): Promise<Response> {
     });
   }
 
-  const server = buildServer(mcpAuth);
-  const transport = new StreamableHTTPTransport();
-  await server.connect(transport);
-  return (await transport.handleRequest(c)) ?? c.body(null, 204);
+  const handler = createMcpHandler(() => buildServer(mcpAuth), { legacy: "stateless" });
+  return handler.fetch(c.req.raw);
 }

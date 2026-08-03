@@ -14,6 +14,9 @@ There are two ways to connect, backed by the same tool registry:
 - **Remote Streamable HTTP endpoint** — served by the API at `/v1/mcp/{projectId}`, one MCP
   resource per project.
 
+Both speak the stateless `2026-07-28` MCP protocol (no initialize handshake) and remain
+compatible with clients on earlier MCP revisions — current agent IDEs connect unchanged.
+
 ## Tools
 
 | Tool | Purpose |
