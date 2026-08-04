@@ -3088,6 +3088,7 @@ app.openapi(
               gridY: z.number().int().min(0).optional(),
               gridW: z.number().int().min(1).max(12).optional(),
               gridH: z.number().int().min(1).max(24).optional(),
+              position: z.number().int().min(0).optional(),
             }),
           },
         },
