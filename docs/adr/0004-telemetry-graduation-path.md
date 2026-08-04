@@ -1,9 +1,10 @@
 # ADR 0004 — Telemetry graduation path: migrating an install from Postgres to Doris
 
-- **Status:** Accepted; **partially implemented** — `scanRows` + the round-trip conformance
-  case landed with ADR-0002 (#180: both engines, keyset pagination, ms-precision sequence
-  fidelity, source re-insert idempotence). Open: the `telemetry:migrate` CLI and the
-  operator runbook automation (steps 1–7 below work manually via the seam today).
+- **Status:** Accepted; **implemented** — `scanRows` + the round-trip conformance case
+  landed with ADR-0002 (#180: both engines, keyset pagination, ms-precision sequence
+  fidelity, source re-insert idempotence); the `telemetry:migrate` CLI (copy + count/spot
+  verification, `--dry-run`/`--verify-only`, envelope warning) landed 2026-08 — see
+  `scripts/telemetry-migrate.ts` and the runbook in `docs/deployment.md`.
 - **Date:** 2026-07-22
 - **Context tags:** telemetry store, migration, deployment profiles, TelemetryStore seam
 

@@ -42,6 +42,7 @@
     "seed": "bun --env-file=.env scripts/seed.ts",
     "seed:demo": "bun --env-file=.env scripts/seed-demo.ts",
     "dlq": "bun --env-file=.env scripts/replay-dlq.ts",
+    "telemetry:migrate": "bun --env-file=.env scripts/telemetry-migrate.ts",
     "quickstart": "bun --env-file=.env examples/quickstart.ts",
     "screenshots": "bun scripts/screenshots.ts",
     "docs:check": "bun scripts/check-doc-drift.ts",
