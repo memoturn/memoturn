@@ -1,4 +1,4 @@
-import { type IngestEvent, newId, type ObservationType } from "@memoturn/core";
+import { type IngestEvent, MAX_MESSAGE_LEN, newId, type ObservationType } from "@memoturn/core";
 
 /**
  * OTLP → memoturn ingest mapping. Accepts OTLP traces as JSON or protobuf (see
@@ -217,6 +217,77 @@ export function decodeOtlpTraces(bytes: Uint8Array): OtlpPayload {
     else r.skip(wire);
   }
   return { resourceSpans };
+}
+
+// ── OTLP logs (ExportLogsServiceRequest) ─────────────────────────────────────────
+interface OtlpLogRecord {
+  timeUnixNano?: string;
+  observedTimeUnixNano?: string;
+  severityNumber?: number;
+  severityText?: string;
+  body?: OtlpAttr["value"];
+  attributes?: OtlpAttr[];
+  traceId?: string;
+  spanId?: string;
+  eventName?: string;
+}
+interface OtlpLogsPayload {
+  resourceLogs?: { resource?: OtlpResource; scopeLogs?: { logRecords?: OtlpLogRecord[] }[] }[];
+}
+
+function decodeLogRecord(b: Uint8Array): OtlpLogRecord {
+  const r = new PbReader(b);
+  const rec: OtlpLogRecord = { attributes: [] };
+  while (!r.done) {
+    const { field, wire } = r.tag();
+    if (field === 1 && wire === 1) rec.timeUnixNano = r.fixed64u().toString();
+    else if (field === 2 && wire === 0) rec.severityNumber = Number(r.varint());
+    else if (field === 3 && wire === 2) rec.severityText = r.string();
+    else if (field === 5 && wire === 2) rec.body = decodeAnyValue(r.bytes());
+    else if (field === 6 && wire === 2) rec.attributes?.push(decodeKeyValue(r.bytes()));
+    else if (field === 9 && wire === 2) rec.traceId = hex(r.bytes());
+    else if (field === 10 && wire === 2) rec.spanId = hex(r.bytes());
+    else if (field === 11 && wire === 1) rec.observedTimeUnixNano = r.fixed64u().toString();
+    else if (field === 12 && wire === 2) rec.eventName = r.string();
+    else r.skip(wire);
+  }
+  return rec;
+}
+
+function decodeScopeLogs(b: Uint8Array): { logRecords: OtlpLogRecord[] } {
+  const r = new PbReader(b);
+  const logRecords: OtlpLogRecord[] = [];
+  while (!r.done) {
+    const { field, wire } = r.tag();
+    if (field === 2 && wire === 2) logRecords.push(decodeLogRecord(r.bytes()));
+    else r.skip(wire);
+  }
+  return { logRecords };
+}
+
+function decodeResourceLogs(b: Uint8Array): { resource?: OtlpResource; scopeLogs: { logRecords?: OtlpLogRecord[] }[] } {
+  const r = new PbReader(b);
+  let resource: OtlpResource | undefined;
+  const scopeLogs: { logRecords?: OtlpLogRecord[] }[] = [];
+  while (!r.done) {
+    const { field, wire } = r.tag();
+    if (field === 1 && wire === 2) resource = { attributes: decodeAttributes(r.bytes()) };
+    else if (field === 2 && wire === 2) scopeLogs.push(decodeScopeLogs(r.bytes()));
+    else r.skip(wire);
+  }
+  return { resource, scopeLogs };
+}
+
+/** Decode an OTLP/protobuf ExportLogsServiceRequest into the OtlpLogsPayload shape. */
+export function decodeOtlpLogs(bytes: Uint8Array): OtlpLogsPayload {
+  const r = new PbReader(bytes);
+  const resourceLogs: OtlpLogsPayload["resourceLogs"] = [];
+  while (!r.done) {
+    const { field, wire } = r.tag();
+    if (field === 1 && wire === 2) resourceLogs?.push(decodeResourceLogs(r.bytes()));
+    else r.skip(wire);
+  }
+  return { resourceLogs };
 }
 
 function attrValue(a: OtlpAttr): unknown {
@@ -566,6 +637,117 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
             },
           });
         }
+      }
+    }
+  }
+
+  return events;
+}
+
+// ── OTLP logs → ingest events ────────────────────────────────────────────────────
+
+// OTel log severity numbers: 1-4 TRACE, 5-8 DEBUG, 9-12 INFO, 13-16 WARN, 17-24 ERROR/FATAL.
+function severityToLevel(n: number | undefined): "DEBUG" | "DEFAULT" | "WARNING" | "ERROR" {
+  if (n === undefined) return "DEFAULT";
+  if (n >= 17) return "ERROR";
+  if (n >= 13) return "WARNING";
+  if (n >= 1 && n <= 8) return "DEBUG";
+  return "DEFAULT";
+}
+
+/** An unset OTLP id is absent, empty, or all zero bytes (hex-encoded here). */
+const realId = (id: string | undefined): string | undefined => (id && !/^0+$/.test(id) ? id : undefined);
+
+/**
+ * Maps OTLP log records to EVENT observations. This exists chiefly for Claude Code, whose
+ * verbatim user-prompt and assistant-response text ship ONLY as log events (never on spans),
+ * but the mapping is generic: any OTLP log record becomes an EVENT.
+ *
+ * Trace correlation, in order:
+ *  1. The record's own traceId, when set — the event lands inside the real trace (no
+ *     trace-create emitted; the span export owns that trace).
+ *  2. A deterministic per-session trace (`otel-logs:<session.id>`) — Claude Code's log
+ *     records carry no trace context, only `session.id`, so a session's log events group
+ *     into one synthetic trace that sits next to the span-derived traces in the session view.
+ *  3. A per-export fallback trace, so records with neither are still ingested, not dropped.
+ *
+ * Claude Code event specifics (matched by event-name suffix, so both the bare `user_prompt`
+ * `event.name` attr and a namespaced `claude_code.user_prompt` work): the prompt text becomes
+ * the event's input, the assistant response text its output, and `api_error` maps to ERROR.
+ */
+export function otlpLogsToEvents(payload: OtlpLogsPayload): IngestEvent[] {
+  const events: IngestEvent[] = [];
+  const seenSyntheticTraces = new Set<string>();
+
+  for (const rl of payload.resourceLogs ?? []) {
+    const resourceAttrs: Record<string, unknown> = {};
+    for (const a of rl.resource?.attributes ?? []) resourceAttrs[a.key] = attrValue(a);
+    const environment = str(
+      resourceAttrs["deployment.environment.name"] ?? resourceAttrs["deployment.environment"] ?? "default",
+    ) as string;
+    const release = str(resourceAttrs["service.version"]);
+    const serviceName = str(resourceAttrs["service.name"]) ?? "otel";
+    // Fallback trace for records with no trace context AND no session — one per export batch.
+    const batchTraceId = newId();
+
+    for (const sl of rl.scopeLogs ?? []) {
+      for (const rec of sl.logRecords ?? []) {
+        const attrs: Record<string, unknown> = {};
+        for (const a of rec.attributes ?? []) attrs[a.key] = attrValue(a);
+        const time = nanoToIso(rec.timeUnixNano ?? rec.observedTimeUnixNano) ?? new Date().toISOString();
+        const bodyText = rec.body ? str(attrValue({ key: "", value: rec.body })) : undefined;
+        const name = rec.eventName ?? str(attrs["event.name"]) ?? rec.severityText?.toLowerCase() ?? "log";
+        const sessionId = str(attrs["session.id"] ?? resourceAttrs["session.id"]);
+        const userId = str(attrs["gen_ai.user.id"] ?? attrs["enduser.id"] ?? attrs["user.id"] ?? attrs["user.email"]);
+
+        const ownTraceId = realId(rec.traceId);
+        const traceId = ownTraceId ?? (sessionId ? `otel-logs:${sessionId}` : batchTraceId);
+        // Synthetic traces need a trace-create; a record's own trace is created by the span export.
+        if (!ownTraceId && !seenSyntheticTraces.has(traceId)) {
+          seenSyntheticTraces.add(traceId);
+          events.push({
+            id: newId(),
+            type: "trace-create",
+            timestamp: time,
+            body: { id: traceId, name: `${serviceName} logs`, environment, release, sessionId, userId },
+          });
+        }
+
+        // Claude Code event-specific IO: prompt text → input, response text → output. Suffix
+        // match covers both the bare event.name ("user_prompt") and namespaced variants.
+        let input: unknown;
+        let output: unknown = bodyText;
+        let level = severityToLevel(rec.severityNumber);
+        if (name.endsWith("user_prompt")) {
+          input = attrs["prompt"] ?? undefined;
+          output = undefined;
+        } else if (name.endsWith("assistant_response")) {
+          output = bodyText ?? attrs["response"] ?? attrs["message"];
+        } else if (name.endsWith("api_error")) {
+          level = "ERROR";
+        } else if (name.endsWith("tool_result") && attrs["success"] === false && level === "DEFAULT") {
+          level = "WARNING";
+        }
+
+        events.push({
+          id: newId(),
+          type: "event-create",
+          timestamp: time,
+          body: {
+            id: newId(),
+            traceId,
+            parentObservationId: realId(rec.spanId),
+            name,
+            startTime: time,
+            environment,
+            level,
+            // Bounded: an oversized error string must not 400 the whole export at validation.
+            statusMessage: str(attrs["error"])?.slice(0, MAX_MESSAGE_LEN),
+            metadata: { ...attrs, ...(rec.severityText ? { "log.severity": rec.severityText } : {}) },
+            ...(input !== undefined && { input }),
+            ...(output !== undefined && { output }),
+          },
+        });
       }
     }
   }

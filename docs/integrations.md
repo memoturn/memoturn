@@ -16,7 +16,31 @@ Content-Type: application/json
 Spans carrying GenAI semantic-convention attributes (`gen_ai.*`) become **generations**
 (model, provider, token usage mapped); other spans become **spans**. This is the
 zero-lock-in path for frameworks that emit OTel (LlamaIndex, Pydantic AI, Semantic
-Kernel, etc.). OTLP/protobuf support is planned.
+Kernel, etc.). Both OTLP/HTTP encodings are accepted: `application/json` and
+`application/x-protobuf` (the OTLP default).
+
+There is also an OTLP **logs** receiver at `POST /v1/otel/v1/logs` (same auth + encodings).
+Log records become **EVENT observations**: a record carrying trace context lands inside its
+trace; records without it (common — many emitters attach only a `session.id`) group into a
+per-session `otel-logs:<session.id>` trace that sits alongside the span-derived traces in
+the session view. Log severity maps to the observation level (WARN → WARNING, ERROR/FATAL →
+ERROR).
+
+### Claude Code
+
+Claude Code emits OTel natively, so Memoturn can observe your coding sessions: spans carry
+the interaction/LLM-call/tool structure with token + cache usage (cost is computed from the
+model registry), and log events carry the verbatim prompt/response text (`user_prompt` →
+event input, `assistant_response` → event output, `api_error` → ERROR):
+
+```bash
+export CLAUDE_CODE_ENABLE_TELEMETRY=1 CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1
+export OTEL_TRACES_EXPORTER=otlp OTEL_LOGS_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_ENDPOINT=https://your-memoturn.example.com/v1/otel
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic $(printf 'pk-…:sk-…' | base64)"
+export OTEL_LOG_USER_PROMPTS=1 OTEL_LOG_TOOL_DETAILS=1   # opt-in: include prompt/tool text
+```
 
 MCP semantic-convention spans are surfaced first-class: `mcp.session.id` maps to the trace
 session, and a `tools/call` span is named after the tool (`mcp:<tool>`, or `mcp:<method>` for

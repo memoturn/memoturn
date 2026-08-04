@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeOtlpTraces, otlpToEvents } from "./otel.js";
+import { decodeOtlpLogs, decodeOtlpTraces, otlpLogsToEvents, otlpToEvents } from "./otel.js";
 
 // A JSON OTLP payload with resource attrs + a GenAI span (mirrors what an OTLP/JSON
 // exporter sends). The same logical payload is encoded to protobuf below.
@@ -605,5 +605,173 @@ describe("decodeOtlpTraces (protobuf)", () => {
     expect(score.dataType).toBe("NUMERIC");
     expect(score.value).toBe(0.75);
     expect(score.source).toBe("EVAL");
+  });
+});
+
+// ── OTLP logs → events ───────────────────────────────────────────────────────────
+
+// Claude Code-shaped OTLP/JSON logs export: no trace context on records, session.id on
+// every record, prompt/response text on the two events that carry it.
+const jsonLogsPayload = {
+  resourceLogs: [
+    {
+      resource: {
+        attributes: [
+          { key: "service.name", value: { stringValue: "claude-code" } },
+          { key: "deployment.environment.name", value: { stringValue: "staging" } },
+        ],
+      },
+      scopeLogs: [
+        {
+          logRecords: [
+            {
+              timeUnixNano: "1700000000000000000",
+              severityNumber: 9,
+              attributes: [
+                { key: "event.name", value: { stringValue: "user_prompt" } },
+                { key: "session.id", value: { stringValue: "sess-1" } },
+                { key: "user.id", value: { stringValue: "user-7" } },
+                { key: "prompt", value: { stringValue: "fix the bug" } },
+              ],
+            },
+            {
+              timeUnixNano: "1700000001000000000",
+              severityNumber: 9,
+              body: { stringValue: "I fixed the bug by …" },
+              attributes: [
+                { key: "event.name", value: { stringValue: "claude_code.assistant_response" } },
+                { key: "session.id", value: { stringValue: "sess-1" } },
+              ],
+            },
+            {
+              timeUnixNano: "1700000002000000000",
+              severityNumber: 9,
+              attributes: [
+                { key: "event.name", value: { stringValue: "api_error" } },
+                { key: "session.id", value: { stringValue: "sess-1" } },
+                { key: "error", value: { stringValue: "overloaded_error" } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+const logBody = (e: { body: unknown }) => e.body as Record<string, unknown>;
+
+describe("otlpLogsToEvents (JSON)", () => {
+  it("groups session-scoped records into one synthetic trace with session/user identity", () => {
+    const events = otlpLogsToEvents(jsonLogsPayload);
+    const traces = events.filter((e) => e.type === "trace-create");
+    expect(traces).toHaveLength(1);
+    const trace = logBody(traces[0] as { body: unknown });
+    expect(trace.id).toBe("otel-logs:sess-1");
+    expect(trace.name).toBe("claude-code logs");
+    expect(trace.sessionId).toBe("sess-1");
+    expect(trace.userId).toBe("user-7");
+    expect(trace.environment).toBe("staging");
+    for (const ev of events.filter((e) => e.type === "event-create")) {
+      expect(logBody(ev).traceId).toBe("otel-logs:sess-1");
+    }
+  });
+
+  it("maps prompt text to input and response text to output", () => {
+    const events = otlpLogsToEvents(jsonLogsPayload).filter((e) => e.type === "event-create");
+    const prompt = events.map(logBody).find((b) => b.name === "user_prompt");
+    expect(prompt?.input).toBe("fix the bug");
+    expect(prompt?.output).toBeUndefined();
+    const response = events.map(logBody).find((b) => b.name === "claude_code.assistant_response");
+    expect(response?.output).toBe("I fixed the bug by …");
+  });
+
+  it("maps api_error to an ERROR event with the error as statusMessage", () => {
+    const events = otlpLogsToEvents(jsonLogsPayload).filter((e) => e.type === "event-create");
+    const err = events.map(logBody).find((b) => b.name === "api_error");
+    expect(err?.level).toBe("ERROR");
+    expect(err?.statusMessage).toBe("overloaded_error");
+  });
+
+  it("attaches records carrying trace context to the real trace without a trace-create", () => {
+    const events = otlpLogsToEvents({
+      resourceLogs: [
+        {
+          scopeLogs: [
+            {
+              logRecords: [
+                {
+                  timeUnixNano: "1700000000000000000",
+                  body: { stringValue: "hello" },
+                  traceId: "0af7651916cd43dd8448eb211c80319c",
+                  spanId: "b7ad6b7169203331",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(events.filter((e) => e.type === "trace-create")).toHaveLength(0);
+    const ev = logBody(events[0] as { body: unknown });
+    expect(ev.traceId).toBe("0af7651916cd43dd8448eb211c80319c");
+    expect(ev.parentObservationId).toBe("b7ad6b7169203331");
+    expect(ev.output).toBe("hello");
+  });
+
+  it("treats an all-zero trace id as unset and falls back to a per-export trace", () => {
+    const events = otlpLogsToEvents({
+      resourceLogs: [
+        {
+          scopeLogs: [
+            {
+              logRecords: [
+                {
+                  timeUnixNano: "1700000000000000000",
+                  severityNumber: 17,
+                  traceId: "0".repeat(32),
+                  severityText: "ERROR",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const traces = events.filter((e) => e.type === "trace-create");
+    expect(traces).toHaveLength(1);
+    const ev = events.filter((e) => e.type === "event-create").map(logBody)[0];
+    expect(ev?.traceId).toBe(logBody(traces[0] as { body: unknown }).id);
+    expect(ev?.level).toBe("ERROR");
+    expect(ev?.name).toBe("error"); // severityText fallback, lowercased
+  });
+});
+
+// Inverse of decodeOtlpLogs for round-trip testing, reusing the shared field helpers.
+function encodeProtobufLogs(): Uint8Array {
+  const record = [
+    ...fixed64(1, 1700000001000000000n), // time_unix_nano
+    ...[...tag(2, 0), ...varint(9)], // severity_number = INFO
+    ...strField(3, "INFO"),
+    ...lenDelim(5, anyStr("I fixed the bug by …")), // body AnyValue
+    ...lenDelim(6, kv("session.id", anyStr("sess-1"))),
+    ...lenDelim(6, kv("event.name", anyStr("assistant_response"))),
+  ];
+  const scopeLogs = lenDelim(2, lenDelim(2, record)); // ResourceLogs.scope_logs → ScopeLogs.log_records
+  const resource = lenDelim(1, lenDelim(1, kv("service.name", anyStr("claude-code"))));
+  return new Uint8Array(lenDelim(1, [...resource, ...scopeLogs]));
+}
+
+describe("decodeOtlpLogs (protobuf)", () => {
+  it("round-trips an ExportLogsServiceRequest into the same mapped events as JSON", () => {
+    const events = otlpLogsToEvents(decodeOtlpLogs(encodeProtobufLogs()));
+    const trace = events.filter((e) => e.type === "trace-create").map(logBody)[0];
+    expect(trace?.id).toBe("otel-logs:sess-1");
+    expect(trace?.name).toBe("claude-code logs");
+    const ev = events.filter((e) => e.type === "event-create").map(logBody)[0];
+    expect(ev?.name).toBe("assistant_response");
+    expect(ev?.output).toBe("I fixed the bug by …");
+    expect(ev?.startTime).toBe("2023-11-14T22:13:21.000Z");
+    expect((ev?.metadata as Record<string, unknown>)["log.severity"]).toBe("INFO");
   });
 });
