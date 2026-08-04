@@ -25,7 +25,8 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | Method | Path | Description |
 | --- | --- | --- |
 | POST | `/v1/ingest` | Batched events (`trace-create`, `span/generation-create/update`, `event-create`, `score-create`). Returns `207` with per-event results: schema-invalid events are rejected individually in `errors` (id, index, reason) while valid events are accepted — inspect `errors` to catch silent data loss. Per-event `input`/`output`/`metadata` JSON capped at 1 MB (400 on oversize). Returns `429` when the per-project event rate limit (`INGEST_EVENTS_PER_MINUTE`) is exceeded; `Retry-After` header indicates when to retry. |
-| POST | `/v1/otel/v1/traces` | OpenTelemetry OTLP/HTTP (JSON) receiver; maps GenAI semconv spans. |
+| POST | `/v1/otel/v1/traces` | OpenTelemetry OTLP/HTTP (JSON + protobuf) receiver; maps GenAI semconv spans. |
+| POST | `/v1/otel/v1/logs` | OTLP/HTTP logs receiver (JSON + protobuf); log records become EVENT observations (e.g. Claude Code prompt/response text). |
 | GET | `/v1/ingest/health` | Ingest-pipeline health for the ops console: DLQ depth, insert latency, error counters, recent failed batches. OWNER/ADMIN only. |
 | POST | `/v1/ingest/dlq/replay` | Re-enqueue dead-lettered batches from blob onto the ingest queue. Body: `{ limit? }`. OWNER/ADMIN only; audited. |
 | GET | `/health` | Liveness probe (public, unauthenticated) — `{ status: "ok" }`. |
