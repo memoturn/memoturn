@@ -814,10 +814,12 @@ function AddToDatasetButton({ obs }: { obs: ObservationDetail }) {
   );
 }
 
-/** The input/output/retrieval/status body for one observation — the master-detail pane's content. */
-function ObservationPayloadContent({ obs }: { obs: ObservationDetail }) {
+/** The input/output/retrieval/status body for one observation — the master-detail pane's content.
+ *  `siblings` (the trace's full observation list) powers the reranker before/after pairing. */
+function ObservationPayloadContent({ obs, siblings }: { obs: ObservationDetail; siblings: ObservationDetail[] }) {
   return (
     <div className="space-y-3">
+      {obs.type === "GUARDRAIL" && <GuardrailPanel obs={obs} />}
       {obs.type === "GENERATION" && obs.input && (
         <div className="flex flex-wrap justify-end gap-2">
           <AddToDatasetButton obs={obs} />
@@ -843,7 +845,12 @@ function ObservationPayloadContent({ obs }: { obs: ObservationDetail }) {
           <PayloadView raw={obs.output} />
         </div>
       )}
-      {obs.retrieval_documents.length > 0 && <RetrievalDocs docs={obs.retrieval_documents} />}
+      {obs.retrieval_documents.length > 0 &&
+        (obs.type === "RERANKER" ? (
+          <RerankerDocs obs={obs} siblings={siblings} />
+        ) : (
+          <RetrievalDocs docs={obs.retrieval_documents} />
+        ))}
       {obs.status_message && (
         <div className="space-y-1">
           <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Status</div>
@@ -855,7 +862,7 @@ function ObservationPayloadContent({ obs }: { obs: ObservationDetail }) {
 }
 
 /** The selected observation's payload with an identifying header — the detail half of the split. */
-function ObservationDetailPanel({ obs }: { obs: ObservationDetail }) {
+function ObservationDetailPanel({ obs, siblings }: { obs: ObservationDetail; siblings: ObservationDetail[] }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2 border-b pb-3">
@@ -878,7 +885,7 @@ function ObservationDetailPanel({ obs }: { obs: ObservationDetail }) {
           </Link>
         )}
       </div>
-      <ObservationPayloadContent obs={obs} />
+      <ObservationPayloadContent obs={obs} siblings={siblings} />
     </div>
   );
 }
@@ -902,6 +909,212 @@ function RetrievalDocs({ docs }: { docs: ObservationDetail["retrieval_documents"
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Reranked documents for a RERANKER span. Beyond the plain ranked list, this pairs each doc
+ * against the trace's RETRIEVER stage (parent → same-parent sibling → nearest earlier, by
+ * doc_id, falling back to exact content) to show rank movement — the question a reranker
+ * panel exists to answer. Pairing is best-effort: with no retriever stage or no matchable
+ * ids, it degrades to ranks + score bars.
+ */
+function RerankerDocs({ obs, siblings }: { obs: ObservationDetail; siblings: ObservationDetail[] }) {
+  const docs = obs.retrieval_documents;
+  const retriever = useMemo(() => {
+    const candidates = siblings.filter(
+      (s) => s.id !== obs.id && s.type === "RETRIEVER" && s.retrieval_documents.length > 0,
+    );
+    return (
+      candidates.find((s) => s.id === obs.parent_observation_id) ??
+      candidates.find((s) => s.parent_observation_id === obs.parent_observation_id) ??
+      candidates.filter((s) => s.start_time <= obs.start_time).sort((a, b) => (a.start_time < b.start_time ? 1 : -1))[0]
+    );
+  }, [obs, siblings]);
+
+  const priorRank = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const d of retriever?.retrieval_documents ?? []) {
+      if (d.doc_id) map.set(`id:${d.doc_id}`, d.rank);
+      map.set(`content:${d.content}`, d.rank);
+    }
+    return (d: ObservationDetail["retrieval_documents"][number]): number | undefined =>
+      (d.doc_id ? map.get(`id:${d.doc_id}`) : undefined) ?? map.get(`content:${d.content}`);
+  }, [retriever]);
+
+  const scores = docs.map((d) => d.score).filter((s): s is number => s != null);
+  const minScore = Math.min(...scores);
+  const maxScore = Math.max(...scores);
+  const scoreFrac = (s: number) => (maxScore === minScore ? 1 : (s - minScore) / (maxScore - minScore));
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline gap-2 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+        <span>Reranked documents ({docs.length})</span>
+        {retriever && (
+          <span className="normal-case tracking-normal">
+            kept {docs.length} of {retriever.retrieval_documents.length} retrieved
+          </span>
+        )}
+      </div>
+      <div className="space-y-1.5">
+        {docs.map((d) => {
+          const prior = priorRank(d);
+          const delta = prior === undefined ? undefined : prior - d.rank;
+          return (
+            <div key={d.rank} className="rounded-md border p-2">
+              <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+                <KindBadge tone="teal">#{d.rank}</KindBadge>
+                {retriever &&
+                  (delta === undefined ? (
+                    <KindBadge tone="neutral">new</KindBadge>
+                  ) : delta !== 0 ? (
+                    <KindBadge tone={delta > 0 ? "green" : "amber"}>{delta > 0 ? `↑${delta}` : `↓${-delta}`}</KindBadge>
+                  ) : (
+                    <span>=</span>
+                  ))}
+                {d.score != null && (
+                  <span className="inline-flex items-center gap-1.5">
+                    score {d.score.toFixed(4)}
+                    <span className="inline-block h-1 w-14 overflow-hidden rounded bg-muted">
+                      <span
+                        className="block h-full rounded bg-teal-500"
+                        style={{ width: `${Math.round(scoreFrac(d.score) * 100)}%` }}
+                      />
+                    </span>
+                  </span>
+                )}
+                {d.doc_id && <span className="truncate">· {d.doc_id}</span>}
+              </div>
+              <pre className={PRE_CLASS}>{d.content}</pre>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Tolerant guardrail-metadata shape: memoturn's own verdict keys plus common ecosystem ones. */
+interface GuardrailMeta {
+  verdict?: string;
+  findings?: { category?: string; type?: string; count?: number; score?: number }[];
+  redactedText?: string;
+  rest: [string, string][];
+}
+
+/**
+ * Parse a GUARDRAIL observation's metadata by convention. Guardrail spans come from many
+ * producers (OpenInference GUARDRAIL kind, framework instrumentations) with no standard
+ * verdict schema, so this recognizes memoturn's `/v1/guardrails/check` shape
+ * (verdict/findings/redactedText) plus common boolean conventions (passed/blocked), and
+ * surfaces whatever else is present as key/value rows.
+ */
+function parseGuardrailMeta(metadata: string, level: string): GuardrailMeta {
+  const out: GuardrailMeta = { rest: [] };
+  let obj: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(metadata || "{}") as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) obj = parsed as Record<string, unknown>;
+  } catch {
+    return out;
+  }
+  const consumed = new Set<string>();
+  const take = (k: string): unknown => {
+    consumed.add(k);
+    return obj[k];
+  };
+
+  for (const key of ["verdict", "decision", "guardrail.decision"]) {
+    if (typeof obj[key] === "string") {
+      out.verdict = String(take(key)).toLowerCase();
+      break;
+    }
+  }
+  if (!out.verdict) {
+    for (const [key, blockedWhen] of [
+      ["passed", false],
+      ["blocked", true],
+      ["triggered", true],
+    ] as const) {
+      if (typeof obj[key] === "boolean") {
+        out.verdict = take(key) === blockedWhen ? "block" : "allow";
+        break;
+      }
+    }
+  }
+  if (!out.verdict && level === "ERROR") out.verdict = "block";
+
+  if (Array.isArray(obj.findings)) {
+    out.findings = (take("findings") as GuardrailMeta["findings"] & unknown[]).filter(
+      (f): f is NonNullable<GuardrailMeta["findings"]>[number] => !!f && typeof f === "object",
+    );
+  }
+  for (const key of ["redactedText", "redacted_text"]) {
+    if (typeof obj[key] === "string") {
+      out.redactedText = String(take(key));
+      break;
+    }
+  }
+
+  for (const [k, v] of Object.entries(obj)) {
+    if (consumed.has(k)) continue;
+    if (v === null || typeof v === "object") continue;
+    out.rest.push([k, String(v)]);
+  }
+  return out;
+}
+
+const VERDICT_TONE: Record<string, KindBadgeTone> = {
+  allow: "green",
+  pass: "green",
+  redact: "amber",
+  warn: "amber",
+  block: "rose",
+  fail: "rose",
+  deny: "rose",
+};
+
+/** Structured guardrail verdict panel: verdict badge, findings, redaction, leftover metadata. */
+function GuardrailPanel({ obs }: { obs: ObservationDetail }) {
+  const meta = useMemo(() => parseGuardrailMeta(obs.metadata, obs.level), [obs]);
+  if (!meta.verdict && !meta.findings && meta.rest.length === 0) return null;
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Guardrail</span>
+        {meta.verdict && <KindBadge tone={VERDICT_TONE[meta.verdict] ?? "neutral"}>{meta.verdict}</KindBadge>}
+      </div>
+      {meta.findings && meta.findings.length > 0 && (
+        <div className="space-y-1">
+          {meta.findings.map((f, i) => (
+            <div key={`${f.category}-${f.type}-${i}`} className="flex flex-wrap items-center gap-2 text-xs">
+              {f.category && <KindBadge tone="rose">{f.category}</KindBadge>}
+              <span>{f.type ?? "finding"}</span>
+              {f.count != null && f.count > 1 && <span className="text-muted-foreground">×{f.count}</span>}
+              {f.score != null && <span className="text-muted-foreground">score {Number(f.score).toFixed(3)}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {meta.redactedText && (
+        <div className="space-y-1">
+          <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+            Redacted text
+          </div>
+          <pre className={PRE_CLASS}>{meta.redactedText}</pre>
+        </div>
+      )}
+      {meta.rest.length > 0 && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          {meta.rest.map(([k, v]) => (
+            <span key={k}>
+              <span className="font-medium">{k}:</span> {v}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1831,7 +2044,7 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
               </CardHeader>
               <CardContent>
                 {selectedObs ? (
-                  <ObservationDetailPanel obs={selectedObs} />
+                  <ObservationDetailPanel obs={selectedObs} siblings={trace.observations} />
                 ) : (
                   <EmptyState title="No payloads to show." />
                 )}

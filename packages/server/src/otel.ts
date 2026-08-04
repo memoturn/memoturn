@@ -485,7 +485,7 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
         // Claude Code emits generic `claude_code.tool` spans; name them after the actual tool so
         // they land in by-tool analytics instead of all reading "claude_code.tool".
         const ccToolName =
-          span.name === "claude_code.tool" ? (str(attrs["tool_name"]) ?? str(attrs["gen_ai.tool.name"])) : undefined;
+          span.name === "claude_code.tool" ? (str(attrs.tool_name) ?? str(attrs["gen_ai.tool.name"])) : undefined;
 
         if (!seenTraces.has(span.traceId)) {
           seenTraces.add(span.traceId);
@@ -525,7 +525,7 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
               attrs["gen_ai.usage.prompt_tokens"] ??
               attrs["llm.token_count.prompt"] ??
               attrs["ai.usage.promptTokens"] ??
-              attrs["input_tokens"] ?? // Claude Code emits bare input_tokens / output_tokens
+              attrs.input_tokens ?? // Claude Code emits bare input_tokens / output_tokens
               0,
           );
           const completionTokens = Number(
@@ -533,16 +533,14 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
               attrs["gen_ai.usage.completion_tokens"] ??
               attrs["llm.token_count.completion"] ??
               attrs["ai.usage.completionTokens"] ??
-              attrs["output_tokens"] ??
+              attrs.output_tokens ??
               0,
           );
           // Prompt-cache usage — Anthropic/Claude Code report these as bare keys; newer gen_ai
           // semconv uses gen_ai.usage.cache_read_input_tokens. Both feed cost + the usage split.
-          const cacheReadTokens = Number(
-            attrs["gen_ai.usage.cache_read_input_tokens"] ?? attrs["cache_read_tokens"] ?? 0,
-          );
+          const cacheReadTokens = Number(attrs["gen_ai.usage.cache_read_input_tokens"] ?? attrs.cache_read_tokens ?? 0);
           const cacheCreationTokens = Number(
-            attrs["gen_ai.usage.cache_creation_input_tokens"] ?? attrs["cache_creation_tokens"] ?? 0,
+            attrs["gen_ai.usage.cache_creation_input_tokens"] ?? attrs.cache_creation_tokens ?? 0,
           );
           events.push({
             id: newId(),
@@ -719,13 +717,13 @@ export function otlpLogsToEvents(payload: OtlpLogsPayload): IngestEvent[] {
         let output: unknown = bodyText;
         let level = severityToLevel(rec.severityNumber);
         if (name.endsWith("user_prompt")) {
-          input = attrs["prompt"] ?? undefined;
+          input = attrs.prompt ?? undefined;
           output = undefined;
         } else if (name.endsWith("assistant_response")) {
-          output = bodyText ?? attrs["response"] ?? attrs["message"];
+          output = bodyText ?? attrs.response ?? attrs.message;
         } else if (name.endsWith("api_error")) {
           level = "ERROR";
-        } else if (name.endsWith("tool_result") && attrs["success"] === false && level === "DEFAULT") {
+        } else if (name.endsWith("tool_result") && attrs.success === false && level === "DEFAULT") {
           level = "WARNING";
         }
 
@@ -742,7 +740,7 @@ export function otlpLogsToEvents(payload: OtlpLogsPayload): IngestEvent[] {
             environment,
             level,
             // Bounded: an oversized error string must not 400 the whole export at validation.
-            statusMessage: str(attrs["error"])?.slice(0, MAX_MESSAGE_LEN),
+            statusMessage: str(attrs.error)?.slice(0, MAX_MESSAGE_LEN),
             metadata: { ...attrs, ...(rec.severityText ? { "log.severity": rec.severityText } : {}) },
             ...(input !== undefined && { input }),
             ...(output !== undefined && { output }),
