@@ -63,6 +63,7 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | `EMBEDDING_PROJECTION_DAYS` | `30` | Lookback window for the daily embedding-projection reduction. |
 | `EMBEDDING_PROJECTION_MAX_POINTS` | `5000` | Cap on points per projection run. |
 | `EMBEDDING_PROJECTION_CLUSTERS` | `8` | k-means cluster count for the projection. |
+| `EMBEDDING_PROJECTION_METHOD` | `umap` | Reduction algorithm: `umap` (seeded, deterministic) or `pca`. Sets below 30 points always use PCA. |
 | `SIMILAR_TRACES_SEED_CAP` | `8` | Max seed vectors compared per "find similar traces" query (each adds a distance term to the Doris SQL). |
 
 ## Blob storage (S3-compatible)

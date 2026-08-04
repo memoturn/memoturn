@@ -136,7 +136,7 @@ const maintenanceWorker = new Worker(
       });
       if (ran === null) console.log("[export] skipped — another run holds the lock");
     } else if (job.name === "embeddings") {
-      // Lock so overlapping runs don't race (UMAP-free PCA is deterministic, but two
+      // Lock so overlapping runs don't race (the seeded reduction is deterministic, but two
       // concurrent runs would still write competing run_ids).
       const ran = await withLock("embedding-projection", 30 * 60, async () => {
         const results = await runAllEmbeddingProjections();

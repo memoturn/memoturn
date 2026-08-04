@@ -2,21 +2,29 @@ import type { EmbeddingProjection, SimilarTrace } from "@memoturn/contracts";
 import { isoNow, newId } from "@memoturn/core";
 import { prisma } from "@memoturn/db";
 import { type EmbeddingProjectionRow, telemetry } from "@memoturn/telemetry";
+import { UMAP } from "umap-js";
 
 /**
- * Embeddings analysis. The worker reduces high-dimensional observation vectors to 2D and
+ * Embeddings analysis. The worker reduces high-dimensional observation vectors to 3D and
  * clusters them into a scatter/cluster view that surfaces outliers. Reduction runs offline
  * (a daily worker cron) and writes coordinates to the telemetry store; the console reads
  * them back and can color points by an eval score to find problematic clusters.
  *
- * Reduction uses PCA (top-2 principal components via power iteration) — dependency-free and
- * DETERMINISTIC, so unlike UMAP the layout doesn't jump between runs. Clustering is a small
- * deterministic k-means. Both are pure TS (the stack has no Python worker).
+ * Reduction defaults to UMAP (umap-js) with an INJECTED SEEDED RNG, so identical inputs
+ * produce an identical layout run-to-run — the historical objection to UMAP here. Small
+ * point sets (< MIN_UMAP_POINTS, where neighbor structure is meaningless) and
+ * `EMBEDDING_PROJECTION_METHOD=pca` fall back to the dependency-free PCA (top principal
+ * components via power iteration). Clustering is a small deterministic k-means. Each row
+ * records which method produced it (`umap3d` / `pca3d`).
  */
 
 const DEFAULT_DAYS = Number(process.env.EMBEDDING_PROJECTION_DAYS ?? 30);
 const MAX_POINTS = Number(process.env.EMBEDDING_PROJECTION_MAX_POINTS ?? 5000);
 const CLUSTERS = Number(process.env.EMBEDDING_PROJECTION_CLUSTERS ?? 8);
+/** `umap` (default) or `pca`. */
+const METHOD = (process.env.EMBEDDING_PROJECTION_METHOD ?? "umap").toLowerCase();
+/** Below this, UMAP's neighbor graph is meaningless — PCA reads better and is instant. */
+const MIN_UMAP_POINTS = 30;
 
 function dot(a: number[], b: number[]): number {
   let s = 0;
@@ -160,13 +168,47 @@ export function kmeans2d(points: [number, number][], k: number): number[] {
   return assign;
 }
 
+/** Deterministic PRNG (mulberry32) — injected into UMAP so layouts are stable across runs. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** UMAP → 3D with a seeded RNG (deterministic for identical inputs). One [x,y,z] per row. */
+export function umap3d(vectors: number[][]): [number, number, number][] {
+  const umap = new UMAP({
+    nComponents: 3,
+    nNeighbors: Math.min(15, vectors.length - 1),
+    minDist: 0.1,
+    random: mulberry32(42),
+  });
+  return umap.fit(vectors).map((c) => [c[0] ?? 0, c[1] ?? 0, c[2] ?? 0]);
+}
+
+/**
+ * Reduce vectors to 3D, choosing the method: UMAP by default (seeded → deterministic),
+ * PCA when configured or when the set is too small for a meaningful neighbor graph.
+ */
+export function reduce3d(vectors: number[][]): { coords: [number, number, number][]; method: string } {
+  if (METHOD !== "pca" && vectors.length >= MIN_UMAP_POINTS) {
+    return { coords: umap3d(vectors), method: "umap3d" };
+  }
+  return { coords: pca3d(vectors), method: "pca3d" };
+}
+
 /** Compute a fresh projection run for one project. Returns the run id + point count. */
 export async function runProjectionForProject(projectId: string): Promise<{ runId: string; points: number } | null> {
   const store = telemetry();
   const vectors = await store.listEmbeddingsForProjection(projectId, { days: DEFAULT_DAYS, limit: MAX_POINTS });
   if (vectors.length < 2) return null; // nothing meaningful to project
 
-  const coords = pca3d(vectors.map((v) => v.vector));
+  const { coords, method } = reduce3d(vectors.map((v) => v.vector));
   const clusters = kmeans(coords, CLUSTERS);
   const runId = newId().slice(0, 36);
   const ts = isoNow();
@@ -179,7 +221,7 @@ export async function runProjectionForProject(projectId: string): Promise<{ runI
     y: coords[i]?.[1] ?? 0,
     z: coords[i]?.[2] ?? 0,
     cluster_id: clusters[i] ?? -1,
-    method: "pca3d",
+    method,
     event_ts: ts,
   }));
   await store.insertRows("embedding_projections", rows);
