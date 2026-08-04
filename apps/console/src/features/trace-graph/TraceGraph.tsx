@@ -1,21 +1,21 @@
 import type { ObservationDetail } from "@memoturn/contracts";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../../components/empty-state";
 import { Button } from "../../components/ui/button";
 import { buildGraph, END, type GraphMode, type GraphObs, START } from "./build-graph";
+import { elkLayoutGraph, GAP_X, GAP_Y, NODE_H, NODE_W, type PixelLayout } from "./elk-layout";
 
 /**
  * Agent-flow graph for a trace — a layered node/edge diagram derived from the observation tree
  * (see build-graph.ts). Aggregated collapses repeated node names (×N, loops render as cycles);
  * Expanded shows one node per observation as an acyclic DAG. Rendered as HTML node boxes over an
- * SVG edge layer (no external graph library); node color tracks observation type.
+ * SVG edge layer. Node positions come from ELK's layered algorithm (crossing minimization);
+ * until that (lazily loaded) layout resolves, the hand-rolled longest-path layout renders so
+ * the graph appears instantly and ELK positions snap in.
  */
 
-const NODE_W = 150;
-const NODE_H = 40;
-const GAP_X = 28;
-const GAP_Y = 52;
-// Above this, a hand-rolled layered layout gets unreadable — steer to the other mode / waterfall.
+// ELK handles large graphs fine, but past this the *diagram* stops being readable — steer to
+// the other mode / waterfall.
 const MAX_NODES = 300;
 
 const NODE_TONE: Record<string, string> = {
@@ -52,8 +52,28 @@ export function TraceGraph({ observations }: { observations: ObservationDetail[]
   const [mode, setMode] = useState<GraphMode>("aggregated");
   const graph = useMemo(() => buildGraph(toGraphObs(observations), mode), [observations, mode]);
 
-  // Pixel layout: layers stack top→bottom; nodes within a layer spread left→right and are centered.
-  const { positions, width, height } = useMemo(() => {
+  // ELK layered layout (async, lazily loaded); null until it resolves or when it fails.
+  const [elkLayout, setElkLayout] = useState<PixelLayout | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setElkLayout(null);
+    if (graph.nodes.length === 0 || graph.nodes.length > MAX_NODES) return;
+    elkLayoutGraph(graph).then(
+      (l) => {
+        if (!cancelled) setElkLayout(l);
+      },
+      () => {
+        /* keep the fallback layout */
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [graph]);
+
+  // Fallback pixel layout (build-graph's layer/index): layers stack top→bottom; nodes within a
+  // layer spread left→right and are centered. Renders instantly while ELK computes.
+  const fallbackLayout = useMemo(() => {
     const byLayer = new Map<number, typeof graph.nodes>();
     for (const n of graph.nodes) {
       const arr = byLayer.get(n.layer) ?? [];
@@ -73,6 +93,8 @@ export function TraceGraph({ observations }: { observations: ObservationDetail[]
     const layers = Math.max(0, ...graph.nodes.map((n) => n.layer)) + 1;
     return { positions: pos, width: maxRow, height: layers * (NODE_H + GAP_Y) - GAP_Y };
   }, [graph]);
+
+  const { positions, width, height } = elkLayout ?? fallbackLayout;
 
   if (observations.length === 0) {
     return <EmptyState title="No observations to graph." />;
