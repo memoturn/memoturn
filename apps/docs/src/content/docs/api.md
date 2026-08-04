@@ -122,7 +122,7 @@ Server-executed experiments run a prompt/model across a dataset and auto-score e
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/v1/embeddings/projection` | 2D PCA projection of observation embeddings (clusters + optional `colorBy` score). Computed by the daily worker cron. Params: `runId?`, `colorBy?`, `limit?`. |
+| GET | `/v1/embeddings/projection` | 3D UMAP projection of observation embeddings (seeded/deterministic; PCA fallback for small sets or `EMBEDDING_PROJECTION_METHOD=pca`), with clusters + optional `colorBy` score. Computed by the daily worker cron. Params: `runId?`, `colorBy?`, `limit?`. |
 | POST | `/v1/embeddings/projection/run` | Recompute the projection on demand (instead of waiting for the daily cron). Audited. |
 
 ### Review queues

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kmeans, kmeans2d, pca2d, pca3d, pickDominantSpace } from "./embeddings.js";
+import { kmeans, kmeans2d, pca2d, pca3d, pickDominantSpace, reduce3d, umap3d } from "./embeddings.js";
 
 describe("embedding reduction", () => {
   it("pca2d returns 2D coords, deterministically, one per input", () => {
@@ -92,5 +92,57 @@ describe("pickDominantSpace", () => {
 
   it("returns null for no vectors", () => {
     expect(pickDominantSpace([])).toBeNull();
+  });
+});
+
+/** Two well-separated blobs in 8 dims — deterministic pseudo-noise (no RNG in the suite). */
+function blobs(n: number): number[][] {
+  const out: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const centre = i % 2 === 0 ? 0 : 10;
+    out.push(Array.from({ length: 8 }, (_, d) => centre + Math.sin(i * 13.37 + d * 7.7) * 0.5));
+  }
+  return out;
+}
+
+describe("umap3d", () => {
+  it("is deterministic: identical input produces an identical layout (seeded RNG)", () => {
+    const data = blobs(60);
+    const a = umap3d(data);
+    const b = umap3d(data);
+    expect(a).toEqual(b);
+    expect(a).toHaveLength(60);
+    for (const p of a) expect(p.every(Number.isFinite)).toBe(true);
+  });
+
+  it("separates well-separated clusters", () => {
+    const coords = umap3d(blobs(60));
+    const centroid = (idx: number[]) =>
+      idx
+        .map((i) => coords[i] as [number, number, number])
+        .reduce(
+          (acc, c) => [acc[0] + c[0] / idx.length, acc[1] + c[1] / idx.length, acc[2] + c[2] / idx.length],
+          [0, 0, 0],
+        );
+    const even = centroid([...Array(60).keys()].filter((i) => i % 2 === 0));
+    const odd = centroid([...Array(60).keys()].filter((i) => i % 2 === 1));
+    const dist = Math.hypot(even[0] - odd[0], even[1] - odd[1], even[2] - odd[2]);
+    // Intra-blob noise is ±0.5; the two blob centroids must end far apart in the embedding.
+    expect(dist).toBeGreaterThan(1);
+  });
+});
+
+describe("reduce3d", () => {
+  it("uses UMAP at/above the minimum point count and reports the method", () => {
+    const r = reduce3d(blobs(60));
+    expect(r.method).toBe("umap3d");
+    expect(r.coords).toHaveLength(60);
+  });
+
+  it("falls back to PCA below the minimum point count", () => {
+    const small = blobs(10);
+    const r = reduce3d(small);
+    expect(r.method).toBe("pca3d");
+    expect(r.coords).toEqual(pca3d(small));
   });
 });

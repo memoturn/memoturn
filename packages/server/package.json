@@ -25,7 +25,8 @@
     "@memoturn/llm": "workspace:*",
     "@memoturn/telemetry": "workspace:*",
     "better-auth": "^1.6.24",
-    "nodemailer": "^9.0.1"
+    "nodemailer": "^9.0.1",
+    "umap-js": "^1.4.0"
   },
   "devDependencies": {
     "@types/nodemailer": "^7.0.0",
