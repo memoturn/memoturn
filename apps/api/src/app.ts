@@ -85,6 +85,7 @@ import {
   getPromptDetail,
   getPromptVersionCosts,
   getRetention,
+  getRetrievalAnalytics,
   getReviewAnalytics,
   getSampling,
   getSandboxForUser,
@@ -338,6 +339,7 @@ app.use("/v1/evaluators/*", requireAuth);
 app.use("/v1/experiments", requireAuth);
 app.use("/v1/experiments/*", requireAuth);
 app.use("/v1/embeddings/*", requireAuth);
+app.use("/v1/retrieval/*", requireAuth);
 app.use("/v1/projects", requireAuth);
 app.use("/v1/projects/*", requireAuth);
 app.use("/v1/audit-logs", requireAuth);
@@ -2431,6 +2433,30 @@ app.openapi(
     if (!result) return c.json({ error: "experiment not found" }, 404);
     await recordAudit(c.get("projectId"), c.get("actor"), "experiment.cancel", `experiment:${id}`);
     return c.json(result);
+  },
+);
+
+// ── Retrieval diagnostics (RAG quality across traces) ────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/retrieval/analytics",
+    summary: "Cross-trace retrieval diagnostics: score distribution, weakest retrievals, per-document stats",
+    tags: ["embeddings"],
+    security,
+    request: {
+      query: z.object({
+        days: z.coerce.number().int().min(1).max(365).optional(),
+        limit: z.coerce.number().int().min(1).max(200).optional(),
+      }),
+    },
+    responses: {
+      200: { description: "Retrieval analytics", content: { "application/json": { schema: C.retrievalAnalytics } } },
+    },
+  }),
+  async (c) => {
+    const { days, limit } = c.req.valid("query");
+    return c.json(await getRetrievalAnalytics(c.get("projectId"), { days, limit }));
   },
 );
 

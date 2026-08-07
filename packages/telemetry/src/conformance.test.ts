@@ -688,6 +688,64 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(await store.getScoresByTraceIds(P, ["t1"])).toHaveLength(1);
   });
 
+  it("aggregates cross-trace retrieval diagnostics identically on both engines", async () => {
+    // Seed a second, clearly-weaker retrieval so "worst first" ordering is observable.
+    await store.insertRows("retrieval_documents", [
+      retrievalDoc({ observation_id: "o-weak", trace_id: "t1", rank: 0, doc_id: "docA", score: 0.12 }),
+      retrievalDoc({ observation_id: "o-weak", trace_id: "t1", rank: 1, doc_id: "docC", score: 0.05 }),
+    ]);
+
+    const a = await store.retrievalAnalytics(P, { days: 7, limit: 10 });
+
+    // Summary counts retrievals (observations), not documents.
+    expect(a.summary.retrievals).toBe(2);
+    expect(a.summary.documents).toBe(4);
+    expect(a.summary.avg_docs_per_retrieval).toBeCloseTo(2, 5);
+    expect(a.summary.avg_top_score).toBeCloseTo((0.9 + 0.12) / 2, 5);
+
+    // Histogram: 10 buckets keyed by lower bound; every score lands in exactly one.
+    const byBucket = new Map(a.score_histogram.map((b) => [b.bucket, b.count]));
+    expect(byBucket.get(0.9)).toBe(1); // 0.9
+    expect(byBucket.get(0.4)).toBe(1); // 0.4
+    expect(byBucket.get(0.1)).toBe(1); // 0.12
+    expect(byBucket.get(0)).toBe(1); // 0.05
+    expect(a.score_histogram.reduce((n, b) => n + b.count, 0)).toBe(4);
+
+    // Weakest first — this ordering is the whole point of the view.
+    expect(a.weakest.map((w) => w.observation_id)).toEqual(["o-weak", "o1"]);
+    const weakest = a.weakest[0]!;
+    expect(weakest.trace_id).toBe("t1");
+    expect(weakest.doc_count).toBe(2);
+    expect(weakest.top_score).toBeCloseTo(0.12, 5);
+    expect(weakest.mean_score).toBeCloseTo((0.12 + 0.05) / 2, 5);
+    expect(weakest.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    // Name comes from the joined observation; "o-weak" has no observation row, so it is empty
+    // rather than the row being dropped by the join.
+    expect(weakest.name).toBe("");
+    expect(a.weakest.find((w) => w.observation_id === "o1")!.name).toBe("gen");
+
+    // Per-document stats, most-retrieved first. docA appears in both retrievals.
+    const docA = a.documents.find((d) => d.doc_id === "docA")!;
+    expect(docA.retrievals).toBe(2);
+    expect(docA.avg_score).toBeCloseTo((0.9 + 0.12) / 2, 5);
+    expect(docA.avg_rank).toBeCloseTo(0, 5);
+    expect(a.documents.map((d) => d.doc_id)).toContain("docC");
+
+    // An empty project returns zeroed structure, not nulls or a throw.
+    const empty = await store.retrievalAnalytics("no-such-project", { days: 7 });
+    expect(empty.summary).toEqual({
+      retrievals: 0,
+      documents: 0,
+      avg_docs_per_retrieval: 0,
+      avg_top_score: null,
+    });
+    expect(empty.weakest).toEqual([]);
+    expect(empty.documents).toEqual([]);
+
+    // The rows seeded here live on a separate observation id ("o-weak"), so the round-trip
+    // test's per-observation assertions on "o1" stay exact — no cleanup needed.
+  });
+
   it("round-trips retrieval documents, embeddings, and projections", async () => {
     // Retrieval docs by observation id, ordered by rank; quotes/commas survive round-trip.
     const docs = await store.listRetrievalDocumentsByObservationIds(P, ["o1"]);

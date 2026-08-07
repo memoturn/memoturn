@@ -106,6 +106,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: "/evaluators", label: "Evaluators", icon: Gauge },
       { to: "/datasets", label: "Datasets", icon: Database },
       { to: "/experiments", label: "Experiments", icon: FlaskConical },
+      { to: "/retrieval", label: "Retrieval", icon: Search },
       { to: "/embeddings", label: "Embeddings", icon: ScatterChart },
       { to: "/review", label: "Review", icon: ClipboardCheck },
     ],

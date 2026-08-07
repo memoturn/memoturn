@@ -26,7 +26,7 @@ auth-lifecycle audit log · data retention · rate limiting · NDJSON/CSV/**Parq
 prices · **runtime guardrails** (PII / prompt-injection / content-policy endpoint) ·
 event sink / CDP forwarding · ⌘K palette · global time range · agent-graph view ·
 **tool-call analytics** (calls / error rate / latency by tool) · **ingest health console**
-(DLQ depth, insert latency, error counters, one-click replay) · **semantic trace search**
+(DLQ depth, insert latency, error counters, one-click replay) · **retrieval diagnostics** (cross-trace similarity histogram, weakest retrievals, per-document stats) · **semantic trace search**
 (find-similar via exact cosine k-NN in Doris) · **trace compare** (side-by-side content diff +
 per-observation diff) · **prompt A/B experiments** (weighted sticky split + per-arm score
 compare + promote) · **cost attribution by prompt version** · **head-based ingest sampling** ·

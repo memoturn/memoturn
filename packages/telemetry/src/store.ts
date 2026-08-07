@@ -30,6 +30,7 @@ import type {
   FullScoreRow,
   ObservationRow,
   ProjectRowCounts,
+  RetrievalAnalytics,
   RetrievalDocumentDetail,
   ScanCursor,
   ScanPage,
@@ -167,6 +168,17 @@ export interface TelemetryStore {
     projectId: string,
     observationIds: string[],
   ): Promise<RetrievalDocumentDetail[]>;
+  /**
+   * Cross-trace retrieval diagnostics: score distribution, the weakest retrievals, and
+   * per-document hit stats. The per-trace view answers "what did THIS query retrieve?"; this
+   * answers "which retrievals are scoring badly?" — the question that finds a broken index or
+   * a chunking strategy that stopped working.
+   *
+   * `weakest` is ordered by top score ascending (worst first) so the list leads with the
+   * retrievals most worth looking at. Documents with a NULL score are excluded from score
+   * aggregates but still counted — a store that doesn't report similarity shouldn't vanish.
+   */
+  retrievalAnalytics(projectId: string, opts?: { days?: number; limit?: number }): Promise<RetrievalAnalytics>;
   /** Raw vectors for the dimensionality-reduction job (most-recent window, capped). */
   listEmbeddingsForProjection(
     projectId: string,

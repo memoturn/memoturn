@@ -532,6 +532,48 @@ export const retrievalDocument = z.object({
 });
 export type RetrievalDocument = z.infer<typeof retrievalDocument>;
 
+// ── RAG: retrieval diagnostics (cross-trace) ──────────────────────────────────
+/** One bucket of the similarity-score distribution. `bucket` is the lower bound (0, 0.1, …). */
+export const retrievalScoreBucket = z.object({ bucket: z.number(), count: z.number() });
+export type RetrievalScoreBucket = z.infer<typeof retrievalScoreBucket>;
+
+/** A single retrieval (one RETRIEVER observation), rolled up across the documents it returned. */
+export const retrievalRollup = z.object({
+  trace_id: z.string(),
+  observation_id: z.string(),
+  name: z.string(),
+  timestamp: z.string(),
+  doc_count: z.number(),
+  /** Best similarity among the returned documents — the usual "did we find anything?" signal. */
+  top_score: z.number().nullable(),
+  mean_score: z.number().nullable(),
+});
+export type RetrievalRollup = z.infer<typeof retrievalRollup>;
+
+/** How one document performs across every retrieval that returned it. */
+export const retrievalDocumentStat = z.object({
+  doc_id: z.string(),
+  retrievals: z.number(),
+  avg_score: z.number().nullable(),
+  avg_rank: z.number(),
+});
+export type RetrievalDocumentStat = z.infer<typeof retrievalDocumentStat>;
+
+export const retrievalAnalytics = z.object({
+  summary: z.object({
+    retrievals: z.number(),
+    documents: z.number(),
+    avg_docs_per_retrieval: z.number(),
+    avg_top_score: z.number().nullable(),
+  }),
+  score_histogram: z.array(retrievalScoreBucket),
+  /** Weakest retrievals first — the "show me low-relevance retrievals" list. */
+  weakest: z.array(retrievalRollup),
+  /** Most-retrieved documents, for spotting chunks that dominate or never help. */
+  documents: z.array(retrievalDocumentStat),
+});
+export type RetrievalAnalytics = z.infer<typeof retrievalAnalytics>;
+
 export const observationDetail = z.object({
   id: z.string(),
   trace_id: z.string(),
