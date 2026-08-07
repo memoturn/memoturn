@@ -1,5 +1,16 @@
-import type { EvaluatorAnalytics } from "@memoturn/contracts";
-import { deterministicId, EVALUATOR_TEMPLATES, getEvaluatorTemplate, isoNow, newId } from "@memoturn/core";
+import type { EvaluatorAnalytics, ExpressionTestResult, ExprPreset } from "@memoturn/contracts";
+import {
+  compileExpression,
+  deterministicId,
+  EVALUATOR_TEMPLATES,
+  EXPR_PRESETS,
+  type ExprValue,
+  evaluateExpression,
+  getEvaluatorTemplate,
+  isoNow,
+  newId,
+  runExpression,
+} from "@memoturn/core";
 import { prisma } from "@memoturn/db";
 import { generate, type Provider } from "@memoturn/llm";
 import { telemetry } from "@memoturn/telemetry";
@@ -7,9 +18,15 @@ import { submitBatch } from "./ingest.js";
 import { resolveProviderConfig } from "./providers.js";
 
 /**
- * LLM-as-judge evaluators. An evaluator is a judge prompt + model; running it scores a
- * trace's input/output and writes the score back through the ingest pipeline
- * (source=EVAL), so it lands in the telemetry store alongside API/annotation scores.
+ * Evaluators. Two kinds, behind one interface:
+ *
+ *  - **LLM** — a judge prompt + model (optionally an ensemble jury). Costs a provider call.
+ *  - **CODE** — a deterministic expression evaluated locally by @memoturn/core's safe
+ *    interpreter. Free, instant, reproducible, and needs no provider key. The right home for
+ *    regex / JSON-shape / exact-match / length checks that don't deserve a judge.
+ *
+ * Running either scores a trace's input/output and writes the score back through the ingest
+ * pipeline (source=EVAL), so it lands in the telemetry store alongside API/annotation scores.
  */
 /** One member of an LLM jury: a provider + model that casts an independent judge vote. */
 export interface Juror {
@@ -29,9 +46,23 @@ export function parseJurors(json: unknown): Juror[] {
   return out;
 }
 
+/** Thrown when an evaluator's config is invalid (→ 400), e.g. an expression that won't compile. */
+export class EvaluatorConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EvaluatorConfigError";
+  }
+}
+
 export interface CreateEvaluatorInput {
   name: string;
-  prompt: string;
+  /** "LLM" (default) judges with a prompt + model; "CODE" runs `expression` deterministically. */
+  kind?: string;
+  /** Required when kind = "LLM"; unused (and not required) for CODE evaluators. */
+  prompt?: string;
+  /** Required when kind = "CODE" — validated at write time so a bad check is a 400, not a
+   *  silent per-event failure in the worker. */
+  expression?: string;
   provider?: string;
   model: string;
   online?: boolean;
@@ -48,8 +79,26 @@ export interface CreateEvaluatorInput {
 export async function createEvaluator(projectId: string, input: CreateEvaluatorInput) {
   const provider = input.provider ?? "mock";
   const jurors = parseJurors(input.jurors ?? []);
+  const kind = input.kind === "CODE" ? "CODE" : "LLM";
+  const expression = input.expression ?? "";
+  const prompt = input.prompt ?? "";
+  if (kind === "LLM" && prompt.trim() === "") {
+    throw new EvaluatorConfigError("an LLM evaluator needs a prompt");
+  }
+  if (kind === "CODE") {
+    // Compile now so an unparseable check is rejected at write time. Left to run time it would
+    // fail once per sampled event in the shared worker, where failures are swallowed
+    // best-effort — the author would never find out.
+    try {
+      compileExpression(expression);
+    } catch (err) {
+      throw new EvaluatorConfigError(err instanceof Error ? err.message : String(err));
+    }
+  }
   const data = {
-    prompt: input.prompt,
+    kind,
+    prompt,
+    expression,
     provider,
     model: input.model,
     jurors: jurors as unknown as object,
@@ -67,7 +116,9 @@ export async function createEvaluator(projectId: string, input: CreateEvaluatorI
     const jurorsChanged = !existing || !jurorsEqual(parseJurors(existing.jurors), jurors);
     const configChanged =
       !existing ||
+      existing.kind !== data.kind ||
       existing.prompt !== data.prompt ||
+      existing.expression !== data.expression ||
       existing.model !== data.model ||
       existing.provider !== provider ||
       jurorsChanged;
@@ -79,13 +130,24 @@ export async function createEvaluator(projectId: string, input: CreateEvaluatorI
     });
     if (configChanged) {
       await tx.evaluatorVersion.create({
-        data: { evaluatorId: row.id, version, prompt: data.prompt, provider, model: data.model, jurors: data.jurors },
+        data: {
+          evaluatorId: row.id,
+          version,
+          kind: data.kind,
+          prompt: data.prompt,
+          expression: data.expression,
+          provider,
+          model: data.model,
+          jurors: data.jurors,
+        },
       });
     }
     return row;
   });
   return {
     name: ev.name,
+    kind: ev.kind,
+    expression: ev.expression,
     provider: ev.provider,
     model: ev.model,
     jurors: parseJurors(ev.jurors),
@@ -115,7 +177,9 @@ export async function listEvaluatorVersions(projectId: string, name: string) {
   if (!ev) return null;
   return ev.versions.map((v) => ({
     version: v.version,
+    kind: v.kind,
     prompt: v.prompt,
+    expression: v.expression,
     provider: v.provider,
     model: v.model,
     jurors: parseJurors(v.jurors),
@@ -127,9 +191,11 @@ export async function listEvaluators(projectId: string) {
   const evs = await prisma.evaluator.findMany({ where: { projectId }, orderBy: { name: "asc" } });
   return evs.map((e) => ({
     name: e.name,
+    kind: e.kind,
     provider: e.provider,
     model: e.model,
     prompt: e.prompt,
+    expression: e.expression,
     jurors: parseJurors(e.jurors),
     online: e.online,
     samplingRate: e.samplingRate,
@@ -160,6 +226,54 @@ export function listEvaluatorTemplates() {
     requires: t.requires,
     defaultModel: t.defaultModel ?? "",
   }));
+}
+
+/** The prebuilt CODE-evaluator check library, for the preset menu. */
+export function listExprPresets(): ExprPreset[] {
+  return EXPR_PRESETS.map((p) => ({ ...p, placeholders: p.placeholders.map((ph) => ({ ...ph })) }));
+}
+
+export interface TestExpressionInput {
+  expression: string;
+  input?: unknown;
+  output?: unknown;
+  expectedOutput?: unknown;
+  metadata?: unknown;
+}
+
+/**
+ * Dry-run an expression against a sample item for the editor — never persists anything.
+ *
+ * Errors are RETURNED, not thrown: the whole point of a test affordance is to show what went
+ * wrong, and a compile error is the expected case while someone is still typing. It also
+ * reports the raw value even when that value isn't score-shaped, which is exactly when the
+ * author most needs to see it.
+ */
+export function testExpression(input: TestExpressionInput): ExpressionTestResult {
+  const ctx = {
+    input: (input.input ?? null) as ExprValue,
+    output: (input.output ?? null) as ExprValue,
+    expected: (input.expectedOutput ?? null) as ExprValue,
+    metadata: (input.metadata ?? null) as ExprValue,
+  };
+  let value: ExprValue;
+  try {
+    value = evaluateExpression(input.expression, ctx);
+  } catch (err) {
+    return { ok: false, score: null, value: null, error: err instanceof Error ? err.message : String(err) };
+  }
+  try {
+    const { score } = runExpression(input.expression, ctx);
+    return { ok: true, score, value: JSON.stringify(value) ?? "null", error: null };
+  } catch (err) {
+    // Evaluated fine but isn't a valid score — surface the value alongside the reason.
+    return {
+      ok: false,
+      score: null,
+      value: JSON.stringify(value) ?? "null",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 export interface InstantiateTemplateInput {
@@ -234,6 +348,8 @@ export interface JudgeInput {
   input: unknown;
   output: unknown;
   expectedOutput?: unknown;
+  /** Bound as `metadata` for CODE evaluators; unused by LLM judges. */
+  metadata?: unknown;
 }
 
 export interface JudgeResult {
@@ -294,6 +410,19 @@ export async function judgeWithEvaluator(
 ): Promise<JudgeResult | null> {
   const ev = await prisma.evaluator.findUnique({ where: { projectId_name: { projectId, name } } });
   if (!ev) return null;
+
+  // CODE evaluators are deterministic and local: no provider call, no key needed, no cost, and
+  // the same answer every time. Dispatching here means every consumer — online evals, thread
+  // evals, dataset experiments, and synchronous guardrail checks — gets them for free.
+  if (ev.kind === "CODE") {
+    const { score, value } = runExpression(ev.expression, {
+      input: (input.input ?? null) as ExprValue,
+      output: (input.output ?? null) as ExprValue,
+      expected: (input.expectedOutput ?? null) as ExprValue,
+      metadata: (input.metadata ?? null) as ExprValue,
+    });
+    return { evaluator: ev.name, score, reasoning: `${ev.expression} → ${JSON.stringify(value)}` };
+  }
 
   const jurors = parseJurors(ev.jurors);
   if (jurors.length === 0) {

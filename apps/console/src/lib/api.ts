@@ -34,6 +34,8 @@ import type {
   ExperimentComparison,
   ExperimentDetail,
   ExperimentSummary,
+  ExpressionTestResult,
+  ExprPreset,
   GuardrailPolicy,
   GuardrailVerdict,
   IngestHealth,
@@ -477,7 +479,9 @@ export const api = {
   getEvaluatorAnalytics: (days = 30) => get<EvaluatorAnalytics>(`/v1/evaluators/analytics${qs({ days })}`),
   createEvaluator: (body: {
     name: string;
+    kind?: "LLM" | "CODE";
     prompt: string;
+    expression?: string;
     provider: string;
     model: string;
     online?: boolean;
@@ -488,6 +492,14 @@ export const api = {
     cooldownSeconds?: number;
   }) => post(`/v1/evaluators`, body),
   listEvaluatorTemplates: () => get<{ data: EvaluatorTemplate[] }>(`/v1/evaluators/templates`).then((r) => r.data),
+  listExprPresets: () => get<{ data: ExprPreset[] }>(`/v1/evaluators/presets`).then((r) => r.data),
+  testExpression: (body: {
+    expression: string;
+    input?: unknown;
+    output?: unknown;
+    expectedOutput?: unknown;
+    metadata?: unknown;
+  }) => post<ExpressionTestResult>(`/v1/evaluators/test-expression`, body),
   listEvaluatorVersions: (name: string) =>
     get<{ data: EvaluatorVersion[] }>(`/v1/evaluators/${encodeURIComponent(name)}/versions`).then((r) => r.data),
   getEmbeddingProjection: (opts: { runId?: string; colorBy?: string; limit?: number } = {}) =>

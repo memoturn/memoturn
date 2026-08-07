@@ -12,13 +12,15 @@ vi.mock("./ingest.js", () => ({ submitBatch }));
 const resolveProviderConfig = vi.fn().mockResolvedValue({});
 vi.mock("./providers.js", () => ({ resolveProviderConfig }));
 
-const { judgeWithEvaluator, runEvaluator } = await import("./evaluators.js");
+const { judgeWithEvaluator, runEvaluator, testExpression } = await import("./evaluators.js");
 
 const evaluatorRow = (over: Record<string, unknown> = {}) => ({
   id: "ev1",
   projectId: "p1",
   name: "quality",
+  kind: "LLM",
   prompt: "Rate the response.",
+  expression: "",
   provider: "mock",
   model: "mock-gpt-4o",
   online: false,
@@ -146,5 +148,102 @@ describe("runEvaluator", () => {
         dataType: "NUMERIC",
       }),
     });
+  });
+});
+
+describe("CODE evaluators", () => {
+  beforeEach(() => {
+    findUnique.mockReset();
+    generate.mockReset();
+    submitBatch.mockClear();
+    // Must be cleared too — the LLM-path tests above call it, and this suite asserts it is NOT
+    // called, so a leaked count would make the assertion meaningless.
+    resolveProviderConfig.mockClear();
+  });
+
+  it("scores from the expression without calling a provider", async () => {
+    findUnique.mockResolvedValue(evaluatorRow({ kind: "CODE", expression: 'contains(lower(output), "refund")' }));
+
+    const hit = await judgeWithEvaluator("p1", "quality", { input: "help", output: "Your REFUND is processed." });
+    expect(hit?.score).toBe(1);
+    // The whole point of a CODE evaluator: deterministic, free, and no provider key needed.
+    expect(generate).not.toHaveBeenCalled();
+    expect(resolveProviderConfig).not.toHaveBeenCalled();
+
+    const miss = await judgeWithEvaluator("p1", "quality", { input: "help", output: "No such thing." });
+    expect(miss?.score).toBe(0);
+  });
+
+  it("binds input, output, expected, and metadata", async () => {
+    findUnique.mockResolvedValue(
+      evaluatorRow({
+        kind: "CODE",
+        expression: 'exactMatch(output, expected) and has(metadata, "ok") and len(input) > 0',
+      }),
+    );
+    const res = await judgeWithEvaluator("p1", "quality", {
+      input: "q",
+      output: "a",
+      expectedOutput: "a",
+      metadata: { ok: true },
+    });
+    expect(res?.score).toBe(1);
+  });
+
+  it("explains the result in `reasoning` — the expression and what it produced", async () => {
+    findUnique.mockResolvedValue(evaluatorRow({ kind: "CODE", expression: "len(output) < 5" }));
+    const res = await judgeWithEvaluator("p1", "quality", { input: "", output: "hello world" });
+    expect(res?.reasoning).toBe("len(output) < 5 → false");
+  });
+
+  it("supports graded (non-binary) scores", async () => {
+    findUnique.mockResolvedValue(evaluatorRow({ kind: "CODE", expression: "min(1, len(words(output)) / 4)" }));
+    const res = await judgeWithEvaluator("p1", "quality", { input: "", output: "one two" });
+    expect(res?.score).toBe(0.5);
+  });
+
+  it("throws on a runtime failure so the caller's best-effort handling applies", async () => {
+    // Ingest must never fail because of an evaluator — the worker catches this per-evaluator,
+    // exactly as it does for a failed LLM judge.
+    findUnique.mockResolvedValue(evaluatorRow({ kind: "CODE", expression: '"not a score"' }));
+    await expect(judgeWithEvaluator("p1", "quality", { input: "", output: "x" })).rejects.toThrow(
+      /score must be a number/,
+    );
+  });
+
+  it("still writes the score through the ingest pipeline like an LLM evaluator", async () => {
+    findUnique.mockResolvedValue(evaluatorRow({ kind: "CODE", expression: "true" }));
+    await runEvaluator("p1", "quality", { traceId: "t1", input: "q", output: "a" });
+    expect(submitBatch).toHaveBeenCalled();
+  });
+});
+
+describe("testExpression", () => {
+  it("returns the score and value for a valid expression", () => {
+    expect(testExpression({ expression: "len(output) < 5", output: "hi" })).toEqual({
+      ok: true,
+      score: 1,
+      value: "true",
+      error: null,
+    });
+  });
+
+  it("returns a compile error instead of throwing — the editor needs to show it", () => {
+    const res = testExpression({ expression: "len(", output: "hi" });
+    expect(res.ok).toBe(false);
+    expect(res.score).toBeNull();
+    expect(res.error).toMatch(/unexpected/);
+  });
+
+  it("reports the raw value even when it isn't score-shaped", () => {
+    // This is the case where seeing the value matters most.
+    const res = testExpression({ expression: "output", output: "hello" });
+    expect(res.ok).toBe(false);
+    expect(res.value).toBe('"hello"');
+    expect(res.error).toMatch(/score must be a number/);
+  });
+
+  it("rejects an unknown name with a helpful message", () => {
+    expect(testExpression({ expression: "process", output: "" }).error).toMatch(/unknown name/);
   });
 });

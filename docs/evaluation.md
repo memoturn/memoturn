@@ -36,7 +36,7 @@ flowchart TD
 
 See the dataset example in [TS SDK](./sdk-typescript.md#datasets--experiments).
 
-## Evaluators (LLM-as-judge)
+## Evaluators
 
 An evaluator is a judge prompt + provider/model. Providers: `mock` (deterministic, no key
 — for local testing), `anthropic`, `openai`.
@@ -60,6 +60,72 @@ The prebuilt library (`GET /v1/evaluators/templates`, instantiate via `POST
 metrics (user frustration, knowledge retention, session completeness, conversational
 coherence) and **agent-trajectory** metrics (trajectory accuracy, tool correctness, task
 completion).
+
+## Code evaluators (deterministic checks)
+
+Not every check deserves a model. "Is this valid JSON?", "does it match `^[A-Z]{3}-[0-9]{4}$`?",
+"is it under 500 characters?" have exact answers, and asking an LLM for them is slow, costly, and
+less reliable than the obvious computation.
+
+A **code evaluator** (`kind: "CODE"`) is an expression instead of a judge prompt. It runs locally
+— no provider call, no API key, no cost, and the same answer every time.
+
+```bash
+curl -u pk-mt-dev:sk-mt-dev -X POST http://localhost:3001/v1/evaluators \
+  -H 'content-type: application/json' \
+  -d '{"name":"json-contract","kind":"CODE","model":"n/a",
+       "expression":"jsonValid(output) and jsonPath(jsonParse(output), \"$.status\") == \"ok\""}'
+```
+
+Everything else works identically to an LLM evaluator: online sampling, thread scope, dataset
+experiments, guardrails, version history, and the EVAL score it writes.
+
+### The expression language
+
+Expressions are evaluated against four variables — `input`, `output`, `expected`, `metadata` —
+and must return a **boolean** (pass/fail → 1/0) or a **number in [0, 1]** for a graded score.
+Anything else is an error rather than a silently coerced score.
+
+| | |
+| --- | --- |
+| **Operators** | `and` `or` `not` (also `&&` `\|\|` `!`), `==` `!=` `<` `<=` `>` `>=`, `+` `-` `*` `/` `%`, `a ? b : c` |
+| **Access** | `output.field`, `output["field"]`, `output.items[0]`, `output.length` |
+| **Strings** | `contains` `startsWith` `endsWith` `lower` `upper` `trim` `words` `matches` |
+| **JSON** | `jsonValid` `jsonParse` `jsonPath` `has` `exactMatch` |
+| **Numbers** | `num` `abs` `round` `min` `max` `len` `isEmpty` `coalesce` |
+
+```
+len(output) < 500
+not contains(lower(output), "i cannot")
+matches(output, "^[A-Z]{3}-[0-9]{4}$")
+exactMatch(output, expected)
+min(1, len(words(output)) / 50)          # a graded score, not just pass/fail
+has(metadata, "score") and metadata.score > 0.5
+```
+
+`GET /v1/evaluators/presets` returns a library of ready-made checks (regex, JSON shape, length,
+exact match, …) that the console offers as a menu; picking one fills in an editable expression.
+`POST /v1/evaluators/test-expression` dry-runs an expression against a sample item — the console
+uses it for the "Try it" panel, and it reports the raw value even when that value isn't a valid
+score, which is exactly when you need to see it.
+
+### Why an expression language and not "just run JavaScript"
+
+Evaluators are user-authored config that executes inside the **shared ingest worker**, so the
+language is safe by construction rather than by sandboxing:
+
+- No `eval`, no `Function`, no host object graph, and no way to name anything not bound — there
+  are no callable values, so `output.constructor()` is unparseable rather than merely blocked.
+- Property reads are `hasOwn`-gated and `__proto__` / `constructor` / `prototype` are refused.
+- `matches()` rejects patterns with nested repetition (the ReDoS signature) using the same static
+  check the PII-masking policy uses, and caps subject length.
+- Termination is structural — the language has no loops or recursion — with a node budget and a
+  parser depth cap as backstops.
+- It is dependency-free and portable: no `node:vm`, no WASM, so it behaves identically in the
+  worker, the API, and a future edge profile (see [ADR-0003](./adr/0003-edge-deployment-profile.md)).
+
+Expressions are compiled at **write** time, so a broken check is a `400` when you save it rather
+than a silent per-event failure in the worker later.
 
 ### LLM juries (ensemble judging)
 

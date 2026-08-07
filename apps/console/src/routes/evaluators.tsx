@@ -1,10 +1,12 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { Evaluator } from "@memoturn/contracts";
+import { EXPR_BUILTIN_NAMES } from "@memoturn/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
 import { ClipboardCheck, Plus, X } from "lucide-react";
-import { useFieldArray, useForm } from "react-hook-form";
+import { useState } from "react";
+import { type UseFormReturn, useFieldArray, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 import { DataTable } from "../components/data-table";
@@ -27,18 +29,33 @@ export const Route = createFileRoute("/evaluators")({ component: EvaluatorsPage 
 const PROVIDERS = ["mock", "anthropic", "openai", "gemini", "bedrock", "azure", "openai_compatible"] as const;
 const providerEnum = z.enum(PROVIDERS);
 
-const evaluatorSchema = z.object({
-  name: z.string().min(1, "Name is required"),
-  provider: providerEnum,
-  model: z.string().min(1, "Model is required"),
-  prompt: z.string().min(1, "Prompt is required"),
-  online: z.boolean(),
-  samplingRate: z.number().min(0).max(1),
-  scope: z.enum(["trace", "thread"]),
-  cooldownSeconds: z.number().int().min(0),
-  // Optional LLM jury: when non-empty, the evaluator becomes an ensemble (mean of votes).
-  jurors: z.array(z.object({ provider: providerEnum, model: z.string().min(1, "Model required") })),
-});
+const evaluatorSchema = z
+  .object({
+    name: z.string().min(1, "Name is required"),
+    // LLM = judge prompt + model (costs a provider call). CODE = a deterministic expression,
+    // evaluated locally: free, instant, reproducible, no provider key needed.
+    kind: z.enum(["LLM", "CODE"]),
+    provider: providerEnum,
+    model: z.string().min(1, "Model is required"),
+    prompt: z.string(),
+    expression: z.string(),
+    online: z.boolean(),
+    samplingRate: z.number().min(0).max(1),
+    scope: z.enum(["trace", "thread"]),
+    cooldownSeconds: z.number().int().min(0),
+    // Optional LLM jury: when non-empty, the evaluator becomes an ensemble (mean of votes).
+    jurors: z.array(z.object({ provider: providerEnum, model: z.string().min(1, "Model required") })),
+  })
+  // Each kind requires a different field; validating conditionally keeps one form serving both
+  // instead of splitting into two nearly-identical ones.
+  .superRefine((v, ctx) => {
+    if (v.kind === "LLM" && v.prompt.trim() === "") {
+      ctx.addIssue({ code: "custom", path: ["prompt"], message: "Prompt is required" });
+    }
+    if (v.kind === "CODE" && v.expression.trim() === "") {
+      ctx.addIssue({ code: "custom", path: ["expression"], message: "Expression is required" });
+    }
+  });
 type EvaluatorForm = z.infer<typeof evaluatorSchema>;
 
 const columns: ColumnDef<Evaluator>[] = [
@@ -60,9 +77,23 @@ const columns: ColumnDef<Evaluator>[] = [
   {
     accessorKey: "provider",
     header: "Provider",
-    cell: ({ row }) => <KindBadge tone="blue">{row.original.provider}</KindBadge>,
+    cell: ({ row }) =>
+      row.original.kind === "CODE" ? (
+        <span className="text-muted-foreground">—</span>
+      ) : (
+        <KindBadge tone="blue">{row.original.provider}</KindBadge>
+      ),
   },
-  { accessorKey: "model", header: "Model" },
+  {
+    accessorKey: "model",
+    header: "Model",
+    cell: ({ row }) =>
+      row.original.kind === "CODE" ? (
+        <span className="text-muted-foreground">—</span>
+      ) : (
+        <span>{row.original.model}</span>
+      ),
+  },
   {
     accessorKey: "scope",
     header: "Scope",
@@ -82,9 +113,20 @@ const columns: ColumnDef<Evaluator>[] = [
     },
   },
   {
+    accessorKey: "kind",
+    header: "Kind",
+    cell: ({ row }) => (row.original.kind === "CODE" ? <KindBadge tone="teal">code</KindBadge> : <span>LLM</span>),
+  },
+  {
     accessorKey: "prompt",
-    header: "Prompt",
-    cell: ({ row }) => <span className="text-muted-foreground">{row.original.prompt.slice(0, 70)}</span>,
+    header: "Source",
+    // A CODE evaluator's prompt is empty and its provider/model unused — show the check instead.
+    cell: ({ row }) =>
+      row.original.kind === "CODE" ? (
+        <span className="font-mono text-xs text-muted-foreground">{row.original.expression.slice(0, 70)}</span>
+      ) : (
+        <span className="text-muted-foreground">{row.original.prompt.slice(0, 70)}</span>
+      ),
   },
 ];
 
@@ -100,14 +142,17 @@ function EvaluatorsPage() {
     queryKey: ["evaluator-analytics"],
     queryFn: () => api.getEvaluatorAnalytics(30),
   });
+  const { data: presets } = useQuery({ queryKey: ["expr-presets"], queryFn: () => api.listExprPresets() });
 
   const form = useForm<EvaluatorForm>({
     resolver: zodResolver(evaluatorSchema),
     defaultValues: {
       name: "",
+      kind: "LLM",
       provider: "mock",
       model: "mock-1",
       prompt: "Score how well the output answers the input. 1 = perfect, 0 = wrong.",
+      expression: "",
       online: false,
       samplingRate: 1,
       scope: "trace",
@@ -117,6 +162,8 @@ function EvaluatorsPage() {
   });
   const online = form.watch("online");
   const scope = form.watch("scope");
+  const kind = form.watch("kind");
+  const isCode = kind === "CODE";
   const jurors = useFieldArray({ control: form.control, name: "jurors" });
 
   const create = useMutation({
@@ -133,17 +180,85 @@ function EvaluatorsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Evaluators"
-        description="LLM-as-judge evaluators. Run them over a trace's input/output to record an EVAL score."
-        help="Define an LLM that judges a trace's input and output and records the result as an EVAL score."
+        description="Score traces automatically — with an LLM judge, or a deterministic code check that costs nothing to run."
+        help="An evaluator scores a trace's input/output and records an EVAL score. LLM judges handle subjective quality; code checks handle deterministic rules (regex, JSON shape, length, exact match) for free."
       />
 
       <Card>
         <CardHeader>
           <CardTitle>New evaluator</CardTitle>
-          <CardDescription>Define an LLM-as-judge that scores trace input/output.</CardDescription>
+          <CardDescription>Define an evaluator that scores trace input/output.</CardDescription>
         </CardHeader>
         <CardContent>
-          {templates && templates.length > 0 && (
+          <FormField
+            control={form.control}
+            name="kind"
+            render={({ field }) => (
+              <div className="mb-6 flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium">Kind</span>
+                <div className="inline-flex rounded-md border p-0.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={field.value === "LLM" ? "secondary" : "ghost"}
+                    onClick={() => field.onChange("LLM")}
+                  >
+                    LLM judge
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={field.value === "CODE" ? "secondary" : "ghost"}
+                    onClick={() => field.onChange("CODE")}
+                  >
+                    Code check
+                  </Button>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {field.value === "CODE"
+                    ? "Deterministic expression — free, instant, no model call."
+                    : "An LLM scores the output. Costs a provider call per evaluation."}
+                </span>
+              </div>
+            )}
+          />
+          {isCode && presets && presets.length > 0 && (
+            <div className="mb-6 flex flex-wrap items-end gap-3 rounded-lg border border-dashed p-4">
+              <div className="space-y-1">
+                <div className="text-sm font-medium">Start from a check</div>
+                <div className="text-xs text-muted-foreground">
+                  Fills in an expression you can then edit — the menu is a starting point, not a limit.
+                </div>
+              </div>
+              <Select
+                onValueChange={(key) => {
+                  const preset = presets.find((x) => x.key === key);
+                  if (!preset) return;
+                  // Placeholders are left in place deliberately: the author must fill them in, and
+                  // an unfilled one fails to compile loudly rather than scoring on a literal.
+                  form.setValue("name", preset.name);
+                  form.setValue("expression", preset.expression);
+                  toast.success(
+                    preset.placeholders.length > 0
+                      ? `Loaded “${preset.name}” — replace ${preset.placeholders.map((ph) => `{{${ph.key}}}`).join(", ")}`
+                      : `Loaded “${preset.name}” — review and save`,
+                  );
+                }}
+              >
+                <SelectTrigger className="w-72">
+                  <SelectValue placeholder="Choose a check…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {presets.map((preset) => (
+                    <SelectItem key={preset.key} value={preset.key}>
+                      {preset.name} — {preset.description}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {!isCode && templates && templates.length > 0 && (
             <div className="mb-6 flex flex-wrap items-end gap-3 rounded-lg border border-dashed p-4">
               <div className="space-y-1">
                 <div className="text-sm font-medium">Start from a template</div>
@@ -191,45 +306,49 @@ function EvaluatorsPage() {
                     </FormItem>
                   )}
                 />
-                <FormField
-                  control={form.control}
-                  name="provider"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Provider</FormLabel>
-                      <Select value={field.value} onValueChange={field.onChange}>
+                {!isCode && (
+                  <FormField
+                    control={form.control}
+                    name="provider"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Provider</FormLabel>
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="mock">mock</SelectItem>
+                            <SelectItem value="anthropic">anthropic</SelectItem>
+                            <SelectItem value="openai">openai</SelectItem>
+                            <SelectItem value="gemini">gemini</SelectItem>
+                            <SelectItem value="bedrock">bedrock</SelectItem>
+                            <SelectItem value="azure">azure</SelectItem>
+                            <SelectItem value="openai_compatible">openai_compatible</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+                {!isCode && (
+                  <FormField
+                    control={form.control}
+                    name="model"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Model</FormLabel>
                         <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
+                          <Input placeholder="mock-1" {...field} />
                         </FormControl>
-                        <SelectContent>
-                          <SelectItem value="mock">mock</SelectItem>
-                          <SelectItem value="anthropic">anthropic</SelectItem>
-                          <SelectItem value="openai">openai</SelectItem>
-                          <SelectItem value="gemini">gemini</SelectItem>
-                          <SelectItem value="bedrock">bedrock</SelectItem>
-                          <SelectItem value="azure">azure</SelectItem>
-                          <SelectItem value="openai_compatible">openai_compatible</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="model"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Model</FormLabel>
-                      <FormControl>
-                        <Input placeholder="mock-1" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
                 <FormField
                   control={form.control}
                   name="online"
@@ -344,21 +463,24 @@ function EvaluatorsPage() {
                   />
                 )}
               </div>
-              <FormField
-                control={form.control}
-                name="prompt"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Prompt</FormLabel>
-                    <FormControl>
-                      <Textarea rows={3} {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {!isCode && (
+                <FormField
+                  control={form.control}
+                  name="prompt"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Prompt</FormLabel>
+                      <FormControl>
+                        <Textarea rows={3} {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+              {isCode && <ExpressionEditor form={form} />}
 
-              <div className="space-y-2 rounded-lg border border-dashed p-4">
+              <div className={`space-y-2 rounded-lg border border-dashed p-4 ${isCode ? "hidden" : ""}`}>
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <div className="inline-flex items-center gap-1 text-sm font-medium">
@@ -478,6 +600,120 @@ function EvaluatorsPage() {
         ) : (
           <DataTable columns={columns} data={evaluators} filterColumn="name" filterPlaceholder="Filter evaluators…" />
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Expression editor for CODE evaluators, with a dry-run panel.
+ *
+ * The sample item is deliberately part of the editor rather than a separate page: an expression
+ * you can't try is a guess, and the failure modes here (a typo'd builtin, a result that isn't
+ * score-shaped) are much easier to understand against a concrete output than from a message.
+ */
+function ExpressionEditor({ form }: { form: UseFormReturn<EvaluatorForm> }) {
+  const [sampleOutput, setSampleOutput] = useState('{"status":"ok","id":"ABC-1234"}');
+  const [sampleExpected, setSampleExpected] = useState("");
+  const expression = form.watch("expression");
+
+  const test = useMutation({
+    mutationFn: () =>
+      api.testExpression({
+        expression,
+        input: "",
+        output: sampleOutput,
+        expectedOutput: sampleExpected,
+        metadata: {},
+      }),
+    onError: (e) => toast.error(`Test failed: ${String(e)}`),
+  });
+  const result = test.data;
+
+  return (
+    <div className="space-y-3">
+      <FormField
+        control={form.control}
+        name="expression"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>
+              <span className="inline-flex items-center gap-1">
+                Expression
+                <HelpTip>
+                  Evaluated against <code>output</code>, <code>input</code>, <code>expected</code>, and{" "}
+                  <code>metadata</code>. Return a boolean (pass/fail → 1/0) or a number between 0 and 1 for a graded
+                  score. No model is called.
+                </HelpTip>
+              </span>
+            </FormLabel>
+            <FormControl>
+              <Textarea rows={3} className="font-mono text-xs" placeholder='matches(output, "^[A-Z]{3}")' {...field} />
+            </FormControl>
+            <FormDescription>
+              Functions: {EXPR_BUILTIN_NAMES.join(", ")}. Operators: and, or, not, ==, !=, &lt;, &lt;=, &gt;, &gt;=, +,
+              -, *, /, %, and a ? b : c.
+            </FormDescription>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+
+      <div className="space-y-2 rounded-lg border border-dashed p-4">
+        <div className="text-sm font-medium">Try it</div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="space-y-1">
+            <span className="text-xs text-muted-foreground">Sample output</span>
+            <Textarea
+              rows={2}
+              className="font-mono text-xs"
+              value={sampleOutput}
+              onChange={(e) => setSampleOutput(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1">
+            <span className="text-xs text-muted-foreground">Sample expected (optional)</span>
+            <Textarea
+              rows={2}
+              className="font-mono text-xs"
+              value={sampleExpected}
+              onChange={(e) => setSampleExpected(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!expression || test.isPending}
+            onClick={() => test.mutate()}
+          >
+            {test.isPending ? "Running…" : "Run check"}
+          </Button>
+          {result && (
+            <div className="flex items-center gap-2 text-sm">
+              {result.ok ? (
+                <>
+                  <KindBadge tone={result.score === 1 ? "green" : result.score === 0 ? "red" : "blue"}>
+                    score {result.score}
+                  </KindBadge>
+                  <span className="font-mono text-xs text-muted-foreground">→ {result.value}</span>
+                </>
+              ) : (
+                <>
+                  <KindBadge tone="red">error</KindBadge>
+                  {/* Show the raw value too when there was one — "produced a string" is far more
+                      actionable next to the string it produced. */}
+                  {result.value !== null && (
+                    <span className="font-mono text-xs text-muted-foreground">→ {result.value}</span>
+                  )}
+                  <span className="text-xs text-destructive">{result.error}</span>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

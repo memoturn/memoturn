@@ -981,9 +981,13 @@ export type Juror = z.infer<typeof juror>;
 
 export const evaluator = z.object({
   name: z.string(),
+  /** "LLM" (judge prompt + model) or "CODE" (a deterministic expression, no provider call). */
+  kind: z.string(),
   provider: z.string(),
   model: z.string(),
   prompt: z.string(),
+  /** The check source for kind = "CODE"; empty for LLM evaluators. */
+  expression: z.string(),
   jurors: z.array(juror),
   online: z.boolean(),
   samplingRate: z.number(),
@@ -997,13 +1001,37 @@ export type Evaluator = z.infer<typeof evaluator>;
 
 export const evaluatorVersion = z.object({
   version: z.number(),
+  kind: z.string(),
   prompt: z.string(),
+  expression: z.string(),
   provider: z.string(),
   model: z.string(),
   jurors: z.array(juror),
   createdAt: z.string(),
 });
 export type EvaluatorVersion = z.infer<typeof evaluatorVersion>;
+
+/** Result of dry-running a CODE evaluator expression against a sample item, for the editor. */
+export const expressionTestResult = z.object({
+  ok: z.boolean(),
+  /** Score in [0,1] when ok; null when the expression errored or wasn't score-shaped. */
+  score: z.number().nullable(),
+  /** The raw value the expression produced, JSON-encoded (present even when not score-shaped). */
+  value: z.string().nullable(),
+  /** Compile or runtime error message when ok is false. */
+  error: z.string().nullable(),
+});
+export type ExpressionTestResult = z.infer<typeof expressionTestResult>;
+
+/** One prebuilt CODE-evaluator check offered in the preset menu. */
+export const exprPreset = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string(),
+  expression: z.string(),
+  placeholders: z.array(z.object({ key: z.string(), label: z.string(), example: z.string() })),
+});
+export type ExprPreset = z.infer<typeof exprPreset>;
 
 // ── Playground ───────────────────────────────────────────────────────────────────
 export const chatMessage = z.object({
