@@ -11,6 +11,14 @@ export interface Usage {
   cacheReadTokens?: number;
   /** Tokens written to the provider's prompt cache (e.g. Anthropic `cache_creation_input_tokens`). */
   cacheCreationTokens?: number;
+  /**
+   * Reasoning/thinking tokens spent before the visible answer (OpenAI
+   * `completion_tokens_details.reasoning_tokens`, Anthropic extended thinking).
+   *
+   * Providers bill these at the output rate and already count them inside
+   * `completionTokens`, so this is an attribution field — it never adds to cost.
+   */
+  reasoningTokens?: number;
 }
 
 export type ObservationLevel = "DEBUG" | "DEFAULT" | "WARNING" | "ERROR";

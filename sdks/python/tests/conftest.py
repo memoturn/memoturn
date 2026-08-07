@@ -48,6 +48,15 @@ class Capture:
         return base64.b64decode(raw).decode()
 
 
+@pytest.fixture(autouse=True)
+def _clear_prompt_cache() -> None:
+    """The prompt cache is module-level state — leaking it across tests would make them
+    order-dependent (a later test could silently be served an earlier test's prompt)."""
+    from memoturn import clear_prompt_cache
+
+    clear_prompt_cache()
+
+
 @pytest.fixture
 def capture(monkeypatch: pytest.MonkeyPatch) -> Capture:
     cap = Capture()

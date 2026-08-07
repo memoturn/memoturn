@@ -56,6 +56,20 @@ no API downtime and blob replay as the fallback
 it also works in reverse (within the Postgres envelope) for downsizing. Retention and
 deletes behave identically on both engines.
 
+The copy is driven by `bun run telemetry:migrate` (both engines' connection env must be
+set; the run is idempotent and resumable, and re-verification is built in):
+
+```bash
+bun run telemetry:migrate -- --from postgres --to doris --dry-run   # size the copy
+bun run telemetry:migrate -- --from postgres --to doris             # bulk copy + verify, system live
+# pause the worker (API keeps acking; queue + blob buffer all ingest)
+bun run telemetry:migrate -- --from postgres --to doris             # fast LWW top-up + re-verify
+# set TELEMETRY_ENGINE=doris on api + worker, resume the worker
+```
+
+The CLI verifies per-project row counts on both engines plus row-level spot checks, and
+exits non-zero (do not flip) on any mismatch. `--verify-only` re-runs just the checks.
+
 ## Full self-host stack
 
 `infra/docker-compose.yml` builds and runs the API + worker alongside all dependencies:

@@ -17,6 +17,8 @@ import { toast } from "sonner";
 import { TraceGraph } from "../features/trace-graph/TraceGraph";
 import {
   api,
+  type CommentMention,
+  downloadTraceJson,
   fetchOffloadedPayload,
   type ObservationDetail,
   type ScoreConfig,
@@ -814,10 +816,12 @@ function AddToDatasetButton({ obs }: { obs: ObservationDetail }) {
   );
 }
 
-/** The input/output/retrieval/status body for one observation — the master-detail pane's content. */
-function ObservationPayloadContent({ obs }: { obs: ObservationDetail }) {
+/** The input/output/retrieval/status body for one observation — the master-detail pane's content.
+ *  `siblings` (the trace's full observation list) powers the reranker before/after pairing. */
+function ObservationPayloadContent({ obs, siblings }: { obs: ObservationDetail; siblings: ObservationDetail[] }) {
   return (
     <div className="space-y-3">
+      {obs.type === "GUARDRAIL" && <GuardrailPanel obs={obs} />}
       {obs.type === "GENERATION" && obs.input && (
         <div className="flex flex-wrap justify-end gap-2">
           <AddToDatasetButton obs={obs} />
@@ -843,7 +847,12 @@ function ObservationPayloadContent({ obs }: { obs: ObservationDetail }) {
           <PayloadView raw={obs.output} />
         </div>
       )}
-      {obs.retrieval_documents.length > 0 && <RetrievalDocs docs={obs.retrieval_documents} />}
+      {obs.retrieval_documents.length > 0 &&
+        (obs.type === "RERANKER" ? (
+          <RerankerDocs obs={obs} siblings={siblings} />
+        ) : (
+          <RetrievalDocs docs={obs.retrieval_documents} />
+        ))}
       {obs.status_message && (
         <div className="space-y-1">
           <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Status</div>
@@ -855,7 +864,7 @@ function ObservationPayloadContent({ obs }: { obs: ObservationDetail }) {
 }
 
 /** The selected observation's payload with an identifying header — the detail half of the split. */
-function ObservationDetailPanel({ obs }: { obs: ObservationDetail }) {
+function ObservationDetailPanel({ obs, siblings }: { obs: ObservationDetail; siblings: ObservationDetail[] }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2 border-b pb-3">
@@ -878,7 +887,7 @@ function ObservationDetailPanel({ obs }: { obs: ObservationDetail }) {
           </Link>
         )}
       </div>
-      <ObservationPayloadContent obs={obs} />
+      <ObservationPayloadContent obs={obs} siblings={siblings} />
     </div>
   );
 }
@@ -902,6 +911,212 @@ function RetrievalDocs({ docs }: { docs: ObservationDetail["retrieval_documents"
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Reranked documents for a RERANKER span. Beyond the plain ranked list, this pairs each doc
+ * against the trace's RETRIEVER stage (parent → same-parent sibling → nearest earlier, by
+ * doc_id, falling back to exact content) to show rank movement — the question a reranker
+ * panel exists to answer. Pairing is best-effort: with no retriever stage or no matchable
+ * ids, it degrades to ranks + score bars.
+ */
+function RerankerDocs({ obs, siblings }: { obs: ObservationDetail; siblings: ObservationDetail[] }) {
+  const docs = obs.retrieval_documents;
+  const retriever = useMemo(() => {
+    const candidates = siblings.filter(
+      (s) => s.id !== obs.id && s.type === "RETRIEVER" && s.retrieval_documents.length > 0,
+    );
+    return (
+      candidates.find((s) => s.id === obs.parent_observation_id) ??
+      candidates.find((s) => s.parent_observation_id === obs.parent_observation_id) ??
+      candidates.filter((s) => s.start_time <= obs.start_time).sort((a, b) => (a.start_time < b.start_time ? 1 : -1))[0]
+    );
+  }, [obs, siblings]);
+
+  const priorRank = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const d of retriever?.retrieval_documents ?? []) {
+      if (d.doc_id) map.set(`id:${d.doc_id}`, d.rank);
+      map.set(`content:${d.content}`, d.rank);
+    }
+    return (d: ObservationDetail["retrieval_documents"][number]): number | undefined =>
+      (d.doc_id ? map.get(`id:${d.doc_id}`) : undefined) ?? map.get(`content:${d.content}`);
+  }, [retriever]);
+
+  const scores = docs.map((d) => d.score).filter((s): s is number => s != null);
+  const minScore = Math.min(...scores);
+  const maxScore = Math.max(...scores);
+  const scoreFrac = (s: number) => (maxScore === minScore ? 1 : (s - minScore) / (maxScore - minScore));
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline gap-2 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+        <span>Reranked documents ({docs.length})</span>
+        {retriever && (
+          <span className="normal-case tracking-normal">
+            kept {docs.length} of {retriever.retrieval_documents.length} retrieved
+          </span>
+        )}
+      </div>
+      <div className="space-y-1.5">
+        {docs.map((d) => {
+          const prior = priorRank(d);
+          const delta = prior === undefined ? undefined : prior - d.rank;
+          return (
+            <div key={d.rank} className="rounded-md border p-2">
+              <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+                <KindBadge tone="teal">#{d.rank}</KindBadge>
+                {retriever &&
+                  (delta === undefined ? (
+                    <KindBadge tone="neutral">new</KindBadge>
+                  ) : delta !== 0 ? (
+                    <KindBadge tone={delta > 0 ? "green" : "amber"}>{delta > 0 ? `↑${delta}` : `↓${-delta}`}</KindBadge>
+                  ) : (
+                    <span>=</span>
+                  ))}
+                {d.score != null && (
+                  <span className="inline-flex items-center gap-1.5">
+                    score {d.score.toFixed(4)}
+                    <span className="inline-block h-1 w-14 overflow-hidden rounded bg-muted">
+                      <span
+                        className="block h-full rounded bg-teal-500"
+                        style={{ width: `${Math.round(scoreFrac(d.score) * 100)}%` }}
+                      />
+                    </span>
+                  </span>
+                )}
+                {d.doc_id && <span className="truncate">· {d.doc_id}</span>}
+              </div>
+              <pre className={PRE_CLASS}>{d.content}</pre>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Tolerant guardrail-metadata shape: memoturn's own verdict keys plus common ecosystem ones. */
+interface GuardrailMeta {
+  verdict?: string;
+  findings?: { category?: string; type?: string; count?: number; score?: number }[];
+  redactedText?: string;
+  rest: [string, string][];
+}
+
+/**
+ * Parse a GUARDRAIL observation's metadata by convention. Guardrail spans come from many
+ * producers (OpenInference GUARDRAIL kind, framework instrumentations) with no standard
+ * verdict schema, so this recognizes memoturn's `/v1/guardrails/check` shape
+ * (verdict/findings/redactedText) plus common boolean conventions (passed/blocked), and
+ * surfaces whatever else is present as key/value rows.
+ */
+function parseGuardrailMeta(metadata: string, level: string): GuardrailMeta {
+  const out: GuardrailMeta = { rest: [] };
+  let obj: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(metadata || "{}") as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) obj = parsed as Record<string, unknown>;
+  } catch {
+    return out;
+  }
+  const consumed = new Set<string>();
+  const take = (k: string): unknown => {
+    consumed.add(k);
+    return obj[k];
+  };
+
+  for (const key of ["verdict", "decision", "guardrail.decision"]) {
+    if (typeof obj[key] === "string") {
+      out.verdict = String(take(key)).toLowerCase();
+      break;
+    }
+  }
+  if (!out.verdict) {
+    for (const [key, blockedWhen] of [
+      ["passed", false],
+      ["blocked", true],
+      ["triggered", true],
+    ] as const) {
+      if (typeof obj[key] === "boolean") {
+        out.verdict = take(key) === blockedWhen ? "block" : "allow";
+        break;
+      }
+    }
+  }
+  if (!out.verdict && level === "ERROR") out.verdict = "block";
+
+  if (Array.isArray(obj.findings)) {
+    out.findings = (take("findings") as GuardrailMeta["findings"] & unknown[]).filter(
+      (f): f is NonNullable<GuardrailMeta["findings"]>[number] => !!f && typeof f === "object",
+    );
+  }
+  for (const key of ["redactedText", "redacted_text"]) {
+    if (typeof obj[key] === "string") {
+      out.redactedText = String(take(key));
+      break;
+    }
+  }
+
+  for (const [k, v] of Object.entries(obj)) {
+    if (consumed.has(k)) continue;
+    if (v === null || typeof v === "object") continue;
+    out.rest.push([k, String(v)]);
+  }
+  return out;
+}
+
+const VERDICT_TONE: Record<string, KindBadgeTone> = {
+  allow: "green",
+  pass: "green",
+  redact: "amber",
+  warn: "amber",
+  block: "rose",
+  fail: "rose",
+  deny: "rose",
+};
+
+/** Structured guardrail verdict panel: verdict badge, findings, redaction, leftover metadata. */
+function GuardrailPanel({ obs }: { obs: ObservationDetail }) {
+  const meta = useMemo(() => parseGuardrailMeta(obs.metadata, obs.level), [obs]);
+  if (!meta.verdict && !meta.findings && meta.rest.length === 0) return null;
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Guardrail</span>
+        {meta.verdict && <KindBadge tone={VERDICT_TONE[meta.verdict] ?? "neutral"}>{meta.verdict}</KindBadge>}
+      </div>
+      {meta.findings && meta.findings.length > 0 && (
+        <div className="space-y-1">
+          {meta.findings.map((f, i) => (
+            <div key={`${f.category}-${f.type}-${i}`} className="flex flex-wrap items-center gap-2 text-xs">
+              {f.category && <KindBadge tone="rose">{f.category}</KindBadge>}
+              <span>{f.type ?? "finding"}</span>
+              {f.count != null && f.count > 1 && <span className="text-muted-foreground">×{f.count}</span>}
+              {f.score != null && <span className="text-muted-foreground">score {Number(f.score).toFixed(3)}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {meta.redactedText && (
+        <div className="space-y-1">
+          <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+            Redacted text
+          </div>
+          <pre className={PRE_CLASS}>{meta.redactedText}</pre>
+        </div>
+      )}
+      {meta.rest.length > 0 && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          {meta.rest.map(([k, v]) => (
+            <span key={k}>
+              <span className="font-medium">{k}:</span> {v}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1371,8 +1586,9 @@ function AnnotateButton({ traceId }: { traceId: string }) {
 }
 
 /**
- * Prompt/completion token split + prompt-cache breakdown, summed across a trace's
- * generations. Cache figures render only when present (non-caching traces stay clean).
+ * Prompt/completion token split + prompt-cache and reasoning breakdown, summed across a
+ * trace's generations. Cache and reasoning figures render only when present, so traces that
+ * use neither stay clean.
  */
 function MetricsGrid({ trace }: { trace: TraceDetail }) {
   const sum = (k: keyof ObservationDetail) => trace.observations.reduce((a, o) => a + Number(o[k] ?? 0), 0);
@@ -1380,6 +1596,7 @@ function MetricsGrid({ trace }: { trace: TraceDetail }) {
   const completion = sum("completion_tokens");
   const cacheRead = sum("cache_read_tokens");
   const cacheCreation = sum("cache_creation_tokens");
+  const reasoning = sum("reasoning_tokens");
   const cost = Number(trace.total_cost);
 
   const items: { label: string; value: ReactNode; help?: string }[] = [
@@ -1397,6 +1614,15 @@ function MetricsGrid({ trace }: { trace: TraceDetail }) {
     { label: "Total tokens", value: Number(trace.total_tokens).toLocaleString() },
     { label: "Prompt tokens", value: prompt.toLocaleString(), help: "Input tokens sent to the model." },
     { label: "Completion tokens", value: completion.toLocaleString(), help: "Output tokens generated by the model." },
+    ...(reasoning > 0
+      ? [
+          {
+            label: "Reasoning tokens",
+            value: `${reasoning.toLocaleString()}${completion > 0 ? ` (${Math.round((reasoning / completion) * 100)}%)` : ""}`,
+            help: "Thinking tokens spent before the visible answer. Already counted in completion tokens and billed at the output rate — shown separately so you can see how much of your output spend is reasoning.",
+          },
+        ]
+      : []),
     ...(cacheRead > 0
       ? [
           {
@@ -1634,6 +1860,20 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
             {trace.environment}
           </Badge>
           <FlagForReviewButton traceId={trace.id} />
+          {/* Read-only action — available to VIEWERs too. */}
+          <Button
+            variant="outline"
+            size="sm"
+            title="Download this trace (observations, retrieved documents, and scores) as JSON"
+            onClick={() =>
+              downloadTraceJson(trace.id).catch((e: unknown) =>
+                toast.error(`Export failed: ${e instanceof Error ? e.message : String(e)}`),
+              )
+            }
+          >
+            <Download className="size-3.5" />
+            Export JSON
+          </Button>
           <Button variant="outline" size="sm" disabled={readOnly || replay.isPending} onClick={() => replay.mutate()}>
             <RotateCcw className="size-3.5" />
             {replay.isPending ? "Replaying…" : "Replay"}
@@ -1831,7 +2071,7 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
               </CardHeader>
               <CardContent>
                 {selectedObs ? (
-                  <ObservationDetailPanel obs={selectedObs} />
+                  <ObservationDetailPanel obs={selectedObs} siblings={trace.observations} />
                 ) : (
                   <EmptyState title="No payloads to show." />
                 )}
@@ -1844,6 +2084,41 @@ export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: s
       <SimilarTraces traceId={trace.id} />
 
       <Comments traceId={trace.id} />
+    </div>
+  );
+}
+
+/**
+ * Render a comment body, highlighting the @handles the server actually resolved to a person.
+ * A handle that matched nobody stays plain text — the highlight is a signal that someone was
+ * really addressed, so it must not fire on a typo.
+ */
+function CommentBody({ content, mentions }: { content: string; mentions: CommentMention[] }) {
+  if (mentions.length === 0) return <div className="mt-1 text-sm whitespace-pre-wrap">{content}</div>;
+
+  // Every spelling the server accepts for these people: full email, local-part, and the
+  // whitespace-stripped name (mirrors resolveMentions in packages/server/src/comments.ts).
+  const resolved = new Set<string>();
+  for (const m of mentions) {
+    const email = m.email.toLowerCase();
+    resolved.add(email);
+    resolved.add(email.split("@")[0] ?? "");
+    resolved.add(m.name.toLowerCase().replace(/\s+/g, ""));
+  }
+
+  const parts = content.split(/(@[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|@[A-Za-z0-9._%+-]+)/g);
+  return (
+    <div className="mt-1 text-sm whitespace-pre-wrap">
+      {parts.map((part, i) =>
+        part.startsWith("@") && resolved.has(part.slice(1).toLowerCase()) ? (
+          // Index key is fine: split() parts are positional and the list is re-rendered whole.
+          <span key={i} className="rounded-sm bg-primary/10 px-1 font-medium text-primary">
+            {part}
+          </span>
+        ) : (
+          part
+        ),
+      )}
     </div>
   );
 }
@@ -1916,14 +2191,19 @@ function Comments({ traceId }: { traceId: string }) {
                     </AlertDialogContent>
                   </AlertDialog>
                 </div>
-                <div className="mt-1 text-sm">{cm.content}</div>
+                <CommentBody content={cm.content} mentions={cm.mentions} />
+                {cm.mentions.length > 0 && (
+                  <div className="mt-1.5 text-xs text-muted-foreground">
+                    Mentioned {cm.mentions.map((m) => m.name || m.email).join(", ")}
+                  </div>
+                )}
               </li>
             ))}
           </ul>
         )}
         <div className="space-y-2">
           <Textarea
-            placeholder="Add a comment…"
+            placeholder="Add a comment… use @name to mention a teammate"
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {

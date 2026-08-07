@@ -59,6 +59,8 @@ export interface ObservationRow {
   total_tokens: number;
   cache_read_tokens: number;
   cache_creation_tokens: number;
+  /** Reasoning/thinking tokens — a subset of completion_tokens, not additive to cost. */
+  reasoning_tokens: number;
   input_cost: number;
   output_cost: number;
   total_cost: number;

@@ -32,6 +32,12 @@ export function wrapAnthropic<T extends object>(
   });
 }
 
+/**
+ * Note on extended thinking: Anthropic does not break thinking tokens out in `usage` — they
+ * are counted inside `output_tokens` and not reported separately — so there is nothing to map
+ * onto `reasoningTokens` here. Deriving one by measuring thinking content blocks would be a
+ * guess, so it is left unset rather than approximated.
+ */
 /** Map Anthropic usage (incl. prompt-cache tokens) to the recorded usage shape — shared by
  * the non-streaming path and the stream accumulator's `.finalize()`. */
 function mapAnthropicUsage(usage: any): Record<string, number> | undefined {

@@ -41,6 +41,7 @@ import {
   createScoreConfig,
   createWebhook,
   createWidget,
+  decodeOtlpLogs,
   decodeOtlpTraces,
   deleteAlertRule,
   deleteAutomation,
@@ -58,6 +59,7 @@ import {
   disconnectMcpClient,
   evaluateGate,
   exportDatasetJsonl,
+  exportTraceJson,
   exportTracesCsv,
   exportTracesJsonl,
   exportTracesParquet,
@@ -124,6 +126,7 @@ import {
   mcpAuthorizationServerMetadata,
   mcpOpenIdConfigMetadata,
   mcpProtectedResourceMetadata,
+  otlpLogsToEvents,
   otlpToEvents,
   RoleHierarchyError,
   recordAudit,
@@ -485,6 +488,20 @@ app.get("/v1/demo/status", async (c) => {
   return c.json({ sandbox: await getSandboxForUser(userId) });
 });
 
+// Single-trace export (JSON download) — plain route so we can set a file download header.
+// Declared before the list export so the more specific path wins.
+app.get("/v1/exports/traces/:traceId", async (c) => {
+  const traceId = c.req.param("traceId");
+  const body = await exportTraceJson(c.get("projectId"), traceId);
+  if (!body) return c.json({ error: "Trace not found" }, 404);
+  return c.body(body, 200, {
+    "content-type": "application/json",
+    // Trace ids are caller-supplied, so keep the filename to characters that can't break
+    // out of the header or the saved filename.
+    "content-disposition": `attachment; filename=memoturn-trace-${traceId.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`,
+  });
+});
+
 // Batch export (NDJSON download) — plain route so we can set a file download header.
 app.get("/v1/exports/traces", async (c) => {
   const url = new URL(c.req.url);
@@ -718,6 +735,39 @@ app.post("/v1/otel/v1/traces", async (c) => {
 
   // OTLP success: an empty ExportTraceServiceResponse. For protobuf, an empty body is a
   // valid "all accepted" response; for JSON we return the partialSuccess envelope.
+  if (contentType.includes("protobuf")) {
+    return c.body(new Uint8Array(0).buffer, 200, { "content-type": "application/x-protobuf" });
+  }
+  return c.json({ partialSuccess: {} }, 200);
+});
+
+// OTLP/HTTP logs receiver. Log records become EVENT observations — this is how Claude Code's
+// verbatim user-prompt / assistant-response text arrives (log events only, never spans).
+// Same content-type switch + response conventions as the traces receiver above.
+app.post("/v1/otel/v1/logs", async (c) => {
+  // rbac-exempt: SDK/collector ingest path — API-key auth resolves to OWNER, same as /v1/otel/v1/traces.
+  const contentType = c.req.header("content-type") ?? "";
+  let payload: ReturnType<typeof decodeOtlpLogs> | null = null;
+
+  if (contentType.includes("json")) {
+    payload = (await c.req.json().catch(() => null)) as typeof payload;
+  } else if (contentType.includes("protobuf")) {
+    try {
+      payload = decodeOtlpLogs(new Uint8Array(await c.req.arrayBuffer()));
+    } catch {
+      return c.json({ error: "could not decode OTLP protobuf" }, 400);
+    }
+  } else {
+    return c.json({ error: "content-type must be application/json or application/x-protobuf" }, 415);
+  }
+
+  const events = otlpLogsToEvents(payload ?? {});
+  if (events.length > 0) {
+    const parsed = ingestRequest.safeParse({ batch: events });
+    if (!parsed.success) return c.json({ error: "mapping failed" }, 400);
+    await submitBatch(c.get("projectId"), parsed.data);
+  }
+
   if (contentType.includes("protobuf")) {
     return c.body(new Uint8Array(0).buffer, 200, { "content-type": "application/x-protobuf" });
   }
@@ -3053,6 +3103,7 @@ app.openapi(
               gridY: z.number().int().min(0).optional(),
               gridW: z.number().int().min(1).max(12).optional(),
               gridH: z.number().int().min(1).max(24).optional(),
+              position: z.number().int().min(0).optional(),
             }),
           },
         },

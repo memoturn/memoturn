@@ -80,6 +80,7 @@ const observationColumns: ColumnSpec<ObservationRow>[] = [
   { name: "total_tokens", values: (r) => [r.total_tokens] },
   { name: "cache_read_tokens", values: (r) => [r.cache_read_tokens] },
   { name: "cache_creation_tokens", values: (r) => [r.cache_creation_tokens] },
+  { name: "reasoning_tokens", values: (r) => [r.reasoning_tokens] },
   { name: "input_cost", values: (r) => [r.input_cost] },
   { name: "output_cost", values: (r) => [r.output_cost] },
   { name: "total_cost", values: (r) => [r.total_cost] },

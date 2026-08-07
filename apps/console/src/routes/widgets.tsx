@@ -11,8 +11,8 @@ import {
 } from "@memoturn/contracts";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { GripVertical, Trash2 } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "../components/empty-state";
 import { FilterBuilder } from "../components/filter-builder";
@@ -138,6 +138,28 @@ function WidgetBuilderPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["query-widgets"] }),
     onError: (e) => toast.error(`Failed to resize: ${String(e)}`),
   });
+  // Drag-to-reorder: the dragged widget id lives in component state (not dataTransfer,
+  // which is unreadable during dragover); on drop the full order is renumbered into
+  // `position`, optimistically applied to the query cache, then persisted per widget.
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+  const reorder = useMutation({
+    mutationFn: (ids: string[]) => Promise.all(ids.map((id, i) => api.updateWidgetGrid(id, { position: i }))),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["query-widgets"] }),
+    onError: (e) => toast.error(`Failed to reorder: ${String(e)}`),
+  });
+  const dropOn = (targetId: string) => {
+    setOverId(null);
+    if (!dragId || dragId === targetId || !saved.data) return;
+    const ids = saved.data.map((w) => w.id);
+    const from = ids.indexOf(dragId);
+    const to = ids.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    ids.splice(to, 0, ...ids.splice(from, 1));
+    const byId = new Map(saved.data.map((w) => [w.id, w]));
+    qc.setQueryData(["query-widgets"], ids.map((id) => byId.get(id)).filter(Boolean));
+    reorder.mutate(ids);
+  };
   const promptSave = () => {
     if (!data) return;
     const title = window.prompt("Name this chart", `${AGG_LABEL[aggregation]} of ${measureDef.label}`);
@@ -306,6 +328,15 @@ function WidgetBuilderPage() {
                 extraFilters={dashFilters}
                 onDelete={() => remove.mutate(w.id)}
                 onResize={(gridW) => resize.mutate({ id: w.id, gridW })}
+                dragging={dragId === w.id}
+                dropTarget={overId === w.id && dragId !== w.id}
+                onDragStart={() => setDragId(w.id)}
+                onDragEnd={() => {
+                  setDragId(null);
+                  setOverId(null);
+                }}
+                onDragOver={() => setOverId(w.id)}
+                onDrop={() => dropOn(w.id)}
               />
             ))}
           </div>
@@ -325,20 +356,38 @@ const WIDTHS = [
 ];
 
 /** One saved query-widget: runs its stored query and renders it, spanning `gridW` of 12 columns.
- * The width control persists gridW (a lightweight resize; drag-and-drop reorder is a follow-up). */
+ * The width control persists gridW; the grip handle drags the card to reorder (persists
+ * `position`). Dragging is armed only from the handle's mousedown so chart/text interactions
+ * inside the card never start an accidental drag. */
 function SavedWidget({
   widget,
   readOnly,
   extraFilters,
   onDelete,
   onResize,
+  dragging,
+  dropTarget,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
 }: {
   widget: QueryWidget;
   readOnly: boolean;
   extraFilters: SingleFilter[];
   onDelete: () => void;
   onResize: (gridW: number) => void;
+  dragging: boolean;
+  dropTarget: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDragOver: () => void;
+  onDrop: () => void;
 }) {
+  // Whether the current mouse gesture began on the grip — a ref, not state, so the value is
+  // set synchronously on mousedown (before the browser samples drag eligibility) with no
+  // re-render race. The card is always `draggable`; onDragStart vetoes non-grip gestures.
+  const gripGesture = useRef(false);
   const days = useRangeDays();
   // Recompute the time range live from the global picker (the stored absolute range would freeze),
   // and merge dashboard-level filters (the engine skips columns a view lacks).
@@ -356,11 +405,59 @@ function SavedWidget({
   });
   const span = Math.min(12, Math.max(2, widget.gridW));
   return (
-    <Card className="col-span-12" style={{ gridColumn: `span ${span} / span ${span}` }}>
+    <Card
+      className={`col-span-12 ${dragging ? "opacity-50" : ""} ${dropTarget ? "ring-2 ring-primary/60" : ""}`}
+      style={{ gridColumn: `span ${span} / span ${span}` }}
+      draggable
+      onDragStart={(e) => {
+        if (!gripGesture.current) {
+          e.preventDefault();
+          return;
+        }
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart();
+      }}
+      onDragEnd={() => {
+        gripGesture.current = false;
+        onDragEnd();
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        onDragOver();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop();
+      }}
+    >
       <CardHeader>
         <CardTitle className="text-base">{widget.title}</CardTitle>
         {!readOnly && (
           <CardAction className="flex items-center gap-1">
+            {/* The grip arms the CARD as draggable on mousedown (cleared on dragend/mouseup), so
+                chart/text interactions inside the card never start an accidental drag. NOT a
+                <button>: Chrome suppresses native drag gestures that begin on form controls,
+                so the handle must stay a generic element (role satisfies the a11y lint; native
+                HTML5 DnD is mouse-only regardless). */}
+            {/* biome-ignore lint/a11y/useSemanticElements: a real <button> can't be a drag
+                handle — Chrome suppresses native drag gestures that begin on form controls. */}
+            <span
+              role="button"
+              aria-roledescription="drag handle"
+              aria-label="Drag to reorder"
+              tabIndex={-1}
+              className="cursor-grab p-1 text-muted-foreground hover:text-foreground active:cursor-grabbing"
+              title="Drag to reorder"
+              onMouseDown={() => {
+                gripGesture.current = true;
+              }}
+              onMouseUp={() => {
+                gripGesture.current = false;
+              }}
+            >
+              <GripVertical className="size-4" />
+            </span>
             <Select value={String(span)} onValueChange={(v) => onResize(Number(v))}>
               <SelectTrigger className="h-7 w-16 text-xs" title="Widget width">
                 <SelectValue />

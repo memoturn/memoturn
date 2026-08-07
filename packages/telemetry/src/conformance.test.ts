@@ -69,6 +69,7 @@ const observation = (over: Partial<ObservationRow> = {}): ObservationRow => ({
   total_tokens: 300,
   cache_read_tokens: 40,
   cache_creation_tokens: 60,
+  reasoning_tokens: 120,
   input_cost: 0.001,
   output_cost: 0.002,
   total_cost: 0.003,
@@ -456,6 +457,9 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(gen.total_cost).toBeCloseTo(0.003, 6);
     expect(gen.cache_read_tokens).toBe(40);
     expect(gen.cache_creation_tokens).toBe(60);
+    // Reasoning is a subset of completion_tokens and must never inflate cost.
+    expect(gen.reasoning_tokens).toBe(120);
+    expect(gen.reasoning_tokens).toBeLessThanOrEqual(gen.completion_tokens);
     expect(gen.end_time).not.toBeNull();
     expect(gen.prompt_id).toBe("p1"); // prompt linkage surfaced on the observation
     expect(obs.find((o) => o.id === "o2")!.end_time).toBeNull();
@@ -660,6 +664,7 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(gen.prompt_tokens).toBe(100);
     expect(gen.cache_read_tokens).toBe(40);
     expect(gen.cache_creation_tokens).toBe(60);
+    expect(gen.reasoning_tokens).toBe(120);
     expect(gen.total_cost).toBeCloseTo(0.003, 6);
     expect(gen.end_time).not.toBeNull();
     expect(obs.find((o) => o.id === "o2")!.end_time).toBeNull();

@@ -10,6 +10,36 @@ released together from `v*` tags.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-08-02
+
+- Postgres telemetry tier (ADR-0002): `TELEMETRY_ENGINE=postgres` runs the whole
+  platform Doris-free — telemetry lives in the OLTP Postgres (`telemetry` schema,
+  pgvector) for small installs, with the conformance suite green on both engines
+  in CI and the `scanRows` bulk-copy seam (ADR-0004) as the graduation path to
+  Doris at scale.
+- MCP: both servers (local stdio and the remote per-project Streamable HTTP
+  endpoint) now speak the stateless `2026-07-28` protocol revision (SEP-2575 —
+  no initialize handshake, `server/discover`), running on the v2 TypeScript SDK;
+  clients on earlier MCP revisions connect unchanged.
+- Evaluation: conversation/agent metric templates, LLM juries, thread-scope
+  online evaluators with cooldown, hierarchical session paths, and the `mt eval`
+  CI-gate CLI in the JS SDK.
+- Guardrails: restricted-topic and toxicity model guards.
+- Observability: real-time live trace tail (SSE over Redis pub/sub),
+  reasoning-step span kinds with a session Memory Explorer, and Claude Code
+  OTel ingestion (token/cost accounting + named tool spans).
+- Ingest controls: tail-sampling keep-rules at the ingest gate and volume-based
+  usage metering (bytes/events/traces per project per day).
+- Datasets & metrics: fine-tuning export with a tightened trace→dataset loop;
+  project-wide cost-by-prompt breakdown.
+- Automations: PagerDuty and email actions.
+- Public demo at demo.memoturn.com: per-visitor sandboxes with realistic seeded
+  telemetry, magic-link sign-in, and a 7-day TTL.
+- Console: pretty-printed JSON, human-readable timestamps, a branded error
+  boundary + 404, and list-page stat/layout polish.
+- Primary domain is now memoturn.com (memoturn.ai redirects); single-VM
+  production compose fixes (Better Auth routing, env passthrough, worker health).
+
 ## [0.4.0] — 2026-07-22
 
 - Auth: enterprise hardening pass and OAuth 2.1 provider migration for the remote

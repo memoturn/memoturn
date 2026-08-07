@@ -14,6 +14,11 @@ type Usage struct {
 	TotalTokens         int `json:"totalTokens,omitempty"`
 	CacheReadTokens     int `json:"cacheReadTokens,omitempty"`
 	CacheCreationTokens int `json:"cacheCreationTokens,omitempty"`
+	// ReasoningTokens counts thinking tokens spent before the visible answer (OpenAI
+	// reasoning models, Anthropic extended thinking). Providers bill these at the output
+	// rate and already count them inside CompletionTokens, so this is an attribution
+	// field — it never adds to cost.
+	ReasoningTokens int `json:"reasoningTokens,omitempty"`
 }
 
 // Observation type constants for SpanInput.ObservationType — the observation taxonomy from

@@ -72,12 +72,22 @@ export const scoreConfig = z.object({
 });
 export type ScoreConfig = z.infer<typeof scoreConfig>;
 
+/** An @mention resolved to a real org member at comment-write time. */
+export const commentMention = z.object({
+  userId: z.string(),
+  email: z.string(),
+  name: z.string(),
+});
+export type CommentMention = z.infer<typeof commentMention>;
+
 export const comment = z.object({
   id: z.string(),
   objectType: z.string(),
   objectId: z.string(),
   author: z.string(),
   content: z.string(),
+  /** Resolved @mentions. Unmatched or ambiguous handles are dropped, so this can be empty. */
+  mentions: z.array(commentMention),
   createdAt: z.string(),
 });
 export type Comment = z.infer<typeof comment>;
@@ -541,6 +551,8 @@ export const observationDetail = z.object({
   total_tokens: z.number(),
   cache_read_tokens: z.number(),
   cache_creation_tokens: z.number(),
+  /** Reasoning/thinking tokens — a subset of completion_tokens, already priced into total_cost. */
+  reasoning_tokens: z.number(),
   total_cost: z.number(),
   latency_ms: z.number(),
   input: z.string(),

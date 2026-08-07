@@ -466,8 +466,10 @@ export const api = {
     get<{ data: QueryWidget[] }>(`/v1/widgets/query${qs({ dashboardId })}`).then((r) => r.data),
   createQueryWidget: (body: { title: string; query: AnalyticsQuery; chartType: ChartType; gridW?: number }) =>
     post<QueryWidget>(`/v1/widgets/query`, body),
-  updateWidgetGrid: (id: string, grid: { gridX?: number; gridY?: number; gridW?: number; gridH?: number }) =>
-    patch<{ updated: boolean }>(`/v1/widgets/${encodeURIComponent(id)}/grid`, grid),
+  updateWidgetGrid: (
+    id: string,
+    grid: { gridX?: number; gridY?: number; gridW?: number; gridH?: number; position?: number },
+  ) => patch<{ updated: boolean }>(`/v1/widgets/${encodeURIComponent(id)}/grid`, grid),
   listDashboards: () => get<{ data: Dashboard[] }>(`/v1/dashboards`).then((r) => r.data),
   createDashboard: (name: string) => post<Dashboard>(`/v1/dashboards`, { name }),
   deleteDashboard: (id: string) => del(`/v1/dashboards/${encodeURIComponent(id)}`),
@@ -624,6 +626,22 @@ export async function downloadTracesExport(
   const a = document.createElement("a");
   a.href = url;
   a.download = `memoturn-traces.${format}`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Download ONE trace as a self-contained JSON document (header + observations + retrieved
+ * documents + scores), for bug reports, support tickets, and offline diffing.
+ */
+export async function downloadTraceJson(traceId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/v1/exports/traces/${encodeURIComponent(traceId)}`, { headers: headers() });
+  if (!res.ok) throw new Error(`export failed: ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `memoturn-trace-${traceId.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`;
   a.click();
   URL.revokeObjectURL(url);
 }

@@ -28,7 +28,8 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | Method | Path | Description |
 | --- | --- | --- |
 | POST | `/v1/ingest` | Batched events (`trace-create`, `span/generation-create/update`, `event-create`, `score-create`). Returns `207` with per-event results: schema-invalid events are rejected individually in `errors` (id, index, reason) while valid events are accepted — inspect `errors` to catch silent data loss. Per-event `input`/`output`/`metadata` JSON capped at 1 MB (400 on oversize). Returns `429` when the per-project event rate limit (`INGEST_EVENTS_PER_MINUTE`) is exceeded; `Retry-After` header indicates when to retry. |
-| POST | `/v1/otel/v1/traces` | OpenTelemetry OTLP/HTTP (JSON) receiver; maps GenAI semconv spans. |
+| POST | `/v1/otel/v1/traces` | OpenTelemetry OTLP/HTTP (JSON + protobuf) receiver; maps GenAI semconv spans. |
+| POST | `/v1/otel/v1/logs` | OTLP/HTTP logs receiver (JSON + protobuf); log records become EVENT observations (e.g. Claude Code prompt/response text). |
 | GET | `/v1/ingest/health` | Ingest-pipeline health for the ops console: DLQ depth, insert latency, error counters, recent failed batches. OWNER/ADMIN only. |
 | POST | `/v1/ingest/dlq/replay` | Re-enqueue dead-lettered batches from blob onto the ingest queue. Body: `{ limit? }`. OWNER/ADMIN only; audited. |
 | GET | `/health` | Liveness probe (public, unauthenticated) — `{ status: "ok" }`. |
@@ -121,7 +122,7 @@ Server-executed experiments run a prompt/model across a dataset and auto-score e
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/v1/embeddings/projection` | 2D PCA projection of observation embeddings (clusters + optional `colorBy` score). Computed by the daily worker cron. Params: `runId?`, `colorBy?`, `limit?`. |
+| GET | `/v1/embeddings/projection` | 3D UMAP projection of observation embeddings (seeded/deterministic; PCA fallback for small sets or `EMBEDDING_PROJECTION_METHOD=pca`), with clusters + optional `colorBy` score. Computed by the daily worker cron. Params: `runId?`, `colorBy?`, `limit?`. |
 | POST | `/v1/embeddings/projection/run` | Recompute the projection on demand (instead of waiting for the daily cron). Audited. |
 
 ### Review queues
@@ -204,6 +205,7 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | GET / POST | `/v1/model-prices` | List / create-update custom model price overrides (matched by name pattern, override built-ins). |
 | DELETE | `/v1/model-prices/{id}` | Delete a model price override. |
 | GET | `/v1/exports/traces` | Download traces as NDJSON (`application/x-ndjson`, default), CSV (`?format=csv`), or Parquet (`?format=parquet`, flat one-row-per-trace for BI); honors the trace-list filters: `limit`, `environment`, `search`, `userId`, `tag`, `scoreName`, `level`, `days`. |
+| GET | `/v1/exports/traces/{traceId}` | Download ONE trace as a self-contained JSON document — header, observations (with retrieved documents), and scores, wrapped in a versioned `memoturn_export` envelope. 404 if the trace is not in this project. |
 | GET / POST | `/v1/scheduled-exports` | Get / configure the recurring daily NDJSON export of traces to blob storage. |
 | POST | `/v1/scheduled-exports/run` | Run the export now and write the NDJSON to blob storage. |
 | GET / POST | `/v1/masking` | Get / configure the PII redaction policy (built-in + custom patterns) applied to trace input/output at ingest. |

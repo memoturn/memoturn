@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- `GetPrompt` now caches on the client and degrades instead of failing. Prompt resolution sits on
+  the calling app's request path, so: a hit within the TTL (`WithPromptCacheTTL`, default 60s, `0`
+  disables) skips the network entirely; a stale hit is served immediately while a refresh runs in a
+  background goroutine (stale-while-revalidate); a failed fetch keeps serving the cached value, so
+  a memoturn outage no longer takes down the app that depends on it; and with nothing cached,
+  `WithPromptFallback` supplies a last-resort prompt instead of returning an error (absent it, the
+  historical error return is unchanged). Concurrent resolves of the same key are coalesced into one
+  request. The cache lives on the `Client` — scoped to its credentials by construction — is keyed
+  by name + channel + bucket key, and is bounded at 500 entries so a per-user A/B split can't grow
+  it without limit. New: `WithPromptCacheTTL`, `WithPromptFallback`, `Client.ClearPromptCache`,
+  `DefaultPromptCacheTTL`.
+- `Usage.ReasoningTokens` — reasoning/thinking tokens spent before the visible answer. A subset of
+  `CompletionTokens` (providers bill it at the output rate and already count it there), so it is an
+  attribution field and never adds to cost.
+
 ## 0.3.0 — 2026-07-17
 
 ### Features
