@@ -1,6 +1,7 @@
 import { Writable } from "node:stream";
 import parquet from "@dsnp/parquetjs";
 import { type ExportFilters, telemetry } from "@memoturn/telemetry";
+import { getTrace } from "./traces.js";
 
 /**
  * Batch export — stream a project's traces (with their observations) as newline-
@@ -22,6 +23,39 @@ export function clampExportLimit(raw: string | number | null | undefined): numbe
 export async function exportTracesJsonl(projectId: string, filters: ExportFilters = {}): Promise<string> {
   const rows = await telemetry().exportTraces(projectId, filters);
   return rows.map((r) => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : "");
+}
+
+/** Envelope version for single-trace exports — bump on any breaking shape change. */
+export const TRACE_EXPORT_VERSION = 1;
+
+/**
+ * Export ONE trace as a self-contained, pretty-printed JSON document: the trace header plus
+ * every observation (with its retrieved documents) and every score. This is the "hand the
+ * whole trace to someone else" path — a bug report, a support ticket, an offline diff — so it
+ * carries a small envelope identifying what the file is rather than a bare payload.
+ *
+ * Returns null when the trace does not exist in this project (the caller maps that to a 404).
+ */
+export async function exportTraceJson(
+  projectId: string,
+  traceId: string,
+  exportedAt = new Date(),
+): Promise<string | null> {
+  const trace = await getTrace(projectId, traceId);
+  if (!trace) return null;
+  return `${JSON.stringify(
+    {
+      memoturn_export: {
+        kind: "trace" as const,
+        version: TRACE_EXPORT_VERSION,
+        exported_at: exportedAt.toISOString(),
+        project_id: projectId,
+      },
+      trace,
+    },
+    null,
+    2,
+  )}\n`;
 }
 
 /** Quote a CSV field (RFC 4180): wrap in quotes and double any embedded quotes. */

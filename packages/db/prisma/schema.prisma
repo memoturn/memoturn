@@ -903,9 +903,14 @@ model Comment {
   objectId   String
   author     String
   content    String
+  // User ids resolved from @mentions in `content` at write time. Stored resolved (not re-parsed
+  // on read) so a later rename/removal can't silently change who a past comment addressed.
+  mentions   String[] @default([])
   createdAt  DateTime @default(now())
 
   @@index([projectId, objectType, objectId])
+  // "comments that mention me", across objects.
+  @@index([projectId, mentions])
 }
 
 // A user-defined dashboard widget: a metric query over the daily rollup.
@@ -1128,6 +1133,8 @@ model ObservationState {
   totalTokens         Int?
   cacheReadTokens     Int?
   cacheCreationTokens Int?
+  // Reasoning/thinking tokens — a subset of completionTokens, attribution only (never cost).
+  reasoningTokens     Int?
   promptId            String?
   promptVersion       String?
   input               String?

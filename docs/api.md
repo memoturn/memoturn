@@ -202,6 +202,7 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | GET / POST | `/v1/model-prices` | List / create-update custom model price overrides (matched by name pattern, override built-ins). |
 | DELETE | `/v1/model-prices/{id}` | Delete a model price override. |
 | GET | `/v1/exports/traces` | Download traces as NDJSON (`application/x-ndjson`, default), CSV (`?format=csv`), or Parquet (`?format=parquet`, flat one-row-per-trace for BI); honors the trace-list filters: `limit`, `environment`, `search`, `userId`, `tag`, `scoreName`, `level`, `days`. |
+| GET | `/v1/exports/traces/{traceId}` | Download ONE trace as a self-contained JSON document — header, observations (with retrieved documents), and scores, wrapped in a versioned `memoturn_export` envelope. 404 if the trace is not in this project. |
 | GET / POST | `/v1/scheduled-exports` | Get / configure the recurring daily NDJSON export of traces to blob storage. |
 | POST | `/v1/scheduled-exports/run` | Run the export now and write the NDJSON to blob storage. |
 | GET / POST | `/v1/masking` | Get / configure the PII redaction policy (built-in + custom patterns) applied to trace input/output at ingest. |

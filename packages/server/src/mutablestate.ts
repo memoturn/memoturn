@@ -199,6 +199,7 @@ const OBS_COLS: readonly ColDef[] = [
   ["totalTokens", "integer"],
   ["cacheReadTokens", "integer"],
   ["cacheCreationTokens", "integer"],
+  ["reasoningTokens", "integer"],
   ["promptId", "text"],
   ["promptVersion", "text"],
   ["input", "text"],
@@ -259,6 +260,7 @@ export function extractObservationPatch(
     setTok("totalTokens", "totalTokens");
     setTok("cacheReadTokens", "cacheReadTokens");
     setTok("cacheCreationTokens", "cacheCreationTokens");
+    setTok("reasoningTokens", "reasoningTokens");
   }
   return { id: maskedBody.id, mergeVersion: versionOf(eventTs), scalars: s };
 }
@@ -420,6 +422,7 @@ export async function seedObservationStates(projectId: string, rows: Observation
         totalTokens: r.total_tokens,
         cacheReadTokens: r.cache_read_tokens,
         cacheCreationTokens: r.cache_creation_tokens,
+        reasoningTokens: r.reasoning_tokens,
         promptId: r.prompt_id,
         promptVersion: r.prompt_version,
         input: r.input,

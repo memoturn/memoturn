@@ -631,6 +631,22 @@ export async function downloadTracesExport(
 }
 
 /**
+ * Download ONE trace as a self-contained JSON document (header + observations + retrieved
+ * documents + scores), for bug reports, support tickets, and offline diffing.
+ */
+export async function downloadTraceJson(traceId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/v1/exports/traces/${encodeURIComponent(traceId)}`, { headers: headers() });
+  if (!res.ok) throw new Error(`export failed: ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `memoturn-trace-${traceId.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
  * Download a dataset as JSONL — `items` (backup dump) or `oai-chat` (OpenAI fine-tuning
  * chat format; items without an expectedOutput are skipped). Returns the skipped count
  * from the X-Memoturn-Skipped header so callers can surface it.

@@ -132,6 +132,55 @@ describe("mapEvents", () => {
     expect(o.cache_creation_tokens).toBe(240);
   });
 
+  it("maps reasoning tokens without letting them affect cost", () => {
+    const gen = (usage: Record<string, number>) =>
+      mapEvents(PROJECT, [
+        {
+          id: "e1",
+          type: "generation-create",
+          timestamp: "2026-06-25T00:00:00.000Z",
+          body: {
+            id: "reason-g",
+            traceId: "tr",
+            model: "claude-sonnet-4-6",
+            environment: "default",
+            startTime: "2026-06-25T00:00:00.000Z",
+            usage,
+          },
+        },
+      ]).observations[0]!;
+
+    const withReasoning = gen({ promptTokens: 100, completionTokens: 800, reasoningTokens: 600 });
+    const withoutReasoning = gen({ promptTokens: 100, completionTokens: 800 });
+
+    expect(withReasoning.reasoning_tokens).toBe(600);
+    expect(withoutReasoning.reasoning_tokens).toBe(0);
+    // Reasoning is already inside completionTokens, so declaring it must not change any cost.
+    expect(withReasoning.total_cost).toBe(withoutReasoning.total_cost);
+    expect(withReasoning.output_cost).toBe(withoutReasoning.output_cost);
+    expect(withReasoning.total_tokens).toBe(withoutReasoning.total_tokens);
+  });
+
+  it("clamps reasoning tokens to the completion count a mis-reporting client sends", () => {
+    const { observations } = mapEvents(PROJECT, [
+      {
+        id: "e1",
+        type: "generation-create",
+        timestamp: "2026-06-25T00:00:00.000Z",
+        body: {
+          id: "bad-reason-g",
+          traceId: "tr2",
+          model: "claude-sonnet-4-6",
+          environment: "default",
+          startTime: "2026-06-25T00:00:00.000Z",
+          usage: { promptTokens: 100, completionTokens: 50, reasoningTokens: 9_000 },
+        },
+      },
+    ]);
+    // Reasoning can never exceed completion — otherwise the UI's "% of output" reads > 100%.
+    expect(observations[0]!.reasoning_tokens).toBe(50);
+  });
+
   it("treats a cross-batch partial update as a patch over the stored row (bases)", () => {
     // Batch 1 materialized this row (create with full state)...
     const [base] = mapEvents(PROJECT, sampleBatch("t2").slice(0, 2)).observations;

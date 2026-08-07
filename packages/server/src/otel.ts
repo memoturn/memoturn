@@ -542,6 +542,15 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
           const cacheCreationTokens = Number(
             attrs["gen_ai.usage.cache_creation_input_tokens"] ?? attrs.cache_creation_tokens ?? 0,
           );
+          // Reasoning/thinking tokens. Providers count these inside the output tokens above, so
+          // this is attribution only — it never adds to totalTokens or cost.
+          const reasoningTokens = Number(
+            attrs["gen_ai.usage.reasoning_tokens"] ??
+              attrs["llm.token_count.completion_details.reasoning"] ??
+              attrs["ai.usage.reasoningTokens"] ??
+              attrs.reasoning_tokens ??
+              0,
+          );
           events.push({
             id: newId(),
             type: "generation-create",
@@ -570,6 +579,7 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
                 totalTokens: promptTokens + completionTokens,
                 ...(cacheReadTokens ? { cacheReadTokens } : {}),
                 ...(cacheCreationTokens ? { cacheCreationTokens } : {}),
+                ...(reasoningTokens ? { reasoningTokens } : {}),
               },
               // Newer semconv uses gen_ai.input/output.messages; fall back to prompt/completion, then OpenInference.
               input:

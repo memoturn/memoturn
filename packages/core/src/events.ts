@@ -83,6 +83,12 @@ const usage = z
     // the cache on this call. Both are subsets/companions of promptTokens, reported separately.
     cacheReadTokens: z.number().int().nonnegative().optional(),
     cacheCreationTokens: z.number().int().nonnegative().optional(),
+    // Reasoning/thinking tokens spent before the visible answer (OpenAI reasoning models'
+    // `completion_tokens_details.reasoning_tokens`, Anthropic extended thinking). Providers
+    // bill these at the output rate and already count them inside completionTokens, so this
+    // is an *attribution* field — it does not add to cost. Reported separately so "how much
+    // of my output spend is reasoning?" is answerable.
+    reasoningTokens: z.number().int().nonnegative().optional(),
   })
   .optional();
 

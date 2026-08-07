@@ -1,0 +1,11 @@
+-- Reasoning/thinking token attribution on generations.
+--
+-- reasoning_tokens = tokens the model spent reasoning before the visible answer
+-- (OpenAI reasoning models' completion_tokens_details.reasoning_tokens; Anthropic
+-- extended thinking). Providers bill these at the OUTPUT rate and already count them
+-- inside completion_tokens, so this column is purely attributional — it must never be
+-- added to the cost columns or the totals would double-count.
+--
+-- Additive value column; existing rows default to 0. Light schema change on the
+-- merge-on-write observations table, same shape as 0002_cache_tokens.sql.
+ALTER TABLE observations ADD COLUMN reasoning_tokens BIGINT NOT NULL DEFAULT '0' AFTER cache_creation_tokens;
