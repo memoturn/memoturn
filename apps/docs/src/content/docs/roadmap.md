@@ -12,7 +12,7 @@ Observability (traces / observations / scores, waterfall, sessions, OTel) · met
 dashboards · custom widgets (v2: score/error-rate metrics, cost-by-user/session
 breakdowns, per-widget filters, multiple named dashboards) · prompt registry + channels ·
 playground (multi-provider, streaming, trace-linked, tools + structured output,
-**multi-model side-by-side comparison**) · datasets & experiments + comparison matrix ·
+**multi-model side-by-side comparison**) · datasets & experiments + comparison matrix · **trace→dataset (bulk + per-observation) + fine-tuning JSONL export (OpenAI + Anthropic)** ·
 **dataset CI quality gates** (gate API + GitHub Action + Python SDK) · evaluators (offline
 + online, **template library + version history**, **deterministic code checks**) · human review queues + assignments ·
 score configs · scores on traces · comments · tags + facets · webhooks + automations
@@ -49,7 +49,6 @@ OpenAI, LangChain, prompts, OTel exporter, **LlamaIndex (Python)**).
 
 | Feature | Effort | Notes |
 | --- | --- | --- |
-| **Trace → dataset / fine-tuning** | M | One-click trace→dataset-item; export datasets as fine-tuning JSONL (OpenAI/Anthropic formats). |
 | **Inter-rater agreement** | M | Agreement metrics on review queues; keyboard-driven review UI. |
 | **More SDK integrations** | M | LlamaIndex + Vercel AI SDK (JS), Pydantic AI (Python). (TS/Python/Go core SDKs shipped.) |
 | **Project-wide cost-by-prompt** | S | Per-*version* cost shipped; a project-wide "spend per prompt" ranking on the prompts list is the small remaining half. |
