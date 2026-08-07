@@ -354,3 +354,67 @@ def test_responses_stream_early_close_marks_generation_warning(capture: Capture)
     update = _find(capture.batch(), "generation-update")
     assert update["body"]["level"] == "WARNING"
     assert update["body"]["statusMessage"] == "stream ended before completion"
+
+
+def test_maps_reasoning_and_cached_token_subsets(capture: Capture) -> None:
+    usage = SimpleNamespace(
+        prompt_tokens=100,
+        completion_tokens=900,
+        total_tokens=1000,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=80),
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=700),
+    )
+    message = SimpleNamespace(model_dump=lambda: {"role": "assistant", "content": "4"})
+    resp = SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=usage)
+
+    mt = Memoturn(**CREDS)
+    client = wrap_openai(_fake_openai(lambda **kw: resp), mt)
+    client.chat.completions.create(model="o3", messages=[{"role": "user", "content": "hi"}])
+    mt.flush()
+
+    update = _find(capture.batch(), "generation-update")
+    # Both are SUBSETS of the totals they sit under — the totals stay untouched.
+    assert update["body"]["usage"] == {
+        "promptTokens": 100,
+        "completionTokens": 900,
+        "totalTokens": 1000,
+        "cacheReadTokens": 80,
+        "reasoningTokens": 700,
+    }
+
+
+def test_omits_detail_fields_when_absent(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+    client = wrap_openai(_fake_openai(lambda **kw: _completion()), mt)
+    client.chat.completions.create(model="gpt-4o", messages=[])
+    mt.flush()
+
+    usage = _find(capture.batch(), "generation-update")["body"]["usage"]
+    # Absent rather than zero, so a later partial update can't be clobbered by a stray 0.
+    assert "reasoningTokens" not in usage
+    assert "cacheReadTokens" not in usage
+
+
+def test_maps_responses_api_token_details(capture: Capture) -> None:
+    usage = SimpleNamespace(
+        input_tokens=50,
+        output_tokens=400,
+        total_tokens=450,
+        input_tokens_details=SimpleNamespace(cached_tokens=20),
+        output_tokens_details=SimpleNamespace(reasoning_tokens=300),
+    )
+    resp = SimpleNamespace(output_text="ok", output=[{"type": "message"}], usage=usage)
+
+    mt = Memoturn(**CREDS)
+    client = wrap_openai(_fake_with_responses(lambda **kw: resp), mt)
+    client.responses.create(model="o3", input="hi")
+    mt.flush()
+
+    update = _find(capture.batch(), "generation-update")
+    assert update["body"]["usage"] == {
+        "promptTokens": 50,
+        "completionTokens": 400,
+        "totalTokens": 450,
+        "cacheReadTokens": 20,
+        "reasoningTokens": 300,
+    }
