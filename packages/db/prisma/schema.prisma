@@ -575,7 +575,13 @@ model Evaluator {
   projectId    String
   project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   name         String
-  prompt       String // judge prompt / instructions
+  // "LLM" (default): an LLM-as-judge evaluator driven by `prompt` + provider/model.
+  // "CODE": a deterministic check — `expression` is evaluated by the safe expression
+  // interpreter in @memoturn/core; prompt/provider/model are unused and no LLM call is made.
+  kind         String   @default("LLM")
+  prompt       String // judge prompt / instructions (kind = "LLM")
+  // Source of the check for kind = "CODE". Empty for LLM evaluators.
+  expression   String   @default("")
   provider     String   @default("mock")
   model        String
   outputSchema Json     @default("{}")
@@ -613,7 +619,11 @@ model EvaluatorVersion {
   evaluatorId  String
   evaluator    Evaluator @relation(fields: [evaluatorId], references: [id], onDelete: Cascade)
   version      Int
+  // Mirrors Evaluator.kind/expression so a CODE evaluator's history is as attributable as an
+  // LLM one — a score shift should always be traceable to the exact check that produced it.
+  kind         String    @default("LLM")
   prompt       String
+  expression   String    @default("")
   provider     String
   model        String
   jurors       Json      @default("[]")

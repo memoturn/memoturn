@@ -11,7 +11,7 @@ breakdowns, per-widget filters, multiple named dashboards) · prompt registry + 
 playground (multi-provider, streaming, trace-linked, tools + structured output,
 **multi-model side-by-side comparison**) · datasets & experiments + comparison matrix ·
 **dataset CI quality gates** (gate API + GitHub Action + Python SDK) · evaluators (offline
-+ online, **template library + version history**) · human review queues + assignments ·
++ online, **template library + version history**, **deterministic code checks**) · human review queues + assignments ·
 score configs · scores on traces · comments · tags + facets · webhooks + automations
 (Slack, **retries + delivery log**) · **alert rules engine** (error-rate / latency-p95 /
 cost / ingest-volume / DLQ-depth triggers, firing→resolved lifecycle, email + PagerDuty) ·

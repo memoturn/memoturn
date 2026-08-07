@@ -57,6 +57,7 @@ import {
   deleteWidget,
   demoModeEnabled,
   disconnectMcpClient,
+  EvaluatorConfigError,
   evaluateGate,
   exportDatasetJsonl,
   exportTraceJson,
@@ -106,6 +107,7 @@ import {
   listEvaluatorTemplates,
   listEvaluatorVersions,
   listExperiments,
+  listExprPresets,
   listMcpConnections,
   listModelPrices,
   listProjectMembers,
@@ -164,6 +166,7 @@ import {
   submitBatch,
   submitReviewScore,
   subscribeLiveTraces,
+  testExpression,
   traceFacets,
   traceHistogram,
   UserPatternError,
@@ -2111,6 +2114,52 @@ app.openapi(
   async (c) => c.json({ data: listEvaluatorTemplates() }),
 );
 
+// Prebuilt CODE-evaluator checks — static `/presets` path, registered before `/{name}`.
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/evaluators/presets",
+    summary: "List the prebuilt code-evaluator checks (regex, JSON shape, length, exact match)",
+    tags: ["evaluators"],
+    security,
+    responses: {
+      200: { description: "Presets", content: { "application/json": { schema: C.listOf(C.exprPreset) } } },
+    },
+  }),
+  async (c) => c.json({ data: listExprPresets() }),
+);
+
+app.openapi(
+  createRoute({
+    // rbac-exempt: POST only because it takes a body — this is a pure dry-run that persists
+    // nothing, so a VIEWER inspecting why a check scores the way it does should not be blocked.
+    method: "post",
+    path: "/v1/evaluators/test-expression",
+    summary: "Evaluate a code-evaluator expression against a sample item without saving it",
+    tags: ["evaluators"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              expression: z.string().min(1),
+              input: z.unknown().optional(),
+              output: z.unknown().optional(),
+              expectedOutput: z.unknown().optional(),
+              metadata: z.unknown().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Result", content: { "application/json": { schema: C.expressionTestResult } } },
+    },
+  }),
+  async (c) => c.json(testExpression(c.req.valid("json"))),
+);
+
 app.openapi(
   createRoute({
     method: "post",
@@ -2161,7 +2210,7 @@ app.openapi(
   createRoute({
     method: "post",
     path: "/v1/evaluators",
-    summary: "Create/update an LLM-as-judge evaluator",
+    summary: "Create/update an evaluator (LLM-as-judge, or a deterministic CODE check)",
     tags: ["evaluators"],
     security,
     request: {
@@ -2170,7 +2219,13 @@ app.openapi(
           "application/json": {
             schema: z.object({
               name: z.string().min(1),
-              prompt: z.string().min(1),
+              // "CODE" evaluators carry `expression` and make no provider call; "LLM" (default)
+              // uses `prompt` + provider/model.
+              kind: z.enum(["LLM", "CODE"]).optional(),
+              // Not min(1): a CODE evaluator has no prompt. The kind-specific requirement is
+              // enforced in createEvaluator, which knows which field each kind actually needs.
+              prompt: z.string().optional(),
+              expression: z.string().optional(),
               provider: z.enum(RUN_PROVIDER_IDS).optional(),
               model: z.string(),
               online: z.boolean().optional(),
@@ -2186,6 +2241,7 @@ app.openapi(
     },
     responses: {
       201: { description: "Created", content: { "application/json": { schema: z.any() } } },
+      400: { description: "Invalid evaluator config (e.g. an expression that doesn't compile)" },
       403: { description: "Forbidden" },
     },
   }),
@@ -2193,7 +2249,14 @@ app.openapi(
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
     const body = c.req.valid("json");
-    const result = await createEvaluator(c.get("projectId"), body);
+    let result: Awaited<ReturnType<typeof createEvaluator>>;
+    try {
+      result = await createEvaluator(c.get("projectId"), body);
+    } catch (err) {
+      // A CODE expression that won't compile is the author's mistake, not a server fault.
+      if (err instanceof EvaluatorConfigError) return c.json({ error: err.message }, 400);
+      throw err;
+    }
     await recordAudit(c.get("projectId"), c.get("actor"), "evaluator.create", `evaluator:${body.name}`);
     return c.json(result, 201);
   },
