@@ -64,6 +64,8 @@ export function mirrorObservationRow(s: ObservationState, prices: ModelPrice[]):
     total_tokens: totalTokens,
     cache_read_tokens: clampTokens(s.cacheReadTokens ?? undefined),
     cache_creation_tokens: clampTokens(s.cacheCreationTokens ?? undefined),
+    // Attribution only — reasoning is already inside completionTokens, so it never feeds cost.
+    reasoning_tokens: Math.min(clampTokens(s.reasoningTokens ?? undefined), completionTokens),
     input_cost: cost.inputCost,
     output_cost: cost.outputCost,
     total_cost: cost.totalCost,

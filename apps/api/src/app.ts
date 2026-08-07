@@ -59,6 +59,7 @@ import {
   disconnectMcpClient,
   evaluateGate,
   exportDatasetJsonl,
+  exportTraceJson,
   exportTracesCsv,
   exportTracesJsonl,
   exportTracesParquet,
@@ -485,6 +486,20 @@ app.get("/v1/demo/status", async (c) => {
   const userId = c.get("userId");
   if (!userId) return c.json({ sandbox: null });
   return c.json({ sandbox: await getSandboxForUser(userId) });
+});
+
+// Single-trace export (JSON download) — plain route so we can set a file download header.
+// Declared before the list export so the more specific path wins.
+app.get("/v1/exports/traces/:traceId", async (c) => {
+  const traceId = c.req.param("traceId");
+  const body = await exportTraceJson(c.get("projectId"), traceId);
+  if (!body) return c.json({ error: "Trace not found" }, 404);
+  return c.body(body, 200, {
+    "content-type": "application/json",
+    // Trace ids are caller-supplied, so keep the filename to characters that can't break
+    // out of the header or the saved filename.
+    "content-disposition": `attachment; filename=memoturn-trace-${traceId.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`,
+  });
 });
 
 // Batch export (NDJSON download) — plain route so we can set a file download header.

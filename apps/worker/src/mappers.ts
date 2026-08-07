@@ -135,6 +135,7 @@ export function mapEvents(
     let totalTokens: number;
     let cacheReadTokens: number;
     let cacheCreationTokens: number;
+    let reasoningTokens: number;
     let cost: { inputCost: number; outputCost: number; totalCost: number };
     if (b.usage !== undefined || !base) {
       promptTokens = clampTokens(b.usage?.promptTokens);
@@ -142,6 +143,10 @@ export function mapEvents(
       totalTokens = clampTokens(b.usage?.totalTokens ?? promptTokens + completionTokens);
       cacheReadTokens = clampTokens(b.usage?.cacheReadTokens);
       cacheCreationTokens = clampTokens(b.usage?.cacheCreationTokens);
+      // Reasoning tokens are already inside completionTokens (providers bill them at the
+      // output rate), so they feed attribution only — never cost. Clamp to completionTokens
+      // so a mis-reporting SDK can't make the reasoning share exceed 100%.
+      reasoningTokens = Math.min(clampTokens(b.usage?.reasoningTokens), completionTokens);
       const c = computeCost(model, promptTokens, completionTokens, priceOverrides);
       cost = { inputCost: c.inputCost, outputCost: c.outputCost, totalCost: c.totalCost };
     } else {
@@ -150,6 +155,7 @@ export function mapEvents(
       totalTokens = base.total_tokens;
       cacheReadTokens = base.cache_read_tokens;
       cacheCreationTokens = base.cache_creation_tokens;
+      reasoningTokens = base.reasoning_tokens;
       cost = { inputCost: base.input_cost, outputCost: base.output_cost, totalCost: base.total_cost };
     }
     const startTime: string = b.startTime ?? base?.start_time ?? event_ts;
@@ -175,6 +181,7 @@ export function mapEvents(
       total_tokens: totalTokens,
       cache_read_tokens: cacheReadTokens,
       cache_creation_tokens: cacheCreationTokens,
+      reasoning_tokens: reasoningTokens,
       input_cost: cost.inputCost,
       output_cost: cost.outputCost,
       total_cost: cost.totalCost,

@@ -52,6 +52,7 @@ describe("stream load serialization", () => {
       total_tokens: 0,
       cache_read_tokens: 0,
       cache_creation_tokens: 0,
+      reasoning_tokens: 0,
       input_cost: 0,
       output_cost: 0,
       total_cost: 0,
