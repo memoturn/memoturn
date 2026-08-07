@@ -22,13 +22,19 @@ import { tapStream } from "./stream.js";
 
 type WrapOptions = { trace?: MemoturnTrace; traceName?: string; streamTimeoutMs?: number };
 
-/** Straight 3-field usage passthrough — Groq has no prompt-caching fields to map. */
+/**
+ * Usage passthrough — Groq has no prompt-caching fields to map. Reasoning models served on
+ * Groq report OpenAI-shaped `completion_tokens_details.reasoning_tokens`, a subset of
+ * `completion_tokens`, so it is carried for attribution and never added to a total.
+ */
 function mapUsage(usage: any): Record<string, number> | undefined {
   if (!usage) return undefined;
+  const reasoning = usage.completion_tokens_details?.reasoning_tokens;
   return {
     promptTokens: usage.prompt_tokens,
     completionTokens: usage.completion_tokens,
     totalTokens: usage.total_tokens,
+    ...(reasoning ? { reasoningTokens: reasoning } : {}),
   };
 }
 

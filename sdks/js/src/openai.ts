@@ -33,6 +33,31 @@ export function wrapOpenAI<T extends object>(
 
 type WrapOptions = { trace?: MemoturnTrace; traceName?: string; streamTimeoutMs?: number };
 
+/**
+ * Map a Chat Completions `usage` object onto the recorded usage shape.
+ *
+ * Beyond the headline counts, OpenAI reports two breakdowns that are *subsets* of the totals
+ * they sit under — `prompt_tokens_details.cached_tokens` inside the prompt tokens, and
+ * `completion_tokens_details.reasoning_tokens` inside the completion tokens. They are carried
+ * separately for attribution ("how much of this call was cache / was thinking?") and never
+ * added to any total, which would double-count.
+ *
+ * Fields are omitted rather than zeroed when the provider doesn't report them, so a partial
+ * usage patch can't clobber a value another event already recorded.
+ */
+function mapChatUsage(usage: any): Record<string, number> | undefined {
+  if (!usage) return undefined;
+  const cached = usage.prompt_tokens_details?.cached_tokens;
+  const reasoning = usage.completion_tokens_details?.reasoning_tokens;
+  return {
+    promptTokens: usage.prompt_tokens,
+    completionTokens: usage.completion_tokens,
+    totalTokens: usage.total_tokens,
+    ...(cached ? { cacheReadTokens: cached } : {}),
+    ...(reasoning ? { reasoningTokens: reasoning } : {}),
+  };
+}
+
 function wrapChat(chat: any, memoturn: Memoturn, options: WrapOptions): any {
   return new Proxy(chat, {
     get(target, prop, receiver) {
@@ -109,13 +134,7 @@ function createChatStreamAccumulator() {
         // Match the non-streaming shape: a single message object when there's one choice
         // (the common case), mirroring `response?.choices?.[0]?.message`.
         output: messages.length <= 1 ? messages[0] : messages,
-        usage: usage
-          ? {
-              promptTokens: usage.prompt_tokens,
-              completionTokens: usage.completion_tokens,
-              totalTokens: usage.total_tokens,
-            }
-          : undefined,
+        usage: mapChatUsage(usage),
       };
     },
   };
@@ -176,13 +195,7 @@ function wrapCompletions(completions: any, memoturn: Memoturn, options: WrapOpti
           const response = await original.call(target, params, ...rest);
           generation.end({
             output: response?.choices?.[0]?.message ?? response,
-            usage: response?.usage
-              ? {
-                  promptTokens: response.usage.prompt_tokens,
-                  completionTokens: response.usage.completion_tokens,
-                  totalTokens: response.usage.total_tokens,
-                }
-              : undefined,
+            usage: mapChatUsage(response?.usage),
           });
           return response;
         } catch (err) {
@@ -199,15 +212,23 @@ function extractResponsesOutput(response: any): unknown {
   return response?.output_text ?? response?.output ?? response;
 }
 
-/** Map Responses API usage (`input_tokens`/`output_tokens`) to the recorded usage shape. */
+/**
+ * Map Responses API usage (`input_tokens`/`output_tokens`) to the recorded usage shape.
+ * The Responses API nests the same two subset breakdowns as Chat Completions, under
+ * `input_tokens_details` / `output_tokens_details` — see `mapChatUsage` for why they are
+ * carried separately and never summed into the totals.
+ */
 function mapResponsesUsage(usage: any): Record<string, number> | undefined {
-  return usage
-    ? {
-        promptTokens: usage.input_tokens,
-        completionTokens: usage.output_tokens,
-        totalTokens: usage.total_tokens,
-      }
-    : undefined;
+  if (!usage) return undefined;
+  const cached = usage.input_tokens_details?.cached_tokens;
+  const reasoning = usage.output_tokens_details?.reasoning_tokens;
+  return {
+    promptTokens: usage.input_tokens,
+    completionTokens: usage.output_tokens,
+    totalTokens: usage.total_tokens,
+    ...(cached ? { cacheReadTokens: cached } : {}),
+    ...(reasoning ? { reasoningTokens: reasoning } : {}),
+  };
 }
 
 /**

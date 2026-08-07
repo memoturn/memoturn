@@ -57,6 +57,52 @@ describe("wrapOpenAI", () => {
     expect(update?.body.usage).toEqual({ promptTokens: 10, completionTokens: 1, totalTokens: 11 });
   });
 
+  it("maps reasoning and cached tokens from the details sub-objects", async () => {
+    active = mockFetch(() => ({ status: 207 }));
+    const memoturn = new Memoturn(creds);
+    const openai = wrapOpenAI(
+      fakeOpenAI(async () => ({
+        choices: [{ message: { role: "assistant", content: "4" } }],
+        usage: {
+          prompt_tokens: 100,
+          completion_tokens: 900,
+          total_tokens: 1000,
+          prompt_tokens_details: { cached_tokens: 80 },
+          completion_tokens_details: { reasoning_tokens: 700 },
+        },
+      })),
+      memoturn,
+    );
+    await openai.chat.completions.create({ model: "o3", messages: [{ role: "user", content: "hi" }] });
+    await memoturn.flush();
+
+    const update = batchFrom(active).find((e) => e.type === "generation-update");
+    // Both are SUBSETS of the totals they sit under — the totals stay untouched.
+    expect(update?.body.usage).toEqual({
+      promptTokens: 100,
+      completionTokens: 900,
+      totalTokens: 1000,
+      cacheReadTokens: 80,
+      reasoningTokens: 700,
+    });
+  });
+
+  it("omits the detail fields when the model reports none", async () => {
+    active = mockFetch(() => ({ status: 207 }));
+    const memoturn = new Memoturn(creds);
+    const openai = wrapOpenAI(
+      fakeOpenAI(async () => completion),
+      memoturn,
+    );
+    await openai.chat.completions.create({ model: "gpt-4o", messages: [] });
+    await memoturn.flush();
+
+    const usage = batchFrom(active).find((e) => e.type === "generation-update")?.body.usage as Record<string, number>;
+    // Absent rather than zero, so a later partial update can't be clobbered by a stray 0.
+    expect(usage).not.toHaveProperty("reasoningTokens");
+    expect(usage).not.toHaveProperty("cacheReadTokens");
+  });
+
   it("creates a default trace per call, or nests under a provided trace", async () => {
     active = mockFetch(() => ({ status: 207 }));
     const memoturn = new Memoturn(creds);
@@ -122,6 +168,39 @@ describe("wrapOpenAI", () => {
     expect(create?.body.input).toEqual({ instructions: "be terse", input: "hi" });
     expect(update?.body.output).toBe("it works");
     expect(update?.body.usage).toEqual({ promptTokens: 12, completionTokens: 7, totalTokens: 19 });
+  });
+
+  it("maps Responses API reasoning + cached tokens from *_tokens_details", async () => {
+    active = mockFetch(() => ({ status: 207 }));
+    const memoturn = new Memoturn(creds);
+    const openai = wrapOpenAI(
+      {
+        responses: {
+          create: async () => ({
+            output_text: "ok",
+            usage: {
+              input_tokens: 50,
+              output_tokens: 400,
+              total_tokens: 450,
+              input_tokens_details: { cached_tokens: 20 },
+              output_tokens_details: { reasoning_tokens: 300 },
+            },
+          }),
+        },
+      },
+      memoturn,
+    );
+    await (openai as any).responses.create({ model: "o3", input: "hi" });
+    await memoturn.flush();
+
+    const update = batchFrom(active).find((e) => e.type === "generation-update");
+    expect(update?.body.usage).toEqual({
+      promptTokens: 50,
+      completionTokens: 400,
+      totalTokens: 450,
+      cacheReadTokens: 20,
+      reasoningTokens: 300,
+    });
   });
 
   it("falls back to output items when responses has no output_text", async () => {

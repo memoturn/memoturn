@@ -103,6 +103,56 @@ describe("wrapGemini", () => {
     });
   });
 
+  it("folds thinking tokens into completionTokens and reports them as reasoningTokens", async () => {
+    active = mockFetch(() => ({ status: 207 }));
+    const memoturn = new Memoturn(creds);
+    const gemini = wrapGemini(
+      fakeGemini(async () => ({
+        text: "hi",
+        // Gemini reports thoughts ALONGSIDE candidates, not inside them:
+        // totalTokenCount = prompt + candidates + thoughts.
+        usageMetadata: {
+          promptTokenCount: 100,
+          candidatesTokenCount: 200,
+          thoughtsTokenCount: 500,
+          totalTokenCount: 800,
+        },
+      })),
+      memoturn,
+    );
+
+    await gemini.models.generateContent({ model: "gemini-2.5-pro", contents: [], config: {} });
+    await memoturn.flush();
+
+    const update = batchFrom(active).find((e) => e.type === "generation-update");
+    // Thinking is billed at the output rate, so it must be part of completionTokens —
+    // candidatesTokenCount alone would understate output (and cost) by 500 here.
+    expect(update?.body.usage).toEqual({
+      promptTokens: 100,
+      completionTokens: 700,
+      totalTokens: 800,
+      reasoningTokens: 500,
+    });
+  });
+
+  it("prefers the provider's own totalTokenCount over a locally computed sum", async () => {
+    active = mockFetch(() => ({ status: 207 }));
+    const memoturn = new Memoturn(creds);
+    const gemini = wrapGemini(
+      fakeGemini(async () => ({
+        text: "hi",
+        usageMetadata: { promptTokenCount: 8, candidatesTokenCount: 3, totalTokenCount: 99 },
+      })),
+      memoturn,
+    );
+
+    await gemini.models.generateContent({ model: "gemini-2.5-flash", contents: [], config: {} });
+    await memoturn.flush();
+
+    const usage = batchFrom(active).find((e) => e.type === "generation-update")?.body.usage as Record<string, number>;
+    expect(usage.totalTokens).toBe(99);
+  });
+
   it("omits totalTokens and cacheReadTokens when the underlying fields are absent", async () => {
     active = mockFetch(() => ({ status: 207 }));
     const memoturn = new Memoturn(creds);
