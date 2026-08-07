@@ -559,6 +559,30 @@ const messages = compilePrompt(prompt, { customer: "Ada" });
 Pass `bucketKey` (a stable user/session id) to stick a caller to one arm of an A/B split, and
 stamp `prompt.version` on the resulting generation via `promptVersion`.
 
+### Caching and outage behavior
+
+Prompt resolution sits on your request path, so `getPrompt` caches in memory and degrades
+instead of failing:
+
+| Situation | Behavior |
+| --- | --- |
+| Within `cacheTtlMs` (default 60s) | Served from memory, no network call |
+| Past the TTL | **Stale value returned immediately**, refreshed in the background |
+| Fetch fails, something cached | Keeps serving the cached value — a memoturn outage won't take down your app |
+| Fetch fails, nothing cached | `fallback` if you gave one, otherwise throws |
+
+```ts
+const prompt = await getPrompt(memoturn, "support-reply", {
+  cacheTtlMs: 300_000, // 5 minutes
+  fallback: { name: "support-reply", version: 0, type: "TEXT", content: "…", config: {} },
+});
+```
+
+Concurrent resolves of the same prompt are coalesced into one request. The cache is keyed by
+credentials, name, channel, and `bucketKey`, and bounded (500 entries) so a per-user A/B split
+can't grow it without limit. Set `cacheTtlMs: 0` to disable caching; call `clearPromptCache()`
+to force the next resolve to refetch.
+
 ## Datasets & CI gates
 
 Dataset, prompt, and guardrail helpers take a plain creds object (`{}` uses the

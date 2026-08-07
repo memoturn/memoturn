@@ -53,15 +53,34 @@ function extractGeminiOutput(response: any): unknown {
   return response?.text ?? response?.candidates ?? response;
 }
 
+/**
+ * Map Gemini `usageMetadata` onto the recorded usage shape.
+ *
+ * Gotcha worth stating: unlike OpenAI and Anthropic, Gemini reports thinking tokens
+ * *alongside* the answer tokens rather than inside them — `totalTokenCount` is
+ * `promptTokenCount + candidatesTokenCount + thoughtsTokenCount`. Thinking tokens are still
+ * billed at the output rate, so `candidatesTokenCount` alone understates output (and
+ * therefore cost) on thinking models. We add them together for `completionTokens` and carry
+ * `thoughtsTokenCount` separately as `reasoningTokens`, which restores the invariant the rest
+ * of the pipeline assumes: reasoning is a subset of completion, never additive to cost.
+ *
+ * `totalTokenCount` is preferred when present — it is the provider's own accounting.
+ */
 function mapGeminiUsage(usage: any): Record<string, number> | undefined {
   if (!usage) return undefined;
   const promptTokens = usage.promptTokenCount;
-  const completionTokens = usage.candidatesTokenCount;
+  const answerTokens = usage.candidatesTokenCount;
+  const thoughts = usage.thoughtsTokenCount;
+  const completionTokens = answerTokens != null || thoughts != null ? (answerTokens ?? 0) + (thoughts ?? 0) : undefined;
+  const totalTokens =
+    usage.totalTokenCount ??
+    (promptTokens != null && completionTokens != null ? promptTokens + completionTokens : undefined);
   return {
     promptTokens,
     completionTokens,
-    ...(promptTokens != null && completionTokens != null ? { totalTokens: promptTokens + completionTokens } : {}),
+    ...(totalTokens != null ? { totalTokens } : {}),
     ...(usage.cachedContentTokenCount != null ? { cacheReadTokens: usage.cachedContentTokenCount } : {}),
+    ...(thoughts ? { reasoningTokens: thoughts } : {}),
   };
 }
 
