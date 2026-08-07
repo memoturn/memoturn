@@ -124,6 +124,7 @@ Server-executed experiments run a prompt/model across a dataset and auto-score e
 
 | Method | Path | Description |
 | --- | --- | --- |
+| GET | `/v1/retrieval/analytics` | Cross-trace RAG diagnostics: similarity histogram, weakest retrievals (worst top-score first), and per-document hit stats. Query: `days` (1–365), `limit` (1–200). |
 | GET | `/v1/embeddings/projection` | 3D UMAP projection of observation embeddings (seeded/deterministic; PCA fallback for small sets or `EMBEDDING_PROJECTION_METHOD=pca`), with clusters + optional `colorBy` score. Computed by the daily worker cron. Params: `runId?`, `colorBy?`, `limit?`. |
 | POST | `/v1/embeddings/projection/run` | Recompute the projection on demand (instead of waiting for the daily cron). Audited. |
 

@@ -1,4 +1,4 @@
-import type { EmbeddingProjection, SimilarTrace } from "@memoturn/contracts";
+import type { EmbeddingProjection, RetrievalAnalytics, SimilarTrace } from "@memoturn/contracts";
 import { isoNow, newId } from "@memoturn/core";
 import { prisma } from "@memoturn/db";
 import { type EmbeddingProjectionRow, telemetry } from "@memoturn/telemetry";
@@ -351,4 +351,19 @@ export async function getEmbeddingProjection(
 
   const clusterCount = new Set(points.map((p) => p.cluster_id)).size;
   return { run_id: runId ?? "", method: points[0] ? "pca" : "", cluster_count: clusterCount, points };
+}
+
+/**
+ * Cross-trace retrieval diagnostics. The trace view answers "what did THIS query retrieve?";
+ * this answers "which retrievals are scoring badly?" — the question that surfaces a broken
+ * index, a chunking change that regressed, or documents that dominate every result set.
+ *
+ * A thin pass-through to the telemetry store: all the aggregation is engine SQL, which lives
+ * behind the store seam so both dialects stay equivalent (conformance covers it).
+ */
+export async function getRetrievalAnalytics(
+  projectId: string,
+  opts: { days?: number; limit?: number } = {},
+): Promise<RetrievalAnalytics> {
+  return telemetry().retrievalAnalytics(projectId, opts);
 }

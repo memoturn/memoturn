@@ -53,6 +53,7 @@ import type {
   ProviderConnection,
   QueryResult,
   QueryWidget,
+  RetrievalAnalytics,
   ReviewAnalytics,
   ReviewItemsResponse,
   ReviewQueue,
@@ -502,6 +503,8 @@ export const api = {
   }) => post<ExpressionTestResult>(`/v1/evaluators/test-expression`, body),
   listEvaluatorVersions: (name: string) =>
     get<{ data: EvaluatorVersion[] }>(`/v1/evaluators/${encodeURIComponent(name)}/versions`).then((r) => r.data),
+  getRetrievalAnalytics: (opts: { days?: number; limit?: number } = {}) =>
+    get<RetrievalAnalytics>(`/v1/retrieval/analytics${qs(opts as Record<string, unknown>)}`),
   getEmbeddingProjection: (opts: { runId?: string; colorBy?: string; limit?: number } = {}) =>
     get<EmbeddingProjection>(`/v1/embeddings/projection${qs(opts as Record<string, unknown>)}`),
   runEmbeddingProjection: () => post<{ run_id: string; points: number }>(`/v1/embeddings/projection/run`, {}),

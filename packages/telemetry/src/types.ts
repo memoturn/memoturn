@@ -314,6 +314,13 @@ export interface TraceEmbeddingRow {
   vector: number[];
 }
 
+/**
+ * Cross-trace retrieval diagnostics. Re-exported from @memoturn/contracts rather than
+ * redeclared: it is an API response shape, so the contract is the source of truth and
+ * redeclaring it here would be exactly the drift the contracts package exists to prevent.
+ */
+export type { RetrievalAnalytics } from "@memoturn/contracts";
+
 /** One retrieved doc read back with its owning observation id (getTrace enrichment). */
 export interface RetrievalDocumentDetail {
   observation_id: string;
