@@ -49,6 +49,30 @@ msgs := p.CompileChat(map[string]any{"name": "Ada"})                  // CHAT pr
 `GetPrompt` resolves the `"production"` channel by default; pick another with
 `memoturn.WithPromptChannel("staging")`.
 
+### Caching and outage behavior
+
+Prompt resolution sits on your request path, so `GetPrompt` caches on the client and degrades
+instead of failing:
+
+| Situation | Behavior |
+| --- | --- |
+| Within the TTL (default 60s) | Served from memory, no network call |
+| Past the TTL | **Stale value returned immediately**, refreshed in a background goroutine |
+| Fetch fails, something cached | Keeps serving the cached value — a memoturn outage won't take down your app |
+| Fetch fails, nothing cached | `WithPromptFallback` if you gave one, otherwise the error |
+
+```go
+p, err := mt.GetPrompt("support-reply",
+    memoturn.WithPromptCacheTTL(5*time.Minute),
+    memoturn.WithPromptFallback(&memoturn.CompiledPrompt{Name: "support-reply", Type: "TEXT", Content: "…"}),
+)
+```
+
+Concurrent resolves of the same prompt are coalesced into one request, and the cache is bounded
+(500 entries) so a per-user A/B split can't grow it without limit. Pass
+`memoturn.WithPromptCacheTTL(0)` to disable caching, or call `mt.ClearPromptCache()` to force the
+next resolve to refetch.
+
 ## Datasets, experiment runs & CI quality gates
 
 ```go

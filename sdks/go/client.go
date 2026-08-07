@@ -60,6 +60,13 @@ type Client struct {
 	flushing   bool // a size-triggered background flush is in flight (single-flight)
 	warnedFull bool
 
+	// Prompt cache (see prompt.go). Separate mutex: a prompt resolve must never contend
+	// with the ingest buffer.
+	promptMu       sync.Mutex
+	promptCache    map[string]promptEntry
+	promptInflight map[string]chan struct{}
+	promptInserts  int64 // monotonic insert counter, for oldest-first eviction
+
 	stopOnce sync.Once
 	stop     chan struct{}
 	done     chan struct{}
