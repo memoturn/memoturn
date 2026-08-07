@@ -63,13 +63,20 @@ def _message(resp: Any) -> Any:
 
 
 def _map_usage(usage: Any) -> Optional[dict]:
+    """Groq has no prompt-caching fields to map. Reasoning models served on Groq report the
+    OpenAI-shaped ``completion_tokens_details.reasoning_tokens``, a subset of
+    ``completion_tokens``, carried for attribution and never added to a total."""
     if usage is None:
         return None
-    return {
+    out: dict[str, Any] = {
         "promptTokens": _get(usage, "prompt_tokens"),
         "completionTokens": _get(usage, "completion_tokens"),
         "totalTokens": _get(usage, "total_tokens"),
     }
+    reasoning = _get(_get(usage, "completion_tokens_details"), "reasoning_tokens")
+    if reasoning:
+        out["reasoningTokens"] = reasoning
+    return out
 
 
 class _GroqAccumulator:

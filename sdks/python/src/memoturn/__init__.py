@@ -19,7 +19,7 @@ from .mistral import wrap_mistral
 from .openai import wrap_openai
 from .otel import otlp_config, span_exporter, span_processor
 from .pinecone import wrap_pinecone
-from .prompt import compile_prompt, get_prompt
+from .prompt import clear_prompt_cache, compile_prompt, get_prompt
 from .qdrant import wrap_qdrant
 from .weaviate import wrap_weaviate
 
@@ -33,6 +33,7 @@ __all__ = [
     "set_trace_context",
     "get_prompt",
     "compile_prompt",
+    "clear_prompt_cache",
     "wrap_openai",
     "wrap_anthropic",
     "wrap_bedrock",

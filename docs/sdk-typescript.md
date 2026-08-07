@@ -71,6 +71,20 @@ const prompt = await getPrompt(
 const messages = compilePrompt(prompt, { product: "memoturn", question: q });
 ```
 
+`getPrompt` caches in memory (default TTL 60s) and serves stale-while-revalidate, so a resolve
+on your request path costs nothing most of the time and never blocks on a slow control plane.
+If the fetch fails it keeps serving the cached value; with nothing cached it returns `fallback`
+when you supply one, otherwise it throws.
+
+```ts
+const prompt = await getPrompt(creds, "support-reply", {
+  cacheTtlMs: 300_000,
+  fallback: { name: "support-reply", version: 0, type: "TEXT", content: "…", config: {} },
+});
+```
+
+Set `cacheTtlMs: 0` to disable caching, or call `clearPromptCache()` to force a refetch.
+
 ## Datasets / experiments
 
 ```ts

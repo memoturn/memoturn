@@ -6,6 +6,35 @@ All notable changes to the memoturn Python SDK.
 
 ### Features
 
+- `get_prompt` now caches in memory and degrades instead of failing. Prompt resolution sits on
+  the calling app's request path, so: a hit within `cache_ttl` seconds (default 60, `0` disables)
+  skips the network entirely; a failed fetch keeps serving the cached value, so a memoturn outage
+  no longer takes down the app that depends on it; and with nothing cached, a new `fallback`
+  argument supplies a last-resort prompt instead of raising (absent it, the historical raise is
+  unchanged). Cache entries are keyed by credentials + name + channel + `bucket_key` and bounded
+  at 500 so a per-user A/B split can't grow them without limit. New export: `clear_prompt_cache`.
+  Deliberate difference from the TypeScript SDK: it serves a stale prompt while refreshing in the
+  background, whereas this SDK refreshes synchronously — it holds no background threads by design,
+  and spawning one from library code would be a new behavior inconsistent with the rest of the SDK.
+- Reasoning/thinking token attribution (`reasoningTokens`). `wrap_openai` maps
+  `completion_tokens_details.reasoning_tokens` (Chat Completions) and
+  `output_tokens_details.reasoning_tokens` (Responses API); `wrap_groq` maps the OpenAI-shaped
+  equivalent. These are subsets of the completion tokens they sit under and are never added to a
+  total. `wrap_openai` also now maps the cached-prompt-token subset
+  (`prompt_tokens_details.cached_tokens` / `input_tokens_details.cached_tokens`) as
+  `cacheReadTokens`, which it previously dropped. Anthropic does not report thinking tokens
+  separately in `usage`, so nothing is mapped there rather than approximating one.
+
+### Fixes
+
+- `wrap_gemini` undercounted output tokens (and therefore cost) on thinking models. Gemini reports
+  thinking tokens *alongside* the answer tokens rather than inside them (`total_token_count =
+  prompt_token_count + candidates_token_count + thoughts_token_count`), but the wrapper mapped
+  `candidates_token_count` alone to `completionTokens`. Thinking tokens are billed at the output
+  rate, so `completionTokens` is now `candidates_token_count + thoughts_token_count`, with
+  `thoughts_token_count` carried separately as `reasoningTokens`. `totalTokens` now prefers the
+  provider's own `total_token_count` when present.
+
 - `wrap_mistral(client)` — drop-in wrapper for a Mistral client (`mistralai` v1 on
   PyPI): records `client.chat.complete` and `client.chat.stream` as generations.
   Non-streaming responses are OpenAI-chat-shaped (`choices[0].message`, snake_case
