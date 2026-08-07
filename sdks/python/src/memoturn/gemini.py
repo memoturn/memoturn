@@ -130,14 +130,37 @@ def _output(resp: Any) -> Any:
 
 
 def _map_usage(usage: Any) -> Optional[dict[str, Any]]:
+    """Map Gemini ``usage_metadata``.
+
+    Gotcha worth stating: unlike OpenAI and Anthropic, Gemini reports thinking tokens
+    *alongside* the answer tokens rather than inside them — ``total_token_count`` is
+    ``prompt_token_count + candidates_token_count + thoughts_token_count``. Thinking tokens are
+    still billed at the output rate, so ``candidates_token_count`` alone understates output (and
+    therefore cost) on thinking models. They are summed into ``completionTokens`` and carried
+    separately as ``reasoningTokens``, restoring the invariant the rest of the pipeline assumes:
+    reasoning is a subset of completion, never additive to cost.
+
+    ``total_token_count`` is preferred when present — it is the provider's own accounting.
+    """
     if usage is None:
         return None
     prompt_tokens = _get(usage, "prompt_token_count")
-    completion_tokens = _get(usage, "candidates_token_count")
+    answer_tokens = _get(usage, "candidates_token_count")
+    thoughts = _get(usage, "thoughts_token_count")
     cache_read_tokens = _get(usage, "cached_content_token_count")
+
+    completion_tokens: Optional[int] = None
+    if answer_tokens is not None or thoughts is not None:
+        completion_tokens = (answer_tokens or 0) + (thoughts or 0)
+
     out: dict[str, Any] = {"promptTokens": prompt_tokens, "completionTokens": completion_tokens}
-    if prompt_tokens is not None and completion_tokens is not None:
-        out["totalTokens"] = prompt_tokens + completion_tokens
+    total = _get(usage, "total_token_count")
+    if total is None and prompt_tokens is not None and completion_tokens is not None:
+        total = prompt_tokens + completion_tokens
+    if total is not None:
+        out["totalTokens"] = total
     if cache_read_tokens is not None:
         out["cacheReadTokens"] = cache_read_tokens
+    if thoughts:
+        out["reasoningTokens"] = thoughts
     return out

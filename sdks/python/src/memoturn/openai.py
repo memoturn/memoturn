@@ -141,13 +141,28 @@ class _ChatAccumulator:
 
 
 def _map_chat_usage(usage: Any) -> Optional[dict[str, Any]]:
+    """Map Chat Completions usage.
+
+    Beyond the headline counts, OpenAI reports two breakdowns that are *subsets* of the totals
+    they sit under: ``prompt_tokens_details.cached_tokens`` inside the prompt tokens, and
+    ``completion_tokens_details.reasoning_tokens`` inside the completion tokens. Both are carried
+    separately for attribution and never added to a total, which would double-count. Omitted
+    rather than zeroed when absent, so a partial usage patch can't clobber a recorded value.
+    """
     if usage is None:
         return None
-    return {
+    out: dict[str, Any] = {
         "promptTokens": _get(usage, "prompt_tokens"),
         "completionTokens": _get(usage, "completion_tokens"),
         "totalTokens": _get(usage, "total_tokens"),
     }
+    cached = _get(_get(usage, "prompt_tokens_details"), "cached_tokens")
+    reasoning = _get(_get(usage, "completion_tokens_details"), "reasoning_tokens")
+    if cached:
+        out["cacheReadTokens"] = cached
+    if reasoning:
+        out["reasoningTokens"] = reasoning
+    return out
 
 
 def _patch_responses(client: Any, mt: Memoturn, trace: Optional[Trace]) -> None:
@@ -253,10 +268,19 @@ def _responses_output(resp: Any) -> Any:
 
 
 def _map_responses_usage(usage: Any) -> Optional[dict[str, Any]]:
+    """Map Responses API usage. Same two subset breakdowns as Chat Completions, nested under
+    ``input_tokens_details`` / ``output_tokens_details`` — see ``_map_chat_usage``."""
     if usage is None:
         return None
-    return {
+    out: dict[str, Any] = {
         "promptTokens": _get(usage, "input_tokens"),
         "completionTokens": _get(usage, "output_tokens"),
         "totalTokens": _get(usage, "total_tokens"),
     }
+    cached = _get(_get(usage, "input_tokens_details"), "cached_tokens")
+    reasoning = _get(_get(usage, "output_tokens_details"), "reasoning_tokens")
+    if cached:
+        out["cacheReadTokens"] = cached
+    if reasoning:
+        out["reasoningTokens"] = reasoning
+    return out

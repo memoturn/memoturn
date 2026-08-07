@@ -80,3 +80,21 @@ from memoturn import get_prompt, compile_prompt
 prompt = get_prompt("support-reply", channel="production")
 messages = compile_prompt(prompt, product="memoturn", question=q)
 ```
+
+`get_prompt` caches in memory (default TTL 60s, `cache_ttl=0` disables) and degrades instead of
+failing: while the cached value is fresh no network call is made; if the fetch fails it keeps
+serving the cached value, so a memoturn outage won't take down your app; and with nothing cached
+it returns `fallback` when you supply one, otherwise it raises.
+
+```python
+prompt = get_prompt(
+    "support-reply",
+    cache_ttl=300,
+    fallback={"name": "support-reply", "version": 0, "type": "TEXT", "content": "…", "config": {}},
+)
+```
+
+Call `clear_prompt_cache()` to force the next resolve to refetch. Note a deliberate difference
+from the TypeScript SDK: it refreshes an expired prompt in the background and serves the stale
+value immediately, whereas this SDK holds no background threads by design and refreshes
+synchronously — one blocking fetch per TTL window per prompt.

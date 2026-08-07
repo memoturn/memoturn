@@ -28,11 +28,15 @@ def _fake_gemini(generate_content=None, generate_content_stream=None) -> SimpleN
 
 
 def _usage(**kw: object) -> SimpleNamespace:
-    return SimpleNamespace(
-        prompt_token_count=kw.get("prompt_token_count"),
-        candidates_token_count=kw.get("candidates_token_count"),
-        cached_content_token_count=kw.get("cached_content_token_count"),
-    )
+    fields: dict[str, object] = {
+        "prompt_token_count": None,
+        "candidates_token_count": None,
+        "cached_content_token_count": None,
+        "thoughts_token_count": None,
+        "total_token_count": None,
+    }
+    fields.update(kw)
+    return SimpleNamespace(**fields)
 
 
 def _response(text: str = "4", usage: object | None = None) -> SimpleNamespace:
@@ -245,3 +249,41 @@ def test_generate_content_stream_missing_is_noop(capture: Capture) -> None:
     client.models.generate_content(model="gemini-2.0-flash", contents="hi")
     mt.flush()
     assert _find(capture.batch(), "generation-create")["body"]["name"] == "gemini.generateContent"
+
+
+def test_folds_thinking_tokens_into_completion_and_reports_reasoning(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+    # Gemini reports thoughts ALONGSIDE candidates, not inside them:
+    # total_token_count = prompt + candidates + thoughts.
+    resp = _response(
+        usage=_usage(
+            prompt_token_count=100,
+            candidates_token_count=200,
+            thoughts_token_count=500,
+            total_token_count=800,
+        )
+    )
+    client = _fake_gemini(generate_content=lambda **kw: resp)
+    wrap_gemini(client, mt)
+    client.models.generate_content(model="gemini-2.5-pro", contents=[], config={})
+    mt.flush()
+
+    # Thinking is billed at the output rate, so it must be part of completionTokens —
+    # candidates_token_count alone would understate output (and cost) by 500 here.
+    assert _find(capture.batch(), "generation-update")["body"]["usage"] == {
+        "promptTokens": 100,
+        "completionTokens": 700,
+        "totalTokens": 800,
+        "reasoningTokens": 500,
+    }
+
+
+def test_prefers_provider_total_token_count(capture: Capture) -> None:
+    mt = Memoturn(**CREDS)
+    resp = _response(usage=_usage(prompt_token_count=8, candidates_token_count=3, total_token_count=99))
+    client = _fake_gemini(generate_content=lambda **kw: resp)
+    wrap_gemini(client, mt)
+    client.models.generate_content(model="gemini-2.5-flash", contents=[], config={})
+    mt.flush()
+
+    assert _find(capture.batch(), "generation-update")["body"]["usage"]["totalTokens"] == 99
