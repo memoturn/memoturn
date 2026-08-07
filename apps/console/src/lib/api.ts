@@ -659,13 +659,14 @@ export async function downloadTraceJson(traceId: string): Promise<void> {
 }
 
 /**
- * Download a dataset as JSONL — `items` (backup dump) or `oai-chat` (OpenAI fine-tuning
- * chat format; items without an expectedOutput are skipped). Returns the skipped count
- * from the X-Memoturn-Skipped header so callers can surface it.
+ * Download a dataset as JSONL — `items` (backup dump), `oai-chat` (OpenAI fine-tuning
+ * chat format), or `anthropic-messages` (Anthropic fine-tuning; the system prompt is hoisted
+ * to a top-level field). Items without an expectedOutput are skipped in both fine-tuning
+ * formats; the count comes back in the X-Memoturn-Skipped header so callers can surface it.
  */
 export async function downloadDatasetExport(
   name: string,
-  format: "items" | "oai-chat",
+  format: "items" | "oai-chat" | "anthropic-messages",
   version?: number,
 ): Promise<{ skipped: number }> {
   const res = await fetch(`${API_BASE}/v1/datasets/${encodeURIComponent(name)}/export${qs({ format, version })}`, {

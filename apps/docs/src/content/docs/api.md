@@ -85,7 +85,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/datasets/{name}/versions` | List a dataset's immutable version snapshots. |
 | POST | `/v1/datasets/{name}/versions` | Cut a new version (freeze the current items). Body: `{ label?, description? }`. Audited. |
 | GET | `/v1/datasets/{name}/versions/{version}` | A version's frozen items. |
-| GET | `/v1/datasets/{name}/export` | JSONL download. `format=items` (backup dump) or `format=oai-chat` (OpenAI fine-tuning chat lines — items without `expectedOutput` are skipped; count in `X-Memoturn-Skipped`). Optional `version=N` exports a frozen version. Offloaded payloads are rehydrated. |
+| GET | `/v1/datasets/{name}/export` | JSONL download. `format=items` (backup dump), `format=oai-chat` (OpenAI fine-tuning chat lines), or `format=anthropic-messages` (Anthropic fine-tuning; the system prompt is hoisted to a top-level `system` field). Items without `expectedOutput` are skipped in both fine-tuning formats; count in `X-Memoturn-Skipped`. Optional `version=N` exports a frozen version. Offloaded payloads are rehydrated. |
 
 ### Playground
 
