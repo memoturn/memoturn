@@ -13,8 +13,8 @@ export type { GuardrailFinding, GuardrailVerdict, OnGuardFailure, RunGuardedOpti
 export { checkGuardrails, GuardrailBlockedError, runGuarded } from "./guardrails.js";
 export { MemoturnCallback } from "./langchain.js";
 export { wrapOpenAI } from "./openai.js";
-export type { CompiledPrompt } from "./prompt.js";
-export { compilePrompt, getPrompt } from "./prompt.js";
+export type { CompiledPrompt, GetPromptOptions } from "./prompt.js";
+export { clearPromptCache, compilePrompt, getPrompt } from "./prompt.js";
 export { wrapQdrant } from "./qdrant.js";
 export type * from "./types.js";
 export { wrapWeaviate } from "./weaviate.js";
