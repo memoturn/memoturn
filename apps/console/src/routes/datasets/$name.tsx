@@ -73,7 +73,7 @@ function DatasetDetailPage() {
     onError: (e) => toast.error(String(e)),
   });
 
-  const exportDataset = async (format: "items" | "oai-chat") => {
+  const exportDataset = async (format: "items" | "oai-chat" | "anthropic-messages") => {
     try {
       const { skipped } = await downloadDatasetExport(name, format);
       if (skipped > 0) toast.info(`${skipped} item${skipped === 1 ? "" : "s"} without an expected output skipped`);
@@ -125,6 +125,10 @@ function DatasetDetailPage() {
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void exportDataset("oai-chat")}>
                 Fine-tuning (OpenAI chat JSONL)
+                <span className="ml-auto text-xs text-muted-foreground">.jsonl</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void exportDataset("anthropic-messages")}>
+                Fine-tuning (Anthropic messages JSONL)
                 <span className="ml-auto text-xs text-muted-foreground">.jsonl</span>
               </DropdownMenuItem>
             </DropdownMenuContent>

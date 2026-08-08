@@ -399,7 +399,7 @@ export async function evaluateGate(
 
 // ── Export (fine-tuning + backup) ──────────────────────────────────────────────────
 
-export type DatasetExportFormat = "items" | "oai-chat";
+export type DatasetExportFormat = "items" | "oai-chat" | "anthropic-messages";
 
 export interface DatasetExportItem {
   input: unknown;
@@ -408,12 +408,21 @@ export interface DatasetExportItem {
 }
 
 /**
- * Shape dataset items into JSONL. `items` is a generic backup/re-import dump; `oai-chat`
- * emits OpenAI fine-tuning chat lines — item input through messagesFromInput (the same
- * normalization the experiment runner uses, so exports and experiments read items
- * identically) with expectedOutput as the final assistant message. Items without an
- * expectedOutput are skipped in oai-chat (a fine-tuning example needs a target). Pure —
- * exported for tests; rehydration happens in exportDatasetJsonl.
+ * Shape dataset items into JSONL, in one of three formats:
+ *
+ *  - `items` — a generic backup/re-import dump.
+ *  - `oai-chat` — OpenAI fine-tuning chat lines: `{messages: [...]}` with the system prompt
+ *    (if any) staying inline as a `system`-role message.
+ *  - `anthropic-messages` — Anthropic fine-tuning lines. Same content, but the Messages API
+ *    keeps the system prompt in a **top-level `system` field** rather than as a message role,
+ *    so it is hoisted out; several system messages join with blank lines.
+ *
+ * Item input goes through messagesFromInput — the same normalization the experiment runner
+ * uses, so exports and experiments read items identically — with expectedOutput as the final
+ * assistant message. Items without an expectedOutput are skipped in both fine-tuning formats
+ * (an example needs a target), as is an item left with no non-system turn.
+ *
+ * Pure — exported for tests; rehydration happens in exportDatasetJsonl.
  */
 export function datasetItemsToJsonl(
   items: DatasetExportItem[],
@@ -433,8 +442,29 @@ export function datasetItemsToJsonl(
       continue;
     }
     const target = typeof item.expectedOutput === "string" ? item.expectedOutput : JSON.stringify(item.expectedOutput);
+    const turns = messagesFromInput(item.input);
+
+    if (format === "oai-chat") {
+      lines.push(JSON.stringify({ messages: [...turns, { role: "assistant", content: target }] }));
+      continue;
+    }
+
+    // anthropic-messages: hoist system out of the turn list.
+    const system = turns
+      .filter((m) => m.role === "system")
+      .map((m) => m.content)
+      .join("\n\n");
+    const conversation = turns.filter((m) => m.role !== "system");
+    if (conversation.length === 0) {
+      // System-only input leaves nothing to learn from — skip rather than emit a malformed line.
+      skipped++;
+      continue;
+    }
     lines.push(
-      JSON.stringify({ messages: [...messagesFromInput(item.input), { role: "assistant", content: target }] }),
+      JSON.stringify({
+        ...(system ? { system } : {}),
+        messages: [...conversation, { role: "assistant", content: target }],
+      }),
     );
   }
   return { content: lines.length ? `${lines.join("\n")}\n` : "", count: lines.length, skipped };

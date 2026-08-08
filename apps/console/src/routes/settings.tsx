@@ -1,10 +1,25 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { AlertRule, ApiKey, ModelPrice, ModelPriceList, ScoreConfig, Webhook } from "@memoturn/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
-import { BellRing, Copy, DollarSign, KeyRound, ListChecks, Plug, Webhook as WebhookIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  Archive,
+  BellRing,
+  Copy,
+  DollarSign,
+  EyeOff,
+  KeyRound,
+  ListChecks,
+  Plug,
+  Share2,
+  ShieldAlert,
+  ShieldCheck,
+  Users,
+  Webhook as WebhookIcon,
+  Workflow,
+} from "lucide-react";
+import { Fragment, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -25,14 +40,73 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../componen
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "../components/ui/form";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Textarea } from "../components/ui/textarea";
 import { WebhookLogButton } from "../components/webhook-deliveries";
 import { api } from "../lib/api";
 import { useIsReadOnly } from "../lib/role";
+import { cn } from "../lib/utils";
 
-export const Route = createFileRoute("/settings")({ component: SettingsPage });
+/**
+ * Settings sections, grouped for the nav. Each `value` matches its <TabsContent>.
+ * The nav is a vertical rail on lg+ and collapses to a single Select below that — a flat
+ * 13-tab strip wraps into an unreadable block on narrow viewports.
+ */
+const SECTION_GROUPS = [
+  {
+    label: "Project",
+    items: [
+      { value: "api-keys", label: "API Keys", icon: KeyRound },
+      { value: "access", label: "Access", icon: Users },
+      { value: "providers", label: "Providers", icon: Plug },
+      { value: "pricing", label: "Model Pricing", icon: DollarSign },
+    ],
+  },
+  {
+    label: "Data",
+    items: [
+      { value: "retention", label: "Data Retention", icon: Archive },
+      { value: "exports", label: "Exports & Analytics", icon: Share2 },
+      { value: "masking", label: "Masking", icon: EyeOff },
+    ],
+  },
+  {
+    label: "Quality & safety",
+    items: [
+      { value: "guardrails", label: "Guardrails", icon: ShieldAlert },
+      { value: "scores", label: "Scores", icon: ListChecks },
+    ],
+  },
+  {
+    label: "Alerting",
+    items: [
+      { value: "alerts", label: "Alerts", icon: BellRing },
+      { value: "webhooks", label: "Webhooks", icon: WebhookIcon },
+      { value: "automations", label: "Automations", icon: Workflow },
+    ],
+  },
+  { label: "Account", items: [{ value: "security", label: "Security", icon: ShieldCheck }] },
+] as const;
+
+const SECTION_VALUES: string[] = SECTION_GROUPS.flatMap((g) => g.items.map((i) => i.value));
+const DEFAULT_SECTION = "api-keys";
+
+export const Route = createFileRoute("/settings")({
+  // The open section lives in the URL so settings pages are deep-linkable (?tab=webhooks).
+  validateSearch: (s: Record<string, unknown>): { tab?: string } => ({
+    tab: typeof s.tab === "string" && SECTION_VALUES.includes(s.tab) ? s.tab : undefined,
+  }),
+  component: SettingsPage,
+});
 
 type ModelPriceBuiltin = ModelPriceList["builtins"][number];
 
@@ -91,6 +165,15 @@ type PricingForm = z.infer<typeof pricingSchema>;
 function SettingsPage() {
   const qc = useQueryClient();
   const readOnly = useIsReadOnly();
+
+  // ── Section nav (URL-backed so a section is deep-linkable) ────────────────
+  const navigate = useNavigate({ from: Route.fullPath });
+  const section = Route.useSearch().tab ?? DEFAULT_SECTION;
+  const setSection = (value: string) =>
+    navigate({
+      search: (prev) => ({ ...prev, tab: value === DEFAULT_SECTION ? undefined : value }),
+      replace: true,
+    });
 
   // ── API keys ──────────────────────────────────────────────────────────────
   const { data: apiKeys } = useQuery({ queryKey: ["api-keys"], queryFn: () => api.listApiKeys() });
@@ -684,40 +767,74 @@ function SettingsPage() {
         help="Per-project configuration for API keys, model providers, data handling, and alerting."
       />
 
-      <Tabs defaultValue="api-keys">
-        <TabsList className="h-auto flex-wrap">
-          <TabsTrigger value="api-keys">API Keys</TabsTrigger>
-          <TabsTrigger value="access">Access</TabsTrigger>
-          <TabsTrigger value="security">Security</TabsTrigger>
-          <TabsTrigger value="providers">Providers</TabsTrigger>
-          <TabsTrigger value="retention">Data Retention</TabsTrigger>
-          <TabsTrigger value="exports">Exports &amp; Analytics</TabsTrigger>
-          <TabsTrigger value="masking">Masking</TabsTrigger>
-          <TabsTrigger value="guardrails">Guardrails</TabsTrigger>
-          <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
-          <TabsTrigger value="automations">Automations</TabsTrigger>
-          <TabsTrigger value="alerts">Alerts</TabsTrigger>
-          <TabsTrigger value="scores">Scores</TabsTrigger>
-          <TabsTrigger value="pricing">Model Pricing</TabsTrigger>
+      <Tabs
+        value={section}
+        onValueChange={setSection}
+        orientation="vertical"
+        className="flex-col gap-4 lg:flex-row lg:gap-8"
+      >
+        {/* Narrow viewports: the 13 sections collapse into one Select. */}
+        <div className="lg:hidden">
+          <Select value={section} onValueChange={setSection}>
+            <SelectTrigger className="w-full" aria-label="Settings section">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SECTION_GROUPS.map((group) => (
+                <SelectGroup key={group.label}>
+                  <SelectLabel>{group.label}</SelectLabel>
+                  {group.items.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      <item.icon className="text-muted-foreground" />
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* lg+: sticky vertical rail. It scrolls internally so the last sections stay reachable
+            when the rail is taller than the space under the sticky header. */}
+        <TabsList className="hidden w-60 shrink-0 self-start lg:sticky lg:top-[4.75rem] lg:flex lg:max-h-[calc(100svh-6rem)] lg:overflow-y-auto">
+          {SECTION_GROUPS.map((group, i) => (
+            <Fragment key={group.label}>
+              <div
+                className={cn(
+                  "w-full px-4 pb-1 text-[0.625rem] font-semibold tracking-wider text-muted-foreground/70 uppercase",
+                  i > 0 && "pt-3",
+                )}
+              >
+                {group.label}
+              </div>
+              {group.items.map((item) => (
+                <TabsTrigger key={item.value} value={item.value} className="tracking-normal normal-case">
+                  <item.icon />
+                  {item.label}
+                </TabsTrigger>
+              ))}
+            </Fragment>
+          ))}
         </TabsList>
 
         {/* ── Access (per-project RBAC) ─────────────────────────────────── */}
-        <TabsContent value="access" className="space-y-6">
+        <TabsContent value="access" className="min-w-0 space-y-6">
           <ProjectAccess />
         </TabsContent>
 
         {/* ── Guardrails (runtime PII / injection / blocked terms) ──────── */}
-        <TabsContent value="guardrails" className="space-y-6">
+        <TabsContent value="guardrails" className="min-w-0 space-y-6">
           <ProjectGuardrails />
         </TabsContent>
 
         {/* ── Security (per-user: 2FA + passkeys) ───────────────────────── */}
-        <TabsContent value="security" className="space-y-6">
+        <TabsContent value="security" className="min-w-0 space-y-6">
           <AccountSecurity />
         </TabsContent>
 
         {/* ── API Keys ──────────────────────────────────────────────────── */}
-        <TabsContent value="api-keys" className="space-y-6">
+        <TabsContent value="api-keys" className="min-w-0 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Create API key</CardTitle>
@@ -874,7 +991,7 @@ function SettingsPage() {
         </TabsContent>
 
         {/* ── Providers ─────────────────────────────────────────────────── */}
-        <TabsContent value="providers" className="space-y-6">
+        <TabsContent value="providers" className="min-w-0 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-1.5">
@@ -1004,7 +1121,7 @@ function SettingsPage() {
         </TabsContent>
 
         {/* ── Data Retention ────────────────────────────────────────────── */}
-        <TabsContent value="retention" className="space-y-6">
+        <TabsContent value="retention" className="min-w-0 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Data retention</CardTitle>
@@ -1116,7 +1233,7 @@ function SettingsPage() {
         </TabsContent>
 
         {/* ── Exports & Analytics ───────────────────────────────────────── */}
-        <TabsContent value="exports" className="space-y-6">
+        <TabsContent value="exports" className="min-w-0 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Scheduled exports</CardTitle>
@@ -1229,7 +1346,7 @@ function SettingsPage() {
         </TabsContent>
 
         {/* ── Masking ───────────────────────────────────────────────────── */}
-        <TabsContent value="masking" className="space-y-6">
+        <TabsContent value="masking" className="min-w-0 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-1.5">
@@ -1309,7 +1426,7 @@ function SettingsPage() {
         </TabsContent>
 
         {/* ── Webhooks ──────────────────────────────────────────────────── */}
-        <TabsContent value="webhooks" className="space-y-6">
+        <TabsContent value="webhooks" className="min-w-0 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-1.5">
@@ -1406,12 +1523,12 @@ function SettingsPage() {
         </TabsContent>
 
         {/* ── Automations ───────────────────────────────────────────────── */}
-        <TabsContent value="automations" className="space-y-6">
+        <TabsContent value="automations" className="min-w-0 space-y-6">
           <AutomationsPanel />
         </TabsContent>
 
         {/* ── Alerts ────────────────────────────────────────────────────── */}
-        <TabsContent value="alerts" className="space-y-6">
+        <TabsContent value="alerts" className="min-w-0 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Alert rules</CardTitle>
@@ -1650,7 +1767,7 @@ function SettingsPage() {
         </TabsContent>
 
         {/* ── Scores ────────────────────────────────────────────────────── */}
-        <TabsContent value="scores" className="space-y-6">
+        <TabsContent value="scores" className="min-w-0 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Score configs</CardTitle>
@@ -1732,7 +1849,7 @@ function SettingsPage() {
         </TabsContent>
 
         {/* ── Model Pricing ─────────────────────────────────────────────── */}
-        <TabsContent value="pricing" className="space-y-6">
+        <TabsContent value="pricing" className="min-w-0 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-1.5">

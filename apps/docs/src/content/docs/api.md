@@ -85,7 +85,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/datasets/{name}/versions` | List a dataset's immutable version snapshots. |
 | POST | `/v1/datasets/{name}/versions` | Cut a new version (freeze the current items). Body: `{ label?, description? }`. Audited. |
 | GET | `/v1/datasets/{name}/versions/{version}` | A version's frozen items. |
-| GET | `/v1/datasets/{name}/export` | JSONL download. `format=items` (backup dump) or `format=oai-chat` (OpenAI fine-tuning chat lines — items without `expectedOutput` are skipped; count in `X-Memoturn-Skipped`). Optional `version=N` exports a frozen version. Offloaded payloads are rehydrated. |
+| GET | `/v1/datasets/{name}/export` | JSONL download. `format=items` (backup dump), `format=oai-chat` (OpenAI fine-tuning chat lines), or `format=anthropic-messages` (Anthropic fine-tuning; the system prompt is hoisted to a top-level `system` field). Items without `expectedOutput` are skipped in both fine-tuning formats; count in `X-Memoturn-Skipped`. Optional `version=N` exports a frozen version. Offloaded payloads are rehydrated. |
 
 ### Playground
 
@@ -124,6 +124,7 @@ Server-executed experiments run a prompt/model across a dataset and auto-score e
 
 | Method | Path | Description |
 | --- | --- | --- |
+| GET | `/v1/retrieval/analytics` | Cross-trace RAG diagnostics: similarity histogram, weakest retrievals (worst top-score first), and per-document hit stats. Query: `days` (1–365), `limit` (1–200). |
 | GET | `/v1/embeddings/projection` | 3D UMAP projection of observation embeddings (seeded/deterministic; PCA fallback for small sets or `EMBEDDING_PROJECTION_METHOD=pca`), with clusters + optional `colorBy` score. Computed by the daily worker cron. Params: `runId?`, `colorBy?`, `limit?`. |
 | POST | `/v1/embeddings/projection/run` | Recompute the projection on demand (instead of waiting for the daily cron). Audited. |
 

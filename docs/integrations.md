@@ -218,7 +218,9 @@ receiver above.
 Each wraps the client's query method so a lookup is recorded as a **RETRIEVER** observation
 carrying the retrieved documents — id, similarity score, rank, and content — as queryable
 rows rather than a blob of JSON. That is what powers retrieval-quality evaluators
-(context relevance / recall / precision) and "show me the low-relevance retrievals".
+(context relevance / recall / precision) and the **Retrieval** view in the console, which
+aggregates across traces: a similarity histogram, the weakest retrievals worst-first, and
+per-document hit stats (`GET /v1/retrieval/analytics`).
 
 Where the client exposes the query vector, it is captured as the span's embedding (truncated
 to a bounded dimension), feeding semantic trace search and the embeddings projection view.

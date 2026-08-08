@@ -35,6 +35,7 @@ import type {
   FullScoreRow,
   ObservationRow,
   ProjectRowCounts,
+  RetrievalAnalytics,
   RetrievalDocumentDetail,
   RetrievalDocumentRow,
   ScanCursor,
@@ -1287,6 +1288,105 @@ export class PostgresTelemetryStore implements TelemetryStore {
       content: r.content,
       metadata: r.metadata,
     }));
+  }
+
+  async retrievalAnalytics(
+    projectId: string,
+    opts: { days?: number; limit?: number } = {},
+  ): Promise<RetrievalAnalytics> {
+    const { days = 0, limit = 20 } = opts;
+    const dayCond = days > 0 ? "AND rd.event_ts >= ?" : "";
+    const dayParam = days > 0 ? [cutoffDaysAgo(days)] : [];
+    const cap = Math.max(1, Math.min(200, Math.floor(limit)));
+
+    // Per-retrieval rollup, reused by the summary and the weakest list — one retrieval is one
+    // RETRIEVER observation. Mirrors the Doris implementation; only the dialect differs.
+    const rollupSql = `
+      SELECT rd.observation_id AS observation_id,
+             MAX(rd.trace_id) AS trace_id,
+             COUNT(*) AS doc_count,
+             MAX(rd.score) AS top_score,
+             AVG(rd.score) AS mean_score,
+             MAX(rd.event_ts) AS event_ts
+      FROM retrieval_documents rd
+      WHERE rd.project_id = ? ${dayCond}
+      GROUP BY rd.observation_id
+    `;
+
+    const [summaryRows, histRows, weakRows, docRows] = await Promise.all([
+      this.query<{ retrievals: unknown; documents: unknown; avg_docs: unknown; avg_top: unknown }>(
+        `SELECT COUNT(*) AS retrievals, SUM(doc_count) AS documents,
+                AVG(doc_count) AS avg_docs, AVG(top_score) AS avg_top
+         FROM (${rollupSql}) r`,
+        [projectId, ...dayParam],
+      ),
+      // 10 buckets over [0,1]; a perfect 1.0 folds back into the top bucket rather than
+      // creating an 11th.
+      this.query<{ bucket: unknown; count: unknown }>(
+        `SELECT LEAST(FLOOR(rd.score * 10), 9) AS bucket, COUNT(*) AS count
+         FROM retrieval_documents rd
+         WHERE rd.project_id = ? AND rd.score IS NOT NULL ${dayCond}
+         GROUP BY LEAST(FLOOR(rd.score * 10), 9)
+         ORDER BY bucket ASC`,
+        [projectId, ...dayParam],
+      ),
+      this.query<{
+        trace_id: string;
+        observation_id: string;
+        name: string;
+        timestamp: string;
+        doc_count: unknown;
+        top_score: unknown;
+        mean_score: unknown;
+      }>(
+        `SELECT r.trace_id AS trace_id, r.observation_id AS observation_id,
+                COALESCE(o.name, '') AS name,
+                to_char(r.event_ts, ${ISO_FMT}) AS timestamp,
+                r.doc_count AS doc_count, r.top_score AS top_score, r.mean_score AS mean_score
+         FROM (${rollupSql}) r
+         LEFT JOIN observations o ON o.project_id = ? AND o.id = r.observation_id
+         WHERE r.top_score IS NOT NULL
+         ORDER BY r.top_score ASC, r.observation_id ASC
+         LIMIT ${cap}`,
+        [projectId, ...dayParam, projectId],
+      ),
+      this.query<{ doc_id: string; retrievals: unknown; avg_score: unknown; avg_rank: unknown }>(
+        `SELECT rd.doc_id AS doc_id, COUNT(*) AS retrievals,
+                AVG(rd.score) AS avg_score, AVG(rd.rank) AS avg_rank
+         FROM retrieval_documents rd
+         WHERE rd.project_id = ? AND rd.doc_id <> '' ${dayCond}
+         GROUP BY rd.doc_id
+         ORDER BY retrievals DESC, doc_id ASC
+         LIMIT ${cap}`,
+        [projectId, ...dayParam],
+      ),
+    ]);
+
+    const s = summaryRows[0];
+    return {
+      summary: {
+        retrievals: Number(s?.retrievals ?? 0),
+        documents: Number(s?.documents ?? 0),
+        avg_docs_per_retrieval: Number(s?.avg_docs ?? 0),
+        avg_top_score: s?.avg_top === null || s?.avg_top === undefined ? null : Number(s.avg_top),
+      },
+      score_histogram: histRows.map((r) => ({ bucket: Number(r.bucket) / 10, count: Number(r.count) })),
+      weakest: weakRows.map((r) => ({
+        trace_id: r.trace_id,
+        observation_id: r.observation_id,
+        name: r.name,
+        timestamp: r.timestamp,
+        doc_count: Number(r.doc_count),
+        top_score: r.top_score === null ? null : Number(r.top_score),
+        mean_score: r.mean_score === null ? null : Number(r.mean_score),
+      })),
+      documents: docRows.map((r) => ({
+        doc_id: r.doc_id,
+        retrievals: Number(r.retrievals),
+        avg_score: r.avg_score === null ? null : Number(r.avg_score),
+        avg_rank: Number(r.avg_rank),
+      })),
+    };
   }
 
   async listEmbeddingsForProjection(
