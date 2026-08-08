@@ -481,7 +481,10 @@ function RootComponent() {
   return (
     <SidebarProvider>
       <AppSidebar email={email} initials={initials} />
-      <SidebarInset>
+      {/* min-w-0: without it the inset takes its min-content width from the widest page content,
+          so a wide data table stretches it past the viewport and eats the right-hand padding.
+          Wide content should scroll inside its own container instead. */}
+      <SidebarInset className="min-w-0">
         <DemoBanner />
         <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/70">
           <SidebarTrigger className="-ml-1" />
