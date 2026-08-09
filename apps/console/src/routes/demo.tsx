@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { MailCheckIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Logo } from "../components/logo";
@@ -61,26 +62,47 @@ function DemoSignIn() {
     <Centered>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <Logo className="size-9" />
-          <CardTitle>Try Memoturn</CardTitle>
+          {sent ? (
+            <span className="flex size-9 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <MailCheckIcon className="size-5" aria-hidden />
+            </span>
+          ) : (
+            <Logo className="size-9" />
+          )}
+          <CardTitle>{sent ? "Check your email" : "Try Memoturn"}</CardTitle>
           <CardDescription>
-            Enter your email and we'll spin up a private sandbox pre-loaded with realistic traces, dashboards, prompts,
-            and evals — no install, no credit card. It's read-only, and it expires on its own.
+            {sent ? (
+              <>We're sending your sign-in link. Open it on this device to jump straight in.</>
+            ) : (
+              <>
+                Enter your email and we'll spin up a private sandbox pre-loaded with realistic traces, dashboards,
+                prompts, and evals — no install, no credit card. It's read-only, and it expires on its own.
+              </>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {sent ? (
-            <div className="space-y-2 text-sm">
-              <p className="font-medium">We're preparing your sandbox</p>
+            <div className="space-y-3 text-sm">
+              {/* The address gets its own line — inline in prose it breaks mid-word on long domains. */}
+              <p className="rounded-md border bg-muted/40 px-3 py-2 font-medium break-all text-foreground">{email}</p>
               <p className="text-muted-foreground">
-                Your sign-in link will arrive at <span className="font-medium text-foreground">{email}</span> in a
-                minute or two, once your sandbox is loaded with realistic traces, dashboards, prompts, and evals. Open
-                it on this device to jump straight in.
+                This takes a minute or two. We hold the link until your sandbox is fully seeded, so there's nothing to
+                wait for once you open it.
               </p>
-              <p className="text-muted-foreground">
-                Nothing after a few minutes? Check your spam folder — it's the most common reason the link doesn't turn
-                up.
+              <p className="text-xs text-muted-foreground">
+                Nothing after a few minutes? Check your spam folder — that's the usual culprit.
               </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setSent(false);
+                  setEmail("");
+                }}
+                className="text-xs text-muted-foreground underline underline-offset-2 transition-colors hover:text-foreground"
+              >
+                Wrong address? Start over
+              </button>
             </div>
           ) : (
             <form onSubmit={submit} className="space-y-3">
@@ -98,10 +120,12 @@ function DemoSignIn() {
             </form>
           )}
         </CardContent>
-        <CardFooter className="text-center text-xs text-muted-foreground">
-          Sandboxes are read-only and expire automatically. By continuing you agree to the demo being reset
-          periodically.
-        </CardFooter>
+        {sent ? null : (
+          <CardFooter className="text-center text-xs text-muted-foreground">
+            Sandboxes are read-only and expire automatically. By continuing you agree to the demo being reset
+            periodically.
+          </CardFooter>
+        )}
       </Card>
     </Centered>
   );
