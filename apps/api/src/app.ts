@@ -113,6 +113,7 @@ import {
   listExprPresets,
   listMcpConnections,
   listModelPrices,
+  listMyMentions,
   listProjectMembers,
   listPrompts,
   listProviderConnections,
@@ -3509,6 +3510,29 @@ app.openapi(
     const result = await deleteComment(c.get("projectId"), id);
     await recordAudit(c.get("projectId"), c.get("actor"), "comment.delete", id);
     return c.json(result);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/comments/mentions",
+    summary: "Comments in this project that @mention the signed-in user",
+    tags: ["platform"],
+    security,
+    request: { query: z.object({ limit: z.coerce.number().int().min(1).max(500).optional() }) },
+    responses: {
+      200: {
+        description: "Mentions",
+        content: { "application/json": { schema: z.object({ data: z.array(C.comment) }) } },
+      },
+    },
+  }),
+  async (c) => {
+    // API-key auth has no user behind it, so there are no mentions to list — listMyMentions
+    // returns [] for an empty id rather than matching every comment.
+    const data = await listMyMentions(c.get("projectId"), c.get("userId"), c.req.valid("query").limit);
+    return c.json({ data });
   },
 );
 

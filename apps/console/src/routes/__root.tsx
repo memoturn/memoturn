@@ -20,6 +20,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createRootRoute, Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import {
   Activity,
+  AtSign,
   BarChart3,
   Building2,
   Check,
@@ -129,6 +130,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
 // (Audit-logs is NOT admin-gated — any authenticated role can read it — so it stays visible.)
 const NAV_SECONDARY: NavItem[] = [
   { to: "/ops", label: "Ingest health", icon: HeartPulse, adminOnly: true },
+  { to: "/mentions", label: "Mentions", icon: AtSign },
   { to: "/audit", label: "Audit", icon: History },
   { to: "/organizations", label: "Organizations", icon: Building2 },
   { to: "/settings", label: "Settings", icon: SettingsIcon },

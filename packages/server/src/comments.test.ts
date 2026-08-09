@@ -6,7 +6,7 @@ vi.mock("@memoturn/db", () => ({ prisma: { comment: { findMany, create: vi.fn(),
 const listProjectMembers = vi.fn();
 vi.mock("./projectmembers.js", () => ({ listProjectMembers }));
 
-const { parseMentionTokens, resolveMentions } = await import("./comments.js");
+const { listMyMentions, parseMentionTokens, resolveMentions } = await import("./comments.js");
 
 const MEMBERS = [
   { userId: "u-ada", email: "ada@corp.com", name: "Ada Lovelace", orgRole: "member", projectRole: null },
@@ -73,5 +73,33 @@ describe("resolveMentions", () => {
   it("returns each mentioned user once even when addressed several ways", async () => {
     const r = await resolveMentions("p1", "@ada @ada@corp.com @AdaLovelace");
     expect(r).toHaveLength(1);
+  });
+});
+
+describe("listMyMentions", () => {
+  beforeEach(() => {
+    findMany.mockReset().mockResolvedValue([]);
+    listProjectMembers.mockReset().mockResolvedValue(MEMBERS);
+  });
+
+  it("queries only comments mentioning this user in this project", async () => {
+    await listMyMentions("p1", "u-ada");
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { projectId: "p1", mentions: { has: "u-ada" } },
+        orderBy: { createdAt: "desc" },
+      }),
+    );
+  });
+
+  it("returns nothing for a caller with no user behind it", async () => {
+    // API-key auth resolves no user; an empty id must not become a query that matches rows.
+    expect(await listMyMentions("p1", "")).toEqual([]);
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it("clamps the limit to a sane range", async () => {
+    await listMyMentions("p1", "u-ada", 100_000);
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500 }));
   });
 });
