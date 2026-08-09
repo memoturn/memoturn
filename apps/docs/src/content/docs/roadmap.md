@@ -21,7 +21,8 @@ cost / ingest-volume / DLQ-depth triggers, firing→resolved lifecycle, email + 
 **cost budgets** (per-project thresholds + over-budget flag) · auth (sessions + API keys,
 social, passwordless, 2FA, passkeys) · organizations + SSO (OIDC + SAML, IdP→org/role
 mapping) + RBAC (org **and project-level**) + project switcher · admin plugin ·
-auth-lifecycle audit log · data retention · rate limiting · NDJSON/CSV/**Parquet** export
+auth-lifecycle audit log · data retention · **volume-based usage metering** (bytes / events /
+traces per project per UTC day, measured pre-sampling) · rate limiting · NDJSON/CSV/**Parquet** export
 + scheduled blob exports · saved views · batch actions · multimodal media · custom model
 prices · **runtime guardrails** (PII / prompt-injection / content-policy endpoint) ·
 event sink / CDP forwarding · ⌘K palette · global time range · agent-graph view ·
@@ -29,7 +30,8 @@ event sink / CDP forwarding · ⌘K palette · global time range · agent-graph 
 (DLQ depth, insert latency, error counters, one-click replay) · **retrieval diagnostics** (cross-trace similarity histogram, weakest retrievals, per-document stats) · **semantic trace search**
 (find-similar via exact cosine k-NN in Doris) · **trace compare** (side-by-side content diff +
 per-observation diff) · **prompt A/B experiments** (weighted sticky split + per-arm score
-compare + promote) · **cost attribution by prompt version** · **head-based ingest sampling** ·
+compare + promote) · **cost attribution by prompt version** · **head + tail ingest sampling** (per-project keep-rate
+plus keep-on-error / latency / cost rules) ·
 **metric anomaly detection** (rolling-baseline z-score alerts) · MCP server (stdio + remote
 Streamable HTTP with OAuth + per-tool RBAC; **`query_traces` / `get_trace` / `get_metrics`
 / `list_scores` reads + `run_evaluator` write**; **`mcp.method.name` / `mcp.session.id`
@@ -41,9 +43,9 @@ OpenAI, LangChain, prompts, OTel exporter, **LlamaIndex (Python)**).
 
 | Feature | Effort | Notes |
 | --- | --- | --- |
-| **Volume-based usage metering** | M | Meter ingested volume by GB rather than per-observation — agent workloads emit 40–75 spans per interaction. Blob-first ingest makes byte-accurate metering cheap. |
-| **Tail sampling at ingest** | M | Head-based sampling shipped (per-project keep-rate, stable per trace, blob keeps everything for replay). Tail sampling — keep-on-error / keep-on-high-cost regardless of the head decision — is the remaining piece; it needs a per-trace buffering/decision window to stay orphan-free. |
-| **Agent-graph v2** | S | Collapse/expand subgraphs, highlight failed paths. |
+| **Real full-text search** | M–L | Trace/observation search compiles to `LIKE '%…%'` — a table scan that also misses payloads offloaded to blob (> 256 KB). Needs a Doris inverted index (`MATCH_ANY` / `MATCH_PHRASE`) plus `tsvector`/GIN on the Postgres tier, both behind the existing store method, and a searchable digest indexed at offload time so large bodies stop being a silent hole. Validate the inverted-index-vs-merge-on-write interaction before committing to the design. |
+| **Comment mention delivery** | S–M | @mentions parse, resolve, persist and render today, but nobody is notified. Webhooks are typed to score events only, so this needs either a widened payload union or an email path, plus per-user notification prefs. A "comments mentioning me" view is the cheap companion — the index already exists. |
+| **Agent-graph v2** | S | Highlight failed paths — the graph's node model carries no error level today, so a failing branch looks like any other. (Aggregated mode already collapses repeated nodes.) |
 
 ## Improvements to existing features
 
