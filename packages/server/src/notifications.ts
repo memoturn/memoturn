@@ -28,19 +28,27 @@ function consoleOrigin(): string | null {
 }
 
 /**
- * Console path for a commented-on object. Mirrors the console's file-based routes; an unknown
- * objectType yields null so the email degrades to link-free rather than inventing a route.
+ * Console path for a commented-on object, or null when the object has no standalone page —
+ * the email then degrades to link-free rather than pointing at a route that 404s.
+ *
+ * Case-insensitive on purpose: `objectType` is a free-form string on the wire, and the console
+ * posts it uppercase ("TRACE") while the API and MCP surfaces accept anything. Matching only
+ * lowercase silently dropped the link from every real mention email.
+ *
+ * Only object types with an actual console route appear here. Observations deliberately do not:
+ * they are rendered inside their parent trace's waterfall, so there is no /observations/:id page
+ * to link to.
  */
 function objectPath(objectType: string, objectId: string): string | null {
   const id = encodeURIComponent(objectId);
-  switch (objectType) {
+  switch (objectType.toLowerCase()) {
     case "trace":
       return `/traces/${id}`;
-    case "observation":
-      return `/observations/${id}`;
     case "session":
       return `/sessions/${id}`;
     case "prompt":
+      // The prompts route is keyed by name (`/prompts/$name`), so this only resolves when the
+      // caller stored a prompt name as objectId.
       return `/prompts/${id}`;
     default:
       return null;

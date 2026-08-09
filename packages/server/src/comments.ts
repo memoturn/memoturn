@@ -158,6 +158,32 @@ export async function listComments(projectId: string, objectType: string, object
   }));
 }
 
+/**
+ * Comments in this project that @mention the given user, newest first.
+ *
+ * Served by the `[projectId, mentions]` index on Comment — `mentions` stores resolved user ids,
+ * so this is an index lookup rather than a scan over comment bodies. Project-scoped like every
+ * other console read: you see mentions in the project you're currently looking at.
+ */
+export async function listMyMentions(projectId: string, userId: string, limit = 100): Promise<CommentRow[]> {
+  if (!userId) return [];
+  const rows = await prisma.comment.findMany({
+    where: { projectId, mentions: { has: userId } },
+    orderBy: { createdAt: "desc" },
+    take: Math.min(Math.max(limit, 1), 500),
+  });
+  const byUser = await hydrateMentions(projectId, rows);
+  return rows.map((c) => ({
+    id: c.id,
+    objectType: c.objectType,
+    objectId: c.objectId,
+    author: c.author,
+    content: c.content,
+    mentions: c.mentions.map((id) => byUser.get(id)).filter((m): m is CommentMention => m !== undefined),
+    createdAt: c.createdAt.toISOString(),
+  }));
+}
+
 export async function deleteComment(projectId: string, id: string) {
   await prisma.comment.deleteMany({ where: { projectId, id } });
   return { deleted: true };

@@ -73,8 +73,21 @@ describe("notifyCommentMentions", () => {
     expect(body).toContain("Memoturn console");
   });
 
+  it("links regardless of objectType casing", async () => {
+    // The console posts "TRACE", not "trace". Matching only lowercase dropped the link from
+    // every real mention email — the one code path that actually exists in the product.
+    await notifyCommentMentions({ ...base, objectType: "TRACE" });
+    expect(deliverToChannel.mock.calls[0]?.[1]?.body).toContain("https://memoturn.example.com/traces/trace-1");
+  });
+
   it("omits the link for an object type with no console route", async () => {
     await notifyCommentMentions({ ...base, objectType: "dataset" });
+    expect(deliverToChannel.mock.calls[0]?.[1]?.body).not.toContain("https://memoturn.example.com");
+  });
+
+  it("omits the link for observations, which have no standalone page", async () => {
+    // Observations render inside their parent trace's waterfall; /observations/:id does not exist.
+    await notifyCommentMentions({ ...base, objectType: "OBSERVATION" });
     expect(deliverToChannel.mock.calls[0]?.[1]?.body).not.toContain("https://memoturn.example.com");
   });
 

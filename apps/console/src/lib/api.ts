@@ -455,6 +455,8 @@ export const api = {
   createComment: (objectType: string, objectId: string, content: string) =>
     post(`/v1/comments`, { objectType, objectId, content }),
   deleteComment: (id: string) => del(`/v1/comments/${encodeURIComponent(id)}`),
+  listMyMentions: (limit?: number) =>
+    get<{ data: Comment[] }>(`/v1/comments/mentions${qs({ limit })}`).then((r) => r.data),
   getNotificationPreferences: () => get<NotificationPreferences>(`/v1/notification-preferences`),
   updateNotificationPreferences: (patch: Partial<NotificationPreferences>) =>
     put<NotificationPreferences>(`/v1/notification-preferences`, patch),
