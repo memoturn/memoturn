@@ -1,4 +1,5 @@
 import { prisma } from "@memoturn/db";
+import { notifyCommentMentions } from "./notifications.js";
 import { listProjectMembers } from "./projectmembers.js";
 
 /** Comments on a trace / observation / session / prompt. */
@@ -98,7 +99,12 @@ async function hydrateMentions(
   return new Map(members.map((m) => [m.userId, { userId: m.userId, email: m.email, name: m.name }]));
 }
 
-export async function createComment(projectId: string, author: string, input: CreateCommentInput): Promise<CommentRow> {
+export async function createComment(
+  projectId: string,
+  author: string,
+  input: CreateCommentInput,
+  authorUserId?: string,
+): Promise<CommentRow> {
   const mentions = await resolveMentions(projectId, input.content);
   const c = await prisma.comment.create({
     data: {
@@ -110,6 +116,20 @@ export async function createComment(projectId: string, author: string, input: Cr
       mentions: mentions.map((m) => m.userId),
     },
   });
+
+  // Awaited, not fire-and-forget: a detached promise is not safe across deployment profiles
+  // (ADR-0003 — an edge invocation can be torn down the moment the response is written).
+  // notifyCommentMentions never throws and returns 0 when email isn't configured.
+  await notifyCommentMentions({
+    projectId,
+    author,
+    authorUserId,
+    objectType: c.objectType,
+    objectId: c.objectId,
+    content: c.content,
+    mentions,
+  });
+
   return {
     id: c.id,
     objectType: c.objectType,

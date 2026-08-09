@@ -92,6 +92,17 @@ export const comment = z.object({
 });
 export type Comment = z.infer<typeof comment>;
 
+/**
+ * Per-user notification opt-outs. Scoped to the signed-in user, not the project — a read-only
+ * viewer still controls their own inbox. Defaults are all-on, so a user who has never touched
+ * these reads back `true` everywhere.
+ */
+export const notificationPreferences = z.object({
+  /** Email me when someone @mentions me in a comment. */
+  mentionEmail: z.boolean(),
+});
+export type NotificationPreferences = z.infer<typeof notificationPreferences>;
+
 export const savedView = z.object({
   id: z.string(),
   table: z.string(),

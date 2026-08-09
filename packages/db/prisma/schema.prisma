@@ -178,8 +178,25 @@ model User {
   twoFactors        TwoFactor[]
   passkeys          Passkey[]
   projectMembers    ProjectMember[]
+  notificationPreference NotificationPreference?
 
   @@map("user")
+}
+
+/**
+ * Per-user notification opt-outs. A row exists only once a user has changed a default, so
+ * absence means "all defaults" — every notification type defaults to on, and the sender
+ * treats a missing row as opted in.
+ */
+model NotificationPreference {
+  userId       String   @id
+  /** Email me when someone @mentions me in a comment. */
+  mentionEmail Boolean  @default(true)
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preference")
 }
 
 // Better Auth two-factor plugin: TOTP secret + backup codes (both stored encrypted by the

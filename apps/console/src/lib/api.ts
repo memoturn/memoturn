@@ -43,6 +43,7 @@ import type {
   McpConnection,
   MetricsSummary,
   ModelPriceList,
+  NotificationPreferences,
   PlaygroundResponse,
   Project,
   ProjectMember,
@@ -454,6 +455,9 @@ export const api = {
   createComment: (objectType: string, objectId: string, content: string) =>
     post(`/v1/comments`, { objectType, objectId, content }),
   deleteComment: (id: string) => del(`/v1/comments/${encodeURIComponent(id)}`),
+  getNotificationPreferences: () => get<NotificationPreferences>(`/v1/notification-preferences`),
+  updateNotificationPreferences: (patch: Partial<NotificationPreferences>) =>
+    put<NotificationPreferences>(`/v1/notification-preferences`, patch),
   listWidgets: (dashboardId?: string) =>
     get<{ data: Widget[] }>(`/v1/widgets${qs({ dashboardId })}`).then((r) => r.data),
   createWidget: (body: {
