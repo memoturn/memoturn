@@ -183,6 +183,8 @@ after `DEMO_TTL_DAYS`. Used to run the public demo; see the worker's `sandbox-pr
 | `DEMO_SEED_DAYS` | `3` | Days of backdated demo telemetry generated per sandbox. |
 | `DEMO_SEED_TRACES_PER_DAY` | `15` | Traces per day per sandbox — keep small; every sandbox pays this ingest cost. |
 | `DEMO_MEMBER_ROLE` | `viewer` | Role the visitor gets. `viewer` is read-only (every mutating route is gated), which is what stops a public sandbox from ingesting, spending on the playground, or minting API keys. |
+| `DEMO_FINALIZE_DELAY_MS` | `120000` | How long the finalize job waits after the seed batches are submitted, so async ingest can drain before the sign-in link is emailed. Raise it if visitors land on a half-empty dashboard. |
+| `DEMO_START_RATE_LIMIT_PER_MINUTE` | `10` | Per-IP cap on `POST /v1/demo/start`, the unauthenticated pre-provision route. Honors `RATE_LIMIT_TRUSTED_PROXIES` when resolving the client IP. |
 | `SANDBOX_CONCURRENCY` | `2` | Worker concurrency for the sandbox seed queue. |
 
 ## Dev tooling

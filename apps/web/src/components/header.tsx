@@ -9,9 +9,10 @@ import {
 import { Link } from "@tanstack/react-router";
 import { MenuIcon } from "lucide-react";
 
-import { DOCS_PUBLIC_URL, GITHUB_URL } from "../lib/public-urls.ts";
+import { DEMO_PUBLIC_URL, DOCS_PUBLIC_URL, GITHUB_URL } from "../lib/public-urls.ts";
 
 const GETTING_STARTED_URL = `${DOCS_PUBLIC_URL}/getting-started/`;
+const DEMO_URL = `${DEMO_PUBLIC_URL}/demo`;
 
 const NAV_LINK_CLASS =
   "inline-flex h-9 items-center rounded-md px-3 text-sm font-medium text-muted-foreground no-underline transition-colors hover:bg-card hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background";
@@ -30,6 +31,9 @@ export default function Header() {
         </Link>
 
         <nav aria-label="Primary" className="ml-3 hidden items-center gap-1 md:flex">
+          <a href={DEMO_URL} target="_blank" rel="noopener" className={NAV_LINK_CLASS}>
+            Demo
+          </a>
           <a href={DOCS_PUBLIC_URL} target="_blank" rel="noopener" className={NAV_LINK_CLASS}>
             Docs
           </a>
@@ -49,6 +53,11 @@ export default function Header() {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-48">
+            <DropdownMenuItem asChild>
+              <a href={DEMO_URL} target="_blank" rel="noopener" className="no-underline">
+                Demo
+              </a>
+            </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <a href={DOCS_PUBLIC_URL} target="_blank" rel="noopener" className="no-underline">
                 Docs

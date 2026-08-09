@@ -21,7 +21,7 @@ const JSON_LD = {
       operatingSystem: "Self-hosted",
       description: DESCRIPTION,
       url: "https://memoturn.com",
-      sameAs: ["https://github.com/memoturn/memoturn"],
+      sameAs: ["https://github.com/memoturn/memoturn", "https://demo.memoturn.com"],
       license: "https://www.apache.org/licenses/LICENSE-2.0",
       offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
     },

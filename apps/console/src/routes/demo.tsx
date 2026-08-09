@@ -65,7 +65,7 @@ function DemoSignIn() {
           <CardTitle>Try Memoturn</CardTitle>
           <CardDescription>
             Enter your email and we'll spin up a private sandbox pre-loaded with realistic traces, dashboards, prompts,
-            and evals — no install, no credit card.
+            and evals — no install, no credit card. It's read-only, and it expires on its own.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -76,6 +76,10 @@ function DemoSignIn() {
                 Your sign-in link will arrive at <span className="font-medium text-foreground">{email}</span> in a
                 minute or two, once your sandbox is loaded with realistic traces, dashboards, prompts, and evals. Open
                 it on this device to jump straight in.
+              </p>
+              <p className="text-muted-foreground">
+                Nothing after a few minutes? Check your spam folder — it's the most common reason the link doesn't turn
+                up.
               </p>
             </div>
           ) : (
