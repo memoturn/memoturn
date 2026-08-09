@@ -132,6 +132,9 @@ generated telemetry — hard-deleted after `DEMO_TTL_DAYS` (default 7) by the `s
 cron. Read-only (`viewer` role) means no ingest, no playground spend, and no API keys, so a
 public sandbox can't run up cost or be abused for storage.
 
+[demo.memoturn.com](https://demo.memoturn.com/demo) is exactly this configuration, running on a
+single small VM — open it if you want to see the result before you build one.
+
 Run it on the **Postgres telemetry tier** (no Doris) — a demo's data volume sits far inside
 that tier's envelope, and it drops the box to ~4 GB RAM (a few €/month) versus the Doris
 footprint. That's what makes a hosted demo affordable.

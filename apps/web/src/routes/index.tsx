@@ -4,9 +4,10 @@ import { ArrowRightIcon } from "lucide-react";
 import heroDashboard from "../assets/shots/hero-dashboard.png";
 import shotEvaluators from "../assets/shots/shot-evaluators.png";
 import shotPrompt from "../assets/shots/shot-prompt.png";
+import shotTraces from "../assets/shots/shot-traces.png";
 import shotWaterfall from "../assets/shots/shot-waterfall.png";
 import CopyChip from "../components/copy-chip";
-import { DOCS_PUBLIC_URL, GITHUB_URL } from "../lib/public-urls.ts";
+import { DEMO_PUBLIC_URL, DOCS_PUBLIC_URL, GITHUB_URL } from "../lib/public-urls.ts";
 
 export const Route = createFileRoute("/")({
   component: Landing,
@@ -14,6 +15,8 @@ export const Route = createFileRoute("/")({
 
 const GETTING_STARTED_URL = `${DOCS_PUBLIC_URL}/getting-started/`;
 const USE_CASES_URL = `${DOCS_PUBLIC_URL}/use-cases/`;
+// The public demo's entry path: an email form that provisions a read-only sandbox.
+const DEMO_URL = `${DEMO_PUBLIC_URL}/demo`;
 
 // Ingestion surfaces — bring telemetry from any of these, no lock-in.
 const BACKENDS = ["OpenTelemetry", "OpenAI", "Anthropic", "LangChain", "LiteLLM", "MCP"];
@@ -156,18 +159,30 @@ function Landing() {
             human evals, versioned prompts with deploy channels, monitors, and datasets. OpenTelemetry-native,
             self-hostable, and nothing leaves your network.
           </p>
-          <div className="mt-9 flex flex-wrap items-center gap-3">
+          {/* Two buttons, then GitHub as a quiet text link. Self-host stays the
+              filled primary; the demo is the co-equal outline secondary for anyone
+              not ready to clone. */}
+          <div className="mt-9 flex flex-wrap items-center gap-x-3 gap-y-3.5">
             <Button asChild size="lg" className="bg-foam text-sea-ink hover:bg-foam/90 hover:text-sea-ink">
               <a href={GETTING_STARTED_URL} className="no-underline">
                 Get started
               </a>
             </Button>
             <Button asChild variant="outline" size="lg" className="group">
-              <a href={GITHUB_URL} className="no-underline" target="_blank" rel="noopener">
-                Star on GitHub
+              <a href={DEMO_URL} className="no-underline" target="_blank" rel="noopener">
+                Try the live demo
                 <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
               </a>
             </Button>
+            <a
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noopener"
+              className="group ml-1 inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground no-underline transition-colors hover:text-foreground"
+            >
+              Star on GitHub
+              <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
+            </a>
           </div>
           <dl className="mt-7 flex flex-wrap items-center gap-x-4 gap-y-1.5 font-mono text-xs tracking-[0.04em] text-muted-foreground">
             <div className="inline-flex items-center gap-1.5">
@@ -376,6 +391,61 @@ function Landing() {
               See all use cases in the docs
               <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
             </a>
+          </div>
+        </div>
+      </section>
+
+      {/* The demo, placed where the page has just finished describing the loop:
+          a two-column split rather than a fourth card grid (DESIGN.md spends the
+          identical-card-grid exception on FEATURES). */}
+      <section aria-labelledby="demo-heading" className="lit-edge border-t border-border/60 bg-background">
+        <div className="page-wrap max-w-6xl! py-24">
+          <div className="grid items-center gap-10 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:gap-16">
+            <div className="grid content-start gap-4">
+              <p className="m-0 font-mono text-xs tracking-[0.04em] text-muted-foreground">try it</p>
+              <h2 id="demo-heading" className="display-title text-[clamp(1.875rem,3.8vw,2.875rem)] text-foreground">
+                A live sandbox, <span className="tone-soft">seeded with real traces.</span>
+              </h2>
+              <p className="max-w-[44ch] text-[0.9375rem] leading-[1.7] text-muted-foreground">
+                Skip the install and open a private sandbox of the console, pre-loaded with generated telemetry: agent
+                traces on the waterfall timeline, cost and latency dashboards, a versioned prompt with deployment
+                channels, evaluator scores, and a human review queue.
+              </p>
+              <dl className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1.5 font-mono text-xs tracking-[0.04em] text-muted-foreground">
+                <div className="inline-flex items-center gap-1.5">
+                  <span aria-hidden className="size-1 rounded-full bg-primary/70" />
+                  <dt className="sr-only">Sign-in</dt>
+                  <dd>email sign-in</dd>
+                </div>
+                <div className="inline-flex items-center gap-1.5">
+                  <span aria-hidden className="size-1 rounded-full bg-primary/70" />
+                  <dt className="sr-only">Access</dt>
+                  <dd>read-only</dd>
+                </div>
+                <div className="inline-flex items-center gap-1.5">
+                  <span aria-hidden className="size-1 rounded-full bg-primary/70" />
+                  <dt className="sr-only">Lifetime</dt>
+                  <dd>expires in 7 days</dd>
+                </div>
+              </dl>
+              <div className="mt-3">
+                <Button asChild size="lg" variant="outline" className="group">
+                  <a href={DEMO_URL} className="no-underline" target="_blank" rel="noopener">
+                    Open the demo
+                    <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
+                  </a>
+                </Button>
+              </div>
+            </div>
+            <div className="frame-shot">
+              <img
+                src={shotTraces}
+                width={2880}
+                height={1700}
+                loading="lazy"
+                alt="The traces list in the Memoturn console: trace, token, and cost tiles above a trace-volume histogram, a faceted filter rail on the left, and a table of traces with timestamps, tokens, cost, latency, and evaluator scores."
+              />
+            </div>
           </div>
         </div>
       </section>

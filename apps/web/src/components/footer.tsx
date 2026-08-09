@@ -1,12 +1,13 @@
 import { BrandMark } from "@memoturn/ui";
 import { Link } from "@tanstack/react-router";
 
-import { DOCS_PUBLIC_URL, GITHUB_URL } from "../lib/public-urls.ts";
+import { DEMO_PUBLIC_URL, DOCS_PUBLIC_URL, GITHUB_URL } from "../lib/public-urls.ts";
 
 const FOOTER_LINK_CLASS =
   "rounded-md px-2.5 py-1.5 text-[13px] font-medium text-muted-foreground no-underline transition-colors hover:bg-card hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 const FOOTER_LINKS = [
+  { label: "Demo", href: `${DEMO_PUBLIC_URL}/demo` },
   { label: "Docs", href: DOCS_PUBLIC_URL },
   { label: "Getting started", href: `${DOCS_PUBLIC_URL}/getting-started/` },
   { label: "Use cases", href: `${DOCS_PUBLIC_URL}/use-cases/` },

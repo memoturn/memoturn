@@ -18,7 +18,16 @@ export function DemoBanner() {
   const expiry = daysLeft <= 0 ? "expires today" : `expires in ${daysLeft} day${daysLeft === 1 ? "" : "s"}`;
 
   return (
-    <div className="flex items-center justify-center gap-2 border-b bg-primary/10 px-4 py-1.5 text-center text-xs text-foreground">
+    <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 border-b bg-primary/10 px-4 py-1.5 text-center text-xs text-foreground">
+      <a
+        href="https://memoturn.com"
+        target="_blank"
+        rel="noopener"
+        className="font-medium hover:text-primary hover:underline hover:underline-offset-2"
+      >
+        Memoturn
+      </a>
+      <span className="text-muted-foreground">·</span>
       <span className="font-medium">Demo sandbox</span>
       <span className="text-muted-foreground">·</span>
       <span className="text-muted-foreground">read-only</span>

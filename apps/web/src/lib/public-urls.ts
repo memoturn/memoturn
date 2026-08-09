@@ -13,4 +13,9 @@ export const DOCS_PUBLIC_URL = resolve(
   "https://docs.memoturn.com",
 );
 
+export const DEMO_PUBLIC_URL = resolve(
+  import.meta.env.VITE_PUBLIC_DEMO_URL as string | undefined,
+  "https://demo.memoturn.com",
+);
+
 export const GITHUB_URL = "https://github.com/memoturn/memoturn";

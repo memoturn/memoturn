@@ -1,5 +1,10 @@
 # Getting started
 
+**Not ready to install?** Open the [live demo](https://demo.memoturn.com/demo) instead — sign in
+with an email and you get a private sandbox of the console pre-loaded with generated traces,
+dashboards, prompts, and evaluator scores. It's read-only and expires after 7 days. Come back here
+when you want your own instance.
+
 ## Prerequisites
 
 - [Bun](https://bun.sh) ≥ 1.3 (package manager + runtime)
