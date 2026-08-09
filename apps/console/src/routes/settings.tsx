@@ -11,6 +11,7 @@ import {
   EyeOff,
   KeyRound,
   ListChecks,
+  Mail,
   Plug,
   Share2,
   ShieldAlert,
@@ -29,6 +30,7 @@ import { DataTable } from "../components/data-table";
 import { EmptyState } from "../components/empty-state";
 import { HelpTip } from "../components/help-tip";
 import { KindBadge } from "../components/kind-badge";
+import { NotificationSettings } from "../components/notification-settings";
 import { PageHeader } from "../components/page-header";
 import { ProjectAccess } from "../components/project-access";
 import { ProjectGuardrails } from "../components/project-guardrails";
@@ -90,6 +92,7 @@ const SECTION_GROUPS = [
     label: "Alerting",
     items: [
       { value: "alerts", label: "Alerts", icon: BellRing },
+      { value: "notifications", label: "Notifications", icon: Mail },
       { value: "webhooks", label: "Webhooks", icon: WebhookIcon },
       { value: "automations", label: "Automations", icon: Workflow },
     ],
@@ -821,6 +824,11 @@ function SettingsPage() {
         {/* ── Access (per-project RBAC) ─────────────────────────────────── */}
         <TabsContent value="access" className="min-w-0 space-y-6">
           <ProjectAccess />
+        </TabsContent>
+
+        {/* ── Notifications (per-user, not per-project) ──────────────────── */}
+        <TabsContent value="notifications" className="min-w-0 space-y-6">
+          <NotificationSettings />
         </TabsContent>
 
         {/* ── Guardrails (runtime PII / injection / blocked terms) ──────── */}

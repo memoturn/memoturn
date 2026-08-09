@@ -80,6 +80,7 @@ import {
   getMaskingPolicy,
   getMedia,
   getMetrics,
+  getNotificationPreferences,
   getOffloadedPayload,
   getPromptArmScores,
   getPromptDetail,
@@ -173,6 +174,7 @@ import {
   traceHistogram,
   UserPatternError,
   updateAlertRule,
+  updateNotificationPreferences,
   updateWidgetGrid,
 } from "@memoturn/server";
 import { Scalar } from "@scalar/hono-api-reference";
@@ -3474,7 +3476,14 @@ app.openapi(
   async (c) => {
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
-    const result = await createComment(c.get("projectId"), c.get("actor"), c.req.valid("json"));
+    // userId is empty under API-key auth; notifyCommentMentions treats that as "no self-mention
+    // to skip" rather than matching a real user.
+    const result = await createComment(
+      c.get("projectId"),
+      c.get("actor"),
+      c.req.valid("json"),
+      c.get("userId") || undefined,
+    );
     await recordAudit(c.get("projectId"), c.get("actor"), "comment.create", `${result.objectType}:${result.objectId}`);
     return c.json(result, 201);
   },
@@ -3500,6 +3509,55 @@ app.openapi(
     const result = await deleteComment(c.get("projectId"), id);
     await recordAudit(c.get("projectId"), c.get("actor"), "comment.delete", id);
     return c.json(result);
+  },
+);
+
+// ── Notification preferences (per-user, not per-project) ─────────────────────────
+app.use("/v1/notification-preferences", requireAuth);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/notification-preferences",
+    summary: "Get the signed-in user's notification preferences",
+    tags: ["platform"],
+    security,
+    responses: {
+      200: { description: "Preferences", content: { "application/json": { schema: C.notificationPreferences } } },
+      401: { description: "Unauthenticated" },
+    },
+  }),
+  async (c) => {
+    const userId = c.get("userId");
+    // API-key auth has no user behind it, so there is no inbox to configure. Report defaults.
+    if (!userId) return c.json({ mentionEmail: true });
+    return c.json(await getNotificationPreferences(userId));
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "put",
+    path: "/v1/notification-preferences",
+    summary: "Update the signed-in user's notification preferences",
+    tags: ["platform"],
+    security,
+    request: {
+      body: {
+        content: { "application/json": { schema: z.object({ mentionEmail: z.boolean().optional() }) } },
+      },
+    },
+    responses: {
+      200: { description: "Updated", content: { "application/json": { schema: C.notificationPreferences } } },
+      401: { description: "Unauthenticated" },
+    },
+  }),
+  async (c) => {
+    // rbac-exempt: this is the user's own inbox, not project data. A read-only VIEWER must
+    // still be able to stop email about themselves, so the project-role gate does not apply.
+    const userId = c.get("userId");
+    if (!userId) return c.json({ error: "notification preferences require a signed-in user" }, 401);
+    return c.json(await updateNotificationPreferences(userId, c.req.valid("json")));
   },
 );
 

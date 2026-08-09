@@ -161,6 +161,7 @@ Server-executed experiments run a prompt/model across a dataset and auto-score e
 | DELETE | `/v1/saved-views/{id}` | Delete a saved view. |
 | GET / POST | `/v1/comments` | List comments on an object (trace/observation/session/prompt) / add one. |
 | DELETE | `/v1/comments/{id}` | Delete a comment. |
+| GET / PUT | `/v1/notification-preferences` | Read / update the signed-in user's notification preferences (per-user, not per-project). |
 
 ### Webhooks & automations
 
