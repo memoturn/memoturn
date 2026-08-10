@@ -18,7 +18,8 @@ import { organization } from "better-auth/plugins/organization";
 import { adminAc, defaultStatements, memberAc, ownerAc } from "better-auth/plugins/organization/access";
 import { recordAuthAudit } from "./audit.js";
 import { demoModeEnabled, provisionSandboxForUser } from "./demo.js";
-import { isProduction } from "./env.js";
+import { brandedEmail } from "./emailtemplate.js";
+import { isProduction, consoleOrigin as resolveConsoleOrigin } from "./env.js";
 import { mailerStatus, sendEmail } from "./mailer.js";
 
 /**
@@ -31,8 +32,7 @@ import { mailerStatus, sendEmail } from "./mailer.js";
 
 // The console origin — the first trusted origin (project switcher, invite/reset links,
 // and the OAuth authorize login/consent pages all bounce here). Overridable via AUTH_TRUSTED_ORIGINS.
-const consoleOrigin =
-  (process.env.AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000").split(",")[0] ?? "http://localhost:3000";
+const consoleOrigin = resolveConsoleOrigin();
 
 // The API's own base URL + derived OAuth identities. Better Auth appends basePath to
 // baseURL for its context, so the OAuth issuer (JWT `iss`) is `${authBaseURL}/auth`.
@@ -180,15 +180,20 @@ export function authMethods() {
  * is best-effort via the shared mailer — when email is unconfigured the link is logged to
  * stderr in development (see mailer.ts), so local auth flows stay testable without SMTP.
  */
+/**
+ * Auth's action emails, rendered by the shared brand template (see emailtemplate.ts).
+ * `subject` doubles as the headline so the message reads the same in the list and open.
+ */
 function actionEmail(opts: { subject: string; intro: string; action: string; url: string }) {
-  const text = `${opts.intro}\n\n${opts.action}: ${opts.url}\n\nIf you didn't expect this email, you can safely ignore it.`;
-  const html = `<div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#0f172a">
-  <p style="font-size:15px;line-height:1.5">${opts.intro}</p>
-  <p style="margin:24px 0"><a href="${opts.url}" style="background:#328f97;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:600">${opts.action}</a></p>
-  <p style="font-size:12px;color:#64748b">Or paste this link into your browser:<br><a href="${opts.url}" style="color:#328f97">${opts.url}</a></p>
-  <p style="font-size:12px;color:#94a3b8;margin-top:24px">If you didn't expect this email, you can safely ignore it.</p>
-</div>`;
-  return { subject: opts.subject, text, html };
+  return {
+    subject: opts.subject,
+    ...brandedEmail({
+      title: opts.subject,
+      intro: opts.intro,
+      action: { label: opts.action, url: opts.url },
+      footer: "If you didn't expect this email, you can safely ignore it.",
+    }),
+  };
 }
 
 // Four-role access model: owner/admin/member inherit the org plugin defaults; viewer is

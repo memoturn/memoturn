@@ -83,3 +83,33 @@ export function validateRuntimeEnv(service: string): void {
     }
   }
 }
+
+/**
+ * The console's public origin — where a human clicks through to.
+ *
+ * Single source of truth, because getting this wrong puts a dead link in someone's inbox.
+ * Resolution order:
+ *   1. `CONSOLE_PUBLIC_URL` — explicit, wins when set.
+ *   2. The first entry of `AUTH_TRUSTED_ORIGINS` — already the console origin by definition
+ *      (it's what CORS and every auth bounce-back use), and set in every production deploy.
+ *
+ * Deliberately NOT `AUTH_BASE_URL`: that is the *API* origin (`:3001` in dev). They coincide
+ * on the single-VM stack, where Caddy serves the console at the root, but they are different
+ * things and using it as a fallback emits an API URL in emails on any split deployment.
+ */
+export function consoleOrigin(): string {
+  const explicit = process.env.CONSOLE_PUBLIC_URL?.trim();
+  const trusted = process.env.AUTH_TRUSTED_ORIGINS?.split(",")[0]?.trim();
+  return (explicit || trusted || "http://localhost:3000").replace(/\/$/, "");
+}
+
+/**
+ * The console origin when it's reachable by whoever receives it, else null.
+ *
+ * A localhost URL is correct for a browser on the dev machine but meaningless in an inbox,
+ * so email templates use this and omit the link rather than shipping a dead one.
+ */
+export function publicConsoleOrigin(): string | null {
+  const origin = consoleOrigin();
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(origin) ? null : origin;
+}
