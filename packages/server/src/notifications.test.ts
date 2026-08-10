@@ -114,6 +114,19 @@ describe("notifyCommentMentions", () => {
     expect(msg.text).toBeTruthy(); // plain-text part still present for text-only clients
   });
 
+  it("declares dark-mode support so clients don't force-invert it", async () => {
+    // Without the head metas a dark-mode client inverts the whole email — a #2a7679 button with
+    // white text becomes pale mint with dark text. Declaring color-scheme in a real <head>
+    // suppresses that; the media block then styles dark deliberately.
+    await notifyCommentMentions(base);
+    const rendered = sendEmail.mock.calls[0]?.[0].html as string;
+    expect(rendered).toContain("<!doctype html>");
+    expect(rendered).toContain('name="color-scheme"');
+    expect(rendered).toContain('name="supported-color-schemes"');
+    expect(rendered).toContain("@media (prefers-color-scheme: dark)");
+    expect(rendered).toContain("#4fb8b2"); // lagoon — the dark-surface accent
+  });
+
   it("escapes the comment body instead of injecting it into the HTML", async () => {
     // A comment is user-authored and this email goes to someone else — markup in a comment
     // must not become markup in their inbox.
