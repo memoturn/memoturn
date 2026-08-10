@@ -101,7 +101,7 @@ fresh values with `openssl rand -base64 48`.
 | --- | --- | --- |
 | `BETTER_AUTH_SECRET` | dev placeholder | **Required in production** — signs session cookies and tokens. Use `openssl rand -base64 48`. |
 | `AUTH_BASE_URL` | `http://localhost:3001` | Better Auth base URL |
-| `CONSOLE_PUBLIC_URL` | falls back to `AUTH_BASE_URL` | Public origin of the console, used to deep-link notification emails (e.g. `https://memoturn.example.com`). On the single-VM stack this equals `AUTH_BASE_URL`, so it rarely needs setting. When it is unset or resolves to a localhost dev default, mention emails are sent without a link rather than with a broken one. |
+| `CONSOLE_PUBLIC_URL` | first `AUTH_TRUSTED_ORIGINS` entry | Public origin of the console, used for links in emails (mentions, sign-in, invites). Defaults to the first `AUTH_TRUSTED_ORIGINS` entry, which is already the console origin — set this only when they differ. Deliberately **not** `AUTH_BASE_URL`: that is the API origin (`:3001`). A localhost value means "no public URL", so notification emails ship without a link rather than a dead one. |
 | `AUTH_TRUSTED_ORIGINS` | `http://localhost:3000` | **Required in production** — comma-separated console origins for CORS + auth. |
 | `ENCRYPTION_KEY` | dev placeholder | **Required in production** — AES-256-GCM key for provider API keys stored at rest. Independent of `BETTER_AUTH_SECRET`. Rotating this invalidates all stored provider keys (they must be re-entered in Settings → Providers). |
 | `MCP_LOGIN_PAGE` | `<first AUTH_TRUSTED_ORIGINS>/login` | Console sign-in page the remote-MCP OAuth 2.1 flow (Better Auth `@better-auth/oauth-provider` plugin) redirects unauthenticated users to. Override only if the console login lives elsewhere. |

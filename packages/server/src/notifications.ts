@@ -1,7 +1,9 @@
 import type { NotificationPreferences } from "@memoturn/contracts";
 import { prisma } from "@memoturn/db";
-import { deliverToChannel } from "./automations.js";
 import type { CommentMention } from "./comments.js";
+import { brandedEmail } from "./emailtemplate.js";
+import { publicConsoleOrigin } from "./env.js";
+import { sendEmail } from "./mailer.js";
 
 /**
  * Outbound notifications to *people* (as opposed to automations, which notify systems).
@@ -11,21 +13,6 @@ import type { CommentMention } from "./comments.js";
  * throwing. Callers still await them — a detached promise isn't safe across deployment
  * profiles (ADR-0003), where an invocation can be torn down as soon as the response is written.
  */
-
-/**
- * Public origin of the console, used to deep-link notifications back to the object in question.
- *
- * `CONSOLE_PUBLIC_URL` is the explicit setting. It falls back to `AUTH_BASE_URL`, which is the
- * console origin on the single-VM deployment (Caddy serves the SPA at the root and proxies the
- * API under `/api`). When neither is set — or when the value is a localhost dev default that
- * would be meaningless in someone's inbox — we send a link-free email rather than a broken link.
- */
-function consoleOrigin(): string | null {
-  const raw = (process.env.CONSOLE_PUBLIC_URL ?? process.env.AUTH_BASE_URL ?? "").trim();
-  if (!raw) return null;
-  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(raw)) return null;
-  return raw.replace(/\/$/, "");
-}
 
 /**
  * Console path for a commented-on object, or null when the object has no standalone page —
@@ -110,8 +97,8 @@ export interface MentionNotification {
  * Email everyone @mentioned in a comment. Returns the number of messages actually delivered.
  *
  * Skips the author (nobody needs mail about their own comment) and anyone who has opted out.
- * Never throws: individual failures are swallowed by `deliverToChannel`, and a total failure
- * (e.g. the database is unreachable) resolves to 0.
+ * Never throws: a failed send resolves false rather than raising, and a total failure (e.g. the
+ * database is unreachable) resolves to 0.
  */
 export async function notifyCommentMentions(input: MentionNotification): Promise<number> {
   try {
@@ -122,31 +109,30 @@ export async function notifyCommentMentions(input: MentionNotification): Promise
     const targets = recipients.filter((m) => !optedOut.has(m.userId));
     if (targets.length === 0) return 0;
 
-    const origin = consoleOrigin();
+    const origin = publicConsoleOrigin();
     const path = objectPath(input.objectType, input.objectId);
     const link = origin && path ? `${origin}${path}` : null;
 
     // Comments are prose and can be long; quote enough to give context without mailing an essay.
     const excerpt = input.content.length > 500 ? `${input.content.slice(0, 500)}…` : input.content;
+    const kind = input.objectType.toLowerCase();
     const subject = `${input.author} mentioned you in a comment`;
-    const body = [
-      `${input.author} mentioned you on a ${input.objectType} in Memoturn:`,
-      "",
-      excerpt,
-      "",
-      link ? `View it: ${link}` : `Open the ${input.objectType} in your Memoturn console to reply.`,
-      "",
-      "Don't want these? Turn off mention email in your Memoturn notification settings.",
-    ].join("\n");
+    // The comment body is user-authored and lands in someone else's inbox — brandedEmail
+    // escapes it, which is why the quote goes through the template rather than string concat.
+    const { text, html } = brandedEmail({
+      title: subject,
+      // With no public console URL there's no button to press, so the intro carries the
+      // instruction instead — otherwise the recipient is told they were mentioned and given
+      // nowhere to go.
+      intro: link
+        ? `${input.author} mentioned you on a ${kind} in Memoturn.`
+        : `${input.author} mentioned you on a ${kind} in Memoturn. Open the ${kind} in your Memoturn console to reply.`,
+      quote: excerpt,
+      ...(link ? { action: { label: `View the ${kind}`, url: link } } : {}),
+      footer: "Don't want these? Turn off mention email in Settings → Notifications.",
+    });
 
-    const results = await Promise.all(
-      targets.map((m) =>
-        deliverToChannel(
-          { type: "email", target: m.email },
-          { slackText: subject, webhookBody: null, summary: subject, body },
-        ),
-      ),
-    );
+    const results = await Promise.all(targets.map((m) => sendEmail({ to: m.email, subject, text, html })));
     return results.filter(Boolean).length;
   } catch {
     return 0; // best-effort: never let a notification failure surface to the commenter
