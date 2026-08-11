@@ -40,19 +40,21 @@ Streamable HTTP with OAuth + per-tool RBAC; **`query_traces` / `get_trace` / `ge
 / `list_scores` reads + `run_evaluator` write**; **`mcp.method.name` / `mcp.session.id`
 semconv ingestion**) · provider gateway (Anthropic, OpenAI, **Gemini, Bedrock, Azure,
 OpenAI-compatible** for vLLM/Ollama/OpenRouter) · TypeScript + Python + **Go** SDKs (tracing,
-OpenAI, LangChain, prompts, OTel exporter, **LlamaIndex (Python)**).
+OpenAI, LangChain, prompts, OTel exporter, **LlamaIndex (Python)**) · **score-value + score-category
+filters** (level-agnostic `scores.<name>` pseudo-columns) · **span-level explorer** (observations
+as first-class filterable rows, `GET /v1/observations`) · **evaluator targeting** (judge-prompt
+**variable mapping** to trace / named-span / dataset sources, **observation scope**, and
+**backfill** over already-ingested traces with a pre-run match count) · **score analytics**
+(distribution, timeline, and two-score agreement: correlation / MAE / RMSE, agreement rate,
+Cohen's Kappa, per-label F1, confusion matrix).
 
 ## Up next — triage workflow
 
-The daily loop is "something looks wrong → find the traces → decide if it's real". These are
-the gaps in that loop, ordered by how often they block it.
+The daily loop is "something looks wrong → find the traces → decide if it's real". Score filters,
+the span explorer, evaluator targeting, and score analytics have shipped; this is what's left.
 
 | Feature | Effort | Notes |
 | --- | --- | --- |
-| **Filter traces by score value** | M | "Show me traces my judge scored below 0.5" is the most common triage question and the console can't answer it — `TRACE_FILTER_COLUMNS` has no score column and the filter compiler has no score join. Needs a `scores.<name>` pseudo-column that resolves level-agnostically (a score attached to the trace *or* to one of its observations), in both engine dialects, plus the facet/autocomplete plumbing to offer observed score names. |
-| **Span-level explorer** | M | Today you can only reach an observation through its trace. There's no way to ask "every `retriever` span over 2s this week" or "every generation on model X that errored". The `observations` analytics view already exists in the store, so this is mostly a console table + filter registry over rows we already index. |
-| **Evaluator targeting & mapping** | L | One tranche, because the pieces are useless apart: (a) **variable mapping** — bind each judge-prompt variable to a chosen source (trace field, a *named* observation's input/output, dataset item field, metadata path) instead of the hard-coded `{input, output, expectedOutput}`; (b) **observation scope** — score individual spans, not just whole traces or threads; (c) **backfill** — run a new evaluator over *existing* matching traces, with a live "this matches N items" count, instead of only over new ingest. Today `filterName` (a substring on trace name) is the entire targeting model. |
-| **Score analytics** | L | A dedicated surface per score: distribution (numeric histogram / categorical / boolean), timeline, and summary statistics — plus a **two-score comparison** mode with a confusion-matrix heatmap and real agreement statistics (correlation, MAE/RMSE, Cohen's Kappa, F1, agreement rate). The valuable framing is comparing any two score *sources*: human vs judge, judge vs judge, v1 vs v2 of a judge. That's how a team proves a judge is trustworthy, and it subsumes the older "inter-rater agreement on review queues" idea. Estimate result size and sample above a threshold — this query shape scans a lot of rows. |
 | **Real full-text search** | M–L | Trace/observation search compiles to `LIKE '%…%'` — a table scan that also misses payloads offloaded to blob (> 256 KB). Needs a Doris inverted index (`MATCH_ANY` / `MATCH_PHRASE`) plus `tsvector`/GIN on the Postgres tier, both behind the existing store method, and a searchable digest indexed at offload time so large bodies stop being a silent hole. Validate the inverted-index-vs-merge-on-write interaction before committing to the design. |
 
 ## Adoption blockers
@@ -80,7 +82,7 @@ Things that decide whether a team with existing tooling can adopt Memoturn witho
 | **Histogram + pivot-table widgets** | M | The chart set is `line / bar / horizontal_bar / big_number / pie / table`. A latency/cost **histogram** and a **pivot table** (group rows × columns with subtotals) are the two shapes people rebuild by hand today. |
 | **Portable dashboard JSON** | M | Export a dashboard (with its widgets inlined) as a versioned JSON envelope, import it into another project or instance. Makes dashboards shareable artifacts and turns "starter dashboards" into content rather than code. |
 | **Nested folders for prompts and datasets** | S–M | `Prompt.folder` is a flat string and datasets have none. Path-based folders with breadcrumbs, plus rename/duplicate/delete at the folder level. |
-| **Query-language search bar** | L | A keyboard-driven query bar (`level:(ERROR OR WARNING) -env:dev latency:>2 scores.accuracy:<0.5`) as a second controlled editor over the same filter state the facet sidebar owns — never a second source of truth. Worth doing only after score filters land, since score predicates are most of the value. A natural-language→filter compiler on top of the provider gateway is a small follow-on, and we'd ship it ungated on self-host. |
+| **Query-language search bar** | L | A keyboard-driven query bar (`level:(ERROR OR WARNING) -env:dev latency:>2 scores.accuracy:<0.5`) as a second controlled editor over the same filter state the facet sidebar owns — never a second source of truth. Score filters have landed, so its most valuable predicates now have something to compile to. A natural-language→filter compiler on top of the provider gateway is a small follow-on, and we'd ship it ungated on self-host. |
 | **Public share links** | S–M | `TraceRow.public` exists but nothing reads it. A read-only shared trace (and dashboard) link is the cheapest way for someone to hand a bug report to a colleague who doesn't have an account. |
 | **More SDK integrations** | M | Vercel AI SDK (JS), Pydantic AI (Python), Mastra (JS). (TS/Python/Go core SDKs shipped; LlamaIndex, LangChain/LangGraph, CrewAI, Haystack, LiteLLM, Bedrock, vector stores done.) |
 | **Project-wide cost-by-prompt** | S | Per-*version* cost shipped; a project-wide "spend per prompt" ranking on the prompts list is the small remaining half. |
