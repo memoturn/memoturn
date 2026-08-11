@@ -20,6 +20,7 @@ import {
   listOnlineEvaluators,
   loadMaskingPolicy,
   loadProjectPriceOverrides,
+  mappingNeedsObservations,
   mergeObservationStates,
   mergeScoreStates,
   mergeTraceStates,
@@ -29,6 +30,7 @@ import {
   type ObservationPatch,
   offloadLargePayload,
   offloadMedia,
+  parseVariableMapping,
   publishLiveTraces,
   recordUsage,
   runEvaluator,
@@ -78,40 +80,92 @@ async function insertTable<T extends TelemetryTable>(table: T, values: Telemetry
   }
 }
 
+/** One thing an online evaluator can score: a completed trace, or a completed span. */
+interface EvalTarget {
+  traceId: string;
+  observationId?: string;
+  name: string;
+  input?: unknown;
+  output?: unknown;
+}
+
+type SpanEventType = "span-create" | "span-update" | "generation-create" | "generation-update";
+const SPAN_EVENTS = new Set<string>(["span-create", "span-update", "generation-create", "generation-update"]);
+
 /**
- * Online evaluation: for completed traces in this batch (trace-create events that carry
- * an output), run each enabled online evaluator on a sampled fraction. Failures here
- * never fail ingestion.
+ * Online evaluation: for completed traces in this batch (trace-create events that carry an
+ * output) and completed spans (for observation-scope evaluators), run each enabled online
+ * evaluator on a sampled fraction. Failures here never fail ingestion.
  */
 async function runOnlineEvals(projectId: string, batch: IngestEvent[]): Promise<void> {
   const completed = batch.filter(
     (e): e is Extract<IngestEvent, { type: "trace-create" }> =>
       e.type === "trace-create" && e.body.output !== undefined && e.body.output !== "",
   );
-  if (completed.length === 0) return;
+  // Spans that finished with an output — the targets for observation-scope evaluators. Update
+  // events count too: a generation typically arrives as create-then-update, and the update is
+  // the event that carries the completion.
+  const spans: EvalTarget[] = batch
+    .filter(
+      (e): e is Extract<IngestEvent, { type: SpanEventType }> =>
+        SPAN_EVENTS.has(e.type) && "output" in e.body && e.body.output !== undefined && e.body.output !== "",
+    )
+    .map((e) => ({
+      traceId: e.body.traceId,
+      observationId: e.body.id,
+      name: e.body.name ?? "",
+      input: e.body.input,
+      output: e.body.output,
+    }));
+  if (completed.length === 0 && spans.length === 0) return;
 
   const evaluators = await listOnlineEvaluators(projectId);
   if (evaluators.length === 0) return;
 
+  // Spans grouped by trace, for judges whose variable mapping reads a named observation.
+  // They are already in this batch, so no extra store round-trip is needed.
+  const spansByTrace = new Map<string, EvalTarget[]>();
+  for (const s of spans) {
+    const arr = spansByTrace.get(s.traceId) ?? [];
+    arr.push(s);
+    spansByTrace.set(s.traceId, arr);
+  }
+
   const evalCompleted: { traceId: string; name: string }[] = [];
   for (const ev of evaluators) {
-    for (const t of completed) {
-      const trace = t.body;
-      if (ev.filterName && !(trace.name ?? "").includes(ev.filterName)) continue;
-      if (sample(`${trace.id}:${ev.name}`) >= ev.samplingRate) continue;
+    const needsSpans = mappingNeedsObservations(parseVariableMapping(ev.variableMapping));
+    // Observation-scope evaluators judge SPANS, so they target a different set of events and
+    // their `filterName` matches the span name, not the trace name.
+    const targets: EvalTarget[] =
+      ev.scope === "observation"
+        ? spans.filter((s) => (ev.filterName ? s.name.includes(ev.filterName) : true))
+        : completed
+            .filter((t) => (ev.filterName ? (t.body.name ?? "").includes(ev.filterName) : true))
+            .map((t) => ({ traceId: t.body.id, input: t.body.input, output: t.body.output, name: t.body.name ?? "" }));
+
+    for (const target of targets) {
+      const key = target.observationId ?? target.traceId;
+      if (sample(`${key}:${ev.name}`) >= ev.samplingRate) continue;
       try {
         await withRetry(() =>
-          runEvaluator(projectId, ev.name, { traceId: trace.id, input: trace.input, output: trace.output }),
+          runEvaluator(projectId, ev.name, {
+            traceId: target.traceId,
+            observationId: target.observationId,
+            input: target.input,
+            output: target.output,
+            observations: needsSpans ? spansByTrace.get(target.traceId) : undefined,
+          }),
         );
         inc("evaluator_runs_total", { evaluator: ev.name, result: "ok" });
-        evalCompleted.push({ traceId: trace.id, name: ev.name });
+        evalCompleted.push({ traceId: target.traceId, name: ev.name });
       } catch (err) {
         // Best-effort: never fail ingestion, but COUNT failures so silent eval gaps surface.
         inc("evaluator_runs_total", { evaluator: ev.name, result: "error" });
         logJson("error", "online-eval failed", {
           evaluator: ev.name,
           projectId,
-          traceId: trace.id,
+          traceId: target.traceId,
+          observationId: target.observationId,
           error: err instanceof Error ? err.message : String(err),
         });
       }

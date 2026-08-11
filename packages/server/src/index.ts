@@ -16,6 +16,8 @@ export * from "./demo-entities.js";
 export * from "./demodata.js";
 export * from "./embeddings.js";
 export * from "./env.js";
+export * from "./evaluator-backfill.js";
+export * from "./evaluator-variables.js";
 export * from "./evaluators.js";
 export * from "./experiments.js";
 export * from "./export.js";

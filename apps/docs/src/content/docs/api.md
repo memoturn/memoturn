@@ -116,13 +116,16 @@ filter=[{"column":"scores","type":"numberObject","key":"accuracy","operator":"lt
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET / POST | `/v1/evaluators` | List / create (supports `online`, `samplingRate`, `filterName`). `kind: "CODE"` + `expression` creates a deterministic check instead of an LLM judge; an expression that doesn't compile is a 400. |
+| GET / POST | `/v1/evaluators` | List / create (supports `online`, `samplingRate`, `filterName`, `scope`, `variableMapping`). `kind: "CODE"` + `expression` creates a deterministic check instead of an LLM judge; an expression that doesn't compile is a 400. `scope` is `trace` (default), `observation` (score individual spans; `filterName` then matches the SPAN name), or `thread`. `variableMapping` binds judge-prompt variables to sources — `[{ variable, source, observationName?, jsonPath? }]`, where source is one of `trace.input|output|metadata`, `observation.input|output|metadata`, `dataset.input|expectedOutput|metadata`; empty keeps the built-in `{input, output, expectedOutput}`. |
 | GET | `/v1/evaluators/analytics` | Per-evaluator EVAL score summary (avg, count) + daily trend (`days` query, default 30). |
 | GET | `/v1/evaluators/templates` | The prebuilt evaluator library (RAG/quality judge templates). |
 | GET | `/v1/evaluators/presets` | The prebuilt **code-evaluator** checks (regex, JSON shape, length, exact match). |
 | POST | `/v1/evaluators/test-expression` | Dry-run a code-evaluator expression against a sample item. Persists nothing, so it is not read-only gated. Body: `{ expression, input?, output?, expectedOutput?, metadata? }`. |
 | POST | `/v1/evaluators/from-template` | Instantiate a template into a project evaluator. Body: `{ key, name?, provider?, model?, ... }`. Audited. |
 | GET | `/v1/evaluators/{name}/versions` | Immutable judge-config version history (newest first). A version bumps when the prompt/model/provider changes, so online score drift is attributable to a config change. |
+| GET | `/v1/evaluators/backfills` | Recent evaluator backfill runs with progress counters (`name` query scopes to one evaluator). |
+| GET | `/v1/evaluators/backfills/preview` | How many traces a backfill would score: `{ matches }`. Query: `days`, `filter` (the same JSON-encoded structured trace filter set the traces list uses). |
+| POST | `/v1/evaluators/{name}/backfill` | Queue a run of this evaluator over ALREADY-ingested traces. Body: `{ days?, filters? }`. Capped at 5000 traces per run (the cap is recorded on the run, never silent). Thread-scope evaluators are a 400. Audited. |
 | POST | `/v1/evaluators/{name}/run` | Run over a trace's input/output → writes an `EVAL` score. |
 
 ### Experiments

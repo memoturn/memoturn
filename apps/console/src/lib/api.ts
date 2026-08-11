@@ -28,8 +28,11 @@ import type {
   EmbeddingProjection,
   Evaluator,
   EvaluatorAnalytics,
+  EvaluatorBackfill,
+  EvaluatorBackfillPreview,
   EvaluatorGuard,
   EvaluatorTemplate,
+  EvaluatorVariableBinding,
   EvaluatorVersion,
   ExperimentComparison,
   ExperimentDetail,
@@ -70,6 +73,7 @@ import type {
   SessionPage,
   SessionSummary,
   SimilarTrace,
+  SingleFilter,
   ToolAnalyticsRow,
   TraceDetail,
   TraceFacets,
@@ -513,9 +517,16 @@ export const api = {
     samplingRate?: number;
     filterName?: string;
     jurors?: { provider: string; model: string }[];
-    scope?: "trace" | "thread";
+    scope?: "trace" | "thread" | "observation";
     cooldownSeconds?: number;
+    variableMapping?: EvaluatorVariableBinding[];
   }) => post(`/v1/evaluators`, body),
+  listEvaluatorBackfills: (name?: string) =>
+    get<{ data: EvaluatorBackfill[] }>(`/v1/evaluators/backfills${qs({ name })}`).then((r) => r.data),
+  previewEvaluatorBackfill: (opts: { days?: number; filter?: string } = {}) =>
+    get<EvaluatorBackfillPreview>(`/v1/evaluators/backfills/preview${qs(opts as Record<string, unknown>)}`),
+  createEvaluatorBackfill: (name: string, body: { days?: number; filters?: SingleFilter[] }) =>
+    post<EvaluatorBackfill>(`/v1/evaluators/${encodeURIComponent(name)}/backfill`, body),
   listEvaluatorTemplates: () => get<{ data: EvaluatorTemplate[] }>(`/v1/evaluators/templates`).then((r) => r.data),
   listExprPresets: () => get<{ data: ExprPreset[] }>(`/v1/evaluators/presets`).then((r) => r.data),
   testExpression: (body: {

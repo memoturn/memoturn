@@ -30,6 +30,7 @@ import {
   createDataset,
   createDatasetVersion,
   createEvaluator,
+  createEvaluatorBackfill,
   createExperiment,
   createModelPrice,
   createProject,
@@ -106,6 +107,7 @@ import {
   listDashboards,
   listDatasets,
   listDatasetVersions,
+  listEvaluatorBackfills,
   listEvaluators,
   listEvaluatorTemplates,
   listEvaluatorVersions,
@@ -136,6 +138,7 @@ import {
   observationFacets,
   otlpLogsToEvents,
   otlpToEvents,
+  previewEvaluatorBackfill,
   RoleHierarchyError,
   recordAudit,
   recordAuthAudit,
@@ -2264,8 +2267,11 @@ app.openapi(
               samplingRate: z.number().min(0).max(1).optional(),
               filterName: z.string().optional(),
               jurors: z.array(z.object({ provider: z.enum(RUN_PROVIDER_IDS), model: z.string().min(1) })).optional(),
-              scope: z.enum(["trace", "thread"]).optional(),
+              scope: z.enum(["trace", "thread", "observation"]).optional(),
               cooldownSeconds: z.number().int().min(0).optional(),
+              // Bind judge-prompt variables to chosen sources; omitted/empty keeps the
+              // built-in {input, output, expectedOutput}.
+              variableMapping: z.array(C.evaluatorVariableBinding).optional(),
             }),
           },
         },
@@ -2316,8 +2322,11 @@ app.openapi(
               samplingRate: z.number().min(0).max(1).optional(),
               filterName: z.string().optional(),
               jurors: z.array(z.object({ provider: z.enum(RUN_PROVIDER_IDS), model: z.string().min(1) })).optional(),
-              scope: z.enum(["trace", "thread"]).optional(),
+              scope: z.enum(["trace", "thread", "observation"]).optional(),
               cooldownSeconds: z.number().int().min(0).optional(),
+              // Bind judge-prompt variables to chosen sources; omitted/empty keeps the
+              // built-in {input, output, expectedOutput}.
+              variableMapping: z.array(C.evaluatorVariableBinding).optional(),
             }),
           },
         },
@@ -2342,6 +2351,93 @@ app.openapi(
       throw err;
     }
     await recordAudit(c.get("projectId"), c.get("actor"), "evaluator.create", `evaluator:${body.name}`);
+    return c.json(result, 201);
+  },
+);
+
+// ── Evaluator backfill (score already-ingested traces) ───────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/evaluators/backfills",
+    summary: "List evaluator backfill runs (most recent first)",
+    tags: ["evaluators"],
+    security,
+    request: { query: z.object({ name: z.string().optional() }) },
+    responses: {
+      200: { description: "Backfills", content: { "application/json": { schema: C.listOf(C.evaluatorBackfill) } } },
+    },
+  }),
+  async (c) => c.json({ data: await listEvaluatorBackfills(c.get("projectId"), c.req.valid("query").name) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/evaluators/backfills/preview",
+    summary: "How many traces a backfill would score, for the given window + filters",
+    tags: ["evaluators"],
+    security,
+    request: {
+      query: z.object({
+        days: z.coerce.number().int().min(1).max(365).optional(),
+        // Structured trace filter set (the same one the traces list uses), JSON-encoded.
+        filter: z.string().optional(),
+      }),
+    },
+    responses: {
+      200: { description: "Match count", content: { "application/json": { schema: C.evaluatorBackfillPreview } } },
+    },
+  }),
+  async (c) => {
+    const { days, filter } = c.req.valid("query");
+    const matches = await previewEvaluatorBackfill(c.get("projectId"), {
+      days: days ?? 7,
+      filters: parseFilterSet(filter),
+    });
+    return c.json({ matches });
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/evaluators/{name}/backfill",
+    summary: "Run an evaluator over already-ingested traces (queued; poll the backfill list)",
+    tags: ["evaluators"],
+    security,
+    request: {
+      params: z.object({ name: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              days: z.number().int().min(1).max(365).optional(),
+              filters: C.filterState.optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Queued", content: { "application/json": { schema: C.evaluatorBackfill } } },
+      400: { description: "Unknown evaluator, or one whose scope cannot be backfilled" },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const { name } = c.req.valid("param");
+    const body = c.req.valid("json");
+    let result: C.EvaluatorBackfill;
+    try {
+      result = await createEvaluatorBackfill(c.get("projectId"), name, { days: body.days, filters: body.filters });
+    } catch (err) {
+      if (err instanceof EvaluatorConfigError) return c.json({ error: err.message }, 400);
+      throw err;
+    }
+    await recordAudit(c.get("projectId"), c.get("actor"), "evaluator.backfill", `evaluator:${name}`);
     return c.json(result, 201);
   },
 );
