@@ -177,6 +177,9 @@ Server-executed experiments run a prompt/model across a dataset and auto-score e
 | DELETE | `/v1/dashboards/{id}` | Delete a dashboard (its widgets are removed too). |
 | GET / POST | `/v1/score-configs` | List / create-update a score config. |
 | DELETE | `/v1/score-configs/{id}` | Delete a score config. |
+| GET | `/v1/scores/names` | Score names observed in the window with their data type, source, and count — the analytics picker. Query: `days` (default 30). |
+| GET | `/v1/scores/analytics` | One score's distribution: summary statistics, a 10-bucket histogram (numeric) or label counts (categorical), and a daily timeline. Query: `name` (required), `days`. |
+| GET | `/v1/scores/agreement` | Agreement between two score sources over the traces carrying both. Numeric pairs return correlation + MAE/RMSE; label pairs return agreement rate, Cohen's Kappa, and per-label F1. Always returns a confusion matrix (numeric values are bucketed). Query: `a`, `b` (required), `days`. Scans at most 20 000 pairs; past that `sampled` is true. |
 | PATCH | `/v1/scores/{id}` | Correct a score's `value`/`stringValue`/`comment` (inserts a replacement row; audited). |
 | DELETE | `/v1/scores/{id}` | Hard-delete a score (Doris `DELETE`, project-scoped). |
 | GET / POST | `/v1/saved-views` | List / save a table view (named set of filters). |

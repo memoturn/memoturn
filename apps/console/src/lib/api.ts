@@ -67,8 +67,11 @@ import type {
   SavedView,
   ScheduledExport,
   ScheduledExportResult,
+  ScoreAgreement,
   ScoreConfig,
   ScoreCorrected,
+  ScoreDistribution,
+  ScoreNameInfo,
   SessionMessages,
   SessionPage,
   SessionSummary,
@@ -536,6 +539,11 @@ export const api = {
     expectedOutput?: unknown;
     metadata?: unknown;
   }) => post<ExpressionTestResult>(`/v1/evaluators/test-expression`, body),
+  listScoreNames: (days = 30) => get<{ data: ScoreNameInfo[] }>(`/v1/scores/names${qs({ days })}`).then((r) => r.data),
+  getScoreDistribution: (name: string, days = 30) =>
+    get<ScoreDistribution>(`/v1/scores/analytics${qs({ name, days })}`),
+  getScoreAgreement: (a: string, b: string, days = 30) =>
+    get<ScoreAgreement>(`/v1/scores/agreement${qs({ a, b, days })}`),
   listEvaluatorVersions: (name: string) =>
     get<{ data: EvaluatorVersion[] }>(`/v1/evaluators/${encodeURIComponent(name)}/versions`).then((r) => r.data),
   getRetrievalAnalytics: (opts: { days?: number; limit?: number } = {}) =>

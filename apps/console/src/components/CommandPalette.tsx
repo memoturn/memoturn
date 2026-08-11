@@ -29,6 +29,7 @@ const NAV: Nav[] = [
   { label: "Prompts", to: "/prompts" },
   { label: "Datasets", to: "/datasets" },
   { label: "Experiments", to: "/experiments" },
+  { label: "Scores", to: "/scores" },
   { label: "Embeddings", to: "/embeddings" },
   { label: "Playground", to: "/playground" },
   { label: "Evaluators", to: "/evaluators" },

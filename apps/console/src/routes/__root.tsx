@@ -43,6 +43,7 @@ import {
   Search,
   Settings as SettingsIcon,
   ShieldCheck,
+  Sigma,
   Terminal,
   Users,
   Zap,
@@ -107,6 +108,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     label: "Evaluation",
     items: [
       { to: "/evaluators", label: "Evaluators", icon: Gauge },
+      { to: "/scores", label: "Scores", icon: Sigma },
       { to: "/datasets", label: "Datasets", icon: Database },
       { to: "/experiments", label: "Experiments", icon: FlaskConical },
       { to: "/retrieval", label: "Retrieval", icon: Search },

@@ -226,6 +226,29 @@ by session settling, not by a trace selection.
 thresholds and exits non-zero on a regression — drop it into CI to fail a PR on eval drift.
 See the TypeScript SDK docs and `POST /v1/datasets/{name}/runs/{run}/gate`.
 
+## Score analytics
+
+The **Scores** page answers "is this score trustworthy?".
+
+One score at a time: summary statistics (count, mean, median, standard deviation), the shape of
+its values (a 10-bucket histogram for numeric scores, label counts for categorical ones), and a
+daily timeline — where a step usually means a config change rather than model drift.
+
+Two scores at a time is the more valuable half: pick a second score and the page compares the two
+**sources** over the traces that carry both. That is how a team proves a judge is trustworthy —
+human vs judge, judge vs judge, or v1 vs v2 of the same judge:
+
+- **Numeric pairs** → Pearson correlation (do they rank traces the same way?), MAE and RMSE (how
+  far apart are they in absolute terms?).
+- **Label pairs** → agreement rate, **Cohen's Kappa** (agreement corrected for chance — two
+  raters who always say "pass" agree 100% of the time and score 0), and per-label F1.
+- Both → a **confusion matrix**; the diagonal is agreement and everything off it is where the
+  two sources part ways. Numeric values are bucketed first.
+
+The pair join is the widest query in the product, so it scans at most 20 000 pairs; past that the
+statistics are computed over a sample and the result says so rather than presenting a partial
+number as a total.
+
 ## Human review queues
 
 ```bash
