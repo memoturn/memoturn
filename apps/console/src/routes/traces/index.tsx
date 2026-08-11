@@ -1,4 +1,4 @@
-import { filterState, type SingleFilter } from "@memoturn/contracts";
+import { type FilterColumnDef, filterState, type SingleFilter, TRACE_FILTER_COLUMNS } from "@memoturn/contracts";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@memoturn/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -310,7 +310,8 @@ function FacetSection({
   );
 }
 
-type FacetProps = {
+/** The active filter set the facet counts are computed against. */
+type FacetQuery = {
   days: number;
   environment?: string;
   search?: string;
@@ -321,13 +322,19 @@ type FacetProps = {
   type?: string;
   // JSON-encoded structured filter set — narrows every facet (it is not a facet dimension).
   filter?: string;
+};
+
+type FacetProps = FacetQuery & {
   onPick: (key: "environment" | "search" | "tag" | "scoreName" | "level" | "type", value: string) => void;
 };
 
-/** The facet sections — shared by the desktop rail and the mobile Filters sheet. */
-function FacetSections({ days, environment, search, userId, tag, scoreName, level, type, filter, onPick }: FacetProps) {
+/**
+ * The facets query. Callers share one fetch (identical query key): the rail renders the counts,
+ * and the page reuses the score names as key suggestions for the score filter columns.
+ */
+function useTraceFacets({ days, environment, search, userId, tag, scoreName, level, type, filter }: FacetQuery) {
   // Counts are facet-excluding server-side; passing the active filters makes them narrow live.
-  const { data } = useQuery({
+  return useQuery({
     queryKey: ["trace-facets", days, environment, search, userId, tag, scoreName, level, type, filter],
     queryFn: () =>
       api.traceFacets({ days, limit: 25, environment, search, userId, tag, scoreName, level, type, filter }),
@@ -335,19 +342,33 @@ function FacetSections({ days, environment, search, userId, tag, scoreName, leve
     // Keep the current counts on screen while the next set loads — no skeleton flash on select.
     placeholderData: keepPreviousData,
   });
+}
+
+/** Score pseudo-columns take a score NAME as their key — offer the names actually observed. */
+function filterColumnsWithScoreNames(scores?: FacetCount[]): FilterColumnDef[] {
+  const names = scores?.map((s) => s.value) ?? [];
+  if (names.length === 0) return TRACE_FILTER_COLUMNS;
+  return TRACE_FILTER_COLUMNS.map((c) =>
+    c.id === "scores" || c.id === "scoreCategories" ? { ...c, keyOptions: names } : c,
+  );
+}
+
+/** The facet sections — shared by the desktop rail and the mobile Filters sheet. */
+function FacetSections({ onPick, ...q }: FacetProps) {
+  const { data } = useTraceFacets(q);
   return (
     <div className="space-y-4">
       <FacetSection
         title="Environment"
         items={data?.environments}
-        active={environment}
+        active={q.environment}
         onPick={(v) => onPick("environment", v)}
       />
-      <FacetSection title="Type" items={data?.types} active={type} onPick={(v) => onPick("type", v)} />
-      <FacetSection title="Level" items={data?.levels} active={level} onPick={(v) => onPick("level", v)} />
-      <FacetSection title="Name" items={data?.names} active={search} onPick={(v) => onPick("search", v)} />
-      <FacetSection title="Scores" items={data?.scores} active={scoreName} onPick={(v) => onPick("scoreName", v)} />
-      <FacetSection title="Tags" items={data?.tags} active={tag} onPick={(v) => onPick("tag", v)} />
+      <FacetSection title="Type" items={data?.types} active={q.type} onPick={(v) => onPick("type", v)} />
+      <FacetSection title="Level" items={data?.levels} active={q.level} onPick={(v) => onPick("level", v)} />
+      <FacetSection title="Name" items={data?.names} active={q.search} onPick={(v) => onPick("search", v)} />
+      <FacetSection title="Scores" items={data?.scores} active={q.scoreName} onPick={(v) => onPick("scoreName", v)} />
+      <FacetSection title="Tags" items={data?.tags} active={q.tag} onPick={(v) => onPick("tag", v)} />
     </div>
   );
 }
@@ -391,6 +412,12 @@ function TracesPage() {
   const { peek, page: pageRaw, pageSize: pageSizeRaw, ...listFilters } = filters;
   const page = pageRaw ?? 1;
   const pageSize = pageSizeRaw ?? DEFAULT_PAGE_SIZE;
+
+  // The facet rail and the filter builder share this one query (identical key): the rail draws the
+  // counts, the builder borrows the observed score names for its `scores.<name>` key suggestions.
+  const facetQuery: FacetQuery = { ...listFilters, days };
+  const { data: facets } = useTraceFacets(facetQuery);
+  const filterColumns = useMemo(() => filterColumnsWithScoreNames(facets?.scores), [facets?.scores]);
 
   const {
     data: pageData,
@@ -675,18 +702,7 @@ function TracesPage() {
               <SheetTitle>Filters</SheetTitle>
             </SheetHeader>
             <div className="p-4">
-              <FacetSections
-                days={days}
-                environment={filters.environment}
-                search={filters.search}
-                userId={filters.userId}
-                tag={filters.tag}
-                scoreName={filters.scoreName}
-                level={filters.level}
-                type={filters.type}
-                filter={filters.filter}
-                onPick={pickFacet}
-              />
+              <FacetSections {...facetQuery} onPick={pickFacet} />
             </div>
           </SheetContent>
         </Sheet>
@@ -762,7 +778,7 @@ function TracesPage() {
           Warnings
         </Button>
         <span className="mx-1 h-4 w-px bg-border" aria-hidden />
-        <FilterBuilder value={filterSet} onChange={setFilterSet} />
+        <FilterBuilder value={filterSet} onChange={setFilterSet} columns={filterColumns} />
       </div>
 
       {savedViews && savedViews.length > 0 && (
@@ -842,18 +858,7 @@ function TracesPage() {
       )}
 
       <div className="flex gap-4">
-        <FacetPanel
-          days={days}
-          environment={filters.environment}
-          search={filters.search}
-          userId={filters.userId}
-          tag={filters.tag}
-          scoreName={filters.scoreName}
-          level={filters.level}
-          type={filters.type}
-          filter={filters.filter}
-          onPick={pickFacet}
-        />
+        <FacetPanel {...facetQuery} onPick={pickFacet} />
         <div className="min-w-0 flex-1 space-y-3">
           <VolumeHistogram filters={{ ...listFilters, days }} />
           {isLoading ? (

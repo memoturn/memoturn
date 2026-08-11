@@ -168,6 +168,8 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     // mid-test failure skips that line, leaking the copy project. Clean it here too so
     // failed runs never leave rows behind in a shared dev database.
     await store.deleteProjectData(`${P}-copy`);
+    await store.deleteProjectData(`${P}-scoretypes`);
+    await store.deleteProjectData(`${P}-scorefilter`);
   });
 
   it("lists traces with rollups, tag + search filters, and ISO timestamps", async () => {
@@ -541,6 +543,52 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(matched.every((t) => t.id !== "t-badmeta")).toBe(true);
     expect(await store.countTraces(P, filters(badNum))).toBe(0);
     await store.deleteTraces(P, ["t-badmeta"]);
+  });
+
+  it("filters traces by score value and category, level-agnostically", async () => {
+    // Isolated project: this suite asserts exact score counts and score means under P.
+    const P3 = `${P}-scorefilter`;
+    await store.insertRows("traces", [trace({ id: "t-good", project_id: P3 }), trace({ id: "t-bad", project_id: P3 })]);
+    await store.insertRows("observations", [observation({ id: "o-bad", trace_id: "t-bad", project_id: P3 })]);
+    await store.insertRows("scores", [
+      // Trace-scoped numeric scores.
+      score({ id: "sc-good", project_id: P3, trace_id: "t-good", name: "quality", value: 0.9 }),
+      score({ id: "sc-bad", project_id: P3, trace_id: "t-bad", name: "quality", value: 0.2 }),
+      // Observation-scoped categorical score — it must still match at the trace level.
+      score({
+        id: "sc-cat",
+        project_id: P3,
+        trace_id: "t-bad",
+        observation_id: "o-bad",
+        name: "verdict",
+        data_type: "CATEGORICAL",
+        value: null,
+        string_value: "fail",
+      }),
+    ]);
+
+    const filters = (f: object) => ({ filters: [f] }) as Parameters<typeof store.countTraces>[1];
+    const numeric = (operator: string, value: number) =>
+      filters({ column: "scores", type: "numberObject", key: "quality", operator, value });
+    const category = (operator: string, value: string) =>
+      filters({ column: "scoreCategories", type: "stringObject", key: "verdict", operator, value });
+
+    expect((await store.listTraces(P3, numeric("lt", 0.5))).map((t) => t.id)).toEqual(["t-bad"]);
+    expect((await store.listTraces(P3, numeric("gte", 0.5))).map((t) => t.id)).toEqual(["t-good"]);
+    expect(await store.countTraces(P3, numeric("lt", 1))).toBe(2);
+    // An unknown score name never matches (it is not a silent no-op).
+    expect(
+      await store.countTraces(
+        P3,
+        filters({ column: "scores", type: "numberObject", key: "nope", operator: "gt", value: 0 }),
+      ),
+    ).toBe(0);
+    // Categorical: the score hangs off an observation, and its trace still matches.
+    expect((await store.listTraces(P3, category("eq", "fail"))).map((t) => t.id)).toEqual(["t-bad"]);
+    expect(await store.countTraces(P3, category("eq", "pass"))).toBe(0);
+    expect(await store.countTraces(P3, category("contains", "ai"))).toBe(1);
+
+    await store.deleteProjectData(P3);
   });
 
   it("computes on-the-fly metrics, widget series, and evaluator analytics", async () => {

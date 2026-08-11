@@ -213,6 +213,8 @@ export interface FilterColumnDef {
   type: FilterValueType;
   /** Preset keys offered for object (key/value) columns; free-text when omitted. */
   keyOptions?: string[];
+  /** Placeholder for the key cell of an object column (defaults to a metadata-key hint). */
+  keyPlaceholder?: string;
 }
 
 export const TRACE_FILTER_COLUMNS: FilterColumnDef[] = [
@@ -230,6 +232,12 @@ export const TRACE_FILTER_COLUMNS: FilterColumnDef[] = [
   { id: "cost", label: "Cost (USD)", type: "number" },
   { id: "latencyMs", label: "Latency (ms)", type: "number" },
   { id: "metadata", label: "Metadata", type: "stringObject" },
+  // Score pseudo-columns: `key` is the score NAME, the value is compared against the score's
+  // numeric `value` / categorical `stringValue`. Both resolve level-agnostically — a trace
+  // matches if the score is attached to it OR to one of its observations. The console fills
+  // `keyOptions` from the score facet, so the builder offers the names actually observed.
+  { id: "scores", label: "Score value", type: "numberObject", keyPlaceholder: "score name (e.g. accuracy)" },
+  { id: "scoreCategories", label: "Score category", type: "stringObject", keyPlaceholder: "score name (e.g. verdict)" },
 ];
 
 // ── Analytics query model (dashboard/widget engine) ─────────────────────────────

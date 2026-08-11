@@ -189,11 +189,23 @@ export function FilterBuilder({
               </div>
 
               {IS_OBJECT(col.type) && (
-                <Input
-                  placeholder="metadata key (e.g. user_intent)"
-                  value={key}
-                  onChange={(e) => setKey(e.target.value)}
-                />
+                <>
+                  {/* Suggestions, not a closed set: a score/metadata key that hasn't been seen in
+                      the current range is still typeable. */}
+                  <Input
+                    list={col.keyOptions?.length ? `filter-keys-${col.id}` : undefined}
+                    placeholder={col.keyPlaceholder ?? "metadata key (e.g. user_intent)"}
+                    value={key}
+                    onChange={(e) => setKey(e.target.value)}
+                  />
+                  {col.keyOptions && col.keyOptions.length > 0 && (
+                    <datalist id={`filter-keys-${col.id}`}>
+                      {col.keyOptions.map((k) => (
+                        <option key={k} value={k} />
+                      ))}
+                    </datalist>
+                  )}
+                </>
               )}
 
               <Select value={operator} onValueChange={setOperator}>
