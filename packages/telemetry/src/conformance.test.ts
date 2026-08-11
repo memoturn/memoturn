@@ -471,6 +471,51 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(scores[0]!.value).toBeCloseTo(0.8);
   });
 
+  it("lists observations as first-class rows with filters, facets, and paging", async () => {
+    const rows = await store.listObservations(P, { traceId: "t1" });
+    expect(rows.map((o) => o.id)).toEqual(["o2", "o1"]); // start_time DESC, id DESC
+    const gen = rows.find((o) => o.id === "o1")!;
+    expect(gen.trace_name).toBe("Conformance Trace"); // joined for navigation
+    expect(gen.latency_ms).toBe(1234);
+    expect(gen.total_tokens).toBe(300);
+    expect(gen.total_cost).toBeCloseTo(0.003, 6);
+    expect(gen.end_time).not.toBeNull();
+    expect(rows.find((o) => o.id === "o2")!.end_time).toBeNull();
+    expect(gen.start_time).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+
+    // Quick filters and the structured filter set both resolve against the observation row.
+    expect(await store.countObservations(P, { traceId: "t1", type: "SPAN" })).toBe(1);
+    expect(await store.countObservations(P, { traceId: "t1", model: "gpt-x" })).toBe(1);
+    expect(await store.countObservations(P, { traceId: "t1", search: "out" })).toBe(2); // payload content
+    expect(await store.countObservations(P, { traceId: "t1", search: "nomatch" })).toBe(0);
+    const slow = { filters: [{ column: "latencyMs", type: "number", operator: "gt", value: 1000 }] };
+    expect((await store.listObservations(P, slow as never)).map((o) => o.id)).toEqual(["o1"]);
+    const named = { filters: [{ column: "name", type: "stringOptions", operator: "any_of", value: ["gen"] }] };
+    expect(await store.countObservations(P, named as never)).toBe(2);
+
+    // Score filters here mean "scored at THIS span" — sc1 hangs off the trace, not off o1.
+    const scored = (key: string) => ({
+      filters: [{ column: "scores", type: "numberObject", key, operator: "gt", value: 0 }],
+    });
+    expect(await store.countObservations(P, scored("quality") as never)).toBe(0);
+    await store.insertRows("scores", [score({ id: "sc-span", observation_id: "o1", name: "relevance", value: 0.42 })]);
+    expect((await store.listObservations(P, scored("relevance") as never)).map((o) => o.id)).toEqual(["o1"]);
+    await store.deleteScore(P, "sc-span");
+
+    // Paging.
+    expect(await store.listObservations(P, { traceId: "t1", limit: 1 })).toHaveLength(1);
+    expect(await store.listObservations(P, { traceId: "t1", limit: 10, offset: 5 })).toHaveLength(0);
+
+    // Facets, facet-excluding on their own dimension.
+    const facets = await store.observationFacets(P, { traceId: "t1" });
+    expect(facets.types.map((f) => f.value).sort()).toEqual(["GENERATION", "SPAN"]);
+    expect(facets.names).toEqual([{ value: "gen", count: 2 }]);
+    expect(facets.models.map((f) => f.value)).toEqual(["gpt-x"]); // o2's empty model is dropped
+    const typed = await store.observationFacets(P, { traceId: "t1", type: "SPAN" });
+    expect(typed.types.map((f) => f.value).sort()).toEqual(["GENERATION", "SPAN"]); // own dimension excluded
+    expect(typed.names).toEqual([{ value: "gen", count: 1 }]); // other dimensions still narrow
+  });
+
   it("round-trips TEXT and CORRECTION score dataTypes", async () => {
     // Isolated project id: this project's score-row counts are asserted exactly elsewhere in this
     // suite (e.g. countProjectRows), so inserting extra scores under P would break those assertions.

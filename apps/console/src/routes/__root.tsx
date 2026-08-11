@@ -31,6 +31,7 @@ import {
   Gauge,
   HeartPulse,
   History,
+  Layers,
   LayoutDashboard,
   LogOut,
   MessagesSquare,
@@ -89,6 +90,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { to: "/live", label: "Live", icon: Radio },
       { to: "/traces", label: "Traces", icon: Activity },
+      { to: "/observations", label: "Spans", icon: Layers },
       { to: "/sessions", label: "Sessions", icon: MessagesSquare },
       { to: "/users", label: "Users", icon: Users },
       { to: "/widgets", label: "Explore", icon: BarChart3 },

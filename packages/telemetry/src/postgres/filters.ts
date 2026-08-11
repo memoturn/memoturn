@@ -147,6 +147,67 @@ function compileOne(projectId: string, f: SingleFilter): Frag | null {
   };
 }
 
+/**
+ * UI column id → physical mapping for the span-level explorer (alias `o`) — see the Doris
+ * dialect for the model; only the metadata accessor differs.
+ */
+const OBSERVATION_COLUMNS: Record<string, string> = {
+  name: "o.name",
+  type: "o.type",
+  level: "o.level",
+  model: "o.model",
+  provider: "o.provider",
+  environment: "o.environment",
+  traceId: "o.trace_id",
+  parentId: "o.parent_observation_id",
+  promptName: "o.prompt_id",
+  promptVersion: "o.prompt_version",
+  statusMessage: "o.status_message",
+  startTime: "o.start_time",
+  latencyMs: "o.latency_ms",
+  tokens: "o.total_tokens",
+  cost: "o.total_cost",
+  input: "o.input",
+  output: "o.output",
+};
+
+/** Compile a structured filter set over observations into AND-able WHERE fragments + params. */
+export function buildObservationFilterSql(
+  projectId: string,
+  filters: SingleFilter[],
+): { conds: string[]; params: unknown[] } {
+  const conds: string[] = [];
+  const params: unknown[] = [];
+  for (const f of filters) {
+    if (f.column === "scores" || f.column === "scoreCategories") {
+      // Scored at THIS span: unlike the trace registry (which resolves level-agnostically), the
+      // span explorer matches scores attached to the observation itself.
+      if (f.type !== "numberObject" && f.type !== "stringObject") continue;
+      const name = f.key.trim();
+      if (!name) continue;
+      const inner = scalarPredicate(f.column === "scores" ? '"value"' : "string_value", f);
+      conds.push(`o.id IN (SELECT observation_id FROM scores WHERE project_id = ? AND name = ? AND ${inner.frag})`);
+      params.push(projectId, name, ...inner.params);
+      continue;
+    }
+    if (f.column === "metadata") {
+      if (f.type !== "stringObject" && f.type !== "numberObject") continue;
+      const fn = f.type === "numberObject" ? "telemetry.json_number" : "telemetry.json_text";
+      const frag = scalarPredicate(`${fn}(o.metadata, ?)`, f);
+      conds.push(frag.frag);
+      // The key parameter binds inside the expression, before the predicate's own values.
+      params.push(jsonKey(f.key), ...frag.params);
+      continue;
+    }
+    const expr = OBSERVATION_COLUMNS[f.column];
+    if (!expr || f.type === "arrayOptions") continue;
+    const frag = scalarPredicate(expr, f);
+    conds.push(frag.frag);
+    params.push(...frag.params);
+  }
+  return { conds, params };
+}
+
 /** Compile a structured filter set into AND-able WHERE fragments + params (unknown columns skipped). */
 export function buildTraceFilterSql(
   projectId: string,

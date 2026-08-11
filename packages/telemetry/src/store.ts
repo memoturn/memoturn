@@ -5,6 +5,8 @@ import type {
   EmbeddingPoint,
   ModelMetric,
   ObservationDetail,
+  ObservationFacets,
+  ObservationSummary,
   PromptArmScore,
   PromptVersionCost,
   QueryResult,
@@ -28,6 +30,7 @@ import type {
   ExportFilters,
   ExportTraceRow,
   FullScoreRow,
+  ObservationFilters,
   ObservationRow,
   ProjectRowCounts,
   RetrievalAnalytics,
@@ -98,6 +101,20 @@ export interface TelemetryStore {
   ): Promise<UserSummary[]>;
   countUsers(projectId: string, days?: number, search?: string): Promise<number>;
   getTraceHeader(projectId: string, traceId: string): Promise<TraceHeader | null>;
+  /**
+   * The span-level explorer: observations as first-class rows, filtered on the observation
+   * itself rather than reached through a trace. Payload-free (see `ObservationSummary`);
+   * `trace_name` is resolved for the returned page only.
+   */
+  listObservations(projectId: string, filters?: ObservationFilters): Promise<ObservationSummary[]>;
+  /** Total observations matching the filters (ignores limit/offset) — for paginated page counts. */
+  countObservations(projectId: string, filters?: ObservationFilters): Promise<number>;
+  /**
+   * Distinct facet values + counts (name / type / level / model / environment) for the span
+   * explorer. Facet-excluding like `traceFacets`: each dimension honors the other active
+   * filters but not its own.
+   */
+  observationFacets(projectId: string, opts?: ObservationFilters & { limit?: number }): Promise<ObservationFacets>;
   listObservationsByTrace(projectId: string, traceId: string): Promise<ObservationDetail[]>;
   listScoresByTrace(projectId: string, traceId: string): Promise<ScoreDetail[]>;
   getTraceIO(projectId: string, traceIds: string[]): Promise<TraceIO[]>;
