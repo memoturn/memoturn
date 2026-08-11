@@ -42,6 +42,8 @@ export const Route = createFileRoute("/scores")({
 
 const histogramConfig = { count: { label: "Scores", color: "var(--chart-1)" } } satisfies ChartConfig;
 const timelineConfig = { mean: { label: "Mean", color: "var(--chart-2)" } } satisfies ChartConfig;
+/** Label scores have no mean, so their timeline trends volume instead. */
+const timelineCountConfig = { count: { label: "Scores", color: "var(--chart-2)" } } satisfies ChartConfig;
 
 const num = (n: number) => (Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 4 }) : "—");
 
@@ -148,7 +150,11 @@ function ScoresPage() {
     );
   }
 
+  // A label score reports no numbers, so its totals come from the category counts instead of
+  // the numeric statistics (which would all read zero).
   const categorical = (dist?.categories.length ?? 0) > 0;
+  const total = categorical ? (dist?.categories.reduce((s, c) => s + c.count, 0) ?? 0) : (dist?.stats.count ?? 0);
+  const topLabel = categorical ? dist?.categories[0] : undefined;
 
   return (
     <div className="space-y-4">
@@ -205,15 +211,34 @@ function ScoresPage() {
         <Skeleton className="h-64 w-full" />
       ) : (
         <>
+          {/* Mean/median/std dev are meaningless for a label score — showing them as zeros would
+              read as "this score is always 0" rather than "this score isn't a number". */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatTile label="Scores" value={dist.stats.count.toLocaleString()} icon={Sigma} help="Rows in range." />
-            <StatTile label="Mean" value={num(dist.stats.mean)} help="Average of the numeric values." />
-            <StatTile label="Median (p50)" value={num(dist.stats.p50)} help="Half the scores fall below this." />
-            <StatTile
-              label="Std dev"
-              value={num(dist.stats.stddev)}
-              help="Spread of the values. Near zero means the score barely discriminates."
-            />
+            <StatTile label="Scores" value={total.toLocaleString()} icon={Sigma} help="Rows in range." />
+            {categorical ? (
+              <>
+                <StatTile
+                  label="Labels"
+                  value={dist.categories.length.toLocaleString()}
+                  help="Distinct values this score reported."
+                />
+                <StatTile
+                  label="Most common"
+                  value={topLabel ? `${topLabel.value} (${Math.round((topLabel.count / total) * 100)}%)` : "—"}
+                  help="The label recorded most often, and its share of all scores. Near 100% means the score barely discriminates."
+                />
+              </>
+            ) : (
+              <>
+                <StatTile label="Mean" value={num(dist.stats.mean)} help="Average of the numeric values." />
+                <StatTile label="Median (p50)" value={num(dist.stats.p50)} help="Half the scores fall below this." />
+                <StatTile
+                  label="Std dev"
+                  value={num(dist.stats.stddev)}
+                  help="Spread of the values. Near zero means the score barely discriminates."
+                />
+              </>
+            )}
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
@@ -263,13 +288,20 @@ function ScoresPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Over time</CardTitle>
-                <CardDescription>Daily mean — a step here usually means a config change, not drift.</CardDescription>
+                <CardDescription>
+                  {categorical
+                    ? "Daily volume — a label score has no mean to trend."
+                    : "Daily mean — a step here usually means a config change, not drift."}
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 {dist.timeline.length < 2 ? (
                   <p className="text-sm text-muted-foreground">Not enough days in range to plot a trend.</p>
                 ) : (
-                  <ChartContainer config={timelineConfig} className="aspect-auto h-56 w-full">
+                  <ChartContainer
+                    config={categorical ? timelineCountConfig : timelineConfig}
+                    className="aspect-auto h-56 w-full"
+                  >
                     <LineChart data={dist.timeline} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                       <CartesianGrid vertical={false} />
                       <XAxis
@@ -284,8 +316,8 @@ function ScoresPage() {
                       <ChartTooltip content={<ChartTooltipContent />} />
                       <Line
                         type="monotone"
-                        dataKey="mean"
-                        stroke="var(--color-mean)"
+                        dataKey={categorical ? "count" : "mean"}
+                        stroke={categorical ? "var(--color-count)" : "var(--color-mean)"}
                         strokeWidth={2}
                         dot={false}
                         isAnimationActive={false}
@@ -387,16 +419,20 @@ function ScoresPage() {
                     pair count is meaningful.
                   </p>
                 )}
-                <div>
-                  <div className="mb-2 inline-flex items-center gap-1 text-sm font-medium">
-                    Confusion matrix
-                    <HelpTip>
-                      Rows are {agreement.a}, columns are {agreement.b}. The diagonal is agreement; everything off it is
-                      where the two sources part ways. Numeric scores are bucketed first.
-                    </HelpTip>
+                {/* A mixed numeric/label comparison has no shared axis, so there is no matrix to
+                    label — render nothing rather than a heading over emptiness. */}
+                {agreement.aLabels.length > 0 && (
+                  <div>
+                    <div className="mb-2 inline-flex items-center gap-1 text-sm font-medium">
+                      Confusion matrix
+                      <HelpTip>
+                        Rows are {agreement.a}, columns are {agreement.b}. The diagonal is agreement; everything off it
+                        is where the two sources part ways. Numeric scores are bucketed first.
+                      </HelpTip>
+                    </div>
+                    <ConfusionMatrix data={agreement} />
                   </div>
-                  <ConfusionMatrix data={agreement} />
-                </div>
+                )}
               </>
             )}
           </CardContent>
