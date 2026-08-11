@@ -101,6 +101,36 @@ describe("buildTraceFilterSql", () => {
     expect(lat.conds[0]).toContain("HAVING MAX(latency_ms) >= ?");
   });
 
+  it("score value — named-score subquery on trace_id (level-agnostic), name bound", () => {
+    const { conds, params } = one({
+      type: "numberObject",
+      column: "scores",
+      key: "accuracy",
+      operator: "lt",
+      value: 0.5,
+    });
+    expect(conds).toEqual(["t.id IN (SELECT trace_id FROM scores WHERE project_id = ? AND name = ? AND `value` < ?)"]);
+    expect(params).toEqual([PID, "accuracy", 0.5]);
+  });
+
+  it("score category — string predicate over string_value", () => {
+    const { conds, params } = one({
+      type: "stringObject",
+      column: "scoreCategories",
+      key: "verdict",
+      operator: "eq",
+      value: "fail",
+    });
+    expect(conds).toEqual([
+      "t.id IN (SELECT trace_id FROM scores WHERE project_id = ? AND name = ? AND string_value = ?)",
+    ]);
+    expect(params).toEqual([PID, "verdict", "fail"]);
+  });
+
+  it("score filter with a blank name is skipped (never an unscoped scan)", () => {
+    expect(one({ type: "numberObject", column: "scores", key: "  ", operator: "gt", value: 1 }).conds).toEqual([]);
+  });
+
   it("null operator — empty-equals-null nicety", () => {
     expect(one({ type: "null", column: "userId", operator: "is_null" }).conds[0]).toBe(
       "(t.user_id IS NULL OR t.user_id = '')",

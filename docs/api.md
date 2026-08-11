@@ -37,7 +37,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/v1/traces` | Paginated list `{ data, total, scores }` (per-trace score map); paging: `page`, `pageSize` (or legacy `limit`); filters: `userId`, `sessionId`, `environment`, `search` (matches trace name OR observation input/output content), `tag`, `promptId`, `scoreName`, `level`, `days`. |
+| GET | `/v1/traces` | Paginated list `{ data, total, scores }` (per-trace score map); paging: `page`, `pageSize` (or legacy `limit`); filters: `userId`, `sessionId`, `environment`, `search` (matches trace name OR observation input/output content), `tag`, `promptId`, `scoreName`, `level`, `days`, plus `filter` — a JSON-encoded structured filter set (see below). |
 | GET | `/v1/traces/facets` | Distinct filter facet values + counts (`environment`, `name`, `tags`, `scores`, `levels`) over the range; params: `days`, `limit`, plus active filters (`environment`, `search`, `userId`, `tag`, `scoreName`, `level`) for facet-excluding counts. |
 | GET | `/v1/traces/histogram` | Trace volume `{ interval, buckets }` bucketed by hour (ranges ≤ 2 days) or day; honors the trace-list filters (`environment`, `search`, `userId`, `tag`, `scoreName`, `level`, `days`). |
 | POST | `/v1/traces/batch` | Bulk action on selected traces: `delete`, `add-to-dataset`, or `review`. |
@@ -55,6 +55,20 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/metrics/cost-breakdown` | Top spenders: cost rolled up by end user, session, or prompt, ranked by spend. Query: `by` (`user`\|`session`\|`prompt`, default `user`), `days`, `limit`. |
 | GET | `/v1/usage` | Volume-based usage metering — bytes / events / traces ingested per UTC day, measured on the raw batch **before sampling** (the GB-ingested billing signal). Returns `{ total_bytes, total_events, total_traces, byDay }`. Query: `days` (1–365, default 30). |
 | POST | `/v1/metrics/query` | Run a dashboard/widget analytics query (view × metrics × dimensions × time × filters) from a JSON body; returns result rows. Read-only. |
+
+**Structured trace filters (`filter`).** `/v1/traces`, `/v1/traces/facets`, `/v1/traces/histogram`, and
+`/v1/exports/traces` also accept `filter` — a URL-encoded JSON array of
+`{ column, type, operator, value }` predicates, ANDed together, alongside the quick filters above.
+Columns: `name`, `environment`, `type`, `level`, `tags`, `userId`, `sessionId`, `version`, `release`,
+`timestamp`, `tokens`, `cost`, `latencyMs`, `metadata`, `scores`, `scoreCategories`. The last three
+are key/value columns and carry a `key`: for `metadata` the key is a JSON key; for `scores`
+(numeric `value`) and `scoreCategories` (categorical `stringValue`) the key is the **score name**.
+Score predicates resolve level-agnostically — a trace matches when the score is attached to the
+trace itself or to any of its observations.
+
+```
+filter=[{"column":"scores","type":"numberObject","key":"accuracy","operator":"lt","value":0.5}]
+```
 
 ### Prompts
 
@@ -206,7 +220,7 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | GET / POST | `/v1/sampling` | Get / set ingest sampling. Head: `rate` (0–100 = percent of traces kept in the query store; 100 = all, stable per-trace). Tail keep-rules (kept regardless of the head dice below 100): `keepOnError`, `keepLatencyMs`, `keepMinCostUsd` (null = off). Dropped traces stay in blob for replay. Audited. |
 | GET / POST | `/v1/model-prices` | List / create-update custom model price overrides (matched by name pattern, override built-ins). |
 | DELETE | `/v1/model-prices/{id}` | Delete a model price override. |
-| GET | `/v1/exports/traces` | Download traces as NDJSON (`application/x-ndjson`, default), CSV (`?format=csv`), or Parquet (`?format=parquet`, flat one-row-per-trace for BI); honors the trace-list filters: `limit`, `environment`, `search`, `userId`, `tag`, `scoreName`, `level`, `days`. |
+| GET | `/v1/exports/traces` | Download traces as NDJSON (`application/x-ndjson`, default), CSV (`?format=csv`), or Parquet (`?format=parquet`, flat one-row-per-trace for BI); honors the trace-list filters: `limit`, `environment`, `search`, `userId`, `tag`, `scoreName`, `level`, `days`, `filter`. |
 | GET | `/v1/exports/traces/{traceId}` | Download ONE trace as a self-contained JSON document — header, observations (with retrieved documents), and scores, wrapped in a versioned `memoturn_export` envelope. 404 if the trace is not in this project. |
 | GET / POST | `/v1/scheduled-exports` | Get / configure the recurring daily NDJSON export of traces to blob storage. |
 | POST | `/v1/scheduled-exports/run` | Run the export now and write the NDJSON to blob storage. |

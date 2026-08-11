@@ -19,7 +19,9 @@ type ColSpec =
   // An observation attribute — trace matches if ANY observation satisfies the predicate.
   | { kind: "obs"; col: string }
   // A per-trace aggregate over observations (matches how listTraces rolls these up).
-  | { kind: "metric"; agg: "SUM" | "MAX"; col: string };
+  | { kind: "metric"; agg: "SUM" | "MAX"; col: string }
+  // A named score — the filter's `key` is the score name, the value compared against `col`.
+  | { kind: "score"; col: string };
 
 /** UI column id → physical Doris mapping. Ids match `TRACE_FILTER_COLUMNS` in @memoturn/contracts. */
 const TRACE_COLUMNS: Record<string, ColSpec> = {
@@ -37,6 +39,8 @@ const TRACE_COLUMNS: Record<string, ColSpec> = {
   tokens: { kind: "metric", agg: "SUM", col: "total_tokens" },
   cost: { kind: "metric", agg: "SUM", col: "total_cost" },
   latencyMs: { kind: "metric", agg: "MAX", col: "latency_ms" },
+  scores: { kind: "score", col: "`value`" },
+  scoreCategories: { kind: "score", col: "string_value" },
 };
 
 const NUMERIC_OP: Record<string, string> = { eq: "=", neq: "!=", gt: ">", lt: "<", gte: ">=", lte: "<=" };
@@ -126,6 +130,20 @@ function compileOne(projectId: string, f: SingleFilter): Frag | null {
     return {
       frag: `t.id IN (SELECT trace_id FROM observations WHERE project_id = ? AND ${inner.frag})`,
       params: [projectId, ...inner.params],
+    };
+  }
+
+  if (spec.kind === "score") {
+    // `key` is the score name. Scores always carry trace_id (even observation-scoped ones), so
+    // matching on trace_id is level-agnostic: a score on the trace OR on any of its observations
+    // qualifies. Existential, like the observation predicates above — "has a score named N that …".
+    if (f.type !== "numberObject" && f.type !== "stringObject") return null;
+    const name = f.key.trim();
+    if (!name) return null;
+    const inner = scalarPredicate(spec.col, f);
+    return {
+      frag: `t.id IN (SELECT trace_id FROM scores WHERE project_id = ? AND name = ? AND ${inner.frag})`,
+      params: [projectId, name, ...inner.params],
     };
   }
 

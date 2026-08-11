@@ -527,6 +527,9 @@ app.get("/v1/exports/traces", async (c) => {
     scoreName: q.get("scoreName") || undefined,
     level: q.get("level") || undefined,
     days: q.get("days") ? Number(q.get("days")) : undefined,
+    // The console already sends the power-path filter set here — honor it, or an export
+    // silently returns more rows than the table it was launched from.
+    filters: parseTraceFilter(q.get("filter") || undefined),
   };
   if (format === "csv") {
     const body = await exportTracesCsv(c.get("projectId"), filters);
