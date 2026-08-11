@@ -131,6 +131,7 @@ model Project {
   traceStates     TraceState[]
   observationStates ObservationState[]
   scoreStates     ScoreState[]
+  evaluatorBackfills EvaluatorBackfill[]
 
   @@unique([organizationId, slug])
 }
@@ -616,21 +617,55 @@ model Evaluator {
   // "thread": score the whole conversation (all traces sharing a session id) once, after
   // the session has been quiet for `cooldownSeconds` — run by a per-minute worker cron so
   // multi-turn conversations "settle" before being judged as a whole.
+  // "trace" (default), "thread", or "observation" — score individual spans instead of whole
+  // runs (targeted by `filterName` against the OBSERVATION name).
   scope           String @default("trace")
   cooldownSeconds Int    @default(900)
+  // Judge-prompt variable bindings: [{ variable, source, observationName?, jsonPath? }].
+  // Empty (the default) keeps the built-in {input, output, expectedOutput} binding, so every
+  // existing evaluator behaves exactly as before.
+  variableMapping Json   @default("[]")
   // Monotonic version, bumped whenever the judge prompt/model/provider changes. The
   // immutable history lives in EvaluatorVersion so online score drift is attributable
   // (correlate a score-trend shift to when a version was published).
   version      Int      @default(1)
   createdAt    DateTime @default(now())
 
-  versions EvaluatorVersion[]
+  versions  EvaluatorVersion[]
+  backfills EvaluatorBackfill[]
 
   @@unique([projectId, name])
 }
 
 // Immutable snapshot of an evaluator's judge config at a point in time. A new row is
 // written on every create/edit that changes the prompt/model/provider.
+// A request to run an existing evaluator over ALREADY-INGESTED traces. Online evaluation only
+// ever sees new traffic, so without this a new judge has no history to compare against.
+// Executed by the worker (LLM calls, minutes-long); progress counters live here so the console
+// can show it without holding the request open.
+model EvaluatorBackfill {
+  id          String    @id @default(cuid())
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  evaluatorId String
+  evaluator   Evaluator @relation(fields: [evaluatorId], references: [id], onDelete: Cascade)
+  // PENDING → RUNNING → COMPLETED | FAILED
+  status      String    @default("PENDING")
+  // Target selection: the same time window + structured trace filter set the traces list uses.
+  days        Int       @default(7)
+  filters     Json      @default("[]")
+  // `total` is the match count measured when the job starts (the same number the preview shows).
+  total       Int       @default(0)
+  processed   Int       @default(0)
+  failed      Int       @default(0)
+  error       String    @default("")
+  createdAt   DateTime  @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+
+  @@index([projectId, evaluatorId])
+}
+
 model EvaluatorVersion {
   id           String    @id @default(cuid())
   evaluatorId  String

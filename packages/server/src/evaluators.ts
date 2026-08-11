@@ -1,4 +1,9 @@
-import type { EvaluatorAnalytics, ExpressionTestResult, ExprPreset } from "@memoturn/contracts";
+import type {
+  EvaluatorAnalytics,
+  EvaluatorVariableBinding,
+  ExpressionTestResult,
+  ExprPreset,
+} from "@memoturn/contracts";
 import {
   compileExpression,
   deterministicId,
@@ -14,6 +19,7 @@ import {
 import { prisma } from "@memoturn/db";
 import { generate, type Provider } from "@memoturn/llm";
 import { telemetry } from "@memoturn/telemetry";
+import { parseVariableMapping, renderPrompt, resolveVariables, type VariableContext } from "./evaluator-variables.js";
 import { submitBatch } from "./ingest.js";
 import { resolveProviderConfig } from "./providers.js";
 
@@ -70,11 +76,19 @@ export interface CreateEvaluatorInput {
   filterName?: string;
   /** LLM jury members. When non-empty, the evaluator becomes an ensemble (mean of votes). */
   jurors?: Juror[];
-  /** "trace" (default) scores each trace inline; "thread" scores whole settled conversations. */
+  /**
+   * "trace" (default) scores each trace inline; "thread" scores whole settled conversations;
+   * "observation" scores individual spans (targeted by `filterName` on the SPAN name).
+   */
   scope?: string;
   /** For scope="thread": seconds of session inactivity before the conversation is judged. */
   cooldownSeconds?: number;
+  /** Judge-prompt variable bindings. Empty keeps the built-in {input, output, expectedOutput}. */
+  variableMapping?: EvaluatorVariableBinding[];
 }
+
+/** The scopes an evaluator may declare; anything else falls back to "trace". */
+const SCOPES = new Set(["trace", "thread", "observation"]);
 
 export async function createEvaluator(projectId: string, input: CreateEvaluatorInput) {
   const provider = input.provider ?? "mock";
@@ -105,8 +119,9 @@ export async function createEvaluator(projectId: string, input: CreateEvaluatorI
     online: input.online ?? false,
     samplingRate: input.samplingRate ?? 1.0,
     filterName: input.filterName ?? "",
-    scope: input.scope === "thread" ? "thread" : "trace",
+    scope: input.scope && SCOPES.has(input.scope) ? input.scope : "trace",
     cooldownSeconds: input.cooldownSeconds ?? 900,
+    variableMapping: parseVariableMapping(input.variableMapping ?? []) as unknown as object,
   };
   // Version bump: an edit that changes the judge config (prompt/model/provider/jurors) is a
   // new immutable version; unrelated edits (toggling online, sampling) don't bump. A snapshot
@@ -156,6 +171,7 @@ export async function createEvaluator(projectId: string, input: CreateEvaluatorI
     filterName: ev.filterName,
     scope: ev.scope,
     cooldownSeconds: ev.cooldownSeconds,
+    variableMapping: parseVariableMapping(ev.variableMapping),
     version: ev.version,
   };
 }
@@ -202,18 +218,20 @@ export async function listEvaluators(projectId: string) {
     filterName: e.filterName,
     scope: e.scope,
     cooldownSeconds: e.cooldownSeconds,
+    variableMapping: parseVariableMapping(e.variableMapping),
     version: e.version,
     createdAt: e.createdAt.toISOString(),
   }));
 }
 
 /**
- * Online evaluators for a project (run automatically on sampled incoming traces). Only
- * "trace"-scope evaluators run inline at ingest; "thread"-scope ones run on a cron (see
+ * Online evaluators for a project (run automatically on sampled incoming telemetry). Both
+ * "trace"- and "observation"-scope evaluators run inline at ingest — the first scores whole
+ * runs, the second scores individual spans. "thread"-scope ones run on a cron (see
  * `runAllThreadEvaluations`), so they're excluded here.
  */
 export async function listOnlineEvaluators(projectId: string) {
-  return prisma.evaluator.findMany({ where: { projectId, online: true, scope: "trace" } });
+  return prisma.evaluator.findMany({ where: { projectId, online: true, scope: { in: ["trace", "observation"] } } });
 }
 
 /** The prebuilt evaluator library (RAG/quality judge templates) — instantiate to use. */
@@ -288,6 +306,8 @@ export interface InstantiateTemplateInput {
   jurors?: Juror[];
   scope?: string;
   cooldownSeconds?: number;
+  /** Bind the template prompt's variables to sources (e.g. a RAG judge → the retriever span). */
+  variableMapping?: EvaluatorVariableBinding[];
 }
 
 /**
@@ -312,6 +332,7 @@ export async function instantiateEvaluatorTemplate(
     jurors: overrides.jurors,
     scope: overrides.scope,
     cooldownSeconds: overrides.cooldownSeconds,
+    variableMapping: overrides.variableMapping,
   });
 }
 
@@ -331,6 +352,10 @@ export interface RunEvaluatorInput {
   input: unknown;
   output: unknown;
   expectedOutput?: unknown;
+  /** Score THIS span rather than the whole trace (scope = "observation"). */
+  observationId?: string;
+  /** The trace's spans, for variable mappings that bind to a named observation. */
+  observations?: JudgeInput["observations"];
 }
 
 function parseJudge(text: string): { score: number; reasoning: string } {
@@ -348,8 +373,15 @@ export interface JudgeInput {
   input: unknown;
   output: unknown;
   expectedOutput?: unknown;
-  /** Bound as `metadata` for CODE evaluators; unused by LLM judges. */
+  /** Bound as `metadata` for CODE evaluators; a `trace.metadata` mapping source for LLM judges. */
   metadata?: unknown;
+  /**
+   * The trace's spans, so a variable mapping can bind to a NAMED observation (e.g. the
+   * retriever's output). Omit when the caller has none — those bindings resolve to null.
+   */
+  observations?: VariableContext["observations"];
+  /** Dataset-item fields for an experiment run; defaults to {input, expectedOutput, metadata}. */
+  dataset?: VariableContext["dataset"];
 }
 
 export interface JudgeResult {
@@ -366,7 +398,7 @@ async function judgeOnce(
   prompt: string,
   provider: string,
   model: string,
-  input: JudgeInput,
+  payload: unknown,
 ): Promise<{ score: number; reasoning: string }> {
   const config = await resolveProviderConfig(projectId, provider as Provider);
   const result = await generate({
@@ -379,10 +411,7 @@ async function judgeOnce(
         role: "system",
         content: `${prompt}\n\nRespond ONLY with strict JSON: {"score": <number between 0 and 1>, "reasoning": <string>}.`,
       },
-      {
-        role: "user",
-        content: JSON.stringify({ input: input.input, output: input.output, expectedOutput: input.expectedOutput }),
-      },
+      { role: "user", content: JSON.stringify(payload) },
     ],
   });
   // mock provider can't actually judge — synthesize a deterministic score for testing.
@@ -411,11 +440,30 @@ export async function judgeWithEvaluator(
   const ev = await prisma.evaluator.findUnique({ where: { projectId_name: { projectId, name } } });
   if (!ev) return null;
 
+  // Variable mapping: when the evaluator declares one, the judge sees exactly the variables it
+  // binds (and the prompt's `{{name}}` references are substituted); otherwise it sees the
+  // built-in {input, output, expectedOutput}, which is what every pre-mapping evaluator expects.
+  const mapping = parseVariableMapping(ev.variableMapping);
+  const vars = mapping.length
+    ? resolveVariables(mapping, {
+        trace: { input: input.input, output: input.output, metadata: input.metadata },
+        observations: input.observations,
+        dataset: input.dataset ?? {
+          input: input.input,
+          expectedOutput: input.expectedOutput,
+          metadata: input.metadata,
+        },
+      })
+    : null;
+
   // CODE evaluators are deterministic and local: no provider call, no key needed, no cost, and
   // the same answer every time. Dispatching here means every consumer — online evals, thread
   // evals, dataset experiments, and synchronous guardrail checks — gets them for free.
   if (ev.kind === "CODE") {
     const { score, value } = runExpression(ev.expression, {
+      // Mapped variables are additional bindings, never replacements: an expression written
+      // against `output` keeps working when a mapping is added.
+      ...((vars ?? {}) as Record<string, ExprValue>),
       input: (input.input ?? null) as ExprValue,
       output: (input.output ?? null) as ExprValue,
       expected: (input.expectedOutput ?? null) as ExprValue,
@@ -424,15 +472,18 @@ export async function judgeWithEvaluator(
     return { evaluator: ev.name, score, reasoning: `${ev.expression} → ${JSON.stringify(value)}` };
   }
 
+  const prompt = vars ? renderPrompt(ev.prompt, vars) : ev.prompt;
+  const payload = vars ?? { input: input.input, output: input.output, expectedOutput: input.expectedOutput };
+
   const jurors = parseJurors(ev.jurors);
   if (jurors.length === 0) {
-    const judged = await judgeOnce(projectId, ev.prompt, ev.provider, ev.model, input);
+    const judged = await judgeOnce(projectId, prompt, ev.provider, ev.model, payload);
     return { evaluator: ev.name, ...judged };
   }
 
   // Jury: fan out to every member concurrently, aggregate the surviving votes by mean.
   const settled = await Promise.allSettled(
-    jurors.map(async (j) => ({ juror: j, vote: await judgeOnce(projectId, ev.prompt, j.provider, j.model, input) })),
+    jurors.map(async (j) => ({ juror: j, vote: await judgeOnce(projectId, prompt, j.provider, j.model, payload) })),
   );
   const votes: NonNullable<JudgeResult["votes"]> = [];
   for (const r of settled) {
@@ -454,6 +505,7 @@ export async function runEvaluator(projectId: string, name: string, input: RunEv
     input: input.input,
     output: input.output,
     expectedOutput: input.expectedOutput,
+    observations: input.observations,
   });
   if (!judged) return null;
 
@@ -469,8 +521,11 @@ export async function runEvaluator(projectId: string, name: string, input: RunEv
         type: "score-create",
         timestamp: isoNow(),
         body: {
-          id: deterministicId(input.traceId, judged.evaluator),
+          // Scoped to the span when one is given, so a span-scope evaluator writes one score
+          // per observation instead of overwriting a single trace-level score.
+          id: deterministicId(input.observationId ?? input.traceId, judged.evaluator),
           traceId: input.traceId,
+          ...(input.observationId ? { observationId: input.observationId } : {}),
           name: judged.evaluator,
           value: judged.score,
           source: "EVAL",
@@ -482,7 +537,13 @@ export async function runEvaluator(projectId: string, name: string, input: RunEv
     ],
   });
 
-  return { evaluator: judged.evaluator, traceId: input.traceId, score: judged.score, reasoning: judged.reasoning };
+  return {
+    evaluator: judged.evaluator,
+    traceId: input.traceId,
+    observationId: input.observationId ?? "",
+    score: judged.score,
+    reasoning: judged.reasoning,
+  };
 }
 
 // ── Thread-scope evaluation (whole-conversation judging after a cooldown) ──────────────

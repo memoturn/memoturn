@@ -52,6 +52,7 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | `WORKER_METRICS_URL` | `http://127.0.0.1:3002/metrics` | Where the API fetches worker metrics for the ingest-health panel. Set it when the API and worker run on different hosts/pods; fetch failures degrade gracefully (`workerReachable: false`). |
 | `STATE_RETENTION_HOURS` | `72` | Hours a mutable-entity `*State` row stays in Postgres after its last update before the hourly prune drops it (Doris keeps full history). |
 | `EXPERIMENT_CONCURRENCY` | `2` | Concurrent experiment jobs per worker process. Kept low on purpose — each job fans out over dataset items and must not starve ingest. |
+| `EVAL_BACKFILL_CONCURRENCY` | `1` | Concurrent evaluator-backfill jobs per worker process. Each one issues judge calls over a whole trace window, so it stays serial by default. |
 | `EXPERIMENT_ITEM_CONCURRENCY` | `4` | Dataset items executed in parallel within one experiment run. |
 | `MAINTENANCE_CONCURRENCY` | `4` | Maintenance-queue concurrency, so the per-minute alert tick isn't blocked behind a long daily sweep (retention/export/embeddings). Each job type is lock-guarded. |
 | `GUARDRAIL_EVALUATOR_TIMEOUT_MS` | `3000` | Per-check timeout for the LLM-backed guardrails (evaluator guards + the built-in restricted-topic/toxicity model guards). They sit on the request path, so a slow judge must not hang the caller — each fails open on timeout. |

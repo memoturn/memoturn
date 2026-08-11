@@ -111,6 +111,49 @@ describe("judgeWithEvaluator", () => {
   });
 });
 
+describe("judge variable mapping", () => {
+  beforeEach(() => {
+    findUnique.mockReset();
+    generate.mockReset();
+    resolveProviderConfig.mockClear();
+  });
+
+  it("sends only the mapped variables and renders them into the prompt", async () => {
+    findUnique.mockResolvedValue(
+      evaluatorRow({
+        provider: "openai",
+        model: "gpt-x",
+        prompt: "Is {{answer}} supported by {{context}}?",
+        variableMapping: [
+          { variable: "answer", source: "trace.output" },
+          { variable: "context", source: "observation.output", observationName: "retriever" },
+        ],
+      }),
+    );
+    generate.mockResolvedValue({ content: '{"score":0.5,"reasoning":"partly"}' });
+
+    const result = await judgeWithEvaluator("p1", "quality", {
+      input: "the question",
+      output: "the answer",
+      observations: [{ name: "retriever", output: "the context" }],
+    });
+
+    expect(result).toMatchObject({ score: 0.5, reasoning: "partly" });
+    const call = generate.mock.calls[0]![0] as { messages: { role: string; content: string }[] };
+    expect(call.messages[0]!.content).toContain("Is the answer supported by the context?");
+    // The judged payload is the mapping, not the built-in input/output/expectedOutput triple.
+    expect(JSON.parse(call.messages[1]!.content)).toEqual({ answer: "the answer", context: "the context" });
+  });
+
+  it("keeps the built-in payload when no mapping is declared", async () => {
+    findUnique.mockResolvedValue(evaluatorRow({ provider: "openai", model: "gpt-x" }));
+    generate.mockResolvedValue({ content: '{"score":1,"reasoning":"good"}' });
+    await judgeWithEvaluator("p1", "quality", { input: "in", output: "out", expectedOutput: "exp" });
+    const call = generate.mock.calls[0]![0] as { messages: { content: string }[] };
+    expect(JSON.parse(call.messages[1]!.content)).toEqual({ input: "in", output: "out", expectedOutput: "exp" });
+  });
+});
+
 describe("runEvaluator", () => {
   beforeEach(() => {
     findUnique.mockReset();
@@ -126,11 +169,31 @@ describe("runEvaluator", () => {
     expect(submitBatch).not.toHaveBeenCalled();
   });
 
+  it("scopes the score to a span when observationId is given, with a per-span deterministic id", async () => {
+    findUnique.mockResolvedValue(evaluatorRow({ scope: "observation" }));
+    generate.mockResolvedValue({ content: "synthesized" });
+    await runEvaluator("p1", "quality", { traceId: "t1", observationId: "o1", input: "in", output: "out" });
+    await runEvaluator("p1", "quality", { traceId: "t1", observationId: "o2", input: "in", output: "out" });
+    const bodies = submitBatch.mock.calls.map(
+      (call) => (call[1] as { batch: { body: Record<string, unknown> }[] }).batch[0]!.body,
+    );
+    expect(bodies[0]).toMatchObject({ traceId: "t1", observationId: "o1" });
+    expect(bodies[1]).toMatchObject({ traceId: "t1", observationId: "o2" });
+    // Two spans of one trace must not collide on the same score id (which would overwrite).
+    expect(bodies[0]!.id).not.toBe(bodies[1]!.id);
+  });
+
   it("still writes a score back through the ingest pipeline (unchanged public behavior)", async () => {
     findUnique.mockResolvedValue(evaluatorRow());
     generate.mockResolvedValue({ content: "synthesized" });
     const result = await runEvaluator("p1", "quality", { traceId: "t1", input: "in", output: "out" });
-    expect(result).toEqual({ evaluator: "quality", traceId: "t1", score: 1, reasoning: "synthesized" });
+    expect(result).toEqual({
+      evaluator: "quality",
+      traceId: "t1",
+      observationId: "",
+      score: 1,
+      reasoning: "synthesized",
+    });
     expect(submitBatch).toHaveBeenCalledTimes(1);
     const [projectId, req] = submitBatch.mock.calls[0] as [
       string,

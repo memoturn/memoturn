@@ -156,6 +156,64 @@ session's latest trace — so multi-turn conversations "settle" before being jud
   "online": true, "scope": "thread", "cooldownSeconds": 900 }
 ```
 
+### Observation (span) evaluation
+
+Set `scope: "observation"` to score individual **spans** instead of whole runs — one score per
+span, attached to the observation. `filterName` then matches the SPAN name, so a judge can
+target exactly the step you care about:
+
+```json
+{ "name": "context-relevance", "prompt": "…", "provider": "mock", "model": "mock-1",
+  "online": true, "scope": "observation", "filterName": "retriever" }
+```
+
+### Variable mapping
+
+By default a judge sees the trace's `input`, `output`, and `expectedOutput`. That makes some
+judges impossible to express: "is the retrieved context relevant to the question?" needs the
+*retriever span's* output, not the final answer. `variableMapping` binds each variable the
+prompt references to a chosen source:
+
+```json
+{ "name": "context-relevance",
+  "prompt": "Does the context {{context}} support answering {{question}}? Score 0..1.",
+  "variableMapping": [
+    { "variable": "question", "source": "trace.input", "jsonPath": "q" },
+    { "variable": "context",  "source": "observation.output", "observationName": "retriever" }
+  ] }
+```
+
+Sources are `trace.input|output|metadata`, `observation.input|output|metadata` (with
+`observationName` selecting the span), and `dataset.input|expectedOutput|metadata` (experiment
+runs). `jsonPath` is an optional dotted path into the selected value (`docs.0.text`). The judge
+receives exactly the mapped variables as its payload, and `{{name}}` references in the prompt
+are substituted. An unresolvable binding becomes `null` rather than failing the run, and an
+empty mapping keeps the built-in binding — so existing evaluators are unaffected.
+
+Code evaluators get the mapped variables as **additional** bindings alongside `input`,
+`output`, `expected`, and `metadata`, so an existing expression keeps working.
+
+### Backfill (scoring existing traces)
+
+Online evaluation only ever sees new traffic, so a judge published today has nothing to say
+about yesterday. A backfill runs an evaluator over traces you have **already ingested**,
+targeted with the same window + structured filter set the traces list uses:
+
+```bash
+# how many traces would this score?
+curl -u pk-mt-dev:sk-mt-dev 'http://localhost:3001/v1/evaluators/backfills/preview?days=7'
+
+# queue it (returns immediately; poll GET /v1/evaluators/backfills for progress)
+curl -u pk-mt-dev:sk-mt-dev -X POST http://localhost:3001/v1/evaluators/helpfulness/backfill \
+  -H 'content-type: application/json' -d '{"days":7}'
+```
+
+The run executes on the worker (each trace is a judge call), reports `processed`/`failed`
+counters as it goes, and is capped at 5000 traces per run — the cap is recorded on the run,
+never applied silently. Score ids are deterministic in (target, evaluator), so re-running
+overwrites instead of duplicating. Thread-scope evaluators can't be backfilled: they are driven
+by session settling, not by a trace selection.
+
 ### CI gates (`mt eval`)
 
 `mt eval` (shipped with the JS SDK) gates a dataset run's evaluator score means against

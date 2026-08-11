@@ -1108,6 +1108,36 @@ export type ProviderConnection = z.infer<typeof providerConnection>;
 export const juror = z.object({ provider: z.string(), model: z.string() });
 export type Juror = z.infer<typeof juror>;
 
+/**
+ * Where one judge-prompt variable gets its value. `trace.*` reads the trace being judged,
+ * `observation.*` reads a NAMED span inside it (so a judge can see what the retriever
+ * returned, not just the final answer), and `dataset.*` reads the dataset item in an
+ * experiment run. Anything unresolvable binds to null rather than failing the judge.
+ */
+export const evaluatorVariableSource = z.enum([
+  "trace.input",
+  "trace.output",
+  "trace.metadata",
+  "observation.input",
+  "observation.output",
+  "observation.metadata",
+  "dataset.input",
+  "dataset.expectedOutput",
+  "dataset.metadata",
+]);
+export type EvaluatorVariableSource = z.infer<typeof evaluatorVariableSource>;
+
+export const evaluatorVariableBinding = z.object({
+  /** Name used in the judge prompt as `{{variable}}` and as the key in the judged payload. */
+  variable: z.string(),
+  source: evaluatorVariableSource,
+  /** Which span to read, for `observation.*` sources (first match by name; "" = the first span). */
+  observationName: z.string(),
+  /** Optional dotted path into the selected value, e.g. `choices.0.text`. */
+  jsonPath: z.string(),
+});
+export type EvaluatorVariableBinding = z.infer<typeof evaluatorVariableBinding>;
+
 export const evaluator = z.object({
   name: z.string(),
   /** "LLM" (judge prompt + model) or "CODE" (a deterministic expression, no provider call). */
@@ -1121,12 +1151,36 @@ export const evaluator = z.object({
   online: z.boolean(),
   samplingRate: z.number(),
   filterName: z.string(),
+  /** "trace" | "thread" | "observation" — what one score is attached to. */
   scope: z.string(),
   cooldownSeconds: z.number(),
+  /** Empty = the built-in {input, output, expectedOutput} binding. */
+  variableMapping: z.array(evaluatorVariableBinding),
   version: z.number(),
   createdAt: z.string(),
 });
 export type Evaluator = z.infer<typeof evaluator>;
+
+/** A run of an evaluator over already-ingested traces. Progress is polled from the console. */
+export const evaluatorBackfill = z.object({
+  id: z.string(),
+  evaluator: z.string(),
+  status: z.string(),
+  days: z.number(),
+  /** Matches measured when the run started (0 while PENDING). */
+  total: z.number(),
+  processed: z.number(),
+  failed: z.number(),
+  error: z.string(),
+  createdAt: z.string(),
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+});
+export type EvaluatorBackfill = z.infer<typeof evaluatorBackfill>;
+
+/** "This matches N traces" — shown before committing to a backfill's judge calls. */
+export const evaluatorBackfillPreview = z.object({ matches: z.number() });
+export type EvaluatorBackfillPreview = z.infer<typeof evaluatorBackfillPreview>;
 
 export const evaluatorVersion = z.object({
   version: z.number(),

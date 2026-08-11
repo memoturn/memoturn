@@ -29,6 +29,19 @@ export const Route = createFileRoute("/evaluators")({ component: EvaluatorsPage 
 const PROVIDERS = ["mock", "anthropic", "openai", "gemini", "bedrock", "azure", "openai_compatible"] as const;
 const providerEnum = z.enum(PROVIDERS);
 
+/** Where a judge-prompt variable reads from. Mirrors `evaluatorVariableSource` in the contracts. */
+const VARIABLE_SOURCES = [
+  "trace.input",
+  "trace.output",
+  "trace.metadata",
+  "observation.input",
+  "observation.output",
+  "observation.metadata",
+  "dataset.input",
+  "dataset.expectedOutput",
+  "dataset.metadata",
+] as const;
+
 const evaluatorSchema = z
   .object({
     name: z.string().min(1, "Name is required"),
@@ -41,8 +54,20 @@ const evaluatorSchema = z
     expression: z.string(),
     online: z.boolean(),
     samplingRate: z.number().min(0).max(1),
-    scope: z.enum(["trace", "thread"]),
+    scope: z.enum(["trace", "thread", "observation"]),
     cooldownSeconds: z.number().int().min(0),
+    // Substring match that narrows what gets scored: the TRACE name for trace/thread scope,
+    // the SPAN name for observation scope. Empty = everything.
+    filterName: z.string(),
+    // Bind judge-prompt variables to sources; empty keeps {input, output, expectedOutput}.
+    variableMapping: z.array(
+      z.object({
+        variable: z.string().min(1, "Name required"),
+        source: z.enum(VARIABLE_SOURCES),
+        observationName: z.string(),
+        jsonPath: z.string(),
+      }),
+    ),
     // Optional LLM jury: when non-empty, the evaluator becomes an ensemble (mean of votes).
     jurors: z.array(z.object({ provider: providerEnum, model: z.string().min(1, "Model required") })),
   })
@@ -157,6 +182,8 @@ function EvaluatorsPage() {
       samplingRate: 1,
       scope: "trace",
       cooldownSeconds: 900,
+      filterName: "",
+      variableMapping: [],
       jurors: [],
     },
   });
@@ -165,6 +192,7 @@ function EvaluatorsPage() {
   const kind = form.watch("kind");
   const isCode = kind === "CODE";
   const jurors = useFieldArray({ control: form.control, name: "jurors" });
+  const variables = useFieldArray({ control: form.control, name: "variableMapping" });
 
   const create = useMutation({
     mutationFn: (values: EvaluatorForm) => api.createEvaluator(values),
@@ -381,9 +409,10 @@ function EvaluatorsPage() {
                         <span className="inline-flex items-center gap-1">
                           Scope
                           <HelpTip>
-                            <strong>Trace</strong> scores each trace's input/output. <strong>Thread</strong> scores a
-                            whole conversation (all traces sharing a session id) once it has been idle for the cooldown
-                            — use it for conversation-quality metrics.
+                            <strong>Trace</strong> scores each trace's input/output. <strong>Observation</strong> scores
+                            individual spans, so a retriever or a tool call gets its own score. <strong>Thread</strong>{" "}
+                            scores a whole conversation (all traces sharing a session id) once it has been idle for the
+                            cooldown — use it for conversation-quality metrics.
                           </HelpTip>
                         </span>
                       </FormLabel>
@@ -395,6 +424,7 @@ function EvaluatorsPage() {
                         </FormControl>
                         <SelectContent>
                           <SelectItem value="trace">trace (per trace)</SelectItem>
+                          <SelectItem value="observation">observation (per span)</SelectItem>
                           <SelectItem value="thread">thread (per conversation)</SelectItem>
                         </SelectContent>
                       </Select>
@@ -402,7 +432,29 @@ function EvaluatorsPage() {
                     </FormItem>
                   )}
                 />
-                {online && scope === "trace" && (
+                <FormField
+                  control={form.control}
+                  name="filterName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        <span className="inline-flex items-center gap-1">
+                          Name filter
+                          <HelpTip>
+                            Only score things whose name contains this text — the <strong>trace</strong> name for
+                            trace/thread scope, the <strong>span</strong> name for observation scope (e.g.{" "}
+                            <code>retriever</code>). Leave empty to score everything.
+                          </HelpTip>
+                        </span>
+                      </FormLabel>
+                      <FormControl>
+                        <Input placeholder="(all)" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                {online && scope !== "thread" && (
                   <FormField
                     control={form.control}
                     name="samplingRate"
@@ -479,6 +531,104 @@ function EvaluatorsPage() {
                 />
               )}
               {isCode && <ExpressionEditor form={form} />}
+
+              <div className="space-y-2 rounded-lg border border-dashed p-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <div className="inline-flex items-center gap-1 text-sm font-medium">
+                      Variable mapping (optional)
+                      <HelpTip>
+                        By default a judge sees the trace's <code>input</code>, <code>output</code>, and{" "}
+                        <code>expectedOutput</code>. Map variables to bind anything else — a named span's output (the
+                        retriever's context, say), a dataset field, or a path inside any of them. Reference them in the
+                        prompt as <code>{"{{name}}"}</code>.
+                      </HelpTip>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Leave empty for the built-in input / output / expectedOutput binding.
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      variables.append({ variable: "", source: "trace.output", observationName: "", jsonPath: "" })
+                    }
+                  >
+                    <Plus className="mr-1 h-4 w-4" /> Add variable
+                  </Button>
+                </div>
+                {variables.fields.map((f, i) => (
+                  <div key={f.id} className="flex flex-wrap items-end gap-2">
+                    <FormField
+                      control={form.control}
+                      name={`variableMapping.${i}.variable`}
+                      render={({ field }) => (
+                        <FormItem className="w-40">
+                          <FormControl>
+                            <Input placeholder="variable" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name={`variableMapping.${i}.source`}
+                      render={({ field }) => (
+                        <FormItem className="w-52">
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {VARIABLE_SOURCES.map((src) => (
+                                <SelectItem key={src} value={src}>
+                                  {src}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    {/* Only an observation source needs a span name to disambiguate. */}
+                    {form.watch(`variableMapping.${i}.source`)?.startsWith("observation.") && (
+                      <FormField
+                        control={form.control}
+                        name={`variableMapping.${i}.observationName`}
+                        render={({ field }) => (
+                          <FormItem className="w-40">
+                            <FormControl>
+                              <Input placeholder="span name" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
+                    <FormField
+                      control={form.control}
+                      name={`variableMapping.${i}.jsonPath`}
+                      render={({ field }) => (
+                        <FormItem className="w-44">
+                          <FormControl>
+                            <Input placeholder="json path (optional)" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <Button type="button" variant="ghost" size="icon" onClick={() => variables.remove(i)}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
 
               <div className={`space-y-2 rounded-lg border border-dashed p-4 ${isCode ? "hidden" : ""}`}>
                 <div className="flex items-center justify-between">
@@ -589,6 +739,8 @@ function EvaluatorsPage() {
         </Card>
       )}
 
+      {evaluators && evaluators.length > 0 && <BackfillPanel evaluators={evaluators} readOnly={readOnly} />}
+
       <div className="space-y-3">
         <h2 className="text-lg font-semibold tracking-tight">Evaluators ({evaluators?.length ?? 0})</h2>
         {!evaluators || evaluators.length === 0 ? (
@@ -602,6 +754,139 @@ function EvaluatorsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Backfill panel — run an existing evaluator over traces that are already ingested.
+ *
+ * Online evaluation only sees new traffic, so a judge published today knows nothing about
+ * yesterday. The match count is fetched before the run so the cost of the judge calls is a
+ * decision, not a surprise; progress is polled from the queued job.
+ */
+function BackfillPanel({ evaluators, readOnly }: { evaluators: Evaluator[]; readOnly: boolean }) {
+  const qc = useQueryClient();
+  // Thread-scope evaluators are driven by session settling, not by a trace selection.
+  const targetable = evaluators.filter((e) => e.scope !== "thread");
+  const [name, setName] = useState(targetable[0]?.name ?? "");
+  const [days, setDays] = useState(7);
+
+  const { data: preview } = useQuery({
+    queryKey: ["evaluator-backfill-preview", days],
+    queryFn: () => api.previewEvaluatorBackfill({ days }),
+  });
+  const { data: runs } = useQuery({
+    queryKey: ["evaluator-backfills"],
+    queryFn: () => api.listEvaluatorBackfills(),
+    // Cheap poll: a running backfill's counters are the whole point of the panel.
+    refetchInterval: 5_000,
+  });
+
+  const start = useMutation({
+    mutationFn: () => api.createEvaluatorBackfill(name, { days }),
+    onSuccess: () => {
+      toast.success("Backfill queued");
+      qc.invalidateQueries({ queryKey: ["evaluator-backfills"] });
+    },
+    onError: (e) => toast.error(`Failed to queue backfill: ${String(e)}`),
+  });
+
+  if (targetable.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-1.5">
+          Backfill
+          <HelpTip>
+            Score traces you have ALREADY ingested. Online evaluation only ever sees new traffic, so this is how a new
+            judge gets a history to compare against. Runs in the background; each trace costs one judge call.
+          </HelpTip>
+        </CardTitle>
+        <CardDescription>Run an evaluator over existing traces in the selected window.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1">
+            <div className="text-sm font-medium">Evaluator</div>
+            <Select value={name} onValueChange={setName}>
+              <SelectTrigger className="w-56">
+                <SelectValue placeholder="Pick an evaluator" />
+              </SelectTrigger>
+              <SelectContent>
+                {targetable.map((e) => (
+                  <SelectItem key={e.name} value={e.name}>
+                    {e.name}
+                    {e.scope === "observation" ? " (per span)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <div className="text-sm font-medium">Window (days)</div>
+            <Input
+              type="number"
+              min="1"
+              max="365"
+              className="w-28"
+              value={days}
+              onChange={(e) => setDays(Math.max(1, Number(e.target.value) || 1))}
+            />
+          </div>
+          <div className="pb-2 text-sm text-muted-foreground">
+            {preview ? (
+              <>
+                matches <span className="font-medium text-foreground tabular-nums">{preview.matches}</span> trace
+                {preview.matches === 1 ? "" : "s"}
+              </>
+            ) : (
+              "counting…"
+            )}
+          </div>
+          <Button
+            type="button"
+            disabled={readOnly || !name || start.isPending || preview?.matches === 0}
+            onClick={() => start.mutate()}
+          >
+            {start.isPending ? "Queueing…" : "Run backfill"}
+          </Button>
+        </div>
+
+        {runs && runs.length > 0 && (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-muted-foreground">
+                <th className="py-2 font-medium">Evaluator</th>
+                <th className="py-2 font-medium">Status</th>
+                <th className="py-2 text-right font-medium">Progress</th>
+                <th className="py-2 font-medium">Started</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.slice(0, 5).map((r) => (
+                <tr key={r.id} className="border-b last:border-0">
+                  <td className="py-2 font-medium">{r.evaluator}</td>
+                  <td className="py-2">
+                    <KindBadge tone={r.status === "COMPLETED" ? "green" : r.status === "FAILED" ? "red" : "amber"}>
+                      {r.status.toLowerCase()}
+                    </KindBadge>
+                  </td>
+                  <td className="py-2 text-right tabular-nums">
+                    {r.processed}/{r.total || "—"}
+                    {r.failed > 0 && <span className="ml-1 text-destructive">({r.failed} failed)</span>}
+                  </td>
+                  <td className="py-2 text-muted-foreground">
+                    {r.startedAt ? new Date(r.startedAt).toLocaleString() : "queued"}
+                    {r.error && <span className="ml-2 text-xs">{r.error}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

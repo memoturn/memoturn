@@ -85,6 +85,36 @@ export function getExperimentQueue(): Queue<ExperimentJob> {
   return experimentQueue;
 }
 
+/** Payload enqueued per evaluator backfill — the worker loads targeting + progress from Postgres. */
+export interface EvalBackfillJob {
+  projectId: string;
+  backfillId: string;
+}
+
+let evalQueue: Queue<EvalBackfillJob> | undefined;
+
+/**
+ * Queue for evaluator backfills (score already-ingested traces). Like experiments these are
+ * long, LLM-bound jobs, so they get their own Worker at low concurrency rather than competing
+ * with ingest. Retries are safe: score ids are deterministic in (target, evaluator), and a run
+ * that already reached a terminal status returns immediately instead of re-spending judge calls.
+ */
+export function getEvalQueue(): Queue<EvalBackfillJob> {
+  if (!evalQueue) {
+    evalQueue = new Queue<EvalBackfillJob>(QUEUE_NAMES.eval, {
+      connection: connectionOptions(),
+      prefix: QUEUE_PREFIX,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 2000 },
+        removeOnComplete: 1000,
+        removeOnFail: 5000, // retain for inspection
+      },
+    });
+  }
+  return evalQueue;
+}
+
 /**
  * Payload enqueued when a demo sandbox is provisioned — the worker seeds it.
  *

@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { QUEUE_NAMES, QUEUE_PREFIX } from "@memoturn/core";
 import {
   connectionOptions,
+  type EvalBackfillJob,
   type ExperimentJob,
   getDlqQueue,
   getIngestQueue,
@@ -26,6 +27,7 @@ import {
 import { Queue, Worker } from "bullmq";
 import { shouldDeadLetter } from "./dlq.js";
 import { logJson, snapshot } from "./metrics.js";
+import { processEvalBackfill } from "./processors/eval-backfill.js";
 import { processExperiment } from "./processors/experiment.js";
 import { processIngest } from "./processors/ingest.js";
 import { processSandbox } from "./processors/sandbox.js";
@@ -83,6 +85,26 @@ const experimentWorker = new Worker<ExperimentJob>(QUEUE_NAMES.experiment, proce
 experimentWorker.on("ready", () => console.log(`[worker] experiment ready (concurrency=${experimentConcurrency})`));
 experimentWorker.on("failed", (job, err) =>
   logJson("error", "experiment job failed", { jobId: job?.id, attemptsMade: job?.attemptsMade, error: err.message }),
+);
+
+// ── Evaluator backfills (score already-ingested traces) ──────────────────────────
+// Same shape as experiments and for the same reason: an LLM-bound job that can run for
+// minutes must not occupy ingest slots.
+const backfillConcurrency = Number(process.env.EVAL_BACKFILL_CONCURRENCY ?? 1);
+const evalBackfillWorker = new Worker<EvalBackfillJob>(QUEUE_NAMES.eval, processEvalBackfill, {
+  connection: connectionOptions(),
+  prefix: QUEUE_PREFIX,
+  concurrency: backfillConcurrency,
+});
+evalBackfillWorker.on("ready", () =>
+  console.log(`[worker] evaluator backfill ready (concurrency=${backfillConcurrency})`),
+);
+evalBackfillWorker.on("failed", (job, err) =>
+  logJson("error", "evaluator backfill job failed", {
+    jobId: job?.id,
+    attemptsMade: job?.attemptsMade,
+    error: err.message,
+  }),
 );
 
 // ── Demo sandboxes (public demo only) ────────────────────────────────────────────
