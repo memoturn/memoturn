@@ -92,6 +92,8 @@ import {
   getSampling,
   getSandboxForUser,
   getScheduledExport,
+  getScoreAgreement,
+  getScoreDistribution,
   getScoresByTraceIds,
   getSessionMessages,
   getToolAnalytics,
@@ -125,6 +127,7 @@ import {
   listReviewQueues,
   listSavedViews,
   listScoreConfigs,
+  listScoreNames,
   listSessions,
   listTraces,
   listUserProjects,
@@ -3543,6 +3546,67 @@ app.openapi(
     const result = await deleteScoreConfig(c.get("projectId"), id);
     await recordAudit(c.get("projectId"), c.get("actor"), "score-config.delete", id);
     return c.json(result);
+  },
+);
+
+// ── Score analytics (distribution + two-score agreement) ─────────────────────────
+// Static paths, registered before `/v1/scores/{id}` so they are never shadowed by the param route.
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/scores/names",
+    summary: "Score names observed in the window, with their data type and count",
+    tags: ["evaluators"],
+    security,
+    request: { query: z.object({ days: z.coerce.number().int().min(1).max(365).optional() }) },
+    responses: {
+      200: { description: "Score names", content: { "application/json": { schema: C.listOf(C.scoreNameInfo) } } },
+    },
+  }),
+  async (c) => c.json({ data: await listScoreNames(c.get("projectId"), c.req.valid("query").days ?? 30) }),
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/scores/analytics",
+    summary: "One score's distribution: summary statistics, histogram / category counts, timeline",
+    tags: ["evaluators"],
+    security,
+    request: {
+      query: z.object({ name: z.string(), days: z.coerce.number().int().min(1).max(365).optional() }),
+    },
+    responses: {
+      200: { description: "Score distribution", content: { "application/json": { schema: C.scoreDistribution } } },
+    },
+  }),
+  async (c) => {
+    const { name, days } = c.req.valid("query");
+    return c.json(await getScoreDistribution(c.get("projectId"), name, days ?? 30));
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/scores/agreement",
+    summary: "Agreement between two scores over the traces carrying both (human vs judge, v1 vs v2)",
+    tags: ["evaluators"],
+    security,
+    request: {
+      query: z.object({
+        a: z.string(),
+        b: z.string(),
+        days: z.coerce.number().int().min(1).max(365).optional(),
+      }),
+    },
+    responses: {
+      200: { description: "Score agreement", content: { "application/json": { schema: C.scoreAgreement } } },
+    },
+  }),
+  async (c) => {
+    const { a, b, days } = c.req.valid("query");
+    return c.json(await getScoreAgreement(c.get("projectId"), a, b, days ?? 30));
   },
 );
 

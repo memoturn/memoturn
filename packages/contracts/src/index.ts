@@ -887,6 +887,96 @@ export const evaluatorScoreTrend = z.object({
 });
 export type EvaluatorScoreTrend = z.infer<typeof evaluatorScoreTrend>;
 
+// ── Score analytics ──────────────────────────────────────────────────────────────
+// A dedicated surface per score: how its values are distributed, how they move over time, and
+// how two score SOURCES compare (human vs judge, judge vs judge, v1 vs v2 of a judge) — which
+// is how a team proves a judge is trustworthy.
+
+/** One score name observed in the window, with the data type it reports and how often. */
+export const scoreNameInfo = z.object({
+  name: z.string(),
+  /** NUMERIC / CATEGORICAL / BOOLEAN / TEXT / CORRECTION — the most common one for this name. */
+  dataType: z.string(),
+  source: z.string(),
+  count: z.number(),
+});
+export type ScoreNameInfo = z.infer<typeof scoreNameInfo>;
+
+/** Summary statistics over a numeric score's values. All zero when nothing numeric was recorded. */
+export const scoreStats = z.object({
+  count: z.number(),
+  min: z.number(),
+  max: z.number(),
+  mean: z.number(),
+  stddev: z.number(),
+  p50: z.number(),
+  p95: z.number(),
+});
+export type ScoreStats = z.infer<typeof scoreStats>;
+
+/** One histogram bar: a half-open value range [from, to) and how many scores fell in it. */
+export const scoreHistogramBucket = z.object({ from: z.number(), to: z.number(), count: z.number() });
+export type ScoreHistogramBucket = z.infer<typeof scoreHistogramBucket>;
+
+export const scoreTimelinePoint = z.object({ date: z.string(), count: z.number(), mean: z.number() });
+export type ScoreTimelinePoint = z.infer<typeof scoreTimelinePoint>;
+
+export const scoreDistribution = z.object({
+  name: z.string(),
+  dataType: z.string(),
+  days: z.number(),
+  stats: scoreStats,
+  /** Numeric shape: equal-width buckets across the observed range. Empty for categorical scores. */
+  histogram: z.array(scoreHistogramBucket),
+  /** Categorical/boolean shape: value counts. Empty for numeric scores. */
+  categories: z.array(facetCount),
+  timeline: z.array(scoreTimelinePoint),
+});
+export type ScoreDistribution = z.infer<typeof scoreDistribution>;
+
+/** One cell of the two-score confusion matrix (labels are bucket ranges for numeric scores). */
+export const scoreMatrixCell = z.object({ a: z.string(), b: z.string(), count: z.number() });
+export type ScoreMatrixCell = z.infer<typeof scoreMatrixCell>;
+
+/**
+ * Agreement between two score sources over traces that carry BOTH. `numeric` is present when
+ * both sides report numbers, `categorical` when both report labels; a mixed pair yields neither
+ * and only the matrix + pair count.
+ */
+export const scoreAgreement = z.object({
+  a: z.string(),
+  b: z.string(),
+  days: z.number(),
+  /** Traces carrying both scores — the sample the statistics are computed over. */
+  pairs: z.number(),
+  /** True when the pair set hit the scan cap and the statistics are over a sample. */
+  sampled: z.boolean(),
+  numeric: z
+    .object({
+      /** Pearson correlation (-1…1); 0 when either side has no variance. */
+      correlation: z.number(),
+      mae: z.number(),
+      rmse: z.number(),
+    })
+    .nullable(),
+  categorical: z
+    .object({
+      /** Fraction of pairs where both sides gave the same label. */
+      agreementRate: z.number(),
+      /** Cohen's Kappa — agreement corrected for what chance alone would produce. */
+      cohensKappa: z.number(),
+      /** Per-label F1 of B treated as a prediction of A (the reference). */
+      f1: z.array(z.object({ label: z.string(), f1: z.number(), support: z.number() })),
+    })
+    .nullable(),
+  /** Confusion matrix, a×b cell counts. Numeric scores are bucketed into deciles first. */
+  matrix: z.array(scoreMatrixCell),
+  /** Distinct labels (or bucket names) on each axis, in display order. */
+  aLabels: z.array(z.string()),
+  bLabels: z.array(z.string()),
+});
+export type ScoreAgreement = z.infer<typeof scoreAgreement>;
+
 export const evaluatorAnalytics = z.object({
   days: z.number(),
   summary: z.array(evaluatorScoreSummary),

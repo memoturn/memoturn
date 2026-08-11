@@ -170,6 +170,7 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     await store.deleteProjectData(`${P}-copy`);
     await store.deleteProjectData(`${P}-scoretypes`);
     await store.deleteProjectData(`${P}-scorefilter`);
+    await store.deleteProjectData(`${P}-scoreanalytics`);
   });
 
   it("lists traces with rollups, tag + search filters, and ISO timestamps", async () => {
@@ -514,6 +515,73 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     const typed = await store.observationFacets(P, { traceId: "t1", type: "SPAN" });
     expect(typed.types.map((f) => f.value).sort()).toEqual(["GENERATION", "SPAN"]); // own dimension excluded
     expect(typed.names).toEqual([{ value: "gen", count: 1 }]); // other dimensions still narrow
+  });
+
+  it("serves score analytics: names, stats, histogram buckets, categories, timeline, and pairs", async () => {
+    // Isolated project: this suite asserts exact score counts and means under P.
+    const P4 = `${P}-scoreanalytics`;
+    const values = [0, 0.25, 0.5, 0.75, 1];
+    await store.insertRows(
+      "traces",
+      values.map((_, i) => trace({ id: `sa-t${i}`, project_id: P4 })),
+    );
+    await store.insertRows("scores", [
+      // A numeric judge score and a categorical human annotation on the same traces.
+      ...values.map((v, i) => score({ id: `sa-j${i}`, project_id: P4, trace_id: `sa-t${i}`, name: "judge", value: v })),
+      ...values.map((v, i) =>
+        score({
+          id: `sa-h${i}`,
+          project_id: P4,
+          trace_id: `sa-t${i}`,
+          name: "human",
+          source: "ANNOTATION",
+          data_type: "CATEGORICAL",
+          value: null,
+          string_value: v >= 0.5 ? "pass" : "fail",
+        }),
+      ),
+    ]);
+
+    const names = await store.listScoreNames(P4, 7);
+    expect(names.map((n) => n.name).sort()).toEqual(["human", "judge"]);
+    expect(names.find((n) => n.name === "judge")).toMatchObject({ data_type: "NUMERIC", source: "API", count: 5 });
+
+    const stats = await store.scoreStats(P4, "judge", 7);
+    expect(stats).toMatchObject({ count: 5, min: 0, max: 1, mean: 0.5 });
+    expect(stats.stddev).toBeGreaterThan(0);
+    // Percentiles may legally differ between engines (approx vs exact) — assert a range.
+    expect(stats.p50).toBeGreaterThanOrEqual(0.25);
+    expect(stats.p50).toBeLessThanOrEqual(0.75);
+
+    // 10 equal-width buckets over [0,1]: values land in 0, 2, 5, 7, and the max one past the end.
+    const hist = await store.scoreHistogram(P4, "judge", 7, { min: 0, width: 0.1, buckets: 10 });
+    expect(hist.reduce((s, h) => s + h.count, 0)).toBe(5);
+    expect(hist.map((h) => h.bucket)).toEqual([0, 2, 5, 7, 10]);
+
+    expect(await store.scoreCategoryCounts(P4, "human", 7)).toEqual([
+      { value: "pass", count: 3 },
+      { value: "fail", count: 2 },
+    ]);
+    // The numeric score has no string values, so it has no categorical shape.
+    expect(await store.scoreCategoryCounts(P4, "judge", 7)).toEqual([]);
+
+    const timeline = await store.scoreTimeline(P4, "judge", 7);
+    expect(timeline).toHaveLength(1);
+    expect(timeline[0]).toMatchObject({ count: 5, mean: 0.5 });
+    expect(timeline[0]!.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    const pairs = await store.scorePairs(P4, "judge", "human", 7, 100);
+    expect(pairs).toHaveLength(5);
+    for (const p of pairs) {
+      expect(p.a_value).not.toBeNull();
+      expect(["pass", "fail"]).toContain(p.b_string);
+      // Each pair is one trace's two scores, not a cross join of every score with every other.
+      expect(p.b_string).toBe((p.a_value as number) >= 0.5 ? "pass" : "fail");
+    }
+    expect(await store.scorePairs(P4, "judge", "nope", 7, 100)).toEqual([]);
+    expect(await store.scorePairs(P4, "judge", "human", 7, 2)).toHaveLength(2); // the cap is honored
+
+    await store.deleteProjectData(P4);
   });
 
   it("round-trips TEXT and CORRECTION score dataTypes", async () => {

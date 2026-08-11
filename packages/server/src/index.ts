@@ -50,6 +50,7 @@ export * from "./review.js";
 export * from "./sampling.js";
 export * from "./savedviews.js";
 export * from "./scheduledexports.js";
+export * from "./score-analytics.js";
 export * from "./scoreconfigs.js";
 export * from "./traces.js";
 export * from "./usage.js";

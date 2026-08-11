@@ -258,6 +258,34 @@ export interface FullScoreRow {
   config_id: string;
 }
 
+/** One (name, data_type, source) combination observed for a score, with its row count. */
+export interface ScoreNameRow {
+  name: string;
+  data_type: string;
+  source: string;
+  count: number;
+}
+
+/** Raw statistics over a numeric score's values (percentiles may be engine-approximate). */
+export interface ScoreStatsRow {
+  count: number;
+  min: number;
+  max: number;
+  mean: number;
+  stddev: number;
+  p50: number;
+  p95: number;
+}
+
+/** Two scores of the same trace, side by side — the input to every agreement statistic. */
+export interface ScorePairRow {
+  trace_id: string;
+  a_value: number | null;
+  a_string: string;
+  b_value: number | null;
+  b_string: string;
+}
+
 export interface EvalScoreSummaryRow {
   name: string;
   count: number;

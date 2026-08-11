@@ -43,6 +43,9 @@ import type {
   RetrievalDocumentRow,
   ScanCursor,
   ScanPage,
+  ScoreNameRow,
+  ScorePairRow,
+  ScoreStatsRow,
   ScoreWriteRow,
   TelemetryRowMap,
   TelemetryTable,
@@ -768,6 +771,132 @@ export class PostgresTelemetryStore implements TelemetryStore {
       [projectId, cutoffDaysAgo(days)],
     );
     return rows.map((r) => ({ name: r.name, count: Number(r.cnt), avgValue: Number(r.avg_value) }));
+  }
+
+  // ── Score analytics (per-score distribution + two-score agreement) ───────────────
+
+  async listScoreNames(projectId: string, days: number): Promise<ScoreNameRow[]> {
+    const rows = await this.query<{ name: string; data_type: string; source: string; cnt: unknown }>(
+      `
+      SELECT name, data_type, source, COUNT(*) AS cnt
+      FROM scores
+      WHERE project_id = ? AND "timestamp" >= ? AND name != ''
+      GROUP BY name, data_type, source
+      ORDER BY cnt DESC
+      `,
+      [projectId, cutoffDaysAgo(days)],
+    );
+    return rows.map((r) => ({ name: r.name, data_type: r.data_type, source: r.source, count: Number(r.cnt) }));
+  }
+
+  async scoreStats(projectId: string, name: string, days: number): Promise<ScoreStatsRow> {
+    const [row] = await this.query<Record<string, unknown>>(
+      `
+      SELECT
+        COUNT("value") AS cnt,
+        MIN("value") AS min_v,
+        MAX("value") AS max_v,
+        AVG("value") AS mean_v,
+        STDDEV_POP("value") AS sd_v,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "value") AS p50_v,
+        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "value") AS p95_v
+      FROM scores
+      WHERE project_id = ? AND name = ? AND "timestamp" >= ? AND "value" IS NOT NULL
+      `,
+      [projectId, name, cutoffDaysAgo(days)],
+    );
+    return {
+      count: Number(row?.cnt ?? 0),
+      min: Number(row?.min_v ?? 0),
+      max: Number(row?.max_v ?? 0),
+      mean: Number(row?.mean_v ?? 0),
+      stddev: Number(row?.sd_v ?? 0),
+      p50: Number(row?.p50_v ?? 0),
+      p95: Number(row?.p95_v ?? 0),
+    };
+  }
+
+  async scoreHistogram(
+    projectId: string,
+    name: string,
+    days: number,
+    opts: { min: number; width: number; buckets: number },
+  ): Promise<{ bucket: number; count: number }[]> {
+    // Bucket index is computed in SQL from bound min/width so the engine does the grouping;
+    // the caller clamps the max-value row (index == buckets) into the last bucket.
+    const rows = await this.query<{ b: unknown; cnt: unknown }>(
+      `
+      SELECT FLOOR(("value" - ?) / ?) AS b, COUNT(*) AS cnt
+      FROM scores
+      WHERE project_id = ? AND name = ? AND "timestamp" >= ? AND "value" IS NOT NULL
+      GROUP BY b
+      ORDER BY b ASC
+      `,
+      [opts.min, opts.width, projectId, name, cutoffDaysAgo(days)],
+    );
+    return rows.map((r) => ({ bucket: Number(r.b), count: Number(r.cnt) }));
+  }
+
+  async scoreCategoryCounts(
+    projectId: string,
+    name: string,
+    days: number,
+  ): Promise<{ value: string; count: number }[]> {
+    const rows = await this.query<{ value: string; cnt: unknown }>(
+      `
+      SELECT string_value AS value, COUNT(*) AS cnt
+      FROM scores
+      WHERE project_id = ? AND name = ? AND "timestamp" >= ? AND string_value IS NOT NULL AND string_value != ''
+      GROUP BY string_value
+      ORDER BY cnt DESC
+      LIMIT 50
+      `,
+      [projectId, name, cutoffDaysAgo(days)],
+    );
+    return rows.map((r) => ({ value: r.value, count: Number(r.cnt) }));
+  }
+
+  async scoreTimeline(
+    projectId: string,
+    name: string,
+    days: number,
+  ): Promise<{ date: string; count: number; mean: number }[]> {
+    const rows = await this.query<{ date: string; cnt: unknown; mean_v: unknown }>(
+      `
+      SELECT to_char("timestamp", 'YYYY-MM-DD') AS date, COUNT(*) AS cnt, AVG("value") AS mean_v
+      FROM scores
+      WHERE project_id = ? AND name = ? AND "timestamp" >= ?
+      GROUP BY to_char("timestamp", 'YYYY-MM-DD')
+      ORDER BY date ASC
+      `,
+      [projectId, name, cutoffDaysAgo(days)],
+    );
+    return rows.map((r) => ({ date: r.date, count: Number(r.cnt), mean: Number(r.mean_v ?? 0) }));
+  }
+
+  async scorePairs(projectId: string, a: string, b: string, days: number, limit: number): Promise<ScorePairRow[]> {
+    // Traces carrying BOTH scores. Bounded by `limit`: this join is the widest scan in the
+    // analytics surface, and the caller reports when the cap was hit rather than hiding it.
+    const rows = await this.query<Record<string, unknown>>(
+      `
+      SELECT sa.trace_id AS trace_id,
+             sa."value" AS a_value, COALESCE(sa.string_value, '') AS a_string,
+             sb."value" AS b_value, COALESCE(sb.string_value, '') AS b_string
+      FROM scores sa
+      JOIN scores sb ON sb.project_id = sa.project_id AND sb.trace_id = sa.trace_id
+      WHERE sa.project_id = ? AND sa.name = ? AND sb.name = ?
+        AND sa."timestamp" >= ? AND sa.trace_id != ''
+      LIMIT ?
+      `,
+      [projectId, a, b, cutoffDaysAgo(days), Math.floor(limit)],
+    );
+    return rows.map((r) => ({
+      trace_id: String(r.trace_id),
+      a_value: r.a_value == null ? null : Number(r.a_value),
+      a_string: String(r.a_string ?? ""),
+      b_value: r.b_value == null ? null : Number(r.b_value),
+      b_string: String(r.b_string ?? ""),
+    }));
   }
 
   async evaluatorScoreTrend(projectId: string, days: number): Promise<EvalScoreTrendRow[]> {

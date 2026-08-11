@@ -37,6 +37,9 @@ import type {
   RetrievalDocumentDetail,
   ScanCursor,
   ScanPage,
+  ScoreNameRow,
+  ScorePairRow,
+  ScoreStatsRow,
   TelemetryRowMap,
   TelemetryTable,
   TraceEmbeddingRow,
@@ -122,6 +125,35 @@ export interface TelemetryStore {
   getScoreById(projectId: string, scoreId: string): Promise<FullScoreRow | null>;
   evaluatorScoreSummary(projectId: string, days: number): Promise<EvalScoreSummaryRow[]>;
   evaluatorScoreTrend(projectId: string, days: number): Promise<EvalScoreTrendRow[]>;
+
+  // ── Score analytics ─────────────────────────────────────────────────────────────
+  /** Every (name, data_type, source) combination seen in the window, with counts — the picker. */
+  listScoreNames(projectId: string, days: number): Promise<ScoreNameRow[]>;
+  /** Summary statistics over one score's numeric values. Percentiles may be engine-approximate. */
+  scoreStats(projectId: string, name: string, days: number): Promise<ScoreStatsRow>;
+  /**
+   * Value counts by equal-width bucket index, computed engine-side from a caller-supplied
+   * `min`/`width`. The row at index == `buckets` is the max value and belongs in the last bucket.
+   */
+  scoreHistogram(
+    projectId: string,
+    name: string,
+    days: number,
+    opts: { min: number; width: number; buckets: number },
+  ): Promise<{ bucket: number; count: number }[]>;
+  /** Value counts for a categorical/boolean score (top 50 labels). */
+  scoreCategoryCounts(projectId: string, name: string, days: number): Promise<{ value: string; count: number }[]>;
+  /** Daily count + mean for one score. */
+  scoreTimeline(
+    projectId: string,
+    name: string,
+    days: number,
+  ): Promise<{ date: string; count: number; mean: number }[]>;
+  /**
+   * Traces carrying BOTH named scores, one row per pair — the input to every agreement
+   * statistic. Bounded by `limit`; callers report when the cap was hit rather than hiding it.
+   */
+  scorePairs(projectId: string, a: string, b: string, days: number, limit: number): Promise<ScorePairRow[]>;
   metricsByDay(projectId: string, days: number): Promise<DailyMetric[]>;
   metricsByModel(projectId: string, days: number): Promise<ModelMetric[]>;
   /** Spend ranked by user_id (top spenders). Joins observation cost onto traces. */
