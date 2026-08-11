@@ -49,6 +49,8 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | POST | `/v1/traces/{id}/replay` | Re-run a stored trace's input through the LLM gateway and record the result as a new trace. Body: `{ provider?, model? }`. Audited. |
 | POST | `/v1/traces/{id}/annotate` | Add a manual ANNOTATION score to a trace. Body: `{ name, dataType, value?, stringValue?, comment? }`. Audited. |
 | POST | `/v1/traces/{id}/tags` | Replace a trace's tags (merge-on-write). Body: `{ tags: string[] }`. Audited. |
+| GET | `/v1/observations` | Paginated spans `{ data, total }` — observations as first-class rows, filtered on the observation itself (the span explorer). Paging: `page`, `pageSize` (or legacy `limit`); filters: `search` (span name OR inline input/output), `traceId`, `type`, `level`, `model`, `environment`, `days`, plus `filter` (structured filter set over observation columns). |
+| GET | `/v1/observations/facets` | Distinct facet values + counts (`names`, `types`, `levels`, `models`, `environments`) for the span explorer; same filters as above, counts facet-excluding. |
 | GET | `/v1/sessions` | Paginated sessions `{ data, total }` (traces grouped by `sessionId`); paging: `page`, `pageSize` (or legacy `limit`); scoped by `days`; `search` filters by `sessionId` substring. |
 | GET | `/v1/sessions/{id}/messages` | The session's traces as a conversation (Memory Explorer): `{ session_id, messages }`, one turn per trace (oldest-first) with `input`/`output` and token/cost roll-ups. |
 | GET | `/v1/live/traces` | Live tail (SSE): streams a `trace` event per trace as it's ingested, plus `ping` heartbeats. Best-effort read-side (Redis pub/sub); EventSource clients pass `?project=` since they can't set the switcher header. |

@@ -114,6 +114,7 @@ import {
   listMcpConnections,
   listModelPrices,
   listMyMentions,
+  listObservationsPage,
   listProjectMembers,
   listPrompts,
   listProviderConnections,
@@ -132,6 +133,7 @@ import {
   mcpAuthorizationServerMetadata,
   mcpOpenIdConfigMetadata,
   mcpProtectedResourceMetadata,
+  observationFacets,
   otlpLogsToEvents,
   otlpToEvents,
   RoleHierarchyError,
@@ -322,6 +324,8 @@ app.use("/v1/ingest/dlq/*", requireAuth);
 app.use("/v1/otel/*", requireAuth);
 app.use("/v1/traces", requireAuth);
 app.use("/v1/traces/*", requireAuth);
+app.use("/v1/observations", requireAuth);
+app.use("/v1/observations/*", requireAuth);
 app.use("/v1/sessions", requireAuth);
 app.use("/v1/sessions/*", requireAuth);
 app.use("/v1/live/*", requireAuth);
@@ -529,7 +533,7 @@ app.get("/v1/exports/traces", async (c) => {
     days: q.get("days") ? Number(q.get("days")) : undefined,
     // The console already sends the power-path filter set here — honor it, or an export
     // silently returns more rows than the table it was launched from.
-    filters: parseTraceFilter(q.get("filter") || undefined),
+    filters: parseFilterSet(q.get("filter") || undefined),
   };
   if (format === "csv") {
     const body = await exportTracesCsv(c.get("projectId"), filters);
@@ -827,9 +831,9 @@ app.openapi(
   },
 );
 
-/** Parse the JSON-encoded structured filter param; undefined for absent/malformed/empty input
- * (a bad filter set is ignored, never a 500). */
-function parseTraceFilter(raw: string | undefined): C.SingleFilter[] | undefined {
+/** Parse the JSON-encoded structured filter param (traces or observations — the model is shared);
+ * undefined for absent/malformed/empty input (a bad filter set is ignored, never a 500). */
+function parseFilterSet(raw: string | undefined): C.SingleFilter[] | undefined {
   if (!raw) return undefined;
   try {
     const parsed = C.filterState.safeParse(JSON.parse(raw));
@@ -891,7 +895,7 @@ app.openapi(
     const size = pageSize ?? limit ?? 50;
     const offset = page ? (page - 1) * size : 0;
     // Parse the JSON filter param defensively — a malformed set is ignored, never a 500.
-    const filters = parseTraceFilter(filter);
+    const filters = parseFilterSet(filter);
     const base = { userId, sessionId, environment, search, tag, promptId, scoreName, level, type, filters, days };
     const [data, total] = await Promise.all([
       listTraces(c.get("projectId"), { ...base, limit: size, offset }),
@@ -952,7 +956,7 @@ app.openapi(
       scoreName,
       level,
       type,
-      filters: parseTraceFilter(filter),
+      filters: parseFilterSet(filter),
     });
     return c.json(data);
   },
@@ -995,8 +999,77 @@ app.openapi(
       scoreName,
       level,
       type,
-      filters: parseTraceFilter(filter),
+      filters: parseFilterSet(filter),
     });
+    return c.json(data);
+  },
+);
+
+// ── Observations (span-level explorer) ───────────────────────────────────────────
+// Observations as first-class rows: "every `retriever` span over 2s this week" is a question
+// the trace list can't ask, because its predicates resolve at trace granularity.
+const observationQuery = {
+  days: z.coerce.number().int().min(1).max(365).optional(),
+  search: z.string().optional(),
+  traceId: z.string().optional(),
+  type: z.string().optional(),
+  level: z.string().optional(),
+  model: z.string().optional(),
+  environment: z.string().optional(),
+  // Structured operator-based filter set over OBSERVATION columns, JSON-encoded.
+  filter: z.string().optional(),
+};
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/observations",
+    summary: "List observations (spans) across traces, filtered on the observation itself",
+    tags: ["traces"],
+    security,
+    request: {
+      query: z.object({
+        limit: z.coerce.number().int().min(1).max(500).optional(),
+        page: z.coerce.number().int().min(1).optional(),
+        pageSize: z.coerce.number().int().min(1).max(500).optional(),
+        ...observationQuery,
+      }),
+    },
+    responses: {
+      200: { description: "Observation page", content: { "application/json": { schema: C.observationPage } } },
+    },
+  }),
+  async (c) => {
+    const { limit, page, pageSize, filter, ...rest } = c.req.valid("query");
+    const size = pageSize ?? limit ?? 50;
+    const offset = page ? (page - 1) * size : 0;
+    const data = await listObservationsPage(c.get("projectId"), {
+      ...rest,
+      filters: parseFilterSet(filter),
+      limit: size,
+      offset,
+    });
+    return c.json(data);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/observations/facets",
+    summary: "Distinct filter facet values + counts for observations (name / type / level / model / environment)",
+    tags: ["traces"],
+    security,
+    request: {
+      query: z.object({ limit: z.coerce.number().int().min(1).max(100).optional(), ...observationQuery }),
+    },
+    responses: {
+      200: { description: "Observation facets", content: { "application/json": { schema: C.observationFacets } } },
+    },
+  }),
+  async (c) => {
+    const { filter, ...rest } = c.req.valid("query");
+    const data = await observationFacets(c.get("projectId"), { ...rest, filters: parseFilterSet(filter) });
     return c.json(data);
   },
 );

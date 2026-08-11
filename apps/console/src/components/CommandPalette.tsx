@@ -24,6 +24,7 @@ interface Nav {
 const NAV: Nav[] = [
   { label: "Dashboard", to: "/dashboard" },
   { label: "Traces", to: "/traces" },
+  { label: "Spans", to: "/observations" },
   { label: "Sessions", to: "/sessions" },
   { label: "Prompts", to: "/prompts" },
   { label: "Datasets", to: "/datasets" },

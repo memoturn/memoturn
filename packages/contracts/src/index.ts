@@ -240,6 +240,36 @@ export const TRACE_FILTER_COLUMNS: FilterColumnDef[] = [
   { id: "scoreCategories", label: "Score category", type: "stringObject", keyPlaceholder: "score name (e.g. verdict)" },
 ];
 
+/**
+ * Filterable columns of the span-level explorer. Same model as the trace columns, but every
+ * predicate applies to the observation ROW itself — this list answers "every `retriever` span
+ * over 2s", which the trace list can only answer at trace granularity.
+ */
+export const OBSERVATION_FILTER_COLUMNS: FilterColumnDef[] = [
+  { id: "name", label: "Name", type: "stringOptions" },
+  { id: "type", label: "Type", type: "stringOptions" },
+  { id: "level", label: "Level", type: "stringOptions" },
+  { id: "model", label: "Model", type: "stringOptions" },
+  { id: "provider", label: "Provider", type: "string" },
+  { id: "environment", label: "Environment", type: "stringOptions" },
+  { id: "traceId", label: "Trace ID", type: "string" },
+  { id: "parentId", label: "Parent span ID", type: "string" },
+  { id: "promptName", label: "Prompt", type: "string" },
+  { id: "promptVersion", label: "Prompt version", type: "string" },
+  { id: "statusMessage", label: "Status message", type: "string" },
+  { id: "startTime", label: "Start time", type: "datetime" },
+  { id: "latencyMs", label: "Latency (ms)", type: "number" },
+  { id: "tokens", label: "Tokens", type: "number" },
+  { id: "cost", label: "Cost (USD)", type: "number" },
+  { id: "input", label: "Input", type: "string" },
+  { id: "output", label: "Output", type: "string" },
+  { id: "metadata", label: "Metadata", type: "stringObject" },
+  // Score pseudo-columns, keyed by score NAME — here they match scores attached to THIS span,
+  // not to its trace (the trace registry's versions are the level-agnostic ones).
+  { id: "scores", label: "Score value", type: "numberObject", keyPlaceholder: "score name (e.g. relevance)" },
+  { id: "scoreCategories", label: "Score category", type: "stringObject", keyPlaceholder: "score name (e.g. verdict)" },
+];
+
 // ── Analytics query model (dashboard/widget engine) ─────────────────────────────
 // A generic query over a declared "view" (traces/observations/scores): pick a metric
 // (measure × aggregation) broken down by dimension(s) and/or time, filtered with the shared
@@ -623,6 +653,44 @@ export const observationDetail = z.object({
   retrieval_documents: z.array(retrievalDocument),
 });
 export type ObservationDetail = z.infer<typeof observationDetail>;
+
+/**
+ * A row in the span-level explorer — one observation, standing on its own rather than nested
+ * inside a trace. Deliberately payload-free (no input/output): the list is for finding spans,
+ * and the trace view is for reading them. `trace_name` is joined on for navigation.
+ */
+export const observationSummary = z.object({
+  id: z.string(),
+  trace_id: z.string(),
+  trace_name: z.string(),
+  type: z.string(),
+  name: z.string(),
+  start_time: z.string(),
+  end_time: z.string().nullable(),
+  environment: z.string(),
+  level: z.string(),
+  status_message: z.string(),
+  model: z.string(),
+  provider: z.string(),
+  prompt_id: z.string(),
+  prompt_version: z.string(),
+  total_tokens: z.number(),
+  total_cost: z.number(),
+  latency_ms: z.number(),
+});
+export type ObservationSummary = z.infer<typeof observationSummary>;
+
+export const observationPage = z.object({ data: z.array(observationSummary), total: z.number() });
+export type ObservationPage = z.infer<typeof observationPage>;
+
+export const observationFacets = z.object({
+  names: z.array(facetCount),
+  types: z.array(facetCount),
+  levels: z.array(facetCount),
+  models: z.array(facetCount),
+  environments: z.array(facetCount),
+});
+export type ObservationFacets = z.infer<typeof observationFacets>;
 
 // ── Embeddings projection (RAG cluster/scatter view) ────────────────────────────
 export const embeddingPoint = z.object({

@@ -44,6 +44,8 @@ import type {
   MetricsSummary,
   ModelPriceList,
   NotificationPreferences,
+  ObservationFacets,
+  ObservationPage,
   PlaygroundResponse,
   Project,
   ProjectMember,
@@ -190,6 +192,18 @@ export interface TraceFilters {
   filter?: string;
   days?: number;
 }
+/** Span-explorer query — every field filters the observation row itself, not its trace. */
+export interface ObservationQuery {
+  search?: string;
+  traceId?: string;
+  type?: string;
+  level?: string;
+  model?: string;
+  environment?: string;
+  /** JSON-encoded structured filter set over OBSERVATION columns; parsed server-side. */
+  filter?: string;
+  days?: number;
+}
 export interface PlaygroundRequest {
   provider: string;
   model: string;
@@ -217,6 +231,10 @@ export const api = {
     get<{ data: TraceSummary[] }>(`/v1/traces${qs(filters as Record<string, unknown>)}`).then((r) => r.data),
   listTracesPage: (filters: TraceFilters & { page?: number; pageSize?: number } = {}) =>
     get<TracePage>(`/v1/traces${qs(filters as Record<string, unknown>)}`),
+  listObservationsPage: (filters: ObservationQuery & { page?: number; pageSize?: number } = {}) =>
+    get<ObservationPage>(`/v1/observations${qs(filters as Record<string, unknown>)}`),
+  observationFacets: (opts: ObservationQuery & { limit?: number } = {}) =>
+    get<ObservationFacets>(`/v1/observations/facets${qs(opts as Record<string, unknown>)}`),
   findSimilarTraces: (id: string, opts: { limit?: number; days?: number } = {}) =>
     get<{ data: SimilarTrace[] }>(
       `/v1/traces/${encodeURIComponent(id)}/similar${qs(opts as Record<string, unknown>)}`,

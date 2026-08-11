@@ -5,6 +5,8 @@ import type {
   EmbeddingPoint,
   ModelMetric,
   ObservationDetail,
+  ObservationFacets,
+  ObservationSummary,
   PromptArmScore,
   PromptVersionCost,
   QueryResult,
@@ -33,6 +35,7 @@ import type {
   ExportObservationRow,
   ExportTraceRow,
   FullScoreRow,
+  ObservationFilters,
   ObservationRow,
   ProjectRowCounts,
   RetrievalAnalytics,
@@ -53,7 +56,7 @@ import type {
 } from "../types.js";
 import { TELEMETRY_PRIMARY_KEYS } from "../types.js";
 import { closePgPool, pgQuery } from "./client.js";
-import { buildTraceFilterSql } from "./filters.js";
+import { buildObservationFilterSql, buildTraceFilterSql } from "./filters.js";
 import { compileQuery, validateQuery } from "./query.js";
 import { buildUpserts, toVectorLiteral } from "./serialize.js";
 
@@ -535,6 +538,122 @@ export class PostgresTelemetryStore implements TelemetryStore {
     );
     const r = rows[0];
     return r ? { ...r, tags: parseTags(r.tags) } : null;
+  }
+
+  /** Shared filter predicate for the span explorer (alias `o`), sans limit/offset. */
+  private observationListWhere(projectId: string, filters: ObservationFilters): { where: string; params: unknown[] } {
+    const { search, traceId, type, level, model, environment, days } = filters;
+    const conds: string[] = ["o.project_id = ?"];
+    const params: unknown[] = [projectId];
+    if (traceId) {
+      conds.push("o.trace_id = ?");
+      params.push(traceId);
+    }
+    if (type) {
+      conds.push("o.type = ?");
+      params.push(type);
+    }
+    if (level) {
+      conds.push("o.level = ?");
+      params.push(level);
+    }
+    if (model) {
+      conds.push("o.model = ?");
+      params.push(model);
+    }
+    if (environment) {
+      conds.push("o.environment = ?");
+      params.push(environment);
+    }
+    if (search) {
+      // Name or inline payload content (payloads offloaded to blob aren't searchable here).
+      conds.push(
+        `(LOWER(o.name) LIKE '%' || LOWER(?) || '%'
+          OR LOWER(o.input) LIKE '%' || LOWER(?) || '%'
+          OR LOWER(o.output) LIKE '%' || LOWER(?) || '%')`,
+      );
+      params.push(search, search, search);
+    }
+    if (days && days > 0) {
+      conds.push("o.start_time >= ?");
+      params.push(cutoffDaysAgo(days));
+    }
+    if (filters.filters && filters.filters.length > 0) {
+      const compiled = buildObservationFilterSql(projectId, filters.filters);
+      conds.push(...compiled.conds);
+      params.push(...compiled.params);
+    }
+    return { where: conds.join(" AND "), params };
+  }
+
+  async countObservations(projectId: string, filters: ObservationFilters = {}): Promise<number> {
+    const { where, params } = this.observationListWhere(projectId, filters);
+    const [row] = await this.query<{ c: unknown }>(`SELECT COUNT(*) AS c FROM observations o WHERE ${where}`, params);
+    return Number(row?.c ?? 0);
+  }
+
+  async listObservations(projectId: string, filters: ObservationFilters = {}): Promise<ObservationSummary[]> {
+    const { limit = 50, offset = 0 } = filters;
+    const { where, params } = this.observationListWhere(projectId, filters);
+    const rows = await this.query<Omit<ObservationSummary, "trace_name">>(
+      `
+      SELECT
+        o.id AS id, o.trace_id AS trace_id, o.type AS type, o.name AS name,
+        to_char(o.start_time, ${ISO_FMT}) AS start_time,
+        to_char(o.end_time, ${ISO_FMT}) AS end_time,
+        o.environment AS environment, o.level AS level,
+        COALESCE(o.status_message, '') AS status_message,
+        o.model AS model, o.provider AS provider,
+        COALESCE(o.prompt_id, '') AS prompt_id, COALESCE(o.prompt_version, '') AS prompt_version,
+        o.total_tokens AS total_tokens, o.total_cost AS total_cost, o.latency_ms AS latency_ms
+      FROM observations o
+      WHERE ${where}
+      ORDER BY o.start_time DESC, o.id DESC
+      LIMIT ? OFFSET ?
+      `,
+      [...params, Math.floor(limit), Math.max(0, Math.floor(offset))],
+    );
+    if (rows.length === 0) return [];
+    // Two-step (like listTraces): resolve trace names for just this page's trace ids.
+    const names = await this.query<{ id: string; name: string }>(
+      "SELECT id, name FROM traces WHERE project_id = ? AND id IN (?)",
+      [projectId, [...new Set(rows.map((r) => r.trace_id))]],
+    );
+    const byTrace = new Map(names.map((t) => [t.id, t.name]));
+    return rows.map((r) => ({
+      ...r,
+      trace_name: byTrace.get(r.trace_id) ?? "",
+      total_tokens: Number(r.total_tokens),
+      total_cost: Number(r.total_cost),
+      latency_ms: Number(r.latency_ms),
+    }));
+  }
+
+  async observationFacets(
+    projectId: string,
+    opts: ObservationFilters & { limit?: number } = {},
+  ): Promise<ObservationFacets> {
+    const cap = Math.floor(opts.limit ?? 25);
+    // Facet-excluding counts: each dimension honors the OTHER active filters but not its own.
+    const build = (drop: keyof ObservationFilters) =>
+      this.observationListWhere(projectId, { ...opts, limit: undefined, offset: undefined, [drop]: undefined });
+    const facet = (dim: string, w: { where: string; params: unknown[] }) =>
+      this.query<{ value: string; count: unknown }>(
+        `SELECT ${dim} AS value, COUNT(*) AS count FROM observations o
+         WHERE ${w.where} GROUP BY ${dim} ORDER BY count DESC LIMIT ?`,
+        [...w.params, cap],
+      ).then((rows) =>
+        rows.filter((r) => r.value != null && r.value !== "").map((r) => ({ value: r.value, count: Number(r.count) })),
+      );
+
+    const [names, types, levels, models, environments] = await Promise.all([
+      facet("o.name", build("search")),
+      facet("o.type", build("type")),
+      facet("o.level", build("level")),
+      facet("o.model", build("model")),
+      facet("o.environment", build("environment")),
+    ]);
+    return { names, types, levels, models, environments };
   }
 
   async listObservationsByTrace(projectId: string, traceId: string): Promise<ObservationDetail[]> {

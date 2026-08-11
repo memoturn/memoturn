@@ -1,5 +1,7 @@
 import type {
   ObservationDetail,
+  ObservationFacets,
+  ObservationPage,
   ScoreRow,
   SessionMessages,
   SessionSummary,
@@ -11,7 +13,13 @@ import type {
   UserSummary,
 } from "@memoturn/contracts";
 import { isoNow } from "@memoturn/core";
-import { type TraceFilters, type TraceIO, type TraceScore, telemetry } from "@memoturn/telemetry";
+import {
+  type ObservationFilters,
+  type TraceFilters,
+  type TraceIO,
+  type TraceScore,
+  telemetry,
+} from "@memoturn/telemetry";
 
 /**
  * Trace reads for the API + dashboard UI, backed by the telemetry store. The store
@@ -21,6 +29,7 @@ import { type TraceFilters, type TraceIO, type TraceScore, telemetry } from "@me
 
 export type {
   ObservationDetail,
+  ObservationFilters,
   ScoreRow,
   SessionSummary,
   TraceDetail,
@@ -81,6 +90,30 @@ export async function traceFacets(
   } = {},
 ): Promise<TraceFacets> {
   return telemetry().traceFacets(projectId, opts);
+}
+
+/**
+ * The span-level explorer: a page of observations filtered on the observation row itself.
+ * Reaching a span through its trace answers "what happened in this run?"; this answers
+ * "which spans are slow / erroring / on model X, anywhere in the project?".
+ */
+export async function listObservationsPage(
+  projectId: string,
+  filters: ObservationFilters = {},
+): Promise<ObservationPage> {
+  const store = telemetry();
+  const [data, total] = await Promise.all([
+    store.listObservations(projectId, filters),
+    store.countObservations(projectId, { ...filters, limit: undefined, offset: undefined }),
+  ]);
+  return { data, total };
+}
+
+export async function observationFacets(
+  projectId: string,
+  opts: ObservationFilters & { limit?: number } = {},
+): Promise<ObservationFacets> {
+  return telemetry().observationFacets(projectId, opts);
 }
 
 export async function listSessions(

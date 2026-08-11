@@ -1,6 +1,6 @@
 import type { SingleFilter } from "@memoturn/contracts";
 import { describe, expect, it } from "vitest";
-import { buildTraceFilterSql } from "./filters.js";
+import { buildObservationFilterSql, buildTraceFilterSql } from "./filters.js";
 
 const PID = "proj_1";
 const one = (f: SingleFilter) => buildTraceFilterSql(PID, [f]);
@@ -160,5 +160,56 @@ describe("buildTraceFilterSql", () => {
 
   it("empty options value is a no-op (matches everything)", () => {
     expect(one({ type: "stringOptions", column: "environment", operator: "any_of", value: [] }).conds).toEqual(["1=1"]);
+  });
+});
+
+describe("buildObservationFilterSql", () => {
+  const obs = (f: SingleFilter) => buildObservationFilterSql(PID, [f]);
+
+  it("compiles direct predicates on the observation row — no trace subquery", () => {
+    const lat = obs({ type: "number", column: "latencyMs", operator: "gt", value: 2000 });
+    expect(lat.conds).toEqual(["o.latency_ms > ?"]);
+    expect(lat.params).toEqual([2000]);
+    expect(obs({ type: "stringOptions", column: "type", operator: "any_of", value: ["SPAN"] }).conds).toEqual([
+      "o.type IN (?)",
+    ]);
+    expect(obs({ type: "string", column: "output", operator: "contains", value: "refus" }).conds).toEqual([
+      "o.output LIKE CONCAT('%', ?, '%')",
+    ]);
+    expect(
+      obs({ type: "datetime", column: "startTime", operator: "gte", value: "2026-08-01T00:00:00Z" }).conds,
+    ).toEqual(["o.start_time >= ?"]);
+  });
+
+  it("metadata reads the observation's own JSON, not the trace's", () => {
+    const { conds, params } = obs({
+      type: "stringObject",
+      column: "metadata",
+      key: "tool",
+      operator: "eq",
+      value: "search",
+    });
+    expect(conds).toEqual(["get_json_string(o.metadata, '$.tool') = ?"]);
+    expect(params).toEqual(["search"]);
+  });
+
+  it("score columns match scores on THIS span, not on its trace", () => {
+    const { conds, params } = obs({
+      type: "numberObject",
+      column: "scores",
+      key: "relevance",
+      operator: "lt",
+      value: 0.5,
+    });
+    expect(conds).toEqual([
+      "o.id IN (SELECT observation_id FROM scores WHERE project_id = ? AND name = ? AND `value` < ?)",
+    ]);
+    expect(params).toEqual([PID, "relevance", 0.5]);
+    expect(obs({ type: "numberObject", column: "scores", key: " ", operator: "gt", value: 0 }).conds).toEqual([]);
+  });
+
+  it("skips unknown columns and trace-only shapes (tags are not an observation column)", () => {
+    expect(obs({ type: "string", column: "userId", operator: "eq", value: "u1" }).conds).toEqual([]);
+    expect(obs({ type: "arrayOptions", column: "tags", operator: "any_of", value: ["a"] }).conds).toEqual([]);
   });
 });

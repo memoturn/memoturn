@@ -187,6 +187,23 @@ export interface TraceFilters {
 }
 
 /**
+ * Span-level explorer filters. Every predicate applies to the observation row itself (not to
+ * its trace), which is what makes "every retriever span over 2s this week" expressible.
+ */
+export interface ObservationFilters {
+  limit?: number;
+  offset?: number;
+  days?: number; // only observations started in the last N days
+  search?: string; // matches observation name OR inline input/output content
+  traceId?: string;
+  type?: string;
+  level?: string;
+  model?: string;
+  environment?: string;
+  filters?: SingleFilter[]; // structured operator-based filter set (the power-path filter builder)
+}
+
+/**
  * Batch-export filters. Same shape as the trace list so an export honors whatever
  * filters the user has applied in the console (environment, search, tag, score, level, …).
  */

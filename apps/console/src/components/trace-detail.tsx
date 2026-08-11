@@ -1675,9 +1675,18 @@ function MetricsGrid({ trace }: { trace: TraceDetail }) {
  * Shared by the full-page route (`/traces/$id`) and the peek drawer on the list, so
  * both stay in lockstep. `showBreadcrumb` is off in the drawer (its header carries context).
  */
-export function TraceDetailBody({ traceId, showBreadcrumb = true }: { traceId: string; showBreadcrumb?: boolean }) {
+export function TraceDetailBody({
+  traceId,
+  showBreadcrumb = true,
+  initialObservationId,
+}: {
+  traceId: string;
+  showBreadcrumb?: boolean;
+  /** Pre-select a span (deep link from the span explorer). Only the initial selection. */
+  initialObservationId?: string;
+}) {
   // Master-detail: the waterfall selects one observation; its payload shows in the detail pane.
-  const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
+  const [selectedId, setSelectedId] = useState<string | undefined>(initialObservationId);
   // Collapsed subgraphs in the waterfall (by observation id).
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Observations view: the waterfall timeline (default) or the agent-flow graph.

@@ -46,7 +46,10 @@ linked by `trace_id` / `project_id`.
   - **span** — generic unit of work
   - **generation** — an LLM call (model, provider, token usage, cost, latency)
   - **event** — a point-in-time marker
-  Observations nest via `parentObservationId`, rendered as a **waterfall timeline**.
+  Observations nest via `parentObservationId`, rendered as a **waterfall timeline**, and are
+  also browsable on their own in the **span explorer** (Spans in the console, `GET /v1/observations`):
+  a flat, filterable table over every span in the project, for questions like "every `retriever`
+  span over 2s this week" that a trace-level filter can't express.
 ![Trace waterfall](./images/trace-detail.png)
 
 - **Score** — a numeric/categorical/boolean measurement attached to a trace (or
