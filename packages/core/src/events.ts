@@ -230,8 +230,21 @@ export const ingestEvent = z.discriminatedUnion("type", [
 export type IngestEvent = z.infer<typeof ingestEvent>;
 export type IngestEventType = IngestEvent["type"];
 
+/**
+ * Which client produced this batch. Optional and additive: an older SDK (or a hand-rolled
+ * caller) simply omits it. It rides in the request BODY rather than a header so it survives
+ * the blob → replay path, where headers are long gone.
+ */
+export const sdkInfo = z.object({
+  /** Distribution name, e.g. `memoturn-js`, `memoturn-python`, `memoturn-go`. */
+  name: z.string().min(1).max(64),
+  version: z.string().min(1).max(32),
+});
+export type SdkInfo = z.infer<typeof sdkInfo>;
+
 export const ingestRequest = z.object({
   batch: z.array(ingestEvent).min(1).max(1000),
+  sdk: sdkInfo.optional(),
 });
 export type IngestRequest = z.infer<typeof ingestRequest>;
 

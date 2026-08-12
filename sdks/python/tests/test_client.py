@@ -9,6 +9,7 @@ from conftest import Capture, http_error
 
 from memoturn import Memoturn
 from memoturn.client import MASK_ERROR_SENTINEL
+from memoturn._version import __version__
 
 CREDS = dict(base_url="http://api.test", public_key="pk-mt-x", secret_key="sk-mt-y", flush_at=1000)
 
@@ -28,6 +29,8 @@ def test_flush_posts_ingest_with_basic_auth(capture: Capture) -> None:
     assert capture.headers()["content-type"] == "application/json"
     assert capture.basic_auth() == "pk-mt-x:sk-mt-y"
     assert isinstance(capture.body()["batch"], list)
+    # The batch identifies the SDK build that produced it (GET /v1/usage/sdks).
+    assert capture.body()["sdk"] == {"name": "memoturn-python", "version": __version__}
 
 
 def test_empty_flush_is_noop(capture: Capture) -> None:

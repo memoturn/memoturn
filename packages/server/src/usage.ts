@@ -1,4 +1,5 @@
-import type { UsageSummary } from "@memoturn/contracts";
+import type { SdkVersionUsage, UsageSummary } from "@memoturn/contracts";
+import type { SdkInfo } from "@memoturn/core";
 import { prisma } from "@memoturn/db";
 
 /**
@@ -68,4 +69,64 @@ export async function getUsage(projectId: string, days = 30): Promise<UsageSumma
     total_traces: byDay.reduce((s, d) => s + d.traces, 0),
     byDay,
   };
+}
+
+/**
+ * Record that a batch arrived from a given SDK build. Rolled up per project per UTC day, so a
+ * project's version inventory is one indexed read rather than a telemetry scan. Best-effort,
+ * like `recordUsage`: metering must never fail ingestion.
+ *
+ * Unknown senders (an older SDK, a hand-rolled HTTP caller, the OTel path) simply don't call
+ * this — an absent row means "we don't know", which is honest, and different from zero usage.
+ */
+export async function recordSdkUsage(
+  projectId: string,
+  sdk: SdkInfo,
+  events: number,
+  at: Date = new Date(),
+): Promise<void> {
+  const date = usageDay(at);
+  const sdkName = sdk.name.slice(0, 64);
+  const sdkVersion = sdk.version.slice(0, 32);
+  const inc = Math.max(0, Math.floor(events));
+  await prisma.sdkUsageDaily.upsert({
+    where: { projectId_date_sdkName_sdkVersion: { projectId, date, sdkName, sdkVersion } },
+    create: { projectId, date, sdkName, sdkVersion, events: inc, batches: 1, lastSeen: at },
+    update: { events: { increment: inc }, batches: { increment: 1 }, lastSeen: at },
+  });
+}
+
+/**
+ * Which SDK builds a project has sent from over the trailing `days`, busiest first. This is
+ * what makes "your SDK is too old for this feature" answerable, and what shows an upgrade
+ * rolling out (the old version's daily events falling as the new one's rise).
+ */
+export async function getSdkVersions(projectId: string, days = 30): Promise<SdkVersionUsage[]> {
+  const n = Math.max(1, Math.min(365, Math.floor(days)));
+  const since = usageDay(new Date(Date.now() - (n - 1) * 86_400_000));
+  const rows = await prisma.sdkUsageDaily.findMany({ where: { projectId, date: { gte: since } } });
+  // Collapse the per-day rows into one entry per (name, version).
+  const byBuild = new Map<string, SdkVersionUsage>();
+  for (const r of rows) {
+    const key = `${r.sdkName}@${r.sdkVersion}`;
+    const cur = byBuild.get(key);
+    if (!cur) {
+      byBuild.set(key, {
+        name: r.sdkName,
+        version: r.sdkVersion,
+        events: r.events,
+        batches: r.batches,
+        firstSeen: r.date,
+        lastSeen: r.lastSeen.toISOString(),
+      });
+      continue;
+    }
+    cur.events += r.events;
+    cur.batches += r.batches;
+    if (r.date < cur.firstSeen) cur.firstSeen = r.date;
+    if (r.lastSeen.toISOString() > cur.lastSeen) cur.lastSeen = r.lastSeen.toISOString();
+  }
+  return [...byBuild.values()].sort(
+    (a, b) => b.events - a.events || a.name.localeCompare(b.name) || a.version.localeCompare(b.version),
+  );
 }

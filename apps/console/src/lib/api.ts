@@ -72,6 +72,7 @@ import type {
   ScoreCorrected,
   ScoreDistribution,
   ScoreNameInfo,
+  SdkVersionUsage,
   SessionMessages,
   SessionPage,
   SessionSummary,
@@ -279,6 +280,7 @@ export const api = {
   ) => post<AnnotationResult>(`/v1/traces/${encodeURIComponent(id)}/annotate`, body),
   setTraceTags: (id: string, tags: string[]) => post<TraceTags>(`/v1/traces/${encodeURIComponent(id)}/tags`, { tags }),
   getMetrics: (days = 30) => get<MetricsSummary>(`/v1/metrics${qs({ days })}`),
+  listSdkVersions: (days = 30) => get<{ data: SdkVersionUsage[] }>(`/v1/usage/sdks${qs({ days })}`).then((r) => r.data),
   getUsage: (days = 30) => get<UsageSummary>(`/v1/usage${qs({ days })}`),
   getDemoStatus: () => get<{ sandbox: DemoStatus | null }>(`/v1/demo/status`).then((r) => r.sandbox),
   // Public pre-provision (DEMO_MODE): POST an email; the server provisions + seeds a sandbox

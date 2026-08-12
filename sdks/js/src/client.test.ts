@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Memoturn } from "./client.js";
 import { decodeBasic, mockFetch } from "./test-helpers.js";
 import type { IngestEnvelope } from "./types.js";
+import { SDK_NAME, SDK_VERSION } from "./version.js";
 
 const creds = {
   baseUrl: "http://api.test",
@@ -41,6 +42,8 @@ describe("Memoturn.flush", () => {
     expect(req.headers["content-type"]).toBe("application/json");
     expect(decodeBasic(req.headers.authorization)).toBe("pk-mt-x:sk-mt-y");
     expect(Array.isArray((req.body as { batch: unknown[] }).batch)).toBe(true);
+    // Identifies the build so the server can report which SDK a project is running.
+    expect((req.body as { sdk?: unknown }).sdk).toEqual({ name: SDK_NAME, version: SDK_VERSION });
   });
 
   it("is a no-op with an empty buffer (no request)", async () => {

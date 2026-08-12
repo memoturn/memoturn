@@ -208,17 +208,38 @@ function checkClaudeRoster(): CheckResult {
   return { name: "Claude roster (.claude/agents,skills → .claude/README.md)", findings };
 }
 
-/** 7. The JS and Python SDK versions must agree everywhere they are declared. */
+/**
+ * 7. The SDK versions must agree everywhere they are declared. Each SDK also reports its
+ * version to `/v1/ingest` (→ `GET /v1/usage/sdks`), so a stale constant here doesn't just
+ * mislabel a release — it misreports which build a customer is actually running.
+ */
 function checkSdkVersions(): CheckResult {
   const findings: Finding[] = [];
   const js = (JSON.parse(read("sdks/js/package.json")) as { version: string }).version;
   const pyToml = read("sdks/python/pyproject.toml").match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? "";
-  const pyInit = read("sdks/python/src/memoturn/__init__.py").match(/__version__\s*=\s*"([^"]+)"/)?.[1] ?? "";
-  if (pyToml !== pyInit) {
+  const pyVersion = read("sdks/python/src/memoturn/_version.py").match(/__version__\s*=\s*"([^"]+)"/)?.[1] ?? "";
+  // The identity constants each SDK sends on every ingest batch.
+  const jsSent = read("sdks/js/src/version.ts").match(/SDK_VERSION\s*=\s*"([^"]+)"/)?.[1] ?? "";
+  const goSent = read("sdks/go/client.go").match(/SDKVersion\s*=\s*"([^"]+)"/)?.[1] ?? "";
+  if (pyToml !== pyVersion) {
     findings.push({
-      doc: "sdks/python/src/memoturn/__init__.py",
+      doc: "sdks/python/src/memoturn/_version.py",
       line: 0,
-      message: `__version__ \`${pyInit}\` ≠ pyproject.toml \`${pyToml}\``,
+      message: `__version__ \`${pyVersion}\` ≠ pyproject.toml \`${pyToml}\``,
+    });
+  }
+  if (jsSent !== js) {
+    findings.push({
+      doc: "sdks/js/src/version.ts",
+      line: 0,
+      message: `SDK_VERSION \`${jsSent}\` ≠ package.json \`${js}\` — the reported build would be wrong`,
+    });
+  }
+  if (goSent !== js) {
+    findings.push({
+      doc: "sdks/go/client.go",
+      line: 0,
+      message: `SDKVersion \`${goSent}\` ≠ js/python \`${js}\` — SDKs release in lockstep`,
     });
   }
   if (js !== pyToml) {
@@ -228,7 +249,7 @@ function checkSdkVersions(): CheckResult {
       message: `version \`${js}\` ≠ python \`${pyToml}\` — SDKs release in lockstep`,
     });
   }
-  return { name: "SDK versions (sdks/js ↔ sdks/python)", findings };
+  return { name: "SDK versions (js ↔ python ↔ go, declared + reported)", findings };
 }
 
 /** 8. All three SDK clients must default to the same base URL (the API port — 3000 is the console). */

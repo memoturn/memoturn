@@ -112,6 +112,7 @@ model Project {
   retention       RetentionPolicy?
   samplingPolicy  SamplingPolicy?
   usageDaily      UsageDaily[]
+  sdkUsageDaily   SdkUsageDaily[]
   webhooks        Webhook[]
   webhookDeliveries WebhookDelivery[]
   widgets         Widget[]
@@ -852,6 +853,25 @@ model UsageDaily {
   traces    Int     @default(0)
 
   @@unique([projectId, date])
+  @@index([projectId, date])
+}
+
+// Which SDK versions a project is actually sending from, rolled up per UTC day. A daily
+// rollup rather than a column on every trace: the questions this answers — "is anyone still
+// on a version too old for this feature?", "how far has the upgrade rolled out?" — are about
+// the project over time, not about one trace, and this costs no telemetry-schema change.
+model SdkUsageDaily {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  date       String // 'YYYY-MM-DD' (UTC)
+  sdkName    String
+  sdkVersion String
+  events     Int      @default(0)
+  batches    Int      @default(0)
+  lastSeen   DateTime @default(now())
+
+  @@unique([projectId, date, sdkName, sdkVersion])
   @@index([projectId, date])
 }
 

@@ -1,6 +1,13 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import * as C from "@memoturn/contracts";
-import { type IngestEvent, type IngestResult, ingestRequest, ingestResponse } from "@memoturn/core";
+import {
+  type IngestEvent,
+  type IngestResult,
+  ingestRequest,
+  ingestResponse,
+  type SdkInfo,
+  sdkInfo,
+} from "@memoturn/core";
 import {
   ALERT_COMPARATORS,
   ALERT_METRICS,
@@ -95,6 +102,7 @@ import {
   getScoreAgreement,
   getScoreDistribution,
   getScoresByTraceIds,
+  getSdkVersions,
   getSessionMessages,
   getToolAnalytics,
   getTrace,
@@ -339,6 +347,7 @@ app.use("/v1/users", requireAuth);
 app.use("/v1/metrics", requireAuth);
 app.use("/v1/metrics/*", requireAuth);
 app.use("/v1/usage", requireAuth);
+app.use("/v1/usage/*", requireAuth);
 app.use("/v1/demo/*", requireAuth);
 app.use("/v1/prompts", requireAuth);
 app.use("/v1/prompts/*", requireAuth);
@@ -604,7 +613,21 @@ app.openapi(
 // ── Ingest ─────────────────────────────────────────────────────────────────────
 // Envelope-only shape check; each event is validated individually in the handler so
 // one bad event yields a per-event 400 in the 207 body instead of failing the batch.
-const ingestEnvelope = z.object({ batch: z.array(z.unknown()).min(1).max(1000) });
+// Shape + size only; each event is validated individually below. `sdk` stays `unknown` here
+// and is validated separately (see `readSdkInfo`) — a client that mislabels its own identity
+// must not lose its telemetry over it, and `.catch()` inside the schema is not representable
+// in the OpenAPI document this route also serves.
+const ingestEnvelope = z.object({
+  batch: z.array(z.unknown()).min(1).max(1000),
+  sdk: z.unknown().optional(),
+});
+
+/** The sender's build, or undefined if absent/malformed — never a reason to reject a batch. */
+function readSdkInfo(raw: unknown): SdkInfo | undefined {
+  if (raw === undefined) return undefined;
+  const parsed = sdkInfo.safeParse(raw);
+  return parsed.success ? parsed.data : undefined;
+}
 
 app.openapi(
   createRoute({
@@ -661,7 +684,10 @@ app.openapi(
     // (the worker and DLQ replay parse it with ingestRequest.parse). We persist the ORIGINAL
     // (pre-zod-default) bodies so the worker can tell which fields the client actually sent — the
     // mutable-state merge (ADR-0001) needs that; the Doris path re-applies defaults on re-parse.
-    if (persist.length > 0) await submitBatch(c.get("projectId"), { batch: persist as IngestEvent[] });
+    if (persist.length > 0) {
+      // `sdk` rides along into the blob so the identity survives replay, where headers don't exist.
+      await submitBatch(c.get("projectId"), { batch: persist as IngestEvent[], sdk: readSdkInfo(envelope.data.sdk) });
+    }
     if (errors.length > 0) {
       console.error(
         JSON.stringify({
@@ -1265,6 +1291,21 @@ app.openapi(
     },
   }),
   async (c) => c.json(await getUsage(c.get("projectId"), c.req.valid("query").days ?? 30)),
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/usage/sdks",
+    summary: "Which SDK builds this project has ingested from (version inventory + rollout)",
+    tags: ["metrics"],
+    security,
+    request: { query: z.object({ days: z.coerce.number().int().min(1).max(365).optional() }) },
+    responses: {
+      200: { description: "SDK builds", content: { "application/json": { schema: C.listOf(C.sdkVersionUsage) } } },
+    },
+  }),
+  async (c) => c.json({ data: await getSdkVersions(c.get("projectId"), c.req.valid("query").days ?? 30) }),
 );
 
 app.openapi(

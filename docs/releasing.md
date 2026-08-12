@@ -34,9 +34,13 @@ be exercised by a real publish, so a green dry run confirms the builds, not the 
 
 ## Cut a release
 
-1. Bump the version in all three manifests so they stay in lockstep:
+1. Bump the version everywhere it is declared so they stay in lockstep (`bun run docs:check`
+   fails the push if any of these drift):
    - `sdks/js/package.json` → `version`
+   - `sdks/js/src/version.ts` → `SDK_VERSION` (reported to `/v1/ingest`)
    - `sdks/python/pyproject.toml` → `[project].version`
+   - `sdks/python/src/memoturn/_version.py` → `__version__` (reported to `/v1/ingest`)
+   - `sdks/go/client.go` → `SDKVersion` (reported to `/v1/ingest`)
    - (optional) root `package.json` → `version`
 2. Commit, then tag and push:
    ```bash
