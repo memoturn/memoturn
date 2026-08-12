@@ -47,7 +47,12 @@ Cohen's Kappa, per-label F1, confusion matrix) · **SDK build identity on ingest
 (optional `sdk` on the wire, per-project version inventory at `GET /v1/usage/sdks`) ·
 **structured evaluator output** (a judge declares numeric / categorical / boolean, so it can
 return a label; majority-vote juries for labels) · **remote dataset runs** (register a runner
-per dataset; a signed pointer trigger, results reported back via `POST /v1/dataset-run-items`).
+per dataset; a signed pointer trigger, results reported back via `POST /v1/dataset-run-items`) · **prompt composability**
+(`@@@memoturnPrompt:…@@@` includes resolved server-side, cycles refused at save) · **chat
+placeholders** (a runtime-filled message-list slot, plus `POST /v1/prompts/{name}/compile`) ·
+**dataset item contracts + CSV import** (declared item schema with per-field errors; RFC 4180
+import with an explicit column mapping) · **prompt CI/CD automations** (`prompt.created` /
+`prompt.updated` / `prompt.label.moved` triggers + a GitHub `repository_dispatch` action).
 
 ## Up next — triage workflow
 
@@ -64,10 +69,7 @@ Things that decide whether a team with existing tooling can adopt Memoturn witho
 
 | Feature | Effort | Notes |
 | --- | --- | --- |
-| **Chat message placeholders + prompt composability** | M | Two registry gaps that block managing real agent prompts: a **placeholder** message slot filled at runtime with a *list* of messages (chat history, few-shot examples), and **composability** — embedding one prompt inside another by name+label, resolved server-side with a dependency graph and cycle detection. Without these, chat and agent prompts get templated by hand outside the registry. |
-| **Dataset CSV import + item schema** | M | Upload a CSV with column→field mapping, and let a dataset declare a JSON schema its items are validated against (with per-field errors on bulk insert). Turns a dataset from a bag of JSON into a contract. Media attachments on dataset items are the third piece. |
-| **Prompt-change automations** | M | Automation triggers are telemetry-only (`score.created` / `trace.created` / `eval.completed`). Add a **prompt** trigger source (created / updated / label moved) and a **GitHub `repository_dispatch`** action, so promoting a prompt label can kick a CI workflow. That's the prompt CI/CD loop, and it composes with the existing dataset gate action. |
-| **Public API breadth** | M | Four concrete holes: a top-level `GET /v1/observations` (observations are only reachable nested inside a trace); org-scoped **provisioning** endpoints (create project, rotate project API keys, manage org/project memberships) so self-hosters can automate tenant setup; **LLM-connection** CRUD so provider credentials can be managed programmatically; and an explicit `DELETE /v1/traces/{id}` for right-to-erasure — the store method exists, only the console bulk path is wired. |
+| **Public API breadth** | M | Three remaining holes (the top-level `GET /v1/observations` shipped with the span explorer): org-scoped **provisioning** endpoints (create project, rotate project API keys, manage org/project memberships) so self-hosters can automate tenant setup; **LLM-connection** CRUD so provider credentials can be managed programmatically; and an explicit `DELETE /v1/traces/{id}` for right-to-erasure — the store method exists, only the console bulk path is wired. |
 
 ## Improvements to existing features
 
@@ -78,6 +80,7 @@ Things that decide whether a team with existing tooling can adopt Memoturn witho
 | **Platform-failure notifications** | S | Alert rules cover telemetry conditions; platform failures (a scheduled export that failed, an evaluator blocked on a bad provider key) are only visible if you go looking. Route them to a per-project channel using the existing automation dispatcher. |
 | **Webhook auto-disable + failure banner** | S | Deliveries retry and are logged, but a permanently-broken endpoint retries forever and silently. Disable after a failure streak and surface it in the console. |
 | **Histogram + pivot-table widgets** | M | The chart set is `line / bar / horizontal_bar / big_number / pie / table`. A latency/cost **histogram** and a **pivot table** (group rows × columns with subtotals) are the two shapes people rebuild by hand today. |
+| **Media on dataset items** | S–M | Dataset items are JSON only. Attaching an image or audio file to an item is the remaining piece of the CSV/schema work — multimodal evals can't be expressed without it, and the media-offload path already exists for traces. |
 | **Portable dashboard JSON** | M | Export a dashboard (with its widgets inlined) as a versioned JSON envelope, import it into another project or instance. Makes dashboards shareable artifacts and turns "starter dashboards" into content rather than code. |
 | **Nested folders for prompts and datasets** | S–M | `Prompt.folder` is a flat string and datasets have none. Path-based folders with breadcrumbs, plus rename/duplicate/delete at the folder level. |
 | **Query-language search bar** | L | A keyboard-driven query bar (`level:(ERROR OR WARNING) -env:dev latency:>2 scores.accuracy:<0.5`) as a second controlled editor over the same filter state the facet sidebar owns — never a second source of truth. Score filters have landed, so its most valuable predicates now have something to compile to. A natural-language→filter compiler on top of the provider gateway is a small follow-on, and we'd ship it ungated on self-host. |
