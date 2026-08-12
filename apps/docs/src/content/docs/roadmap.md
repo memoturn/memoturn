@@ -46,7 +46,11 @@ as first-class filterable rows, `GET /v1/observations`) · **evaluator targeting
 **variable mapping** to trace / named-span / dataset sources, **observation scope**, and
 **backfill** over already-ingested traces with a pre-run match count) · **score analytics**
 (distribution, timeline, and two-score agreement: correlation / MAE / RMSE, agreement rate,
-Cohen's Kappa, per-label F1, confusion matrix).
+Cohen's Kappa, per-label F1, confusion matrix) · **SDK build identity on ingest**
+(optional `sdk` on the wire, per-project version inventory at `GET /v1/usage/sdks`) ·
+**structured evaluator output** (a judge declares numeric / categorical / boolean, so it can
+return a label; majority-vote juries for labels) · **remote dataset runs** (register a runner
+per dataset; a signed pointer trigger, results reported back via `POST /v1/dataset-run-items`).
 
 ## Up next — triage workflow
 
@@ -63,18 +67,15 @@ Things that decide whether a team with existing tooling can adopt Memoturn witho
 
 | Feature | Effort | Notes |
 | --- | --- | --- |
-| **Remote dataset runs** | M | Register a webhook per dataset so "Run experiment" in the console POSTs to *the customer's* service, which executes the run in their own infra and reports results back through the API. Today experiments only run in-platform through our provider gateway, which locks out every team whose eval harness already exists. Pairs with a `POST /v1/dataset-run-items` endpoint so external runs can attach arbitrary traces to a run. |
 | **Chat message placeholders + prompt composability** | M | Two registry gaps that block managing real agent prompts: a **placeholder** message slot filled at runtime with a *list* of messages (chat history, few-shot examples), and **composability** — embedding one prompt inside another by name+label, resolved server-side with a dependency graph and cycle detection. Without these, chat and agent prompts get templated by hand outside the registry. |
 | **Dataset CSV import + item schema** | M | Upload a CSV with column→field mapping, and let a dataset declare a JSON schema its items are validated against (with per-field errors on bulk insert). Turns a dataset from a bag of JSON into a contract. Media attachments on dataset items are the third piece. |
 | **Prompt-change automations** | M | Automation triggers are telemetry-only (`score.created` / `trace.created` / `eval.completed`). Add a **prompt** trigger source (created / updated / label moved) and a **GitHub `repository_dispatch`** action, so promoting a prompt label can kick a CI workflow. That's the prompt CI/CD loop, and it composes with the existing dataset gate action. |
 | **Public API breadth** | M | Four concrete holes: a top-level `GET /v1/observations` (observations are only reachable nested inside a trace); org-scoped **provisioning** endpoints (create project, rotate project API keys, manage org/project memberships) so self-hosters can automate tenant setup; **LLM-connection** CRUD so provider credentials can be managed programmatically; and an explicit `DELETE /v1/traces/{id}` for right-to-erasure — the store method exists, only the console bulk path is wired. |
-| **SDK version on the ingest contract** | S | We don't record which SDK version emitted an event, so we can't warn "this feature needs a newer SDK", can't scope a bug report to a version, and can't measure upgrade rollout. Cheap to add to the wire contract now; expensive later because it needs a backfill. |
 
 ## Improvements to existing features
 
 | Feature | Effort | Notes |
 | --- | --- | --- |
-| **Structured evaluator output** | S–M | Judges parse a fixed `{score: 0..1, reasoning}`. Let an evaluator declare the score name and data type it emits (numeric / categorical / boolean) so a judge can return a label, not just a number. The `Evaluator.outputSchema` column already exists and is currently unread — wire it or drop it. |
 | **Project-level default judge model** | S | Every evaluator re-specifies provider + model. A project default (overridable per evaluator) removes the most common setup step and makes template instantiation one click. |
 | **Protected prompt labels** | S | Mark a label (`production`) as protected so moving it requires a higher role. Small, and immediately relevant to anyone serving prompts from the registry in production. |
 | **Platform-failure notifications** | S | Alert rules cover telemetry conditions; platform failures (a scheduled export that failed, an evaluator blocked on a bad provider key) are only visible if you go looking. Route them to a per-project channel using the existing automation dispatcher. |
