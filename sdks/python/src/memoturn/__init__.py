@@ -64,4 +64,4 @@ __all__ = [
     "span_processor",
 ]
 
-__version__ = "0.5.0"
+from ._version import __version__  # re-exported: `memoturn.__version__` stays the public read

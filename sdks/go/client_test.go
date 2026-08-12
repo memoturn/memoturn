@@ -16,6 +16,7 @@ func TestFlushSendsBatch(t *testing.T) {
 		mu       sync.Mutex
 		gotAuth  string
 		gotBatch []envelope
+		gotSDK   map[string]string
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
@@ -23,10 +24,12 @@ func TestFlushSendsBatch(t *testing.T) {
 		gotAuth = r.Header.Get("authorization")
 		b, _ := io.ReadAll(r.Body)
 		var payload struct {
-			Batch []envelope `json:"batch"`
+			Batch []envelope        `json:"batch"`
+			SDK   map[string]string `json:"sdk"`
 		}
 		_ = json.Unmarshal(b, &payload)
 		gotBatch = payload.Batch
+		gotSDK = payload.SDK
 		w.WriteHeader(http.StatusMultiStatus)
 		_, _ = w.Write([]byte(`{"errors":[]}`))
 	}))
@@ -55,6 +58,10 @@ func TestFlushSendsBatch(t *testing.T) {
 	}
 	if len(gotBatch) != 4 {
 		t.Fatalf("batch len = %d, want 4", len(gotBatch))
+	}
+	// The batch identifies the SDK build that produced it (GET /v1/usage/sdks).
+	if gotSDK["name"] != SDKName || gotSDK["version"] != SDKVersion {
+		t.Errorf("sdk = %v, want name=%s version=%s", gotSDK, SDKName, SDKVersion)
 	}
 	types := make([]string, len(gotBatch))
 	for i, e := range gotBatch {

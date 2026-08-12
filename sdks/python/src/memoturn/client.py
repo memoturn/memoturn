@@ -18,6 +18,12 @@ import urllib.request
 import uuid
 from typing import Any, Callable, Optional
 
+from ._version import __version__
+
+# Build identity sent with every batch, so telemetry can be attributed to the SDK that
+# produced it (GET /v1/usage/sdks). Version comes from the package so it can never drift.
+_SDK = {"name": "memoturn-python", "version": __version__}
+
 logger = logging.getLogger("memoturn")
 
 #: Value substituted when a user-supplied mask function raises — the event is never
@@ -166,7 +172,7 @@ class Memoturn:
         auth = base64.b64encode(f"{self.public_key}:{self.secret_key}".encode()).decode()
         req = urllib.request.Request(
             f"{self.base_url}/v1/ingest",
-            data=json.dumps({"batch": batch}, default=str).encode(),
+            data=json.dumps({"batch": batch, "sdk": _SDK}, default=str).encode(),
             headers={"content-type": "application/json", "authorization": f"Basic {auth}"},
             method="POST",
         )
