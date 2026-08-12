@@ -1,6 +1,16 @@
 import type { PromptArmScore, PromptVersionCost } from "@memoturn/contracts";
 import { type PromptType, prisma } from "@memoturn/db";
 import { telemetry } from "@memoturn/telemetry";
+import {
+  composePrompt,
+  extractPlaceholders,
+  extractPromptRefs,
+  fillPrompt,
+  PromptCompositionError,
+  type PromptRef,
+  type StoredMessage,
+  validatePromptBody,
+} from "./prompt-composition.js";
 
 /**
  * Prompt management. Each save creates a new immutable version; "channels" are
@@ -59,9 +69,47 @@ export interface CompiledPrompt {
   type: PromptType;
   content: unknown;
   config: Record<string, unknown>;
+  /** Placeholder slots still awaiting a message list (empty once compiled). */
+  placeholders: string[];
+}
+
+/** Resolve one reference to the referenced version's raw stored body. */
+function refResolver(projectId: string) {
+  return async (ref: PromptRef) => {
+    const target = await prisma.prompt.findUnique({
+      where: { projectId_name: { projectId, name: ref.name } },
+      include: { channels: true },
+    });
+    if (!target) return null;
+    const version =
+      ref.version ?? target.channels.find((c) => c.label === (ref.label ?? "production"))?.version ?? null;
+    if (version == null) return null;
+    const row = await prisma.promptVersion.findUnique({
+      where: { promptId_version: { promptId: target.id, version } },
+    });
+    return row ? { type: row.type as "TEXT" | "CHAT", content: row.content as unknown } : null;
+  };
 }
 
 export async function createPromptVersion(projectId: string, input: CreatePromptInput): Promise<CompiledPrompt> {
+  const type = input.type ?? "TEXT";
+  // Fail at SAVE time: a malformed body or a cycle should be a 400 the author sees now, not a
+  // runtime failure in someone's request path later.
+  validatePromptBody(input.content, type);
+  const refs = extractPromptRefs(input.content);
+  if (refs.length > 0) {
+    // Self-reference first: on a prompt's FIRST save it doesn't exist yet, so composing would
+    // report a confusing "not found" for what is really a cycle.
+    if (refs.some((r) => r.name === input.name)) {
+      throw new PromptCompositionError(`circular prompt reference: "${input.name}" includes itself`);
+    }
+    // Then compose against the current registry, with the channels THIS save will occupy
+    // blocked — otherwise a reference back to this prompt resolves the old body and the cycle
+    // only appears once the save lands.
+    const willOccupy = new Set(["latest", ...(input.labels ?? [])].map((label) => `${input.name}@${label}`));
+    await composePrompt(input.content, refResolver(projectId), [], willOccupy);
+  }
+
   const prompt = await prisma.prompt.upsert({
     where: { projectId_name: { projectId, name: input.name } },
     update: { folder: input.folder ?? undefined },
@@ -78,7 +126,7 @@ export async function createPromptVersion(projectId: string, input: CreatePrompt
     data: {
       promptId: prompt.id,
       version,
-      type: input.type ?? "TEXT",
+      type,
       content: input.content as object,
       config: (input.config ?? {}) as object,
     },
@@ -98,8 +146,10 @@ export async function createPromptVersion(projectId: string, input: CreatePrompt
     name: prompt.name,
     version: created.version,
     type: created.type,
+    // The RAW body, references intact — this is the author's view of what they just saved.
     content: created.content,
     config: created.config as Record<string, unknown>,
+    placeholders: extractPlaceholders(created.content),
   };
 }
 
@@ -199,13 +249,42 @@ export async function resolvePrompt(
   });
   if (!version) return null;
 
+  // Runtime gets the COMPOSED body — updating a shared prompt updates everything that includes
+  // it. Authors still see the raw body with its references intact via the detail endpoint.
+  const content = await composePrompt(version.content as unknown, refResolver(projectId), [
+    `${prompt.name}@${channel}`,
+  ]);
+
   return {
     name: prompt.name,
     version: version.version,
     type: version.type,
-    content: version.content,
+    content,
     config: version.config as Record<string, unknown>,
+    placeholders: extractPlaceholders(content),
   };
+}
+
+/**
+ * Resolve a prompt and fill it in one call: composition expanded, `{{variables}}` substituted,
+ * and placeholder slots replaced with the caller's message lists. Doing this server-side means
+ * every language gets placeholders today without three SDK releases.
+ */
+export async function compilePrompt(
+  projectId: string,
+  name: string,
+  opts: {
+    channel?: string;
+    bucketKey?: string;
+    variables?: Record<string, unknown>;
+    placeholders?: Record<string, StoredMessage[]>;
+  } = {},
+): Promise<CompiledPrompt | null> {
+  const resolved = await resolvePrompt(projectId, name, opts.channel ?? "production", opts.bucketKey);
+  if (!resolved) return null;
+  const content = fillPrompt(resolved.content, { variables: opts.variables, placeholders: opts.placeholders });
+  // Every slot is either filled or dropped by fillPrompt, so the compiled body has none left.
+  return { ...resolved, content, placeholders: [] };
 }
 
 /** Start a weighted A/B split on a channel: route `splitWeight`% to `splitVersion` (challenger). */
