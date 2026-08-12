@@ -946,9 +946,15 @@ model Automation {
   projectId String
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   name      String
-  trigger   String   @default("score.created") // score.created | trace.created | eval.completed
-  action    String   @default("webhook") // webhook | slack
-  target    String // URL (HTTP endpoint or Slack incoming webhook)
+  // score.created | trace.created | eval.completed | prompt.created | prompt.updated |
+  // prompt.label.moved — the prompt triggers are what make a label promotion kick CI.
+  trigger   String   @default("score.created")
+  action    String   @default("webhook") // webhook | slack | pagerduty | email | github
+  target    String // URL, Slack webhook, PagerDuty routing key, email address, or owner/repo
+  // Credential for actions that need one (github: a PAT with `repo` scope). Encrypted at rest
+  // and never returned by the API — deliberately excluded from the cached dispatch shape so
+  // the Redis automation cache stays secret-free.
+  secret    String   @default("")
   threshold Float?
   filter    String   @default("") // substring match on the entity name ("" = any)
   enabled   Boolean  @default(true)

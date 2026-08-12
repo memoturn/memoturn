@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const findMany = vi.fn();
-vi.mock("@memoturn/db", () => ({ prisma: { automation: { findMany } } }));
+const findUnique = vi.fn();
+vi.mock("@memoturn/db", () => ({ prisma: { automation: { findMany, findUnique } } }));
+
+// The github action decrypts a stored PAT; the cipher itself is tested in @memoturn/llm.
+vi.mock("@memoturn/llm", () => ({
+  encryptSecret: (v: string) => `enc:${v}`,
+  decryptSecret: (v: string) => v.replace(/^enc:/, ""),
+}));
 
 const redis = { get: vi.fn(), set: vi.fn(), del: vi.fn() };
 vi.mock("@memoturn/db/queue", () => ({ redisConnection: () => redis }));
@@ -128,5 +135,64 @@ describe("dispatchAutomationsBatch", () => {
     expect(arg.to).toBe("alerts@example.com");
     expect(arg.subject).toContain("score.created"); // plain-text summary, no markdown
     expect(arg.subject).not.toContain("*");
+  });
+});
+
+describe("github repository_dispatch action", () => {
+  const fetchMock = vi.fn();
+  const origEnv = process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS;
+
+  beforeEach(() => {
+    findMany
+      .mockReset()
+      .mockResolvedValue([{ id: "gh1", action: "github", target: "acme/ci", threshold: null, filter: "" }]);
+    findUnique.mockReset().mockResolvedValue({ secret: "enc:ghp_token" });
+    redis.get.mockReset().mockResolvedValue(null);
+    redis.set.mockReset().mockResolvedValue("OK");
+    fetchMock.mockReset().mockResolvedValue({ ok: true, status: 204 });
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS = origEnv;
+    vi.unstubAllGlobals();
+  });
+
+  it("POSTs a repository_dispatch with the event type derived from the trigger", async () => {
+    const fired = await dispatchAutomationsBatch("p1", "prompt.label.moved", [
+      { name: "support-reply", version: 4, labels: ["production"] },
+    ]);
+    expect(fired).toBe(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, { headers: Record<string, string>; body: string }];
+    expect(url).toBe("https://api.github.com/repos/acme/ci/dispatches");
+    expect(init.headers.authorization).toBe("Bearer ghp_token");
+    const body = JSON.parse(init.body) as { event_type: string; client_payload: Record<string, unknown> };
+    // A workflow filters on `types: [...]`, and dots aren't allowed there.
+    expect(body.event_type).toBe("memoturn-prompt-label-moved");
+    expect(body.client_payload).toMatchObject({ name: "support-reply", version: 4, projectId: "p1" });
+  });
+
+  it("keeps the token out of the cached dispatch shape", async () => {
+    await dispatchAutomationsBatch("p1", "prompt.updated", [{ name: "x", version: 2 }]);
+    // Whatever gets cached must not contain the secret — a Redis dump can't leak a credential.
+    const cached = redis.set.mock.calls[0]?.[1] as string;
+    expect(cached).not.toContain("ghp_token");
+    expect(cached).not.toContain("secret");
+  });
+
+  it("reports a rejected dispatch as not delivered", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 401 });
+    expect(await dispatchAutomationsBatch("p1", "prompt.updated", [{ name: "x" }])).toBe(0);
+  });
+
+  it("does not call GitHub when the token is missing or unreadable", async () => {
+    findUnique.mockResolvedValue({ secret: "" });
+    expect(await dispatchAutomationsBatch("p1", "prompt.updated", [{ name: "x" }])).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not call GitHub when the target isn't owner/repo", async () => {
+    findMany.mockResolvedValue([{ id: "gh1", action: "github", target: "not-a-repo", threshold: null, filter: "" }]);
+    expect(await dispatchAutomationsBatch("p1", "prompt.updated", [{ name: "x" }])).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
