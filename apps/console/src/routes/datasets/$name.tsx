@@ -19,7 +19,7 @@ import {
   BreadcrumbSeparator,
 } from "../../components/ui/breadcrumb";
 import { Button } from "../../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -42,6 +42,7 @@ import { Label } from "../../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
+import { Textarea } from "../../components/ui/textarea";
 import { api, downloadDatasetExport } from "../../lib/api";
 import { useIsReadOnly } from "../../lib/role";
 
@@ -224,6 +225,8 @@ function DatasetDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      <CsvImportCard datasetName={name} readOnly={readOnly} />
 
       <RemoteRunnerCard datasetName={name} readOnly={readOnly} />
 
@@ -453,6 +456,143 @@ function RemoteRunnerCard({ datasetName, readOnly }: { datasetName: string; read
               Verify each trigger with <code>{"HMAC_SHA256(secret, `<timestamp>.<body>`)"}</code> against the{" "}
               <code>X-Memoturn-Signature</code> header.
             </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * CSV import — the path from "we keep our eval cases in a spreadsheet" to a real dataset.
+ *
+ * The mapping is explicit rather than guessed: which column is the input, which is the expected
+ * output, which become metadata. Guessing would be right often enough to be trusted and wrong
+ * often enough to corrupt a dataset quietly.
+ */
+function CsvImportCard({ datasetName, readOnly }: { datasetName: string; readOnly: boolean }) {
+  const qc = useQueryClient();
+  const [csv, setCsv] = useState("");
+  const [inputCols, setInputCols] = useState<string[]>([]);
+  const [expectedCol, setExpectedCol] = useState("");
+  const [result, setResult] = useState<{
+    added: number;
+    rejected: number;
+    errors: { index: number; field: string; message: string }[];
+  } | null>(null);
+
+  // Headers come from the pasted text itself, so the mapping controls appear as soon as there
+  // is something to map — no upload round-trip first.
+  const headers = (() => {
+    const firstLine = csv.split("\n")[0] ?? "";
+    if (!firstLine.trim()) return [];
+    return firstLine
+      .split(",")
+      .map((h) => h.trim().replace(/^"|"$/g, ""))
+      .filter(Boolean);
+  })();
+
+  const importCsv = useMutation({
+    mutationFn: () =>
+      api.importDatasetCsv(datasetName, {
+        csv,
+        mapping: {
+          input: inputCols.length === 1 ? (inputCols[0] as string) : inputCols,
+          expectedOutput: expectedCol || undefined,
+        },
+      }),
+    onSuccess: (r) => {
+      setResult(r);
+      if (r.rejected === 0) toast.success(`Imported ${r.added} item${r.added === 1 ? "" : "s"}`);
+      // A partial import is not a success message — say what didn't land.
+      else toast.warning(`Imported ${r.added}, rejected ${r.rejected}`);
+      qc.invalidateQueries({ queryKey: ["dataset", datasetName] });
+    },
+    onError: (e) => toast.error(`Import failed: ${String(e)}`),
+  });
+
+  const toggleInput = (col: string) =>
+    setInputCols((prev) => (prev.includes(col) ? prev.filter((c) => c !== col) : [...prev, col]));
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="inline-flex items-center gap-1">
+          Import from CSV
+          <HelpTip>
+            Paste a spreadsheet export and say which columns are which. Pick one input column to use its cell as the
+            item input, or several to build an object keyed by column name. Quoted commas and newlines are handled;
+            unmapped columns are ignored.
+          </HelpTip>
+        </CardTitle>
+        <CardDescription>Append items from a CSV export, with an explicit column mapping.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Textarea
+          rows={4}
+          placeholder={"question,answer\nwhy is the sky blue?,rayleigh scattering"}
+          value={csv}
+          onChange={(e) => setCsv(e.target.value)}
+          className="font-mono text-xs"
+        />
+        {headers.length > 0 && (
+          <>
+            <div className="space-y-1">
+              <div className="text-sm font-medium">Input columns</div>
+              <div className="flex flex-wrap gap-1.5">
+                {headers.map((h) => (
+                  <Button
+                    key={h}
+                    type="button"
+                    size="sm"
+                    variant={inputCols.includes(h) ? "secondary" : "outline"}
+                    className="h-7"
+                    onClick={() => toggleInput(h)}
+                  >
+                    {h}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="space-y-1">
+                <div className="text-sm font-medium">Expected output</div>
+                <Select value={expectedCol || "__none"} onValueChange={(v) => setExpectedCol(v === "__none" ? "" : v)}>
+                  <SelectTrigger className="w-52">
+                    <SelectValue placeholder="(none)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">(none)</SelectItem>
+                    {headers.map((h) => (
+                      <SelectItem key={h} value={h}>
+                        {h}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                disabled={readOnly || inputCols.length === 0 || importCsv.isPending}
+                onClick={() => importCsv.mutate()}
+              >
+                {importCsv.isPending ? "Importing…" : "Import"}
+              </Button>
+            </div>
+          </>
+        )}
+        {result && result.errors.length > 0 && (
+          <div className="rounded-md border border-dashed p-3 text-sm">
+            <div className="mb-1 font-medium">
+              {result.added} imported, {result.rejected} rejected
+            </div>
+            <ul className="space-y-0.5 text-xs text-muted-foreground">
+              {result.errors.slice(0, 10).map((e) => (
+                <li key={`${e.index}-${e.field}-${e.message}`}>
+                  row {e.index + 1} · <span className="font-mono">{e.field}</span> — {e.message}
+                </li>
+              ))}
+              {result.errors.length > 10 && <li>…and {result.errors.length - 10} more</li>}
+            </ul>
           </div>
         )}
       </CardContent>

@@ -22,6 +22,7 @@ import {
   authMethods,
   builtinModelPrices,
   cancelExperiment,
+  checkDatasetItems,
   checkGuardrails,
   checkRateLimit,
   clampExportLimit,
@@ -51,6 +52,7 @@ import {
   createWidget,
   type DatasetExportFormat,
   DatasetRunnerError,
+  DatasetSchemaError,
   decodeOtlpLogs,
   decodeOtlpTraces,
   deleteAlertRule,
@@ -81,6 +83,7 @@ import {
   getCostBudget,
   getDatasetComparison,
   getDatasetDetail,
+  getDatasetItemSchema,
   getDatasetRunner,
   getDatasetVersion,
   getEmbeddingProjection,
@@ -110,6 +113,7 @@ import {
   getToolAnalytics,
   getTrace,
   getUsage,
+  importDatasetCsv,
   ingestRateLimitConfig,
   instantiateEvaluatorTemplate,
   listAlertRules,
@@ -175,6 +179,7 @@ import {
   safeServeContentType,
   setAnalyticsSink,
   setCostBudget,
+  setDatasetItemSchema,
   setDatasetRunner,
   setGuardrailPolicy,
   setMaskingPolicy,
@@ -2006,6 +2011,135 @@ app.openapi(
     if (!result) return c.json({ error: "dataset not found" }, 404);
     await recordAudit(c.get("projectId"), c.get("actor"), "dataset.run.record", `dataset:${name}`, {
       run: body.runName,
+    });
+    return c.json(result, 201);
+  },
+);
+
+// ── Dataset item contract + CSV import ───────────────────────────────────────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/datasets/{name}/schema",
+    summary: "The dataset's declared item schema ({} when unconstrained)",
+    tags: ["datasets"],
+    security,
+    request: { params: z.object({ name: z.string() }) },
+    responses: {
+      200: { description: "Item schema", content: { "application/json": { schema: z.any() } } },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const schema = await getDatasetItemSchema(c.get("projectId"), c.req.valid("param").name);
+    if (!schema) return c.json({ error: "dataset not found" }, 404);
+    return c.json(schema);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "put",
+    path: "/v1/datasets/{name}/schema",
+    summary: "Declare (or clear) the item contract. Existing items are not re-validated",
+    tags: ["datasets"],
+    security,
+    request: {
+      params: z.object({ name: z.string() }),
+      body: { content: { "application/json": { schema: z.record(z.string(), z.any()) } } },
+    },
+    responses: {
+      200: { description: "Saved", content: { "application/json": { schema: z.any() } } },
+      400: { description: "Invalid schema (unknown type, empty enum, or an undeclared required field)" },
+      403: { description: "Forbidden" },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const name = c.req.valid("param").name;
+    let saved: Awaited<ReturnType<typeof setDatasetItemSchema>>;
+    try {
+      saved = await setDatasetItemSchema(c.get("projectId"), name, c.req.valid("json"));
+    } catch (err) {
+      // A schema we can't honor is rejected rather than stored as a constraint that never fires.
+      if (err instanceof DatasetSchemaError) return c.json({ error: err.message, problems: err.problems }, 400);
+      throw err;
+    }
+    if (!saved) return c.json({ error: "dataset not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "dataset.schema.set", `dataset:${name}`);
+    return c.json(saved);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/datasets/{name}/schema/check",
+    summary: "How many EXISTING items would fail the current schema (tightening it is informed)",
+    tags: ["datasets"],
+    security,
+    request: { params: z.object({ name: z.string() }) },
+    responses: {
+      200: { description: "Check result", content: { "application/json": { schema: z.any() } } },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const result = await checkDatasetItems(c.get("projectId"), c.req.valid("param").name);
+    if (!result) return c.json({ error: "dataset not found" }, 404);
+    return c.json(result);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/datasets/{name}/items/csv",
+    summary: "Import items from CSV text with a column→field mapping",
+    tags: ["datasets"],
+    security,
+    request: {
+      params: z.object({ name: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              csv: z.string().min(1),
+              mapping: z.object({
+                input: z.union([z.string(), z.array(z.string()).min(1)]),
+                expectedOutput: z.string().optional(),
+                metadata: z.array(z.string()).optional(),
+              }),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Imported", content: { "application/json": { schema: z.any() } } },
+      400: { description: "Unparseable CSV or a mapping naming a column that isn't in the file" },
+      403: { description: "Forbidden" },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const name = c.req.valid("param").name;
+    const body = c.req.valid("json");
+    let result: Awaited<ReturnType<typeof importDatasetCsv>>;
+    try {
+      result = await importDatasetCsv(c.get("projectId"), name, body.csv, body.mapping);
+    } catch (err) {
+      // Parse + mapping failures are the caller's to fix; neither is a server fault.
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+    if (!result) return c.json({ error: "dataset not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "dataset.items.import", `dataset:${name}`, {
+      added: result.added,
+      rejected: result.rejected,
     });
     return c.json(result, 201);
   },
