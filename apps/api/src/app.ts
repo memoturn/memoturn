@@ -4491,7 +4491,7 @@ app.openapi(
     method: "post",
     path: "/v1/automations",
     summary:
-      "Create an automation (trigger: score.created/trace.created/eval.completed; action: webhook/slack/pagerduty/email)",
+      "Create an automation (triggers include prompt.created/updated/label.moved; actions include github repository_dispatch)",
     tags: ["platform"],
     security,
     request: {
@@ -4501,8 +4501,19 @@ app.openapi(
             schema: z
               .object({
                 name: z.string().min(1),
-                trigger: z.enum(["score.created", "trace.created", "eval.completed"]).optional(),
-                action: z.enum(["webhook", "slack", "pagerduty", "email"]).optional(),
+                trigger: z
+                  .enum([
+                    "score.created",
+                    "trace.created",
+                    "eval.completed",
+                    "prompt.created",
+                    "prompt.updated",
+                    "prompt.label.moved",
+                  ])
+                  .optional(),
+                action: z.enum(["webhook", "slack", "pagerduty", "email", "github"]).optional(),
+                // GitHub PAT (repo scope) for the github action. Stored encrypted; never returned.
+                secret: z.string().optional(),
                 // Target shape depends on the action: a URL (webhook/slack), an email address
                 // (email), or a PagerDuty routing key (pagerduty). Validated in superRefine.
                 target: z.string().min(1),
@@ -4523,6 +4534,15 @@ app.openapi(
                   }
                 } else if (action === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.target)) {
                   ctx.addIssue({ code: "custom", message: "target must be an email address", path: ["target"] });
+                } else if (action === "github") {
+                  if (!/^[\w.-]+\/[\w.-]+$/.test(v.target)) {
+                    ctx.addIssue({ code: "custom", message: "target must be owner/repo", path: ["target"] });
+                  }
+                  // Without a token the dispatch would 401 on every fire — reject it now, when
+                  // the author is here to fix it, rather than failing silently forever after.
+                  if (!v.secret) {
+                    ctx.addIssue({ code: "custom", message: "github requires a token", path: ["secret"] });
+                  }
                 }
               }),
           },

@@ -14,7 +14,7 @@ import { HelpTip } from "./help-tip";
 import { KindBadge } from "./kind-badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "./ui/form";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "./ui/form";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
@@ -25,6 +25,8 @@ const automationSchema = z.object({
   target: z.string().min(1, "Target URL is required"),
   threshold: z.string(),
   filter: z.string(),
+  /** GitHub PAT — only used (and only required) by the github action. */
+  secret: z.string(),
 });
 type AutomationForm = z.infer<typeof automationSchema>;
 
@@ -39,13 +41,33 @@ export function AutomationsPanel() {
   const { data: automations } = useQuery({ queryKey: ["automations"], queryFn: () => api.listAutomations() });
   const automationForm = useForm<AutomationForm>({
     resolver: zodResolver(automationSchema),
-    defaultValues: { name: "", trigger: "score.created", action: "webhook", target: "", threshold: "", filter: "" },
+    defaultValues: {
+      name: "",
+      trigger: "score.created",
+      action: "webhook",
+      target: "",
+      threshold: "",
+      filter: "",
+      secret: "",
+    },
   });
   const action = automationForm.watch("action");
   const targetLabel =
-    action === "email" ? "Email address" : action === "pagerduty" ? "PagerDuty routing key" : "Target URL";
+    action === "email"
+      ? "Email address"
+      : action === "pagerduty"
+        ? "PagerDuty routing key"
+        : action === "github"
+          ? "Repository"
+          : "Target URL";
   const targetPlaceholder =
-    action === "email" ? "alerts@example.com" : action === "pagerduty" ? "routing key" : "https://…";
+    action === "email"
+      ? "alerts@example.com"
+      : action === "pagerduty"
+        ? "routing key"
+        : action === "github"
+          ? "owner/repo"
+          : "https://…";
   const addAutomation = useMutation({
     mutationFn: (v: AutomationForm) =>
       api.createAutomation({
@@ -55,6 +77,7 @@ export function AutomationsPanel() {
         target: v.target,
         threshold: v.threshold === "" ? null : Number(v.threshold),
         filter: v.filter || undefined,
+        secret: v.secret || undefined,
       }),
     onSuccess: () => {
       toast.success("Automation added");
@@ -123,9 +146,10 @@ export function AutomationsPanel() {
             <HelpTip>Runs an action, such as a webhook or chat message, whenever a chosen trigger event fires.</HelpTip>
           </CardTitle>
           <CardDescription>
-            Run an action when a trigger fires. Triggers: score.created, trace.created, eval.completed. Actions: a
-            generic webhook (POST JSON), a Slack message (incoming-webhook URL), a PagerDuty event (routing key), or an
-            email. Threshold fires only on low scores; filter is a substring match on the entity name.
+            Run an action when a trigger fires. Triggers include prompt.created / prompt.updated / prompt.label.moved —
+            promoting a label is a deploy, so it can kick a CI workflow. Actions: a generic webhook (POST JSON), a Slack
+            message (incoming-webhook URL), a PagerDuty event (routing key), or an email. Threshold fires only on low
+            scores; filter is a substring match on the entity name.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -161,6 +185,9 @@ export function AutomationsPanel() {
                           <SelectItem value="score.created">score.created</SelectItem>
                           <SelectItem value="trace.created">trace.created</SelectItem>
                           <SelectItem value="eval.completed">eval.completed</SelectItem>
+                          <SelectItem value="prompt.created">prompt.created</SelectItem>
+                          <SelectItem value="prompt.updated">prompt.updated</SelectItem>
+                          <SelectItem value="prompt.label.moved">prompt.label.moved</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -184,12 +211,29 @@ export function AutomationsPanel() {
                           <SelectItem value="slack">slack</SelectItem>
                           <SelectItem value="pagerduty">pagerduty</SelectItem>
                           <SelectItem value="email">email</SelectItem>
+                          <SelectItem value="github">github</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+                {action === "github" && (
+                  <FormField
+                    control={automationForm.control}
+                    name="secret"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>GitHub token</FormLabel>
+                        <FormControl>
+                          <Input type="password" placeholder="ghp_… (repo scope)" {...field} />
+                        </FormControl>
+                        <FormDescription>Stored encrypted and never shown again.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
                 <FormField
                   control={automationForm.control}
                   name="target"

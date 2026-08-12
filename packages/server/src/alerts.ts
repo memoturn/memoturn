@@ -1,6 +1,6 @@
 import { prisma } from "@memoturn/db";
 import { telemetry, type WindowMetric } from "@memoturn/telemetry";
-import { type Channel, type ChannelMessage, type ChannelType, deliverToChannel } from "./automations.js";
+import { type ChannelMessage, type ChannelType, deliverToChannel, type NotifyChannel } from "./automations.js";
 import { mapConcurrent } from "./concurrency.js";
 
 /**
@@ -42,7 +42,7 @@ export interface AlertRuleInput {
   window?: number;
   threshold: number;
   comparator?: AlertComparator;
-  channels?: Channel[];
+  channels?: NotifyChannel[];
   enabled?: boolean;
 }
 
@@ -64,8 +64,8 @@ interface AlertRuleRow {
   } | null;
 }
 
-/** Coerce the JSON `channels` column into a validated Channel[] (drops malformed entries). */
-function parseChannels(raw: unknown): Channel[] {
+/** Coerce the JSON `channels` column into a validated NotifyChannel[] (drops malformed entries). */
+function parseChannels(raw: unknown): NotifyChannel[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((c) => {
     const t = (c as { type?: unknown })?.type;
@@ -183,7 +183,7 @@ export async function getCostBudget(projectId: string) {
 export interface CostBudgetInput {
   monthlyUsd: number;
   thresholds?: number[];
-  channels?: Channel[];
+  channels?: NotifyChannel[];
 }
 
 export async function setCostBudget(projectId: string, input: CostBudgetInput) {
@@ -371,7 +371,7 @@ function alertMessage(rule: AlertRuleRow, projectId: string, value: number, firi
  * means every channel failed, and the caller must NOT commit the state transition yet, so the
  * next tick retries instead of silently dropping the page.
  */
-async function notify(channels: Channel[], message: ChannelMessage): Promise<boolean> {
+async function notify(channels: NotifyChannel[], message: ChannelMessage): Promise<boolean> {
   if (channels.length === 0) return true;
   const results = await mapConcurrent(channels, DISPATCH_CONCURRENCY, (ch) => deliverToChannel(ch, message));
   return results.some((ok) => ok);

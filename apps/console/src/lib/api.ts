@@ -460,6 +460,8 @@ export const api = {
     target: string;
     threshold?: number | null;
     filter?: string;
+    /** GitHub PAT for the github action; stored encrypted, never returned. */
+    secret?: string;
   }) => post(`/v1/automations`, body),
   deleteAutomation: (id: string) => del(`/v1/automations/${encodeURIComponent(id)}`),
   listAlerts: () => get<{ data: AlertRule[] }>(`/v1/alerts`).then((r) => r.data),
