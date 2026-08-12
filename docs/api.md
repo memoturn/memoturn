@@ -84,7 +84,8 @@ filter=[{"column":"scores","type":"numberObject","key":"accuracy","operator":"lt
 | GET | `/v1/prompts/{name}/arm-scores` | Per-A/B-arm score means (scores grouped by the prompt version that produced them). Param: `days`. |
 | POST | `/v1/prompts/{name}/experiment` | Start a weighted A/B split on a channel. Body: `{ channel, splitVersion, splitWeight }` (1–99%). Audited. |
 | POST | `/v1/prompts/{name}/experiment/stop` | Stop the experiment on a channel; `{ channel, promote? }` (promote makes the challenger live). Audited. |
-| GET | `/v1/prompts/{name}?channel=&bucketKey=` | Resolve a deployed prompt (SDK path). `bucketKey` (session/user id) sticks a caller to one A/B arm. |
+| POST | `/v1/prompts/{name}/compile` | Resolve a prompt and **fill** it: composition expanded, `{{variables}}` substituted, and placeholder slots replaced with the caller's message lists. Body: `{ channel?, bucketKey?, variables?, placeholders? }`. Writes nothing, so it is not read-only gated. `422` when references can't be resolved. |
+| GET | `/v1/prompts/{name}?channel=&bucketKey=` | Resolve a deployed prompt (SDK path). `bucketKey` (session/user id) sticks a caller to one A/B arm. Prompt references (`@@@memoturnPrompt:name=X|label=Y@@@`) are expanded server-side; `placeholders` lists any chat slots still awaiting a message list. `422` when a reference can't be resolved. |
 
 ### Datasets & experiments
 
