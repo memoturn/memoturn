@@ -50,6 +50,7 @@ import {
   createWebhook,
   createWidget,
   type DatasetExportFormat,
+  DatasetRunnerError,
   decodeOtlpLogs,
   decodeOtlpTraces,
   deleteAlertRule,
@@ -57,6 +58,7 @@ import {
   deleteComment,
   deleteCostBudget,
   deleteDashboard,
+  deleteDatasetRunner,
   deleteModelPrice,
   deleteProject,
   deleteSavedView,
@@ -79,6 +81,7 @@ import {
   getCostBudget,
   getDatasetComparison,
   getDatasetDetail,
+  getDatasetRunner,
   getDatasetVersion,
   getEmbeddingProjection,
   getEvaluatorAnalytics,
@@ -154,6 +157,7 @@ import {
   recordAudit,
   recordAuthAudit,
   recordRun,
+  recordRunItem,
   removeProjectMember,
   renameProject,
   replayDlq,
@@ -171,6 +175,7 @@ import {
   safeServeContentType,
   setAnalyticsSink,
   setCostBudget,
+  setDatasetRunner,
   setGuardrailPolicy,
   setMaskingPolicy,
   setRetention,
@@ -189,6 +194,7 @@ import {
   testExpression,
   traceFacets,
   traceHistogram,
+  triggerRemoteRun,
   UserPatternError,
   updateAlertRule,
   updateNotificationPreferences,
@@ -351,6 +357,7 @@ app.use("/v1/usage/*", requireAuth);
 app.use("/v1/demo/*", requireAuth);
 app.use("/v1/prompts", requireAuth);
 app.use("/v1/prompts/*", requireAuth);
+app.use("/v1/dataset-run-items", requireAuth);
 app.use("/v1/datasets", requireAuth);
 app.use("/v1/datasets/*", requireAuth);
 app.use("/v1/providers", requireAuth);
@@ -2001,6 +2008,177 @@ app.openapi(
       run: body.runName,
     });
     return c.json(result, 201);
+  },
+);
+
+// ── Remote dataset runs (run the eval harness the customer already has) ──────────
+app.openapi(
+  createRoute({
+    method: "get",
+    path: "/v1/datasets/{name}/runner",
+    summary: "The dataset's registered remote runner (the signing secret is never read back)",
+    tags: ["datasets"],
+    security,
+    request: { params: z.object({ name: z.string() }) },
+    responses: {
+      200: { description: "Runner", content: { "application/json": { schema: C.datasetRunner } } },
+      404: { description: "No runner registered" },
+    },
+  }),
+  async (c) => {
+    const runner = await getDatasetRunner(c.get("projectId"), c.req.valid("param").name);
+    if (!runner) return c.json({ error: "not found" }, 404);
+    return c.json(runner);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "put",
+    path: "/v1/datasets/{name}/runner",
+    summary: "Register or replace the remote runner; returns the signing secret ONCE",
+    tags: ["datasets"],
+    security,
+    request: {
+      params: z.object({ name: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({ url: z.string().url(), enabled: z.boolean().optional() }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Registered", content: { "application/json": { schema: C.datasetRunnerCreated } } },
+      400: { description: "Invalid runner url" },
+      403: { description: "Forbidden" },
+      404: { description: "Dataset not found" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const name = c.req.valid("param").name;
+    let runner: Awaited<ReturnType<typeof setDatasetRunner>>;
+    try {
+      runner = await setDatasetRunner(c.get("projectId"), name, c.req.valid("json"));
+    } catch (err) {
+      if (err instanceof DatasetRunnerError) return c.json({ error: err.message }, 400);
+      throw err;
+    }
+    if (!runner) return c.json({ error: "dataset not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "dataset.runner.set", `dataset:${name}`);
+    return c.json(runner, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/datasets/{name}/runner",
+    summary: "Remove the dataset's remote runner",
+    tags: ["datasets"],
+    security,
+    request: { params: z.object({ name: z.string() }) },
+    responses: {
+      200: { description: "Removed", content: { "application/json": { schema: z.object({ removed: z.boolean() }) } } },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const name = c.req.valid("param").name;
+    const removed = await deleteDatasetRunner(c.get("projectId"), name);
+    if (removed) await recordAudit(c.get("projectId"), c.get("actor"), "dataset.runner.delete", `dataset:${name}`);
+    return c.json({ removed });
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/datasets/{name}/remote-runs",
+    summary: "Ask the registered runner to execute this dataset in its own infrastructure",
+    tags: ["datasets"],
+    security,
+    request: {
+      params: z.object({ name: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({ runName: z.string().min(1), version: z.number().int().optional() }),
+          },
+        },
+      },
+    },
+    responses: {
+      // 202: we asked. Whether the run SUCCEEDS is reported later via /v1/dataset-run-items.
+      202: { description: "Trigger sent", content: { "application/json": { schema: C.datasetRunTrigger } } },
+      400: { description: "No runner registered, or an unknown dataset/version" },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const name = c.req.valid("param").name;
+    const body = c.req.valid("json");
+    let result: C.DatasetRunTrigger;
+    try {
+      result = await triggerRemoteRun(c.get("projectId"), name, body);
+    } catch (err) {
+      if (err instanceof DatasetRunnerError) return c.json({ error: err.message }, 400);
+      throw err;
+    }
+    await recordAudit(c.get("projectId"), c.get("actor"), "dataset.run.remote", `dataset:${name}`, {
+      run: body.runName,
+      accepted: result.accepted,
+    });
+    return c.json(result, 202);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/dataset-run-items",
+    // Deliberately NOT audited: this is a per-item data path (one call per dataset item, like
+    // ingest), so auditing it would bury the audit log. The run itself is audited at trigger.
+    summary: "Attach a trace to a dataset item within a run (how an external harness reports results)",
+    tags: ["datasets"],
+    security,
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              datasetName: z.string().min(1),
+              runName: z.string().min(1),
+              datasetItemId: z.string().min(1),
+              traceId: z.string().min(1),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      201: { description: "Linked", content: { "application/json": { schema: C.datasetRunItemLink } } },
+      400: { description: "Unknown dataset or item" },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const body = c.req.valid("json");
+    try {
+      return c.json(await recordRunItem(c.get("projectId"), body), 201);
+    } catch (err) {
+      if (err instanceof DatasetRunnerError) return c.json({ error: err.message }, 400);
+      throw err;
+    }
   },
 );
 

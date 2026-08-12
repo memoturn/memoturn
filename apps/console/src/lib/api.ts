@@ -23,6 +23,9 @@ import type {
   Dashboard,
   DatasetDetail,
   DatasetListItem,
+  DatasetRunner,
+  DatasetRunnerCreated,
+  DatasetRunTrigger,
   DatasetVersionDetail,
   DatasetVersionRow,
   EmbeddingProjection,
@@ -321,6 +324,12 @@ export const api = {
   getDataset: (name: string) => get<DatasetDetail>(`/v1/datasets/${encodeURIComponent(name)}`),
   getDatasetComparison: (name: string, version?: number) =>
     get<ExperimentComparison>(`/v1/datasets/${encodeURIComponent(name)}/comparison${qs({ version })}`),
+  getDatasetRunner: (name: string) => get<DatasetRunner>(`/v1/datasets/${encodeURIComponent(name)}/runner`),
+  setDatasetRunner: (name: string, body: { url: string; enabled?: boolean }) =>
+    put<DatasetRunnerCreated>(`/v1/datasets/${encodeURIComponent(name)}/runner`, body),
+  deleteDatasetRunner: (name: string) => del<{ removed: boolean }>(`/v1/datasets/${encodeURIComponent(name)}/runner`),
+  triggerRemoteRun: (name: string, body: { runName: string; version?: number }) =>
+    post<DatasetRunTrigger>(`/v1/datasets/${encodeURIComponent(name)}/remote-runs`, body),
   createDataset: (name: string, description?: string) =>
     post<{ id: string; name: string }>(`/v1/datasets`, { name, description }),
   addDatasetItems: (

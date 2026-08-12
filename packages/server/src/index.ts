@@ -10,6 +10,7 @@ export * from "./betterauth.js";
 export * from "./comments.js";
 export * from "./concurrency.js";
 export * from "./dashboards.js";
+export * from "./dataset-runner.js";
 export * from "./datasets.js";
 export * from "./demo.js";
 export * from "./demo-entities.js";

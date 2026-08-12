@@ -1195,6 +1195,44 @@ export const experimentDetail = experimentSummary.extend({
 });
 export type ExperimentDetail = z.infer<typeof experimentDetail>;
 
+/**
+ * A dataset's registered remote runner. The signing secret is returned only when it is set or
+ * rotated, and never read back — so it is not part of this shape.
+ */
+export const datasetRunner = z.object({
+  url: z.string(),
+  enabled: z.boolean(),
+  createdAt: z.string(),
+  /** Null until the first trigger. `lastStatus`/`lastError` describe that trigger's fate, not the run's. */
+  lastInvokedAt: z.string().nullable(),
+  lastStatus: z.number().nullable(),
+  lastError: z.string(),
+});
+export type DatasetRunner = z.infer<typeof datasetRunner>;
+
+/** The runner registration response — carries the signing secret ONCE. */
+export const datasetRunnerCreated = datasetRunner.extend({ secret: z.string() });
+export type DatasetRunnerCreated = z.infer<typeof datasetRunnerCreated>;
+
+/** Result of firing a remote run: whether the runner ACCEPTED the trigger, not whether it finished. */
+export const datasetRunTrigger = z.object({
+  dataset: z.string(),
+  runName: z.string(),
+  itemCount: z.number(),
+  accepted: z.boolean(),
+  status: z.number().nullable(),
+  error: z.string(),
+});
+export type DatasetRunTrigger = z.infer<typeof datasetRunTrigger>;
+
+/** Result of linking one trace to one dataset item within a run. */
+export const datasetRunItemLink = z.object({
+  run: z.string(),
+  datasetItemId: z.string(),
+  traceId: z.string(),
+});
+export type DatasetRunItemLink = z.infer<typeof datasetRunItemLink>;
+
 export const evaluatorTemplate = z.object({
   key: z.string(),
   name: z.string(),
