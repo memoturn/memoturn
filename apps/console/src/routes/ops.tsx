@@ -10,6 +10,7 @@ import { EmptyState } from "../components/empty-state";
 import { HelpTip } from "../components/help-tip";
 import { KindBadge } from "../components/kind-badge";
 import { PageHeader } from "../components/page-header";
+import { Timestamp } from "../components/timestamp";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { api } from "../lib/api";
@@ -49,6 +50,7 @@ function OpsPage() {
   const qc = useQueryClient();
   const readOnly = useIsReadOnly();
   // Poll: DLQ depth + worker counters move on their own; a 10s refresh keeps ops honest.
+  const { data: sdks } = useQuery({ queryKey: ["sdk-versions"], queryFn: () => api.listSdkVersions(30) });
   const { data: health } = useQuery({
     queryKey: ["ingest-health"],
     queryFn: () => api.getIngestHealth(),
@@ -135,6 +137,55 @@ function OpsPage() {
                 </div>
               ))}
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="inline-flex items-center gap-1">
+            SDK versions in use
+            <HelpTip>
+              Which SDK builds this project has actually ingested from. Use it to see an upgrade rolling out, to scope a
+              bug report to a build, or to spot a client too old for a feature. Senders that don't identify themselves
+              (SDKs older than 0.5.0, hand-rolled callers, the OTel endpoint) don't appear — absent means unknown, not
+              zero.
+            </HelpTip>
+          </CardTitle>
+          <CardDescription>Builds seen over the last 30 days, busiest first.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {!sdks || sdks.length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              No batch has identified its SDK yet — every sender is on an older build or a custom client.
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-muted-foreground">
+                  <th className="py-2 font-medium">SDK</th>
+                  <th className="py-2 font-medium">Version</th>
+                  <th className="py-2 text-right font-medium">Events</th>
+                  <th className="py-2 text-right font-medium">Batches</th>
+                  <th className="py-2 font-medium">Last seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sdks.map((s) => (
+                  <tr key={`${s.name}@${s.version}`} className="border-b last:border-0">
+                    <td className="py-2 font-medium">{s.name}</td>
+                    <td className="py-2">
+                      <KindBadge tone="neutral">{s.version}</KindBadge>
+                    </td>
+                    <td className="py-2 text-right tabular-nums">{s.events.toLocaleString()}</td>
+                    <td className="py-2 text-right tabular-nums">{s.batches.toLocaleString()}</td>
+                    <td className="py-2 text-muted-foreground">
+                      <Timestamp value={s.lastSeen} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </CardContent>
       </Card>

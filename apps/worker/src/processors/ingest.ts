@@ -32,6 +32,7 @@ import {
   offloadMedia,
   parseVariableMapping,
   publishLiveTraces,
+  recordSdkUsage,
   recordUsage,
   runEvaluator,
   type ScorePatch,
@@ -254,6 +255,18 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
       });
     } catch (err) {
       logJson("warn", "usage metering failed", { projectId, error: err instanceof Error ? err.message : String(err) });
+    }
+    // Which SDK build sent this batch. Same first-attempt gate and best-effort handling; a
+    // batch from a client that doesn't identify itself simply records nothing.
+    if (parsed.sdk) {
+      try {
+        await recordSdkUsage(projectId, parsed.sdk, parsed.batch.length);
+      } catch (err) {
+        logJson("warn", "sdk metering failed", {
+          projectId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
 

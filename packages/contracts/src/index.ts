@@ -977,6 +977,21 @@ export const scoreAgreement = z.object({
 });
 export type ScoreAgreement = z.infer<typeof scoreAgreement>;
 
+/**
+ * One SDK build a project has ingested from, over the queried window. `firstSeen` is a UTC
+ * day; `lastSeen` is a timestamp. Absent entirely for senders that don't identify themselves
+ * (pre-`sdk` SDK releases, hand-rolled callers, the OTel path) — unknown, not zero.
+ */
+export const sdkVersionUsage = z.object({
+  name: z.string(),
+  version: z.string(),
+  events: z.number(),
+  batches: z.number(),
+  firstSeen: z.string(),
+  lastSeen: z.string(),
+});
+export type SdkVersionUsage = z.infer<typeof sdkVersionUsage>;
+
 export const evaluatorAnalytics = z.object({
   days: z.number(),
   summary: z.array(evaluatorScoreSummary),

@@ -2,13 +2,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const upsert = vi.fn().mockResolvedValue(undefined);
 const findMany = vi.fn();
-vi.mock("@memoturn/db", () => ({ prisma: { usageDaily: { upsert, findMany } } }));
+const sdkUpsert = vi.fn().mockResolvedValue(undefined);
+const sdkFindMany = vi.fn().mockResolvedValue([]);
+vi.mock("@memoturn/db", () => ({
+  prisma: {
+    usageDaily: { upsert, findMany },
+    sdkUsageDaily: { upsert: sdkUpsert, findMany: sdkFindMany },
+  },
+}));
 
-const { recordUsage, getUsage, usageDay } = await import("./usage.js");
+const { recordUsage, recordSdkUsage, getSdkVersions, getUsage, usageDay } = await import("./usage.js");
 
 beforeEach(() => {
   upsert.mockClear();
   findMany.mockClear();
+  sdkUpsert.mockClear();
+  sdkFindMany.mockClear().mockResolvedValue([]);
 });
 
 describe("usageDay", () => {
@@ -59,5 +68,91 @@ describe("getUsage", () => {
     findMany.mockResolvedValue([]);
     expect((await getUsage("p1", 0)).byDay).toHaveLength(1);
     expect((await getUsage("p1", 9999)).byDay).toHaveLength(365);
+  });
+});
+
+describe("recordSdkUsage", () => {
+  it("upserts per (project, day, name, version) and increments both counters", async () => {
+    await recordSdkUsage("p1", { name: "memoturn-js", version: "0.5.0" }, 12, new Date("2026-08-12T10:00:00Z"));
+    const arg = sdkUpsert.mock.calls[0]![0] as {
+      where: { projectId_date_sdkName_sdkVersion: Record<string, string> };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    };
+    expect(arg.where.projectId_date_sdkName_sdkVersion).toEqual({
+      projectId: "p1",
+      date: "2026-08-12",
+      sdkName: "memoturn-js",
+      sdkVersion: "0.5.0",
+    });
+    expect(arg.create).toMatchObject({ events: 12, batches: 1 });
+    expect(arg.update).toEqual({
+      events: { increment: 12 },
+      batches: { increment: 1 },
+      lastSeen: new Date("2026-08-12T10:00:00Z"),
+    });
+  });
+
+  it("clamps a negative event count and truncates over-long identifiers", async () => {
+    await recordSdkUsage("p1", { name: "x".repeat(200), version: "y".repeat(200) }, -5);
+    const arg = sdkUpsert.mock.calls[0]![0] as { where: { projectId_date_sdkName_sdkVersion: Record<string, string> } };
+    expect(arg.where.projectId_date_sdkName_sdkVersion.sdkName).toHaveLength(64);
+    expect(arg.where.projectId_date_sdkName_sdkVersion.sdkVersion).toHaveLength(32);
+    const create = (sdkUpsert.mock.calls[0]![0] as { create: { events: number } }).create;
+    expect(create.events).toBe(0);
+  });
+});
+
+describe("getSdkVersions", () => {
+  it("collapses per-day rows into one entry per build, busiest first", async () => {
+    sdkFindMany.mockResolvedValue([
+      {
+        sdkName: "memoturn-js",
+        sdkVersion: "0.4.0",
+        date: "2026-08-10",
+        events: 5,
+        batches: 1,
+        lastSeen: new Date("2026-08-10T09:00:00Z"),
+      },
+      {
+        sdkName: "memoturn-js",
+        sdkVersion: "0.5.0",
+        date: "2026-08-11",
+        events: 30,
+        batches: 3,
+        lastSeen: new Date("2026-08-11T09:00:00Z"),
+      },
+      {
+        sdkName: "memoturn-js",
+        sdkVersion: "0.5.0",
+        date: "2026-08-12",
+        events: 70,
+        batches: 7,
+        lastSeen: new Date("2026-08-12T09:00:00Z"),
+      },
+    ]);
+    const rows = await getSdkVersions("p1", 30);
+    expect(rows).toEqual([
+      {
+        name: "memoturn-js",
+        version: "0.5.0",
+        events: 100,
+        batches: 10,
+        firstSeen: "2026-08-11",
+        lastSeen: "2026-08-12T09:00:00.000Z", // the newest of the two days, not the last row seen
+      },
+      {
+        name: "memoturn-js",
+        version: "0.4.0",
+        events: 5,
+        batches: 1,
+        firstSeen: "2026-08-10",
+        lastSeen: "2026-08-10T09:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("returns nothing when no batch has identified itself", async () => {
+    expect(await getSdkVersions("p1", 30)).toEqual([]);
   });
 });

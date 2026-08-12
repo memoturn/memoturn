@@ -27,7 +27,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 
 | Method | Path | Description |
 | --- | --- | --- |
-| POST | `/v1/ingest` | Batched events (`trace-create`, `span/generation-create/update`, `event-create`, `score-create`). Returns `207` with per-event results: schema-invalid events are rejected individually in `errors` (id, index, reason) while valid events are accepted — inspect `errors` to catch silent data loss. Per-event `input`/`output`/`metadata` JSON capped at 1 MB (400 on oversize). Returns `429` when the per-project event rate limit (`INGEST_EVENTS_PER_MINUTE`) is exceeded; `Retry-After` header indicates when to retry. |
+| POST | `/v1/ingest` | Batched events (`trace-create`, `span/generation-create/update`, `event-create`, `score-create`). Returns `207` with per-event results: schema-invalid events are rejected individually in `errors` (id, index, reason) while valid events are accepted — inspect `errors` to catch silent data loss. Per-event `input`/`output`/`metadata` JSON capped at 1 MB (400 on oversize). Returns `429` when the per-project event rate limit (`INGEST_EVENTS_PER_MINUTE`) is exceeded; `Retry-After` header indicates when to retry. The body also accepts an optional `sdk: { name, version }` identifying the client build — the official SDKs send it, and it feeds `GET /v1/usage/sdks`. |
 | POST | `/v1/otel/v1/traces` | OpenTelemetry OTLP/HTTP (JSON + protobuf) receiver; maps GenAI semconv spans. |
 | POST | `/v1/otel/v1/logs` | OTLP/HTTP logs receiver (JSON + protobuf); log records become EVENT observations (e.g. Claude Code prompt/response text). |
 | GET | `/v1/ingest/health` | Ingest-pipeline health for the ops console: DLQ depth, insert latency, error counters, recent failed batches. OWNER/ADMIN only. |
@@ -59,6 +59,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | GET | `/v1/metrics/tools` | Per-tool analytics — call volume, error rate, and p50/p95/avg latency by tool name (named SPAN observations) over `days`. The top agent-debugging view. |
 | GET | `/v1/metrics/cost-breakdown` | Top spenders: cost rolled up by end user, session, or prompt, ranked by spend. Query: `by` (`user`\|`session`\|`prompt`, default `user`), `days`, `limit`. |
 | GET | `/v1/usage` | Volume-based usage metering — bytes / events / traces ingested per UTC day, measured on the raw batch **before sampling** (the GB-ingested billing signal). Returns `{ total_bytes, total_events, total_traces, byDay }`. Query: `days` (1–365, default 30). |
+| GET | `/v1/usage/sdks` | Which SDK builds this project has ingested from over the window (name, version, events, batches, first/last seen), busiest first. Populated from the optional `sdk` field on the ingest body — senders that don't identify themselves are absent, which means unknown, not zero. Query: `days` (1–365, default 30). |
 | POST | `/v1/metrics/query` | Run a dashboard/widget analytics query (view × metrics × dimensions × time × filters) from a JSON body; returns result rows. Read-only. |
 
 **Structured trace filters (`filter`).** `/v1/traces`, `/v1/traces/facets`, `/v1/traces/histogram`, and

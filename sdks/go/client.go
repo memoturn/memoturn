@@ -27,6 +27,18 @@ import (
 	"time"
 )
 
+// SDKName and SDKVersion identify this build on every ingest batch, so telemetry can be
+// attributed to the SDK that produced it (GET /v1/usage/sdks). Kept in lockstep with the
+// JS/Python SDK versions by the doc-drift checker — bump all of them together.
+const (
+	SDKName    = "memoturn-go"
+	SDKVersion = "0.5.0"
+)
+
+func sdkInfo() map[string]string {
+	return map[string]string{"name": SDKName, "version": SDKVersion}
+}
+
 const defaultBaseURL = "http://localhost:3001"
 
 const defaultMaxBufferSize = 10_000
@@ -234,7 +246,7 @@ func (c *Client) Flush() error {
 	c.buffer = nil
 	c.mu.Unlock()
 
-	payload, err := json.Marshal(map[string]any{"batch": batch})
+	payload, err := json.Marshal(map[string]any{"batch": batch, "sdk": sdkInfo()})
 	if err != nil {
 		return err
 	}

@@ -8,6 +8,7 @@ import type {
   SpanInput,
   TraceInput,
 } from "./types.js";
+import { SDK_NAME, SDK_VERSION } from "./version.js";
 
 function uuid(): string {
   // Works in Node 18+ and browsers.
@@ -167,7 +168,7 @@ export class Memoturn {
       res = await fetch(`${this.baseUrl}/v1/ingest`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: basicAuth(this.publicKey, this.secretKey) },
-        body: JSON.stringify({ batch }),
+        body: JSON.stringify({ batch, sdk: { name: SDK_NAME, version: SDK_VERSION } }),
         signal: AbortSignal.timeout(this.requestTimeout),
       });
     } catch (err) {
