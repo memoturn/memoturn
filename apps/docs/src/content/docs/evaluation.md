@@ -30,6 +30,62 @@ Human:    Review queue ──► Reviewer scores ──────────�
 
 See the dataset example in [TS SDK](/sdk-typescript/#datasets--experiments).
 
+## Dataset item contracts
+
+A dataset that accumulates items from several people over months drifts: one row's input is
+`{question}`, the next is `{query}`, a third is a bare string. Nothing notices until an
+experiment produces nonsense. A dataset can declare what its items must look like:
+
+```bash
+curl -u pk-mt-dev:sk-mt-dev -X PUT http://localhost:3001/v1/datasets/regression/schema \
+  -H 'content-type: application/json' -d '{
+    "input": { "required": ["question"],
+               "properties": { "question": {"type":"string"},
+                               "tier": {"type":"string","enum":["easy","hard"]} } },
+    "expectedOutput": { "type": "string" } }'
+```
+
+This is a deliberate **subset** of JSON Schema — object shape, field types, `required`, `enum` —
+because that is what dataset items actually look like, and a subset we fully implement beats a
+superset we half-implement and silently ignore. Undeclared fields are allowed: a schema is a
+floor, not a straitjacket.
+
+Inserts are validated against it with **per-field errors and partial acceptance**, the same way
+ingest handles a bad event — rejecting a whole spreadsheet because row 40 is malformed makes the
+fix harder, not easier:
+
+```json
+{ "added": 1, "rejected": 2,
+  "errors": [ { "index": 1, "field": "input.question", "message": "required" },
+              { "index": 2, "field": "input.tier", "message": "must be one of: easy, hard" } ] }
+```
+
+Declaring a schema does **not** re-validate existing items — silently invalidating history would
+be a surprise. `GET /v1/datasets/{name}/schema/check` reports how many current items would fail,
+so tightening a contract is a decision you make with the number in front of you.
+
+## Importing from CSV
+
+Most eval cases start life in a spreadsheet:
+
+```bash
+curl -u pk-mt-dev:sk-mt-dev -X POST http://localhost:3001/v1/datasets/regression/items/csv \
+  -H 'content-type: application/json' \
+  -d '{"csv":"question,answer,tier\nwhy?,because,easy\n",
+       "mapping":{"input":["question","tier"],"expectedOutput":"answer"}}'
+```
+
+The mapping is explicit rather than guessed — guessing would be right often enough to be trusted
+and wrong often enough to corrupt a dataset quietly. Give `input` one column to use its cell
+directly, or several to build an object keyed by column name. Unmapped columns are ignored.
+Cells that look like JSON objects or arrays are parsed; a bare `123` stays a string, so order
+numbers and ids keep their form.
+
+Quoted commas, newlines inside quoted fields, escaped quotes, CRLF, and a leading BOM are all
+handled. A mapping that names a column the file doesn't have fails the **whole** import — that
+is a mistake in the mapping, and importing half a file under a wrong one is worse than importing
+none of it. The console's dataset page has the same flow: paste the CSV, pick the columns, import.
+
 ## Remote dataset runs
 
 An in-platform experiment executes every dataset item through memoturn's provider gateway. That

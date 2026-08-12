@@ -502,6 +502,10 @@ model Dataset {
   // Highest version number cut for this dataset (0 = no version cut yet). Cutting a
   // version freezes the current DatasetItem working set into a DatasetVersion snapshot.
   currentVersion Int              @default(0)
+  // Optional contract for this dataset's items: {input?, expectedOutput?, metadata?} object
+  // schemas (a subset of JSON Schema — types, required, enum). Empty = unconstrained, which
+  // is every dataset that existed before this.
+  itemSchema     Json             @default("{}")
   createdAt      DateTime         @default(now())
   items          DatasetItem[]
   runs           DatasetRun[]

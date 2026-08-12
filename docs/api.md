@@ -94,6 +94,9 @@ filter=[{"column":"scores","type":"numberObject","key":"accuracy","operator":"lt
 | GET / POST | `/v1/datasets` | List / create. |
 | GET | `/v1/datasets/{name}` | Items + runs. |
 | GET | `/v1/datasets/{name}/comparison` | Compare a dataset's runs side by side (per-item output + scores). Optional `version` scopes to runs of one dataset version. |
+| GET / PUT | `/v1/datasets/{name}/schema` | The dataset's **item contract** — `{input?, expectedOutput?, metadata?}` object schemas (a subset of JSON Schema: `type`, `required`, `enum`). `PUT` rejects a schema it can't honor (unknown type, empty enum, a `required` field not declared in `properties`) with the specific problems. Existing items are **not** re-validated. Audited. |
+| GET | `/v1/datasets/{name}/schema/check` | How many **existing** items would fail the current schema, with the first 50 reasons — so tightening a contract is an informed decision rather than a surprise. |
+| POST | `/v1/datasets/{name}/items/csv` | Import items from CSV text with a column→field mapping: `{ csv, mapping: { input: string \| string[], expectedOutput?, metadata? } }`. Quoted commas, embedded newlines, escaped quotes and a BOM are handled. A mapping naming a column that isn't in the file fails the whole import (`400`); per-row problems come back in `errors` alongside the rows that did import. Audited. |
 | POST | `/v1/datasets/{name}/items` | Append items. |
 | POST | `/v1/datasets/{name}/runs` | Record an experiment run (link items → traces). Optional `version` pins the run to a dataset version (defaults to current). |
 | POST | `/v1/datasets/{name}/runs/{runId}/gate` | CI quality gate: aggregate a run's scores and check them against `thresholds` (`{ scoreName: { min?, max?, maxRegression? } }`; optional `baselineRun` for regression). Returns `{ passed, failures[], scores[] }` for a CI exit code. Read-only. |

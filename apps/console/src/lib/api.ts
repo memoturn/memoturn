@@ -324,6 +324,22 @@ export const api = {
   getDataset: (name: string) => get<DatasetDetail>(`/v1/datasets/${encodeURIComponent(name)}`),
   getDatasetComparison: (name: string, version?: number) =>
     get<ExperimentComparison>(`/v1/datasets/${encodeURIComponent(name)}/comparison${qs({ version })}`),
+  getDatasetItemSchema: (name: string) =>
+    get<Record<string, unknown>>(`/v1/datasets/${encodeURIComponent(name)}/schema`),
+  setDatasetItemSchema: (name: string, schema: Record<string, unknown>) =>
+    put<Record<string, unknown>>(`/v1/datasets/${encodeURIComponent(name)}/schema`, schema),
+  checkDatasetItems: (name: string) =>
+    get<{ checked: number; failing: number; errors: { index: number; field: string; message: string }[] }>(
+      `/v1/datasets/${encodeURIComponent(name)}/schema/check`,
+    ),
+  importDatasetCsv: (
+    name: string,
+    body: { csv: string; mapping: { input: string | string[]; expectedOutput?: string; metadata?: string[] } },
+  ) =>
+    post<{ added: number; rejected: number; errors: { index: number; field: string; message: string }[] }>(
+      `/v1/datasets/${encodeURIComponent(name)}/items/csv`,
+      body,
+    ),
   getDatasetRunner: (name: string) => get<DatasetRunner>(`/v1/datasets/${encodeURIComponent(name)}/runner`),
   setDatasetRunner: (name: string, body: { url: string; enabled?: boolean }) =>
     put<DatasetRunnerCreated>(`/v1/datasets/${encodeURIComponent(name)}/runner`, body),
