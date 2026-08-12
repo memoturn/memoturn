@@ -1,4 +1,14 @@
 import { prisma } from "@memoturn/db";
+import {
+  type CsvMapping,
+  csvToItems,
+  type DatasetItemSchema,
+  type ItemValidationError,
+  isEmptySchema,
+  parseItemSchema,
+  validateItem,
+  validateSchemaShape,
+} from "./dataset-schema.js";
 import { rehydratePayload } from "./payloads.js";
 import { messagesFromInput } from "./playground.js";
 import { getScoresByTraceIds, getTraceIO } from "./traces.js";
@@ -33,11 +43,28 @@ export interface DatasetItemInput {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Append items, enforcing the dataset's declared schema if it has one.
+ *
+ * Partial acceptance, like ingest: valid items land and invalid ones come back with the field
+ * and reason. Rejecting a whole spreadsheet because row 40 is malformed makes the fix harder,
+ * not easier — the caller gets a precise list to correct and re-submit.
+ */
 export async function addDatasetItems(projectId: string, name: string, items: DatasetItemInput[]) {
   const ds = await findDataset(projectId, name);
   if (!ds) return null;
+
+  const schema = parseItemSchema(ds.itemSchema);
+  const errors: ItemValidationError[] = [];
+  const accepted: DatasetItemInput[] = [];
+  items.forEach((it, i) => {
+    const itemErrors = isEmptySchema(schema) ? [] : validateItem(schema, it, i);
+    if (itemErrors.length > 0) errors.push(...itemErrors);
+    else accepted.push(it);
+  });
+
   const created = await prisma.$transaction(
-    items.map((it) =>
+    accepted.map((it) =>
       prisma.datasetItem.create({
         data: {
           datasetId: ds.id,
@@ -48,7 +75,83 @@ export async function addDatasetItems(projectId: string, name: string, items: Da
       }),
     ),
   );
-  return { added: created.length, itemIds: created.map((i) => i.id) };
+  return { added: created.length, itemIds: created.map((i) => i.id), rejected: errors.length, errors };
+}
+
+/** The dataset's declared item contract, or an empty schema when it has none. */
+export async function getDatasetItemSchema(projectId: string, name: string): Promise<DatasetItemSchema | null> {
+  const ds = await findDataset(projectId, name);
+  return ds ? parseItemSchema(ds.itemSchema) : null;
+}
+
+export class DatasetSchemaError extends Error {
+  constructor(
+    message: string,
+    readonly problems: string[] = [],
+  ) {
+    super(message);
+    this.name = "DatasetSchemaError";
+  }
+}
+
+/**
+ * Declare (or clear) the item contract. Existing items are NOT re-validated: the schema governs
+ * what comes next, and silently invalidating history would be a surprise. `GET .../schema/check`
+ * reports how many current items would fail, so tightening a schema is an informed decision.
+ */
+export async function setDatasetItemSchema(projectId: string, name: string, schema: DatasetItemSchema) {
+  const ds = await findDataset(projectId, name);
+  if (!ds) return null;
+  const problems = validateSchemaShape(schema);
+  if (problems.length > 0) throw new DatasetSchemaError("invalid item schema", problems);
+  await prisma.dataset.update({ where: { id: ds.id }, data: { itemSchema: schema as object } });
+  return schema;
+}
+
+/** How many EXISTING items would fail the dataset's current schema, with the first reasons. */
+export async function checkDatasetItems(projectId: string, name: string) {
+  const ds = await findDataset(projectId, name);
+  if (!ds) return null;
+  const schema = parseItemSchema(ds.itemSchema);
+  const items = await prisma.datasetItem.findMany({ where: { datasetId: ds.id }, orderBy: { createdAt: "asc" } });
+  if (isEmptySchema(schema)) return { checked: items.length, failing: 0, errors: [] as ItemValidationError[] };
+  const errors: ItemValidationError[] = [];
+  const failing = new Set<number>();
+  items.forEach((it, i) => {
+    const itemErrors = validateItem(
+      schema,
+      {
+        input: it.input,
+        expectedOutput: it.expectedOutput,
+        metadata: (it.metadata ?? undefined) as Record<string, unknown> | undefined,
+      },
+      i,
+    );
+    if (itemErrors.length > 0) {
+      failing.add(i);
+      // Cap the report: a wholly mismatched schema would otherwise return one error per item.
+      if (errors.length < 50) errors.push(...itemErrors);
+    }
+  });
+  return { checked: items.length, failing: failing.size, errors };
+}
+
+/**
+ * Import items from CSV text using a column mapping. Structural mapping problems throw (the
+ * mapping is wrong, so no row should be imported); per-row problems come back in `errors`
+ * alongside the rows that did import.
+ */
+export async function importDatasetCsv(projectId: string, name: string, csv: string, mapping: CsvMapping) {
+  const ds = await findDataset(projectId, name);
+  if (!ds) return null;
+  const { items, errors: rowErrors } = csvToItems(csv, mapping);
+  const result = await addDatasetItems(projectId, name, items);
+  if (!result) return null;
+  return {
+    ...result,
+    rejected: result.rejected + rowErrors.length,
+    errors: [...rowErrors, ...result.errors],
+  };
 }
 
 export interface DatasetListItem {
