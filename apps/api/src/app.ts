@@ -25,6 +25,7 @@ import {
   checkGuardrails,
   checkRateLimit,
   clampExportLimit,
+  compilePrompt,
   correctScore,
   countSessions,
   countTraces,
@@ -152,6 +153,7 @@ import {
   observationFacets,
   otlpLogsToEvents,
   otlpToEvents,
+  PromptCompositionError,
   previewEvaluatorBackfill,
   RoleHierarchyError,
   recordAudit,
@@ -1520,6 +1522,7 @@ app.openapi(
     },
     responses: {
       201: { description: "Created version", content: { "application/json": { schema: z.any() } } },
+      400: { description: "Invalid prompt body (malformed message, duplicate placeholder, or a reference cycle)" },
       403: { description: "Forbidden" },
     },
   }),
@@ -1527,7 +1530,15 @@ app.openapi(
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
     const body = c.req.valid("json");
-    const created = await createPromptVersion(c.get("projectId"), { ...body, content: body.content });
+    let created: Awaited<ReturnType<typeof createPromptVersion>>;
+    try {
+      created = await createPromptVersion(c.get("projectId"), { ...body, content: body.content });
+    } catch (err) {
+      // A body that can't be assembled (malformed message, duplicate placeholder, cycle) is the
+      // author's mistake — caught now rather than in someone's request path later.
+      if (err instanceof PromptCompositionError) return c.json({ error: err.message }, 400);
+      throw err;
+    }
     await recordAudit(c.get("projectId"), c.get("actor"), "prompt.version.create", `prompt:${body.name}`, {
       version: created.version,
     });
@@ -1556,6 +1567,57 @@ app.openapi(
   },
 );
 
+// ── Prompts: resolve AND fill (composition + variables + placeholder message lists) ──
+// Static segment, registered before `/{name}` so the param route never shadows it.
+app.openapi(
+  createRoute({
+    method: "post",
+    path: "/v1/prompts/{name}/compile",
+    summary: "Resolve a prompt and fill it: composition expanded, variables and placeholders applied",
+    tags: ["prompts"],
+    security,
+    request: {
+      params: z.object({ name: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              channel: z.string().optional(),
+              bucketKey: z.string().optional(),
+              variables: z.record(z.string(), z.any()).optional(),
+              // Each key is a placeholder slot name; the value is the message list to splice in.
+              placeholders: z.record(z.string(), z.array(z.record(z.string(), z.any()))).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Filled prompt", content: { "application/json": { schema: z.any() } } },
+      404: { description: "Not found" },
+      422: { description: "Prompt references cannot be resolved" },
+    },
+  }),
+  // rbac-exempt: read-only prompt rendering, writes nothing (same as /v1/evaluators/test-expression)
+  async (c) => {
+    const body = c.req.valid("json");
+    const channel = body.channel ?? "production";
+    try {
+      const filled = await compilePrompt(c.get("projectId"), c.req.valid("param").name, {
+        channel: body.channel,
+        bucketKey: body.bucketKey,
+        variables: body.variables,
+        placeholders: body.placeholders as Record<string, { role?: string; content?: unknown }[]> | undefined,
+      });
+      if (!filled) return c.json({ error: `prompt or channel '${channel}' not found` }, 404);
+      return c.json(filled);
+    } catch (err) {
+      if (err instanceof PromptCompositionError) return c.json({ error: err.message }, 422);
+      throw err;
+    }
+  },
+);
+
 // ── Prompts: resolve a deployed prompt by channel (used by the SDK) ───────────────
 app.openapi(
   createRoute({
@@ -1572,14 +1634,22 @@ app.openapi(
     responses: {
       200: { description: "Compiled prompt", content: { "application/json": { schema: z.any() } } },
       404: { description: "Not found" },
+      422: { description: "Prompt references cannot be resolved (missing target, wrong type, or a cycle)" },
     },
   }),
   async (c) => {
     const q = c.req.valid("query");
     const channel = q.channel ?? "production";
-    const resolved = await resolvePrompt(c.get("projectId"), c.req.valid("param").name, channel, q.bucketKey);
-    if (!resolved) return c.json({ error: `prompt or channel '${channel}' not found` }, 404);
-    return c.json(resolved);
+    try {
+      const resolved = await resolvePrompt(c.get("projectId"), c.req.valid("param").name, channel, q.bucketKey);
+      if (!resolved) return c.json({ error: `prompt or channel '${channel}' not found` }, 404);
+      return c.json(resolved);
+    } catch (err) {
+      // A reference that broke AFTER this prompt was saved (target renamed, retyped, or a cycle
+      // closed from the other end) — the prompt exists but can't be assembled.
+      if (err instanceof PromptCompositionError) return c.json({ error: err.message }, 422);
+      throw err;
+    }
   },
 );
 
