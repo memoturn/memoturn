@@ -156,6 +156,39 @@ session's latest trace — so multi-turn conversations "settle" before being jud
   "online": true, "scope": "thread", "cooldownSeconds": 900 }
 ```
 
+### What a judge emits
+
+By default a judge is asked for `{"score": 0..1, "reasoning": "…"}`, and the result is recorded
+as a NUMERIC score. Plenty of judgements aren't a number, so an evaluator can declare what it
+produces:
+
+| `scoreDataType` | The judge is asked for | Recorded as |
+| --- | --- | --- |
+| `NUMERIC` (default) | `{"score": 0..1, "reasoning"}` | numeric `value` |
+| `CATEGORICAL` | `{"label": "…", "reasoning"}` | `stringValue`, **no** numeric value |
+| `BOOLEAN` | `{"pass": true/false, "reasoning"}` | `value` 1 or 0 |
+
+```json
+{ "name": "failure-mode", "prompt": "Classify the failure, if any.",
+  "scoreDataType": "CATEGORICAL", "scoreCategories": ["hallucination", "refusal", "wrong-tool", "ok"] }
+```
+
+`scoreCategories` is a contract, not a hint: a judge that answers off-list has its label
+rejected (and the attempt recorded in the reasoning) rather than silently creating a new
+category, which would fragment the score's own distribution. Leave it empty to accept anything.
+
+`scoreName` records the score under a different name than the evaluator — use it when two
+evaluators should write the same score, e.g. a v2 judge replacing a v1 so their values stay
+comparable on one timeline.
+
+Two consequences worth knowing:
+
+- A categorical score has **no numeric value at all** — not a zero. It never drags an average
+  down, and it can't back an evaluator **guardrail** (which is a numeric threshold); a guard
+  pointed at a categorical evaluator is skipped and logged rather than compared against a
+  stand-in zero. Compare labels on the Scores page instead.
+- An **LLM jury** aggregates labels by **majority vote**, not by mean.
+
 ### Observation (span) evaluation
 
 Set `scope: "observation"` to score individual **spans** instead of whole runs — one score per

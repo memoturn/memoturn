@@ -1261,6 +1261,12 @@ export const evaluator = z.object({
   cooldownSeconds: z.number(),
   /** Empty = the built-in {input, output, expectedOutput} binding. */
   variableMapping: z.array(evaluatorVariableBinding),
+  /** Score name this evaluator writes under; empty = named after the evaluator. */
+  scoreName: z.string(),
+  /** What the judge produces: NUMERIC (default), CATEGORICAL (a label), or BOOLEAN. */
+  scoreDataType: z.string(),
+  /** Allowed labels for CATEGORICAL; empty = accept whatever the judge returns. */
+  scoreCategories: z.array(z.string()),
   version: z.number(),
   createdAt: z.string(),
 });
@@ -1295,6 +1301,11 @@ export const evaluatorVersion = z.object({
   provider: z.string(),
   model: z.string(),
   jurors: z.array(juror),
+  // Part of the judged contract: a version that emits labels isn't comparable to one that
+  // emitted numbers, so the snapshot has to carry it.
+  scoreName: z.string(),
+  scoreDataType: z.string(),
+  scoreCategories: z.array(z.string()),
   createdAt: z.string(),
 });
 export type EvaluatorVersion = z.infer<typeof evaluatorVersion>;

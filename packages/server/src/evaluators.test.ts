@@ -52,7 +52,14 @@ describe("judgeWithEvaluator", () => {
     findUnique.mockResolvedValue(evaluatorRow());
     generate.mockResolvedValue({ content: "synthesized" });
     const result = await judgeWithEvaluator("p1", "quality", { input: "in", output: "out" });
-    expect(result).toEqual({ evaluator: "quality", score: 1, reasoning: "synthesized" });
+    expect(result).toEqual({
+      evaluator: "quality",
+      scoreName: "quality",
+      dataType: "NUMERIC",
+      score: 1,
+      label: "",
+      reasoning: "synthesized",
+    });
     expect(submitBatch).not.toHaveBeenCalled();
   });
 
@@ -60,7 +67,14 @@ describe("judgeWithEvaluator", () => {
     findUnique.mockResolvedValue(evaluatorRow({ provider: "openai" }));
     generate.mockResolvedValue({ content: '{"score": 0.75, "reasoning": "solid answer"}' });
     const result = await judgeWithEvaluator("p1", "quality", { input: "in", output: "out" });
-    expect(result).toEqual({ evaluator: "quality", score: 0.75, reasoning: "solid answer" });
+    expect(result).toEqual({
+      evaluator: "quality",
+      scoreName: "quality",
+      dataType: "NUMERIC",
+      score: 0.75,
+      label: "",
+      reasoning: "solid answer",
+    });
     expect(submitBatch).not.toHaveBeenCalled();
   });
 
@@ -154,6 +168,109 @@ describe("judge variable mapping", () => {
   });
 });
 
+describe("structured evaluator output", () => {
+  beforeEach(() => {
+    findUnique.mockReset();
+    generate.mockReset();
+    submitBatch.mockClear().mockResolvedValue(undefined);
+    resolveProviderConfig.mockClear();
+  });
+
+  const judgeBody = () => (generate.mock.calls[0]![0] as { messages: { content: string }[] }).messages[0]!.content;
+  const written = () =>
+    (submitBatch.mock.calls[0]![1] as { batch: { body: Record<string, unknown> }[] }).batch[0]!.body;
+
+  it("asks a numeric judge for a score, and writes a NUMERIC score (unchanged default)", async () => {
+    findUnique.mockResolvedValue(evaluatorRow({ provider: "openai", model: "gpt-x" }));
+    generate.mockResolvedValue({ content: '{"score":0.25,"reasoning":"meh"}' });
+    await runEvaluator("p1", "quality", { traceId: "t1", input: "in", output: "out" });
+    expect(judgeBody()).toContain('{"score": <number between 0 and 1>');
+    expect(written()).toMatchObject({ name: "quality", dataType: "NUMERIC", value: 0.25 });
+    expect(written().stringValue).toBeUndefined();
+  });
+
+  it("asks a categorical judge for a label and writes it as stringValue with no numeric value", async () => {
+    findUnique.mockResolvedValue(
+      evaluatorRow({
+        provider: "openai",
+        model: "gpt-x",
+        scoreDataType: "CATEGORICAL",
+        scoreCategories: ["hallucination", "refusal", "ok"],
+      }),
+    );
+    generate.mockResolvedValue({ content: '{"label":"refusal","reasoning":"declined"}' });
+    const result = await runEvaluator("p1", "quality", { traceId: "t1", input: "in", output: "out" });
+    expect(judgeBody()).toContain("The label MUST be one of: hallucination, refusal, ok.");
+    expect(written()).toMatchObject({ dataType: "CATEGORICAL", stringValue: "refusal" });
+    // No stand-in zero: a label must not read as a failing number in averages and gates.
+    expect(written().value).toBeUndefined();
+    expect(result?.score).toBeNull();
+  });
+
+  it("rejects an off-list label rather than inventing a category", async () => {
+    findUnique.mockResolvedValue(
+      evaluatorRow({ provider: "openai", model: "gpt-x", scoreDataType: "CATEGORICAL", scoreCategories: ["a", "b"] }),
+    );
+    generate.mockResolvedValue({ content: '{"label":"something else","reasoning":"why"}' });
+    const result = await judgeWithEvaluator("p1", "quality", { input: "in", output: "out" });
+    expect(result?.label).toBe("");
+    expect(result?.reasoning).toContain("off-list label");
+  });
+
+  it("accepts any label when no categories are declared", async () => {
+    findUnique.mockResolvedValue(evaluatorRow({ provider: "openai", model: "gpt-x", scoreDataType: "CATEGORICAL" }));
+    generate.mockResolvedValue({ content: '{"label":"whatever","reasoning":"r"}' });
+    expect((await judgeWithEvaluator("p1", "quality", { input: "i", output: "o" }))?.label).toBe("whatever");
+  });
+
+  it("maps a boolean judge to 1/0 and writes a BOOLEAN score", async () => {
+    findUnique.mockResolvedValue(evaluatorRow({ provider: "openai", model: "gpt-x", scoreDataType: "BOOLEAN" }));
+    generate.mockResolvedValue({ content: '{"pass":false,"reasoning":"no citation"}' });
+    await runEvaluator("p1", "quality", { traceId: "t1", input: "in", output: "out" });
+    expect(judgeBody()).toContain('{"pass": <true or false>');
+    expect(written()).toMatchObject({ dataType: "BOOLEAN", value: 0 });
+  });
+
+  it("writes under a declared score name instead of the evaluator name", async () => {
+    findUnique.mockResolvedValue(evaluatorRow({ provider: "openai", model: "gpt-x", scoreName: "answer-quality" }));
+    generate.mockResolvedValue({ content: '{"score":1,"reasoning":"good"}' });
+    await runEvaluator("p1", "quality", { traceId: "t1", input: "in", output: "out" });
+    expect(written().name).toBe("answer-quality");
+  });
+
+  it("aggregates a categorical jury by majority, not by mean", async () => {
+    findUnique.mockResolvedValue(
+      evaluatorRow({
+        provider: "openai",
+        model: "gpt-x",
+        scoreDataType: "CATEGORICAL",
+        scoreCategories: ["yes", "no"],
+        jurors: [
+          { provider: "openai", model: "j1" },
+          { provider: "openai", model: "j2" },
+          { provider: "openai", model: "j3" },
+        ],
+      }),
+    );
+    generate
+      .mockResolvedValueOnce({ content: '{"label":"yes","reasoning":"a"}' })
+      .mockResolvedValueOnce({ content: '{"label":"no","reasoning":"b"}' })
+      .mockResolvedValueOnce({ content: '{"label":"yes","reasoning":"c"}' });
+    const result = await judgeWithEvaluator("p1", "quality", { input: "i", output: "o" });
+    expect(result?.label).toBe("yes");
+    expect(result?.score).toBeNull();
+    expect(result?.reasoning).toContain("majority 2/3");
+  });
+
+  it("keeps an unparseable judge response inspectable instead of silently scoring zero", async () => {
+    findUnique.mockResolvedValue(evaluatorRow({ provider: "openai", model: "gpt-x" }));
+    generate.mockResolvedValue({ content: "I cannot comply with that." });
+    const result = await judgeWithEvaluator("p1", "quality", { input: "i", output: "o" });
+    expect(result?.score).toBe(0);
+    expect(result?.reasoning).toContain("I cannot comply");
+  });
+});
+
 describe("runEvaluator", () => {
   beforeEach(() => {
     findUnique.mockReset();
@@ -191,7 +308,10 @@ describe("runEvaluator", () => {
       evaluator: "quality",
       traceId: "t1",
       observationId: "",
+      scoreName: "quality",
+      dataType: "NUMERIC",
       score: 1,
+      label: "",
       reasoning: "synthesized",
     });
     expect(submitBatch).toHaveBeenCalledTimes(1);

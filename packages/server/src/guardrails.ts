@@ -300,6 +300,20 @@ export async function runEvaluatorGuards(
     const g = guards[i] as EvaluatorGuard;
     if (result.status === "fulfilled" && result.value !== null) {
       const { score } = result.value;
+      // A guard is a numeric threshold. A CATEGORICAL evaluator has a label, not a number, so
+      // it cannot back one — skip it loudly rather than comparing a stand-in zero, which would
+      // trip every `lt` guard on every request.
+      if (score === null) {
+        console.error(
+          JSON.stringify({
+            scope: "guardrails.evaluatorGuard",
+            projectId,
+            guard: g.name,
+            error: "evaluator emits a label, not a number — a threshold guard needs a numeric evaluator",
+          }),
+        );
+        return;
+      }
       if (guardFails(score, g.comparator, g.threshold)) {
         findings.push({ category: "evaluator", type: g.name, count: 1, score });
       }
