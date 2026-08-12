@@ -160,6 +160,10 @@ Server-executed experiments run a prompt/model across a dataset and auto-score e
 | POST | `/v1/review-queues/{name}/items/{itemId}/score` | Submit a human `ANNOTATION` score. |
 | POST | `/v1/review-queues/{name}/items/{itemId}/skip` | Skip an item without scoring it (marks it `SKIPPED`). |
 
+| GET / PUT / DELETE | `/v1/datasets/{name}/runner` | The dataset's **remote runner** — a URL we POST a signed trigger to so an external eval harness can execute the run. `PUT` registers or replaces it and returns the HMAC signing `secret` **once** (re-registering rotates it); the secret is never read back. Audited. |
+| POST | `/v1/datasets/{name}/remote-runs` | Ask the registered runner to execute this dataset. Body: `{ runName, version? }`. Returns `202` with `{ accepted, status, error, itemCount }` — whether the runner **accepted the trigger**, not whether the run finished. The run row is created before the trigger fires, so a run that never reports back is visibly empty rather than absent. Audited. |
+| POST | `/v1/dataset-run-items` | Attach a trace to a dataset item within a run — how an external harness reports results. Body: `{ datasetName, runName, datasetItemId, traceId }`. Creates the run on demand and upserts the link, so a retried report overwrites rather than duplicating. |
+
 ### Providers
 
 | Method | Path | Description |

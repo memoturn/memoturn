@@ -30,6 +30,56 @@ Human:    Review queue ──► Reviewer scores ──────────�
 
 See the dataset example in [TS SDK](/sdk-typescript/#datasets--experiments).
 
+## Remote dataset runs
+
+An in-platform experiment executes every dataset item through memoturn's provider gateway. That
+is useless to a team whose eval harness already exists — their prompts, tools, and retrieval
+live in their own service, and moving all of it here just to get a scored run isn't a trade
+anyone should have to make.
+
+Register a **runner** on the dataset instead:
+
+```bash
+# 1. Register your endpoint. The signing secret is returned ONCE.
+curl -u pk-mt-dev:sk-mt-dev -X PUT http://localhost:3001/v1/datasets/regression/runner \
+  -H 'content-type: application/json' -d '{"url":"https://your-harness.example/memoturn-runs"}'
+
+# 2. Trigger a run (or click "Run remotely" on the dataset page).
+curl -u pk-mt-dev:sk-mt-dev -X POST http://localhost:3001/v1/datasets/regression/remote-runs \
+  -H 'content-type: application/json' -d '{"runName":"nightly-2026-08-12"}'
+```
+
+Your endpoint receives a signed POST:
+
+```json
+{ "event": "dataset.run.requested", "projectId": "…", "dataset": "regression",
+  "runName": "nightly-2026-08-12", "version": null, "itemCount": 42,
+  "itemsUrl": "/v1/datasets/regression", "resultsUrl": "/v1/dataset-run-items" }
+```
+
+The trigger is a **pointer, never a copy of the dataset**: it stays the same size whether the
+dataset has 10 items or 100 000, and your runner pulls the items with its own API key — the
+same documented endpoints a human would use. Verify authenticity exactly as for webhooks:
+`HMAC_SHA256(secret, "<timestamp>.<body>")` against `X-Memoturn-Signature`, with the timestamp
+in `X-Memoturn-Timestamp`.
+
+Your harness then runs each item, sends traces through normal ingest, and links each result:
+
+```bash
+curl -u pk-mt-dev:sk-mt-dev -X POST http://localhost:3001/v1/dataset-run-items \
+  -H 'content-type: application/json' \
+  -d '{"datasetName":"regression","runName":"nightly-2026-08-12","datasetItemId":"…","traceId":"…"}'
+```
+
+From there the run is an ordinary run: it appears in the comparison matrix, evaluators can score
+its traces, and `mt eval` can gate on it.
+
+Two things worth knowing. The run row is created **before** the trigger is sent, so a run that
+never reports back shows up empty rather than not at all — "their harness is slow" and "nothing
+happened" look different. And the trigger response tells you whether the runner **accepted** the
+request, not whether the run succeeded; the runner's last status and error are kept on the
+dataset page.
+
 ## Evaluators
 
 An evaluator is a judge prompt + provider/model. Providers: `mock` (deterministic, no key

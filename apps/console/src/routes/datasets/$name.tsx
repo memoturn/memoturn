@@ -9,6 +9,7 @@ import { JsonValue } from "../../components/json-value";
 import { KindBadge } from "../../components/kind-badge";
 import { RunComparison } from "../../components/run-comparison";
 import { StatTile } from "../../components/stat-tile";
+import { Timestamp } from "../../components/timestamp";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -224,6 +225,8 @@ function DatasetDetailPage() {
         </CardContent>
       </Card>
 
+      <RemoteRunnerCard datasetName={name} readOnly={readOnly} />
+
       {comparison && comparison.runs.length > 0 && <RunComparison data={comparison} />}
 
       <Card>
@@ -331,5 +334,128 @@ function CutVersionDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+/**
+ * Remote runner — point "run this dataset" at the customer's own eval harness.
+ *
+ * In-platform experiments go through our provider gateway, which is useless to a team whose
+ * harness already exists. Registering a runner sends them a signed trigger instead; they pull
+ * the items with their own API key, run them wherever their prompts and tools live, and report
+ * results back. The trigger is a pointer, so the payload stays small no matter the dataset size.
+ */
+function RemoteRunnerCard({ datasetName, readOnly }: { datasetName: string; readOnly: boolean }) {
+  const qc = useQueryClient();
+  const [url, setUrl] = useState("");
+  const [runName, setRunName] = useState("");
+  const [secret, setSecret] = useState("");
+
+  const { data: runner } = useQuery({
+    queryKey: ["dataset-runner", datasetName],
+    // A dataset without a runner is the normal case, not an error.
+    queryFn: () => api.getDatasetRunner(datasetName).catch(() => null),
+  });
+
+  const save = useMutation({
+    mutationFn: () => api.setDatasetRunner(datasetName, { url }),
+    onSuccess: (r) => {
+      // Shown once and never again — it's the receiver's only way to verify our signature.
+      setSecret(r.secret);
+      toast.success("Runner registered — copy the signing secret now");
+      qc.invalidateQueries({ queryKey: ["dataset-runner", datasetName] });
+    },
+    onError: (e) => toast.error(`Failed to register runner: ${String(e)}`),
+  });
+  const remove = useMutation({
+    mutationFn: () => api.deleteDatasetRunner(datasetName),
+    onSuccess: () => {
+      setSecret("");
+      toast.success("Runner removed");
+      qc.invalidateQueries({ queryKey: ["dataset-runner", datasetName] });
+    },
+  });
+  const trigger = useMutation({
+    mutationFn: () => api.triggerRemoteRun(datasetName, { runName }),
+    onSuccess: (r) => {
+      if (r.accepted) toast.success(`Runner accepted "${r.runName}" (${r.itemCount} items)`);
+      // A rejected trigger is not a thrown error — say so plainly rather than showing success.
+      else toast.error(`Runner did not accept the run: ${r.error}`);
+      qc.invalidateQueries({ queryKey: ["dataset", datasetName] });
+      qc.invalidateQueries({ queryKey: ["dataset-runner", datasetName] });
+    },
+    onError: (e) => toast.error(`Failed to trigger run: ${String(e)}`),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="inline-flex items-center gap-1">
+          Remote runner
+          <HelpTip>
+            Run this dataset with your own eval harness instead of ours. We POST a signed trigger to your URL; your
+            service pulls the items with its API key, runs them in your infrastructure, and reports each result to{" "}
+            <code>POST /v1/dataset-run-items</code>. The trigger carries a pointer, never a copy of the dataset.
+          </HelpTip>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {runner ? (
+          <>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <KindBadge tone={runner.enabled ? "green" : "neutral"}>
+                {runner.enabled ? "enabled" : "disabled"}
+              </KindBadge>
+              <span className="font-mono text-xs text-muted-foreground">{runner.url}</span>
+              <Button variant="ghost" size="sm" disabled={readOnly} onClick={() => remove.mutate()}>
+                Remove
+              </Button>
+            </div>
+            {runner.lastInvokedAt && (
+              <div className="text-xs text-muted-foreground">
+                Last triggered <Timestamp value={runner.lastInvokedAt} />
+                {runner.lastError ? (
+                  <span className="ml-1 text-destructive">— {runner.lastError}</span>
+                ) : (
+                  <span className="ml-1">— accepted{runner.lastStatus ? ` (HTTP ${runner.lastStatus})` : ""}</span>
+                )}
+              </div>
+            )}
+            <div className="flex flex-wrap items-end gap-2">
+              <Input
+                placeholder="run name (e.g. nightly-2026-08-12)"
+                value={runName}
+                onChange={(e) => setRunName(e.target.value)}
+                className="max-w-xs"
+              />
+              <Button disabled={readOnly || !runName.trim() || trigger.isPending} onClick={() => trigger.mutate()}>
+                {trigger.isPending ? "Triggering…" : "Run remotely"}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-wrap items-end gap-2">
+            <Input
+              placeholder="https://your-harness.example/memoturn-runs"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              className="max-w-md"
+            />
+            <Button disabled={readOnly || !url.trim() || save.isPending} onClick={() => save.mutate()}>
+              {save.isPending ? "Registering…" : "Register runner"}
+            </Button>
+          </div>
+        )}
+        {secret && (
+          <div className="rounded-md border border-dashed p-3 text-sm">
+            <div className="mb-1 font-medium">Signing secret — shown once</div>
+            <code className="break-all text-xs">{secret}</code>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Verify each trigger with <code>{"HMAC_SHA256(secret, `<timestamp>.<body>`)"}</code> against the{" "}
+              <code>X-Memoturn-Signature</code> header.
+            </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

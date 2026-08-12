@@ -507,6 +507,7 @@ model Dataset {
   runs           DatasetRun[]
   versions       DatasetVersion[]
   experiments    Experiment[]
+  runner         DatasetRunner?
 
   @@unique([projectId, name])
 }
@@ -541,6 +542,26 @@ model DatasetRun {
   items     DatasetRunItem[]
 
   @@unique([datasetId, name])
+}
+
+// Where to send "run this dataset" for a team whose eval harness already exists. Experiments
+// otherwise only run in-platform through our provider gateway, which locks out anyone who
+// can't (or won't) move their harness here. The runner receives a signed trigger and pulls the
+// items itself with its own API key — the payload stays a pointer, never a copy of the dataset.
+model DatasetRunner {
+  id            String    @id @default(cuid())
+  datasetId     String    @unique
+  dataset       Dataset   @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  url           String
+  // HMAC secret for X-Memoturn-Signature, so the receiver can prove the trigger came from us.
+  secret        String
+  enabled       Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  // Fate of the most recent trigger — the only way to tell "they never got it" from
+  // "they got it and haven't reported back".
+  lastInvokedAt DateTime?
+  lastStatus    Int?
+  lastError     String    @default("")
 }
 
 // Immutable snapshot of a dataset's DatasetItem working set at cut time. Runs pin a
