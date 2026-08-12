@@ -59,6 +59,11 @@ const evaluatorSchema = z
     // Substring match that narrows what gets scored: the TRACE name for trace/thread scope,
     // the SPAN name for observation scope. Empty = everything.
     filterName: z.string(),
+    // What the judge is asked to produce. NUMERIC keeps the historical {score, reasoning}.
+    scoreName: z.string(),
+    scoreDataType: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]),
+    // Comma-separated in the form; split before submit.
+    scoreCategories: z.string(),
     // Bind judge-prompt variables to sources; empty keeps {input, output, expectedOutput}.
     variableMapping: z.array(
       z.object({
@@ -138,6 +143,20 @@ const columns: ColumnDef<Evaluator>[] = [
     },
   },
   {
+    accessorKey: "scoreDataType",
+    header: "Emits",
+    cell: ({ row }) => (
+      <div className="flex items-center gap-1.5">
+        <KindBadge tone={row.original.scoreDataType === "NUMERIC" ? "neutral" : "cyan"}>
+          {(row.original.scoreDataType || "NUMERIC").toLowerCase()}
+        </KindBadge>
+        {row.original.scoreName && row.original.scoreName !== row.original.name && (
+          <span className="text-xs text-muted-foreground">as {row.original.scoreName}</span>
+        )}
+      </div>
+    ),
+  },
+  {
     accessorKey: "kind",
     header: "Kind",
     cell: ({ row }) => (row.original.kind === "CODE" ? <KindBadge tone="teal">code</KindBadge> : <span>LLM</span>),
@@ -183,6 +202,9 @@ function EvaluatorsPage() {
       scope: "trace",
       cooldownSeconds: 900,
       filterName: "",
+      scoreName: "",
+      scoreDataType: "NUMERIC",
+      scoreCategories: "",
       variableMapping: [],
       jurors: [],
     },
@@ -193,9 +215,17 @@ function EvaluatorsPage() {
   const isCode = kind === "CODE";
   const jurors = useFieldArray({ control: form.control, name: "jurors" });
   const variables = useFieldArray({ control: form.control, name: "variableMapping" });
+  const scoreDataType = form.watch("scoreDataType");
 
   const create = useMutation({
-    mutationFn: (values: EvaluatorForm) => api.createEvaluator(values),
+    mutationFn: ({ scoreCategories, ...values }: EvaluatorForm) =>
+      api.createEvaluator({
+        ...values,
+        scoreCategories: scoreCategories
+          .split(",")
+          .map((c) => c.trim())
+          .filter(Boolean),
+      }),
     onSuccess: () => {
       toast.success("Evaluator created");
       form.reset();
@@ -428,6 +458,83 @@ function EvaluatorsPage() {
                           <SelectItem value="thread">thread (per conversation)</SelectItem>
                         </SelectContent>
                       </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="scoreDataType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        <span className="inline-flex items-center gap-1">
+                          Emits
+                          <HelpTip>
+                            What the judge is asked to produce. <strong>Numeric</strong> is a 0–1 score.{" "}
+                            <strong>Categorical</strong> is a label — use it when the answer is "which failure mode is
+                            this?", where a number would only obscure it. <strong>Boolean</strong> is a pass/fail,
+                            stored as 1/0 so it still averages into a pass rate.
+                          </HelpTip>
+                        </span>
+                      </FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="NUMERIC">numeric (0–1 score)</SelectItem>
+                          <SelectItem value="CATEGORICAL">categorical (a label)</SelectItem>
+                          <SelectItem value="BOOLEAN">boolean (pass / fail)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                {scoreDataType === "CATEGORICAL" && (
+                  <FormField
+                    control={form.control}
+                    name="scoreCategories"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          <span className="inline-flex items-center gap-1">
+                            Labels
+                            <HelpTip>
+                              The labels the judge may choose from, comma-separated. An answer outside the list is
+                              rejected rather than silently becoming a new category — which would fragment the score's
+                              own distribution. Leave empty to accept whatever the judge returns.
+                            </HelpTip>
+                          </span>
+                        </FormLabel>
+                        <FormControl>
+                          <Input placeholder="hallucination, refusal, ok" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+                <FormField
+                  control={form.control}
+                  name="scoreName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        <span className="inline-flex items-center gap-1">
+                          Score name
+                          <HelpTip>
+                            The name the score is recorded under. Leave empty to use the evaluator's name. Set it when
+                            two evaluators should write the same score — e.g. a v2 judge replacing a v1.
+                          </HelpTip>
+                        </span>
+                      </FormLabel>
+                      <FormControl>
+                        <Input placeholder="(evaluator name)" {...field} />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}

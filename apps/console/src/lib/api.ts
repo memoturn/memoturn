@@ -523,6 +523,9 @@ export const api = {
     scope?: "trace" | "thread" | "observation";
     cooldownSeconds?: number;
     variableMapping?: EvaluatorVariableBinding[];
+    scoreName?: string;
+    scoreDataType?: "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
+    scoreCategories?: string[];
   }) => post(`/v1/evaluators`, body),
   listEvaluatorBackfills: (name?: string) =>
     get<{ data: EvaluatorBackfill[] }>(`/v1/evaluators/backfills${qs({ name })}`).then((r) => r.data),

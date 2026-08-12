@@ -85,6 +85,12 @@ export interface CreateEvaluatorInput {
   cooldownSeconds?: number;
   /** Judge-prompt variable bindings. Empty keeps the built-in {input, output, expectedOutput}. */
   variableMapping?: EvaluatorVariableBinding[];
+  /** Name the emitted score. Empty = name it after the evaluator (the historical behavior). */
+  scoreName?: string;
+  /** What the judge produces: NUMERIC (default), CATEGORICAL (a label), or BOOLEAN. */
+  scoreDataType?: string;
+  /** Allowed labels for CATEGORICAL. Empty = accept whatever the judge returns. */
+  scoreCategories?: string[];
 }
 
 /** The scopes an evaluator may declare; anything else falls back to "trace". */
@@ -122,6 +128,11 @@ export async function createEvaluator(projectId: string, input: CreateEvaluatorI
     scope: input.scope && SCOPES.has(input.scope) ? input.scope : "trace",
     cooldownSeconds: input.cooldownSeconds ?? 900,
     variableMapping: parseVariableMapping(input.variableMapping ?? []) as unknown as object,
+    scoreName: (input.scoreName ?? "").trim(),
+    scoreDataType: OUTPUT_TYPES.has((input.scoreDataType ?? "").toUpperCase())
+      ? (input.scoreDataType as string).toUpperCase()
+      : "NUMERIC",
+    scoreCategories: [...new Set((input.scoreCategories ?? []).map((c) => c.trim()).filter(Boolean))],
   };
   // Version bump: an edit that changes the judge config (prompt/model/provider/jurors) is a
   // new immutable version; unrelated edits (toggling online, sampling) don't bump. A snapshot
@@ -136,6 +147,11 @@ export async function createEvaluator(projectId: string, input: CreateEvaluatorI
       existing.expression !== data.expression ||
       existing.model !== data.model ||
       existing.provider !== provider ||
+      // The output declaration is part of the judged contract: a judge that switches from a
+      // number to a label produces incomparable scores, so it must be a new version.
+      existing.scoreName !== data.scoreName ||
+      existing.scoreDataType !== data.scoreDataType ||
+      existing.scoreCategories.join("\u0000") !== data.scoreCategories.join("\u0000") ||
       jurorsChanged;
     const version = existing ? existing.version + (configChanged ? 1 : 0) : 1;
     const row = await tx.evaluator.upsert({
@@ -154,6 +170,9 @@ export async function createEvaluator(projectId: string, input: CreateEvaluatorI
           provider,
           model: data.model,
           jurors: data.jurors,
+          scoreName: data.scoreName,
+          scoreDataType: data.scoreDataType,
+          scoreCategories: data.scoreCategories,
         },
       });
     }
@@ -172,6 +191,9 @@ export async function createEvaluator(projectId: string, input: CreateEvaluatorI
     scope: ev.scope,
     cooldownSeconds: ev.cooldownSeconds,
     variableMapping: parseVariableMapping(ev.variableMapping),
+    scoreName: ev.scoreName,
+    scoreDataType: ev.scoreDataType,
+    scoreCategories: ev.scoreCategories,
     version: ev.version,
   };
 }
@@ -199,6 +221,9 @@ export async function listEvaluatorVersions(projectId: string, name: string) {
     provider: v.provider,
     model: v.model,
     jurors: parseJurors(v.jurors),
+    scoreName: v.scoreName,
+    scoreDataType: v.scoreDataType,
+    scoreCategories: v.scoreCategories,
     createdAt: v.createdAt.toISOString(),
   }));
 }
@@ -219,6 +244,9 @@ export async function listEvaluators(projectId: string) {
     scope: e.scope,
     cooldownSeconds: e.cooldownSeconds,
     variableMapping: parseVariableMapping(e.variableMapping),
+    scoreName: e.scoreName,
+    scoreDataType: e.scoreDataType,
+    scoreCategories: e.scoreCategories,
     version: e.version,
     createdAt: e.createdAt.toISOString(),
   }));
@@ -308,6 +336,9 @@ export interface InstantiateTemplateInput {
   cooldownSeconds?: number;
   /** Bind the template prompt's variables to sources (e.g. a RAG judge → the retriever span). */
   variableMapping?: EvaluatorVariableBinding[];
+  scoreName?: string;
+  scoreDataType?: string;
+  scoreCategories?: string[];
 }
 
 /**
@@ -333,6 +364,9 @@ export async function instantiateEvaluatorTemplate(
     scope: overrides.scope,
     cooldownSeconds: overrides.cooldownSeconds,
     variableMapping: overrides.variableMapping,
+    scoreName: overrides.scoreName,
+    scoreDataType: overrides.scoreDataType,
+    scoreCategories: overrides.scoreCategories,
   });
 }
 
@@ -347,6 +381,23 @@ export async function getEvaluatorAnalytics(projectId: string, days = 30): Promi
   return { days, summary, trend };
 }
 
+/**
+ * The score-body fields a judged result writes. A label goes in `stringValue` with no numeric
+ * `value` — writing 0 there would make a categorical judgement look like a failing number in
+ * every average, chart, and gate that touches it.
+ */
+function scoreFieldsFor(judged: JudgeResult): {
+  name: string;
+  dataType: "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
+  value?: number;
+  stringValue?: string;
+} {
+  if (judged.dataType === "CATEGORICAL") {
+    return { name: judged.scoreName, dataType: "CATEGORICAL", stringValue: judged.label };
+  }
+  return { name: judged.scoreName, dataType: judged.dataType, value: judged.score ?? 0 };
+}
+
 export interface RunEvaluatorInput {
   traceId: string;
   input: unknown;
@@ -358,15 +409,83 @@ export interface RunEvaluatorInput {
   observations?: JudgeInput["observations"];
 }
 
-function parseJudge(text: string): { score: number; reasoning: string } {
+/**
+ * What a judge is asked to produce. NUMERIC is the historical contract; the other two exist
+ * because plenty of judgements aren't a number — "which failure mode is this?" is a label, and
+ * "did it cite a source?" is a yes/no that a 0.5 would only obscure.
+ */
+export type ScoreDataTypeOut = "NUMERIC" | "CATEGORICAL" | "BOOLEAN";
+const OUTPUT_TYPES = new Set<string>(["NUMERIC", "CATEGORICAL", "BOOLEAN"]);
+
+/** The output declaration of an evaluator row, with the historical defaults applied. */
+export interface EvaluatorOutput {
+  scoreName: string;
+  dataType: ScoreDataTypeOut;
+  categories: string[];
+}
+
+export function evaluatorOutput(ev: {
+  name: string;
+  scoreName?: string | null;
+  scoreDataType?: string | null;
+  scoreCategories?: string[] | null;
+}): EvaluatorOutput {
+  const declared = (ev.scoreDataType ?? "").toUpperCase();
+  return {
+    // An unnamed output keeps naming the score after the evaluator — what every judge did before.
+    scoreName: (ev.scoreName ?? "").trim() || ev.name,
+    dataType: OUTPUT_TYPES.has(declared) ? (declared as ScoreDataTypeOut) : "NUMERIC",
+    categories: (ev.scoreCategories ?? []).map((c) => c.trim()).filter(Boolean),
+  };
+}
+
+/** The response shape asked of the judge, spelled out per output type. */
+function judgeInstruction(out: EvaluatorOutput): string {
+  if (out.dataType === "BOOLEAN") {
+    return 'Respond ONLY with strict JSON: {"pass": <true or false>, "reasoning": <string>}.';
+  }
+  if (out.dataType === "CATEGORICAL") {
+    const allowed = out.categories.length > 0 ? ` The label MUST be one of: ${out.categories.join(", ")}.` : "";
+    return `Respond ONLY with strict JSON: {"label": <string>, "reasoning": <string>}.${allowed}`;
+  }
+  return 'Respond ONLY with strict JSON: {"score": <number between 0 and 1>, "reasoning": <string>}.';
+}
+
+/** One judge's answer, normalized. `score` is null for a label — there is no number to invent. */
+export interface JudgeVote {
+  score: number | null;
+  label: string;
+  reasoning: string;
+}
+
+function parseJudge(text: string, out: EvaluatorOutput): JudgeVote {
+  let parsed: Record<string, unknown>;
   try {
     const match = text.match(/\{[\s\S]*\}/);
-    const parsed = JSON.parse(match ? match[0] : text);
-    const score = Math.max(0, Math.min(1, Number(parsed.score)));
-    return { score: Number.isFinite(score) ? score : 0, reasoning: String(parsed.reasoning ?? "") };
+    parsed = JSON.parse(match ? match[0] : text) as Record<string, unknown>;
   } catch {
-    return { score: 0, reasoning: text.slice(0, 500) };
+    // Unparseable: keep the raw text as the reasoning so the failure is inspectable rather
+    // than silently scoring zero with no explanation.
+    return { score: out.dataType === "CATEGORICAL" ? null : 0, label: "", reasoning: text.slice(0, 500) };
   }
+  const reasoning = String(parsed.reasoning ?? "");
+  if (out.dataType === "BOOLEAN") {
+    const pass = parsed.pass === true || parsed.pass === "true" || Number(parsed.pass) === 1;
+    return { score: pass ? 1 : 0, label: "", reasoning };
+  }
+  if (out.dataType === "CATEGORICAL") {
+    const raw = String(parsed.label ?? "").trim();
+    // A declared category list is a contract: an off-list answer is a judge failure, not a new
+    // category to silently accept (which would fragment the score's own distribution).
+    const label = out.categories.length === 0 || out.categories.includes(raw) ? raw : "";
+    return {
+      score: null,
+      label,
+      reasoning: label === "" && raw !== "" ? `off-list label "${raw.slice(0, 80)}": ${reasoning}` : reasoning,
+    };
+  }
+  const score = Math.max(0, Math.min(1, Number(parsed.score)));
+  return { score: Number.isFinite(score) ? score : 0, label: "", reasoning };
 }
 
 export interface JudgeInput {
@@ -386,10 +505,20 @@ export interface JudgeInput {
 
 export interface JudgeResult {
   evaluator: string;
-  score: number;
+  /** The score name this writes under — the evaluator's name unless it declares another. */
+  scoreName: string;
+  dataType: ScoreDataTypeOut;
+  /**
+   * The numeric judgement, or null for a CATEGORICAL evaluator — which has a label, not a
+   * number. Callers that compare thresholds (guards, gates) must handle null rather than
+   * treating a label as a zero.
+   */
+  score: number | null;
+  /** The chosen label for CATEGORICAL; empty for the numeric types. */
+  label: string;
   reasoning: string;
   /** Per-juror breakdown when this evaluator is an LLM jury (empty for a single judge). */
-  votes?: { provider: string; model: string; score: number; reasoning: string }[];
+  votes?: { provider: string; model: string; score: number | null; label: string; reasoning: string }[];
 }
 
 /** Run one judge (a single provider/model) over the item and return its normalized vote. */
@@ -399,7 +528,8 @@ async function judgeOnce(
   provider: string,
   model: string,
   payload: unknown,
-): Promise<{ score: number; reasoning: string }> {
+  out: EvaluatorOutput,
+): Promise<JudgeVote> {
   const config = await resolveProviderConfig(projectId, provider as Provider);
   const result = await generate({
     provider: provider as Provider,
@@ -409,13 +539,18 @@ async function judgeOnce(
     messages: [
       {
         role: "system",
-        content: `${prompt}\n\nRespond ONLY with strict JSON: {"score": <number between 0 and 1>, "reasoning": <string>}.`,
+        content: `${prompt}\n\n${judgeInstruction(out)}`,
       },
       { role: "user", content: JSON.stringify(payload) },
     ],
   });
-  // mock provider can't actually judge — synthesize a deterministic score for testing.
-  return provider === "mock" ? { score: 1, reasoning: result.content } : parseJudge(result.content);
+  // mock provider can't actually judge — synthesize a deterministic answer for testing, in
+  // whatever shape this evaluator declares.
+  if (provider === "mock") {
+    const label = out.dataType === "CATEGORICAL" ? (out.categories[0] ?? "mock") : "";
+    return { score: out.dataType === "CATEGORICAL" ? null : 1, label, reasoning: result.content };
+  }
+  return parseJudge(result.content, out);
 }
 
 /**
@@ -443,6 +578,7 @@ export async function judgeWithEvaluator(
   // Variable mapping: when the evaluator declares one, the judge sees exactly the variables it
   // binds (and the prompt's `{{name}}` references are substituted); otherwise it sees the
   // built-in {input, output, expectedOutput}, which is what every pre-mapping evaluator expects.
+  const out = evaluatorOutput(ev);
   const mapping = parseVariableMapping(ev.variableMapping);
   const vars = mapping.length
     ? resolveVariables(mapping, {
@@ -469,7 +605,16 @@ export async function judgeWithEvaluator(
       expected: (input.expectedOutput ?? null) as ExprValue,
       metadata: (input.metadata ?? null) as ExprValue,
     });
-    return { evaluator: ev.name, score, reasoning: `${ev.expression} → ${JSON.stringify(value)}` };
+    // A code check is inherently numeric — an expression returns a number, not a label — so it
+    // ignores a CATEGORICAL declaration rather than pretending to honor one.
+    return {
+      evaluator: ev.name,
+      scoreName: out.scoreName,
+      dataType: out.dataType === "CATEGORICAL" ? "NUMERIC" : out.dataType,
+      score,
+      label: "",
+      reasoning: `${ev.expression} → ${JSON.stringify(value)}`,
+    };
   }
 
   const prompt = vars ? renderPrompt(ev.prompt, vars) : ev.prompt;
@@ -477,13 +622,17 @@ export async function judgeWithEvaluator(
 
   const jurors = parseJurors(ev.jurors);
   if (jurors.length === 0) {
-    const judged = await judgeOnce(projectId, prompt, ev.provider, ev.model, payload);
-    return { evaluator: ev.name, ...judged };
+    const judged = await judgeOnce(projectId, prompt, ev.provider, ev.model, payload, out);
+    return { evaluator: ev.name, scoreName: out.scoreName, dataType: out.dataType, ...judged };
   }
 
-  // Jury: fan out to every member concurrently, aggregate the surviving votes by mean.
+  // Jury: fan out to every member concurrently, then aggregate — by mean for a number, by
+  // majority for a label (a mean of labels is meaningless).
   const settled = await Promise.allSettled(
-    jurors.map(async (j) => ({ juror: j, vote: await judgeOnce(projectId, prompt, j.provider, j.model, payload) })),
+    jurors.map(async (j) => ({
+      juror: j,
+      vote: await judgeOnce(projectId, prompt, j.provider, j.model, payload, out),
+    })),
   );
   const votes: NonNullable<JudgeResult["votes"]> = [];
   for (const r of settled) {
@@ -493,11 +642,32 @@ export async function judgeWithEvaluator(
     const firstErr = settled.find((r): r is PromiseRejectedResult => r.status === "rejected");
     throw firstErr ? firstErr.reason : new Error("jury produced no votes");
   }
-  const score = votes.reduce((s, v) => s + v.score, 0) / votes.length;
+  const base = { evaluator: ev.name, scoreName: out.scoreName, dataType: out.dataType, votes };
+
+  if (out.dataType === "CATEGORICAL") {
+    const tally = new Map<string, number>();
+    for (const v of votes) if (v.label) tally.set(v.label, (tally.get(v.label) ?? 0) + 1);
+    // Ties break by first-seen order, which is juror order — deterministic, not arbitrary.
+    const [winner, count] = [...tally.entries()].reduce<[string, number]>(
+      (best, cur) => (cur[1] > best[1] ? cur : best),
+      ["", 0],
+    );
+    return {
+      ...base,
+      score: null,
+      label: winner,
+      reasoning: `Jury majority ${count}/${votes.length} for "${winner}": ${votes
+        .map((v) => `${v.model}=${v.label || "?"}`)
+        .join(", ")}`,
+    };
+  }
+
+  const numeric = votes.map((v) => v.score ?? 0);
+  const score = numeric.reduce((sum, v) => sum + v, 0) / numeric.length;
   const reasoning = `Jury mean of ${votes.length}/${jurors.length} vote(s): ${votes
-    .map((v) => `${v.model}=${v.score.toFixed(2)}`)
+    .map((v) => `${v.model}=${(v.score ?? 0).toFixed(2)}`)
     .join(", ")}`;
-  return { evaluator: ev.name, score, reasoning, votes };
+  return { ...base, score, label: "", reasoning };
 }
 
 export async function runEvaluator(projectId: string, name: string, input: RunEvaluatorInput) {
@@ -526,10 +696,8 @@ export async function runEvaluator(projectId: string, name: string, input: RunEv
           id: deterministicId(input.observationId ?? input.traceId, judged.evaluator),
           traceId: input.traceId,
           ...(input.observationId ? { observationId: input.observationId } : {}),
-          name: judged.evaluator,
-          value: judged.score,
+          ...scoreFieldsFor(judged),
           source: "EVAL",
-          dataType: "NUMERIC",
           comment: judged.reasoning,
           environment: "default",
         },
@@ -541,7 +709,12 @@ export async function runEvaluator(projectId: string, name: string, input: RunEv
     evaluator: judged.evaluator,
     traceId: input.traceId,
     observationId: input.observationId ?? "",
+    // The caller shouldn't have to look up the evaluator to know what came back: `score` is
+    // null for a label, and `label` carries the answer.
+    scoreName: judged.scoreName,
+    dataType: judged.dataType,
     score: judged.score,
+    label: judged.label,
     reasoning: judged.reasoning,
   };
 }
@@ -650,10 +823,8 @@ async function scoreThread(
         body: {
           id: deterministicId(`thread:${sessionId}`, judged.evaluator),
           traceId: latestTraceId,
-          name: judged.evaluator,
-          value: judged.score,
+          ...scoreFieldsFor(judged),
           source: "EVAL",
-          dataType: "NUMERIC",
           comment: judged.reasoning,
           environment: "default",
         },

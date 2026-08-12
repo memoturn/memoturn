@@ -602,7 +602,14 @@ model Evaluator {
   expression   String   @default("")
   provider     String   @default("mock")
   model        String
-  outputSchema Json     @default("{}")
+  // What the judge is asked to produce, and what the resulting score carries. NUMERIC (the
+  // default) keeps the historical {score, reasoning} contract; CATEGORICAL asks for a label
+  // (stored in the score's stringValue); BOOLEAN asks for a pass/fail (stored as 1/0).
+  // `scoreName` empty = name the score after the evaluator, which is the historical behavior.
+  scoreName       String   @default("")
+  scoreDataType   String   @default("NUMERIC")
+  // Allowed labels for CATEGORICAL. Empty = accept whatever the judge returns.
+  scoreCategories String[] @default([])
   // LLM jury: when non-empty, this evaluator is an ensemble — the same judge prompt is run
   // against every juror ({provider, model}) and the scores are aggregated (mean) into one
   // score, reducing single-judge variance. Empty ([]) = ordinary single-judge evaluator
@@ -679,6 +686,9 @@ model EvaluatorVersion {
   provider     String
   model        String
   jurors       Json      @default("[]")
+  scoreName       String   @default("")
+  scoreDataType   String   @default("NUMERIC")
+  scoreCategories String[] @default([])
   createdAt    DateTime  @default(now())
 
   @@unique([evaluatorId, version])

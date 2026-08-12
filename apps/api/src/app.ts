@@ -2275,6 +2275,10 @@ app.openapi(
               // Bind judge-prompt variables to chosen sources; omitted/empty keeps the
               // built-in {input, output, expectedOutput}.
               variableMapping: z.array(C.evaluatorVariableBinding).optional(),
+              // What the judge emits: NUMERIC (default), CATEGORICAL (a label), or BOOLEAN.
+              scoreName: z.string().optional(),
+              scoreDataType: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]).optional(),
+              scoreCategories: z.array(z.string()).optional(),
             }),
           },
         },
@@ -2330,6 +2334,10 @@ app.openapi(
               // Bind judge-prompt variables to chosen sources; omitted/empty keeps the
               // built-in {input, output, expectedOutput}.
               variableMapping: z.array(C.evaluatorVariableBinding).optional(),
+              // What the judge emits: NUMERIC (default), CATEGORICAL (a label), or BOOLEAN.
+              scoreName: z.string().optional(),
+              scoreDataType: z.enum(["NUMERIC", "CATEGORICAL", "BOOLEAN"]).optional(),
+              scoreCategories: z.array(z.string()).optional(),
             }),
           },
         },
