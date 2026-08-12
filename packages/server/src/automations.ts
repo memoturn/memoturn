@@ -1,5 +1,6 @@
 import { prisma } from "@memoturn/db";
 import { redisConnection } from "@memoturn/db/queue";
+import { decryptSecret, encryptSecret } from "@memoturn/llm";
 import { mapConcurrent } from "./concurrency.js";
 import { sendEmail } from "./mailer.js";
 import { isPublicUrl } from "./net.js";
@@ -15,8 +16,17 @@ import { isPublicUrl } from "./net.js";
  * honor an optional low-value `threshold`; any trigger honors an optional `filter`
  * substring matched against the entity name.
  */
-export const AUTOMATION_TRIGGERS = ["score.created", "trace.created", "eval.completed"] as const;
-export const AUTOMATION_ACTIONS = ["webhook", "slack", "pagerduty", "email"] as const;
+export const AUTOMATION_TRIGGERS = [
+  "score.created",
+  "trace.created",
+  "eval.completed",
+  // Prompt-registry triggers: the missing half of a prompt CI/CD loop. Promoting a label is a
+  // deploy, and a deploy should be able to kick a workflow the same way a git push does.
+  "prompt.created",
+  "prompt.updated",
+  "prompt.label.moved",
+] as const;
+export const AUTOMATION_ACTIONS = ["webhook", "slack", "pagerduty", "email", "github"] as const;
 
 export interface CreateAutomationInput {
   name: string;
@@ -25,6 +35,8 @@ export interface CreateAutomationInput {
   target: string;
   threshold?: number | null;
   filter?: string;
+  /** Credential for actions that need one (github: a PAT). Stored encrypted, never returned. */
+  secret?: string;
 }
 
 interface AutomationRow {
@@ -106,6 +118,7 @@ export async function createAutomation(projectId: string, input: CreateAutomatio
       target: input.target,
       threshold: input.threshold ?? null,
       filter: input.filter ?? "",
+      secret: input.secret ? encryptSecret(input.secret) : "",
     },
   });
   await bustCache(projectId);
@@ -171,9 +184,27 @@ const DISPATCH_CONCURRENCY = 8;
  * address. (Automations only ever use slack/webhook; alerts use all four.)
  */
 export type ChannelType = "slack" | "webhook" | "pagerduty" | "email";
-export interface Channel {
+/**
+ * What `deliverToChannel` can deliver to. Wider than `ChannelType` on purpose: `github` is an
+ * AUTOMATION action, not an alert/budget channel — those store `{type, target}` pairs with
+ * nowhere to put a credential, and a repository_dispatch needs one.
+ */
+export type DeliveryChannelType = ChannelType | "github";
+/**
+ * An alert/cost-budget notification target — the narrow set, no credential. Kept separate from
+ * `Channel` so widening what automations can DELIVER to never silently widens what those
+ * surfaces accept and store.
+ */
+export interface NotifyChannel {
   type: ChannelType;
   target: string;
+}
+
+export interface Channel {
+  type: DeliveryChannelType;
+  target: string;
+  /** Decrypted credential, for channels that authenticate (github). Never logged or returned. */
+  secret?: string;
 }
 
 /**
@@ -193,6 +224,8 @@ export interface ChannelMessage {
   dedupKey?: string;
   /** true → PagerDuty `resolve` (close the incident) instead of `trigger`. */
   resolved?: boolean;
+  /** `event_type` for a GitHub repository_dispatch — what a workflow's `types:` filter matches. */
+  githubEventType?: string;
 }
 
 const PAGERDUTY_EVENTS_URL = "https://events.pagerduty.com/v2/enqueue";
@@ -239,6 +272,29 @@ export async function deliverToChannel(channel: Channel, message: ChannelMessage
         });
         return true;
       }
+      case "github": {
+        // repository_dispatch: the documented way to start a workflow from outside GitHub.
+        // `target` is owner/repo; the PAT rides in the channel, decrypted by the caller.
+        const [owner, repo] = channel.target.split("/");
+        if (!owner || !repo || !channel.secret) return false;
+        const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/dispatches`, {
+          method: "POST",
+          headers: {
+            accept: "application/vnd.github+json",
+            authorization: `Bearer ${channel.secret}`,
+            "content-type": "application/json",
+            "user-agent": "memoturn-automations/1",
+            "x-github-api-version": "2022-11-28",
+          },
+          body: JSON.stringify({
+            event_type: message.githubEventType ?? "memoturn",
+            // GitHub caps client_payload at 10 fields; ours is small and fixed.
+            client_payload: message.webhookBody ?? {},
+          }),
+          signal: AbortSignal.timeout(5_000),
+        });
+        return res.ok;
+      }
       case "email":
         return await sendEmail({
           to: channel.target,
@@ -254,20 +310,40 @@ export async function deliverToChannel(channel: Channel, message: ChannelMessage
 }
 
 /** Deliver one payload to one automation target. Never throws. */
+/**
+ * The GitHub PAT for one automation, fetched lazily and decrypted at the moment of delivery.
+ *
+ * Deliberately NOT part of the cached dispatch shape: the automation cache lives in Redis, and
+ * keeping it secret-free means a cache dump can't leak a credential. GitHub automations are
+ * rare, so the extra read costs nothing on the hot path.
+ */
+async function automationSecret(id: string): Promise<string> {
+  const row = await prisma.automation.findUnique({ where: { id }, select: { secret: true } });
+  if (!row?.secret) return "";
+  try {
+    return decryptSecret(row.secret);
+  } catch {
+    return ""; // a secret written under a different key is unusable, not fatal
+  }
+}
+
 async function deliverAutomation(
   a: DispatchableAutomation,
   projectId: string,
   event: string,
   payload: AutomationEvent,
 ): Promise<boolean> {
+  const secret = a.action === "github" ? await automationSecret(a.id) : undefined;
   return deliverToChannel(
-    { type: a.action as ChannelType, target: a.target },
+    { type: a.action as DeliveryChannelType, target: a.target, secret },
     {
       slackText: slackText(event, projectId, payload),
       webhookBody: { event, projectId, ...payload },
       // summary/body power the pagerduty + email channels (they fall back to slackText,
       // but a markdown-free line reads better as an email subject / PagerDuty summary).
       summary: summaryText(event, projectId, payload),
+      // A workflow filters on `types: [memoturn-prompt-updated]`, so the dots become dashes.
+      githubEventType: `memoturn-${event.replace(/\./g, "-")}`,
     },
   );
 }

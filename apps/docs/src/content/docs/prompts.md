@@ -103,6 +103,47 @@ visible in the output rather than silently becoming an empty string.
 
 `GET /v1/prompts/{name}` also reports the slot names it still expects, in `placeholders`.
 
+## Prompt CI/CD
+
+Saving a version and promoting a label are events other systems should be able to react to —
+promoting `production` is a deploy, and a deploy should be able to kick a workflow the same way
+a git push does. Three automation triggers cover it:
+
+| Trigger | Fires when |
+| --- | --- |
+| `prompt.created` | the first version of a new prompt is saved |
+| `prompt.updated` | any subsequent version is saved |
+| `prompt.label.moved` | a label that pointed at one version now points at another |
+
+`latest` moves on every save, so it is **not** treated as a deploy on its own — only the labels
+you actually promote fire `prompt.label.moved`.
+
+The `github` action sends a [`repository_dispatch`](https://docs.github.com/rest/repos/repos#create-a-repository-dispatch-event),
+which is how you start a workflow from outside GitHub. `target` is `owner/repo` and the token is
+a PAT with `repo` scope, stored encrypted and never returned by the API:
+
+```json
+{ "name": "rerun-evals-on-deploy", "trigger": "prompt.label.moved",
+  "action": "github", "target": "acme/ci", "secret": "ghp_…", "filter": "support-" }
+```
+
+The event type is the trigger with dots replaced by dashes, which is what a workflow's `types:`
+filter matches:
+
+```yaml
+on:
+  repository_dispatch:
+    types: [memoturn-prompt-label-moved]
+```
+
+The payload carries `{ name, version, labels, projectId }`, so the workflow knows which prompt
+moved and to what. Pair it with the dataset CI gate (`mt eval`) and promoting a prompt label
+runs your eval suite against the new version automatically.
+
+Dispatch is best-effort and non-blocking: an automation target that is down never fails the
+save. The version is already committed by then, and losing the write to a notification failure
+would be the worse outcome.
+
 ## In the console
 
 The **Prompts** page lists prompts with their channels and latest version; the detail

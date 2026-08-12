@@ -1,6 +1,7 @@
 import type { PromptArmScore, PromptVersionCost } from "@memoturn/contracts";
 import { type PromptType, prisma } from "@memoturn/db";
 import { telemetry } from "@memoturn/telemetry";
+import { dispatchAutomations } from "./automations.js";
 import {
   composePrompt,
   extractPlaceholders,
@@ -132,14 +133,40 @@ export async function createPromptVersion(projectId: string, input: CreatePrompt
     },
   });
 
-  // "latest" always tracks the newest version; plus any explicit labels.
+  // "latest" always tracks the newest version; plus any explicit labels. Track which labels
+  // actually MOVED (pointed somewhere else before) — that, not the save, is the deploy.
   const labels = new Set(["latest", ...(input.labels ?? [])]);
+  const moved: string[] = [];
   for (const label of labels) {
+    const before = await prisma.promptChannel.findUnique({
+      where: { promptId_label: { promptId: prompt.id, label } },
+      select: { version: true },
+    });
+    if (before && before.version !== version) moved.push(label);
     await prisma.promptChannel.upsert({
       where: { promptId_label: { promptId: prompt.id, label } },
       update: { version },
       create: { promptId: prompt.id, label, version },
     });
+  }
+
+  // Fire prompt automations. Best-effort and non-blocking: an automation target that is down
+  // must never fail the save — the version is already committed, and losing the write to a
+  // notification failure would be the worse outcome.
+  const isFirstVersion = version === 1;
+  void dispatchAutomations(projectId, isFirstVersion ? "prompt.created" : "prompt.updated", {
+    name: prompt.name,
+    version,
+    labels: [...labels],
+  }).catch(() => {});
+  // "latest" always moves on every save, so it isn't a deploy signal on its own.
+  const deployed = moved.filter((l) => l !== "latest");
+  if (deployed.length > 0) {
+    void dispatchAutomations(projectId, "prompt.label.moved", {
+      name: prompt.name,
+      version,
+      labels: deployed,
+    }).catch(() => {});
   }
 
   return {
