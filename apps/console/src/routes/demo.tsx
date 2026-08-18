@@ -124,9 +124,17 @@ function DemoSignIn() {
           )}
         </CardContent>
         {sent ? null : (
-          <CardFooter className="text-center text-xs text-muted-foreground">
+          <CardFooter className="block text-center text-xs text-muted-foreground">
             Sandboxes are read-only and expire automatically. By continuing you agree to the demo being reset
-            periodically.
+            periodically. Your email is used only for the sign-in link — no marketing, ever.{" "}
+            <a
+              href="https://memoturn.com/privacy"
+              target="_blank"
+              rel="noopener"
+              className="underline underline-offset-2 transition-colors hover:text-foreground"
+            >
+              Privacy
+            </a>
           </CardFooter>
         )}
       </Card>

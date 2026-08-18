@@ -1,24 +1,30 @@
 import { Button, Toaster } from "@memoturn/ui";
 import { createRootRoute, HeadContent, Link, Scripts } from "@tanstack/react-router";
 
+import ConsentBanner from "../components/consent-banner";
 import Footer from "../components/footer";
 import Header from "../components/header";
+import { CONSENT_REGIONS, CONSENT_STORAGE_KEY, GA_ID } from "../lib/analytics";
 
 import appCss from "../styles.css?url";
 
-// GA4 measurement id (G-XXXXXXX). Build-time and optional: unset (local, staging,
-// self-host forks) means no tag is rendered and no analytics request is ever made.
-// Set via the GA_MEASUREMENT_ID repository variable in the deploy-site workflow.
-const GA_ID = /^G-[A-Z0-9]+$/.test(import.meta.env.VITE_GA_MEASUREMENT_ID ?? "")
-  ? import.meta.env.VITE_GA_MEASUREMENT_ID
-  : undefined;
-
-// Standard gtag.js bootstrap (the loader script itself is a separate async <script src>
-// below). Query strings stay intact here on purpose — UTM params are the point. CSP in
-// src/server.ts allowlists www.googletagmanager.com and the GA collect endpoints — keep
-// the two in sync.
+// gtag.js bootstrap with Consent Mode v2 (the loader script itself is a separate async
+// <script src> below; GA_ID comes from ../lib/analytics — unset means no tag is rendered
+// and no analytics request is ever made). Query strings stay intact here on purpose —
+// UTM params are the point. Consent: analytics storage defaults to denied in
+// CONSENT_REGIONS until the banner grants it (a region-scoped default beats the general
+// one regardless of order), granted elsewhere; ad signals are always denied — we run no
+// ads. A previously stored banner choice is replayed before config. CSP in src/server.ts
+// allowlists www.googletagmanager.com and the GA collect endpoints — keep the two in sync.
 const GTAG_SNIPPET = GA_ID
-  ? `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${GA_ID}');`
+  ? [
+      `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}`,
+      `gtag('js',new Date());`,
+      `gtag('consent','default',{ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied',analytics_storage:'denied',region:${JSON.stringify(CONSENT_REGIONS)}});`,
+      `gtag('consent','default',{ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied',analytics_storage:'granted'});`,
+      `try{var c=localStorage.getItem('${CONSENT_STORAGE_KEY}');if(c==='granted'||c==='denied'){gtag('consent','update',{analytics_storage:c});}}catch(e){}`,
+      `gtag('config','${GA_ID}');`,
+    ].join("")
   : undefined;
 
 const TITLE = "Memoturn — open-source LLM observability, evals & prompt management";
@@ -188,6 +194,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           {children}
         </main>
         <Footer />
+        <ConsentBanner />
         <Toaster />
         <Scripts />
       </body>

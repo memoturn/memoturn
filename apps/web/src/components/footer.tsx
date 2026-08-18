@@ -43,6 +43,9 @@ export default function Footer() {
                 {l.label}
               </a>
             ))}
+            <Link to="/privacy" className={FOOTER_LINK_CLASS}>
+              Privacy
+            </Link>
           </nav>
         </div>
       </div>
