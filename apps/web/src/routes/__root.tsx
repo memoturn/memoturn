@@ -6,6 +6,21 @@ import Header from "../components/header";
 
 import appCss from "../styles.css?url";
 
+// GA4 measurement id (G-XXXXXXX). Build-time and optional: unset (local, staging,
+// self-host forks) means no tag is rendered and no analytics request is ever made.
+// Set via the GA_MEASUREMENT_ID repository variable in the deploy-site workflow.
+const GA_ID = /^G-[A-Z0-9]+$/.test(import.meta.env.VITE_GA_MEASUREMENT_ID ?? "")
+  ? import.meta.env.VITE_GA_MEASUREMENT_ID
+  : undefined;
+
+// Standard gtag.js bootstrap (the loader script itself is a separate async <script src>
+// below). Query strings stay intact here on purpose — UTM params are the point. CSP in
+// src/server.ts allowlists www.googletagmanager.com and the GA collect endpoints — keep
+// the two in sync.
+const GTAG_SNIPPET = GA_ID
+  ? `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${GA_ID}');`
+  : undefined;
+
 const TITLE = "Memoturn — open-source LLM observability, evals & prompt management";
 const DESCRIPTION =
   "Open-source LLM observability, evals, and prompt management. Trace calls, track cost, tokens, and latency. OpenTelemetry-native and self-hostable.";
@@ -60,6 +75,7 @@ export const Route = createRootRoute({
       { name: "twitter:image", content: "https://memoturn.com/og-image.png" },
     ],
     links: [
+      ...(GA_ID ? [{ rel: "preconnect", href: "https://www.googletagmanager.com" }] : []),
       { rel: "stylesheet", href: appCss },
       { rel: "canonical", href: "https://memoturn.com/" },
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
@@ -72,7 +88,12 @@ export const Route = createRootRoute({
     // Rendered in <head> by HeadContent (head() `scripts` maps to the match's
     // headScripts); ld+json is a non-executing data block, so CSP script-src
     // does not apply to it (see src/server.ts).
-    scripts: [{ type: "application/ld+json", children: JSON.stringify(JSON_LD) }],
+    scripts: [
+      { type: "application/ld+json", children: JSON.stringify(JSON_LD) },
+      ...(GA_ID && GTAG_SNIPPET
+        ? [{ src: `https://www.googletagmanager.com/gtag/js?id=${GA_ID}`, async: true }, { children: GTAG_SNIPPET }]
+        : []),
+    ],
   }),
   shellComponent: RootDocument,
   errorComponent: RootErrorBoundary,

@@ -197,6 +197,7 @@ after `DEMO_TTL_DAYS`. Used to run the public demo; see the worker's `sandbox-pr
 | `DEMO_FINALIZE_DELAY_MS` | `120000` | How long the finalize job waits after the seed batches are submitted, so async ingest can drain before the sign-in link is emailed. Raise it if visitors land on a half-empty dashboard. |
 | `DEMO_START_RATE_LIMIT_PER_MINUTE` | `10` | Per-IP cap on `POST /v1/demo/start`, the unauthenticated pre-provision route. Honors `RATE_LIMIT_TRUSTED_PROXIES` when resolving the client IP. |
 | `SANDBOX_CONCURRENCY` | `2` | Worker concurrency for the sandbox seed queue. |
+| `VITE_GA_MEASUREMENT_ID` | unset | GA4 measurement id baked into the demo's console bundle at image build (compose build arg, not runtime env). Unset ships zero analytics code — leave it unset on self-host installs. Page views are sent with query strings stripped, so magic-link tokens never reach analytics. |
 
 ## Dev tooling
 

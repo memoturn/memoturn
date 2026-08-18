@@ -6,6 +6,26 @@ import starlightLlmsTxt from "starlight-llms-txt";
 
 const SITE = process.env.MEMOTURN_DOCS_URL ?? "https://docs.memoturn.com";
 
+// GA4 measurement id (G-XXXXXXX). Build-time and optional: unset (local, self-host
+// forks) ships zero analytics code. Set via the GA_MEASUREMENT_ID repository variable
+// in the deploy-site workflow. The enforcing CSP in public/_headers allowlists the
+// gtag/GA origins — keep the two in sync.
+const GA_ID = /^G-[A-Z0-9]+$/.test(process.env.PUBLIC_GA_MEASUREMENT_ID ?? "")
+  ? process.env.PUBLIC_GA_MEASUREMENT_ID
+  : undefined;
+
+/** @type {import('@astrojs/starlight/types').StarlightUserConfig["head"]} */
+const gtagHead = GA_ID
+  ? [
+      { tag: "link", attrs: { rel: "preconnect", href: "https://www.googletagmanager.com" } },
+      { tag: "script", attrs: { src: `https://www.googletagmanager.com/gtag/js?id=${GA_ID}`, async: true } },
+      {
+        tag: "script",
+        content: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${GA_ID}');`,
+      },
+    ]
+  : [];
+
 // https://astro.build/config
 export default defineConfig({
   site: SITE,
@@ -29,6 +49,7 @@ export default defineConfig({
         { icon: "external", label: "memoturn.com", href: "https://memoturn.com" },
       ],
       head: [
+        ...gtagHead,
         { tag: "meta", attrs: { name: "theme-color", content: "#0f1213" } },
         { tag: "meta", attrs: { property: "og:type", content: "website" } },
         { tag: "meta", attrs: { property: "og:image", content: `${SITE}/og-image.png` } },
