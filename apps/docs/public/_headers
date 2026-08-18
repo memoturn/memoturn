@@ -9,8 +9,8 @@
 #   worker is same-origin (/pagefind/pagefind-worker.js), covered by 'self'.
 # - The site CSS @imports Google Fonts → allow fonts.googleapis.com styles and
 #   fonts.gstatic.com font files.
-# - Google Tag Manager (injected from astro.config.mjs when PUBLIC_GTM_ID is set at
-#   build) → allow www.googletagmanager.com scripts and the GA4 collect endpoints in
+# - GA4 gtag.js (injected from astro.config.mjs when PUBLIC_GA_MEASUREMENT_ID is set
+#   at build) → allow www.googletagmanager.com scripts and the GA4 collect endpoints in
 #   connect-src/img-src. This CSP is ENFORCING — a miss here silently kills analytics.
 
 /*

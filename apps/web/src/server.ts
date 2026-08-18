@@ -68,10 +68,10 @@ function deployEnvFor(host: string | null): DeployEnv {
   return "production";
 }
 
-// Google Tag Manager + GA4 collect endpoints (the only third-party scripts on the site;
-// loaded from __root.tsx when VITE_GTM_ID is set at build). Allowlisted unconditionally —
+// gtag.js + GA4 collect endpoints (the only third-party scripts on the site; loaded from
+// __root.tsx when VITE_GA_MEASUREMENT_ID is set at build). Allowlisted unconditionally —
 // harmless when the tag isn't in the build, and keeps the header static per environment.
-const GTM_SCRIPT_SRC = "https://www.googletagmanager.com";
+const GTAG_SCRIPT_SRC = "https://www.googletagmanager.com";
 const GA_COLLECT_SRC = "https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com";
 
 function connectSrcFor(env: DeployEnv): string {
@@ -107,7 +107,7 @@ function applySecurityHeaders(headers: Headers, nonce: string, host: string | nu
     "Content-Security-Policy-Report-Only",
     [
       `default-src 'self'`,
-      `script-src 'self' ${GTM_SCRIPT_SRC} 'nonce-${nonce}' 'unsafe-inline'`,
+      `script-src 'self' ${GTAG_SCRIPT_SRC} 'nonce-${nonce}' 'unsafe-inline'`,
       `style-src 'self' 'unsafe-inline'`,
       `img-src 'self' https: data:`,
       `font-src 'self' data:`,
