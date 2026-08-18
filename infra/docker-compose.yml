@@ -210,6 +210,10 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env (openssl rand -base64 48)}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (openssl rand -base64 48)}
       AUTH_TRUSTED_ORIGINS: ${AUTH_TRUSTED_ORIGINS:?set AUTH_TRUSTED_ORIGINS in .env (comma-separated console origins)}
+      # The worker sends Better Auth emails too (demo finalize emails the first sign-in
+      # magic link) — without AUTH_BASE_URL its links are built against the localhost
+      # fallback and land dead in inboxes. Keep in sync with the api service.
+      AUTH_BASE_URL: ${AUTH_BASE_URL:-http://localhost:3001}
       DATABASE_URL: postgresql://memoturn:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/memoturn?schema=public
       DORIS_HOST: doris-fe
       DORIS_PORT: "9030"
