@@ -889,7 +889,111 @@ function AddToDatasetButton({ obs }: { obs: ObservationDetail }) {
 
 /** The input/output/retrieval/status body for one observation — the master-detail pane's content.
  *  `siblings` (the trace's full observation list) powers the reranker before/after pairing. */
-function ObservationPayloadContent({ obs, siblings }: { obs: ObservationDetail; siblings: ObservationDetail[] }) {
+/** Name under which the console records a generation's human-corrected output. */
+const CORRECTED_OUTPUT_SCORE = "corrected-output";
+
+/**
+ * A generation's human-corrected output — a span-scoped CORRECTION score. The correction is
+ * the ground-truth pair for the generation (what the answer SHOULD have been), reusable as a
+ * dataset expected-output later.
+ */
+function CorrectedOutput({ obs, scores }: { obs: ObservationDetail; scores?: ScoreRow[] }) {
+  const readOnly = useIsReadOnly();
+  const qc = useQueryClient();
+  const existing = (scores ?? [])
+    .filter((s) => s.data_type === "CORRECTION")
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  // Shown until the async ingest pipeline lands the score and the refetch takes over.
+  const [savedText, setSavedText] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: (text: string) =>
+      api.annotateTrace(obs.trace_id, {
+        name: CORRECTED_OUTPUT_SCORE,
+        dataType: "CORRECTION",
+        stringValue: text,
+        observationId: obs.id,
+      }),
+    onSuccess: (_r, text) => {
+      toast.success("Corrected output saved");
+      setSavedText(text);
+      setEditing(false);
+      // The score lands through the async ingest pipeline — refetch after a beat.
+      setTimeout(() => qc.invalidateQueries({ queryKey: ["trace", obs.trace_id] }), 1500);
+    },
+    onError: (e) => toast.error(`Failed to save: ${String(e)}`),
+  });
+  const current = savedText ?? existing?.string_value ?? "";
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-1 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+        Corrected output
+        <HelpTip>
+          What the answer should have been — recorded as a CORRECTION score on this generation, usable as ground truth
+          for datasets and evals.
+        </HelpTip>
+      </div>
+      {editing ? (
+        <div className="space-y-2">
+          <Textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={5}
+            placeholder="The corrected response…"
+            className="font-mono text-xs"
+          />
+          <div className="flex gap-2">
+            <Button size="sm" disabled={!draft.trim() || save.isPending} onClick={() => save.mutate(draft.trim())}>
+              {save.isPending ? "Saving…" : "Save correction"}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : current ? (
+        <div className="space-y-1">
+          <pre className={cn(PRE_CLASS, "border-emerald-500/40 bg-emerald-500/5")}>{current}</pre>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs"
+            disabled={readOnly}
+            onClick={() => {
+              setDraft(current);
+              setEditing(true);
+            }}
+          >
+            Edit correction
+          </Button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          disabled={readOnly}
+          onClick={() => {
+            setDraft(obs.output && !obs.output.startsWith("{") ? obs.output : "");
+            setEditing(true);
+          }}
+          className="w-full rounded-md border border-dashed px-3 py-2 text-left text-xs text-muted-foreground hover:border-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Click to add a corrected output
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ObservationPayloadContent({
+  obs,
+  siblings,
+  scores,
+}: {
+  obs: ObservationDetail;
+  siblings: ObservationDetail[];
+  scores?: ScoreRow[];
+}) {
   return (
     <div className="space-y-3">
       {obs.type === "GUARDRAIL" && <GuardrailPanel obs={obs} />}
@@ -924,6 +1028,7 @@ function ObservationPayloadContent({ obs, siblings }: { obs: ObservationDetail; 
           <PayloadView raw={obs.output} />
         </div>
       )}
+      {obs.type === "GENERATION" && <CorrectedOutput obs={obs} scores={scores} />}
       {obs.retrieval_documents.length > 0 &&
         (obs.type === "RERANKER" ? (
           <RerankerDocs obs={obs} siblings={siblings} />
@@ -941,7 +1046,15 @@ function ObservationPayloadContent({ obs, siblings }: { obs: ObservationDetail; 
 }
 
 /** The selected observation's payload with an identifying header — the detail half of the split. */
-function ObservationDetailPanel({ obs, siblings }: { obs: ObservationDetail; siblings: ObservationDetail[] }) {
+function ObservationDetailPanel({
+  obs,
+  siblings,
+  scores,
+}: {
+  obs: ObservationDetail;
+  siblings: ObservationDetail[];
+  scores?: ScoreRow[];
+}) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2 border-b pb-3">
@@ -968,7 +1081,7 @@ function ObservationDetailPanel({ obs, siblings }: { obs: ObservationDetail; sib
           </Link>
         )}
       </div>
-      <ObservationPayloadContent obs={obs} siblings={siblings} />
+      <ObservationPayloadContent obs={obs} siblings={siblings} scores={scores} />
     </div>
   );
 }
@@ -2210,7 +2323,11 @@ export function TraceDetailBody({
               </CardHeader>
               <CardContent>
                 {selectedObs ? (
-                  <ObservationDetailPanel obs={selectedObs} siblings={trace.observations} />
+                  <ObservationDetailPanel
+                    obs={selectedObs}
+                    siblings={trace.observations}
+                    scores={scoresByObs.get(selectedObs.id)}
+                  />
                 ) : (
                   <EmptyState title="No payloads to show." />
                 )}

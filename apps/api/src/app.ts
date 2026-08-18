@@ -1443,6 +1443,8 @@ app.openapi(
               value: z.number().optional(),
               stringValue: z.string().optional(),
               comment: z.string().optional(),
+              // Target span for span-scoped annotations (e.g. a generation's corrected output).
+              observationId: z.string().optional(),
             }),
           },
         },
