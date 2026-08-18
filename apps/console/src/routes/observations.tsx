@@ -1,7 +1,7 @@
 import { filterState, OBSERVATION_FILTER_COLUMNS, type SingleFilter } from "@memoturn/contracts";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Clock, Coins, DollarSign, Layers } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Clock, Coins, DollarSign, Layers } from "lucide-react";
 import { EmptyState } from "../components/empty-state";
 import { FilterBuilder } from "../components/filter-builder";
 import { KindBadge, toneForKind } from "../components/kind-badge";
@@ -35,7 +35,13 @@ interface ObservationSearch {
   filter?: string;
   page?: number;
   pageSize?: number;
+  // Sort key + direction — view state like page. Default (start_time desc) stays out of the URL.
+  orderBy?: ObsOrder;
+  orderDir?: "asc" | "desc";
 }
+
+type ObsOrder = "start_time" | "name" | "latency" | "cost" | "tokens";
+const OBS_ORDERS: ObsOrder[] = ["start_time", "name", "latency", "cost", "tokens"];
 
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
 const posInt = (v: unknown) => {
@@ -57,6 +63,8 @@ export const Route = createFileRoute("/observations")({
     filter: str(s.filter),
     page: posInt(s.page),
     pageSize: posInt(s.pageSize),
+    orderBy: OBS_ORDERS.includes(s.orderBy as ObsOrder) ? (s.orderBy as ObsOrder) : undefined,
+    orderDir: s.orderDir === "asc" || s.orderDir === "desc" ? s.orderDir : undefined,
   }),
   component: ObservationsPage,
 });
@@ -98,17 +106,21 @@ function ObservationsPage() {
   const navigate = useNavigate({ from: Route.fullPath });
   const days = useRangeDays();
 
-  const { page: pageRaw, pageSize: pageSizeRaw, ...listFilters } = filters;
+  // Sort is view state like page — kept out of `listFilters` so the facets query ignores it.
+  const { page: pageRaw, pageSize: pageSizeRaw, orderBy, orderDir, ...listFilters } = filters;
   const page = pageRaw ?? 1;
   const pageSize = pageSizeRaw ?? DEFAULT_PAGE_SIZE;
+  const sortKey = orderBy ?? "start_time";
+  const sortDir = orderDir ?? "desc";
 
   const {
     data: pageData,
     isLoading,
     error,
   } = useQuery({
-    queryKey: ["observations", listFilters, days, page, pageSize],
-    queryFn: () => api.listObservationsPage({ ...listFilters, days, page, pageSize }),
+    queryKey: ["observations", listFilters, days, page, pageSize, sortKey, sortDir],
+    queryFn: () =>
+      api.listObservationsPage({ ...listFilters, days, page, pageSize, orderBy: sortKey, orderDir: sortDir }),
     refetchInterval: 10_000,
     placeholderData: keepPreviousData,
   });
@@ -129,6 +141,37 @@ function ObservationsPage() {
   const setPage = (p: number) => navigate({ search: (prev) => ({ ...prev, page: p > 1 ? p : undefined }) });
   const setPageSize = (s: number) =>
     navigate({ search: (prev) => ({ ...prev, pageSize: s !== DEFAULT_PAGE_SIZE ? s : undefined, page: undefined }) });
+  // Header click: first click sorts by the column (desc for metrics, asc for name), second flips.
+  const setSort = (key: ObsOrder) => {
+    const dir = sortKey === key ? (sortDir === "desc" ? "asc" : "desc") : key === "name" ? "asc" : "desc";
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        orderBy: key === "start_time" && dir === "desc" ? undefined : key,
+        orderDir: key === "start_time" && dir === "desc" ? undefined : dir,
+        page: undefined,
+      }),
+    });
+  };
+  const SortHead = ({ label, order, right }: { label: string; order: ObsOrder; right?: boolean }) => (
+    <button
+      type="button"
+      onClick={() => setSort(order)}
+      className={`inline-flex items-center gap-1 hover:text-foreground ${right ? "justify-end" : ""}`}
+      title={`Sort by ${label.toLowerCase()}`}
+    >
+      {label}
+      {sortKey === order ? (
+        sortDir === "desc" ? (
+          <ArrowDown className="size-3.5" />
+        ) : (
+          <ArrowUp className="size-3.5" />
+        )
+      ) : (
+        <ArrowUpDown className="size-3.5 opacity-40" />
+      )}
+    </button>
+  );
 
   // The structured filter set lives in the URL as JSON; a malformed value degrades to empty.
   const filterSet: SingleFilter[] = (() => {
@@ -236,14 +279,24 @@ function ObservationsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
+                  <TableHead>
+                    <SortHead label="Name" order="name" />
+                  </TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Level</TableHead>
                   <TableHead>Model</TableHead>
-                  <TableHead className="text-right">Latency</TableHead>
-                  <TableHead className="text-right">Tokens</TableHead>
-                  <TableHead className="text-right">Cost</TableHead>
-                  <TableHead>Start</TableHead>
+                  <TableHead className="text-right">
+                    <SortHead label="Latency" order="latency" right />
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <SortHead label="Tokens" order="tokens" right />
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <SortHead label="Cost" order="cost" right />
+                  </TableHead>
+                  <TableHead>
+                    <SortHead label="Start" order="start_time" />
+                  </TableHead>
                   <TableHead>Trace</TableHead>
                 </TableRow>
               </TableHeader>

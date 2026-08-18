@@ -21,6 +21,11 @@ export const traceSummary = z.object({
   total_cost: z.number(),
   total_tokens: z.number(),
   latency_ms: z.number(),
+  // Leading slice of the trace's input/output/metadata (store-side truncation) — list-row
+  // preview cells only; the full payload stays a getTrace concern.
+  input_preview: z.string(),
+  output_preview: z.string(),
+  metadata_preview: z.string(),
 });
 export type TraceSummary = z.infer<typeof traceSummary>;
 

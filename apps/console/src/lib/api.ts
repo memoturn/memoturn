@@ -202,6 +202,9 @@ export interface TraceFilters {
   /** JSON-encoded structured filter set (the power-path FilterBuilder); parsed server-side. */
   filter?: string;
   days?: number;
+  /** Whitelisted sort key + direction (default: timestamp desc). */
+  orderBy?: "timestamp" | "name" | "latency" | "cost" | "tokens";
+  orderDir?: "asc" | "desc";
 }
 /** Span-explorer query — every field filters the observation row itself, not its trace. */
 export interface ObservationQuery {
@@ -214,6 +217,9 @@ export interface ObservationQuery {
   /** JSON-encoded structured filter set over OBSERVATION columns; parsed server-side. */
   filter?: string;
   days?: number;
+  /** Whitelisted sort key + direction (default: start_time desc). */
+  orderBy?: "start_time" | "name" | "latency" | "cost" | "tokens";
+  orderDir?: "asc" | "desc";
 }
 export interface PlaygroundRequest {
   provider: string;

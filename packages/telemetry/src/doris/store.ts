@@ -57,7 +57,7 @@ import type {
   TraceScore,
   WindowMetric,
 } from "../types.js";
-import { TELEMETRY_PRIMARY_KEYS } from "../types.js";
+import { TELEMETRY_PRIMARY_KEYS, TRACE_PREVIEW_CHARS } from "../types.js";
 import { closeDorisPool, dorisQuery } from "./client.js";
 import { buildObservationFilterSql, buildTraceFilterSql } from "./filters.js";
 import { compileQuery, validateQuery } from "./query.js";
@@ -227,9 +227,27 @@ export class DorisTelemetryStore implements TelemetryStore {
   }
 
   async listTraces(projectId: string, filters: TraceFilters = {}): Promise<TraceSummary[]> {
-    const { limit = 50, offset = 0 } = filters;
+    const { limit = 50, offset = 0, orderBy = "timestamp", orderDir = "desc" } = filters;
     const { where, params } = this.traceListWhere(projectId, filters);
-    params.push(Math.floor(limit), Math.max(0, Math.floor(offset)));
+    const dir = orderDir === "asc" ? "ASC" : "DESC";
+    // Trace-column sorts stay on the fast path; aggregate sorts (latency/cost/tokens) join a
+    // per-trace observation rollup before the LIMIT so the whole result set orders correctly.
+    const aggSort = orderBy === "latency" || orderBy === "cost" || orderBy === "tokens";
+    const orderExpr = {
+      timestamp: "t.`timestamp`",
+      name: "t.name",
+      latency: "COALESCE(agg.latency_ms, 0)",
+      cost: "COALESCE(agg.total_cost, 0)",
+      tokens: "COALESCE(agg.total_tokens, 0)",
+    }[orderBy];
+    const aggJoin = aggSort
+      ? `LEFT JOIN (
+           SELECT trace_id, SUM(total_cost) AS total_cost, SUM(total_tokens) AS total_tokens, MAX(latency_ms) AS latency_ms
+           FROM observations WHERE project_id = ? GROUP BY trace_id
+         ) agg ON agg.trace_id = t.id`
+      : "";
+    const allParams = aggSort ? [projectId, ...params] : params;
+    allParams.push(Math.floor(limit), Math.max(0, Math.floor(offset)));
 
     // Two-step (like exportTraces): pick the page of traces first, then aggregate
     // observations for just those trace ids — an unconditioned subquery would scan
@@ -246,13 +264,17 @@ export class DorisTelemetryStore implements TelemetryStore {
         t.session_id AS session_id,
         t.session_path AS session_path,
         t.environment AS environment,
-        CAST(t.tags AS JSON) AS tags
+        CAST(t.tags AS JSON) AS tags,
+        LEFT(t.input, ${TRACE_PREVIEW_CHARS}) AS input_preview,
+        LEFT(t.output, ${TRACE_PREVIEW_CHARS}) AS output_preview,
+        LEFT(t.metadata, ${TRACE_PREVIEW_CHARS}) AS metadata_preview
       FROM traces t
+      ${aggJoin}
       WHERE ${where}
-      ORDER BY t.\`timestamp\` DESC, t.id DESC
+      ORDER BY ${orderExpr} ${dir}, t.id DESC
       LIMIT ? OFFSET ?
       `,
-      params,
+      allParams,
     );
     if (rows.length === 0) return [];
 
@@ -602,8 +624,16 @@ export class DorisTelemetryStore implements TelemetryStore {
   }
 
   async listObservations(projectId: string, filters: ObservationFilters = {}): Promise<ObservationSummary[]> {
-    const { limit = 50, offset = 0 } = filters;
+    const { limit = 50, offset = 0, orderBy = "start_time", orderDir = "desc" } = filters;
     const { where, params } = this.observationListWhere(projectId, filters);
+    const dir = orderDir === "asc" ? "ASC" : "DESC";
+    const orderExpr = {
+      start_time: "o.start_time",
+      name: "o.name",
+      latency: "o.latency_ms",
+      cost: "o.total_cost",
+      tokens: "o.total_tokens",
+    }[orderBy];
     const rows = await this.query<Omit<ObservationSummary, "trace_name">>(
       `
       SELECT
@@ -617,7 +647,7 @@ export class DorisTelemetryStore implements TelemetryStore {
         o.total_tokens AS total_tokens, o.total_cost AS total_cost, o.latency_ms AS latency_ms
       FROM observations o
       WHERE ${where}
-      ORDER BY o.start_time DESC, o.id DESC
+      ORDER BY ${orderExpr} ${dir}, o.id DESC
       LIMIT ? OFFSET ?
       `,
       [...params, Math.floor(limit), Math.max(0, Math.floor(offset))],

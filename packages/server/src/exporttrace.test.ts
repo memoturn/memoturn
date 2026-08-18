@@ -6,6 +6,7 @@ const listObservationsByTrace = vi.fn();
 const listScoresByTrace = vi.fn();
 const listRetrievalDocumentsByObservationIds = vi.fn();
 vi.mock("@memoturn/telemetry", () => ({
+  TRACE_PREVIEW_CHARS: 300,
   telemetry: () => ({
     getTraceHeader,
     listObservationsByTrace,
