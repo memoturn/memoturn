@@ -8,6 +8,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Skeleton } from "../components/ui/skeleton";
+import { trackEvent } from "../lib/analytics";
 import { api } from "../lib/api";
 import { useSession } from "../lib/auth";
 
@@ -51,6 +52,8 @@ function DemoSignIn() {
         return;
       }
       setSent(true);
+      // GA4 key event (no PII — the email itself is never sent to analytics).
+      trackEvent("demo_signup_requested");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {

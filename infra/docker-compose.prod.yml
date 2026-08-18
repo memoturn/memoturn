@@ -358,6 +358,10 @@ services:
     build:
       context: ..
       dockerfile: docker/console.Dockerfile
+      args:
+        # Public demo only: bakes GA4 into the console bundle when set in the host .env
+        # (empty default = analytics module compiled out; see docker/console.Dockerfile).
+        VITE_GA_MEASUREMENT_ID: ${VITE_GA_MEASUREMENT_ID:-}
     restart: unless-stopped
     # No command override: the image's Caddy static server listens on :3000.
     healthcheck:

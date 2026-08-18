@@ -38,9 +38,13 @@
 
 	handle {
 		# Defense-in-depth CSP for the console document (where user-controlled trace/LLM
-		# content renders). Tuned for the bundled Vite SPA — no external origins; images allow
-		# data:/blob: for inline media, styles allow 'unsafe-inline' for Tailwind/chart styles.
-		header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+		# content renders). Tuned for the bundled Vite SPA — images allow data:/blob: for
+		# inline media, styles allow 'unsafe-inline' for Tailwind/chart styles. The ONLY
+		# external origins are Google gtag/GA4 collect endpoints for the public demo's
+		# analytics (apps/console/src/lib/analytics.ts; inert unless the image was built
+		# with VITE_GA_MEASUREMENT_ID). Deliberately gtag, not GTM: no dynamically
+		# configurable tag injection on the surface that renders untrusted trace content.
+		header Content-Security-Policy "default-src 'self'; script-src 'self' https://www.googletagmanager.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.google-analytics.com https://*.googletagmanager.com; font-src 'self' data:; connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
 		reverse_proxy console:3000
 	}
 }

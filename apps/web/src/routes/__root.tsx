@@ -6,6 +6,17 @@ import Header from "../components/header";
 
 import appCss from "../styles.css?url";
 
+// Google Tag Manager container id (GTM-XXXXXXX). Build-time and optional: unset (local,
+// staging, self-host forks) means no tag is rendered and no analytics request is ever
+// made. Set via the GTM_ID repository variable in the deploy-site workflow.
+const GTM_ID = /^GTM-[A-Z0-9]+$/.test(import.meta.env.VITE_GTM_ID ?? "") ? import.meta.env.VITE_GTM_ID : undefined;
+
+// Standard GTM loader. CSP in src/server.ts allowlists www.googletagmanager.com and the
+// GA collect endpoints — keep the two in sync.
+const GTM_SNIPPET = GTM_ID
+  ? `(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','${GTM_ID}');`
+  : undefined;
+
 const TITLE = "Memoturn — open-source LLM observability, evals & prompt management";
 const DESCRIPTION =
   "Open-source LLM observability, evals, and prompt management. Trace calls, track cost, tokens, and latency. OpenTelemetry-native and self-hostable.";
@@ -60,6 +71,7 @@ export const Route = createRootRoute({
       { name: "twitter:image", content: "https://memoturn.com/og-image.png" },
     ],
     links: [
+      ...(GTM_ID ? [{ rel: "preconnect", href: "https://www.googletagmanager.com" }] : []),
       { rel: "stylesheet", href: appCss },
       { rel: "canonical", href: "https://memoturn.com/" },
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
@@ -72,7 +84,10 @@ export const Route = createRootRoute({
     // Rendered in <head> by HeadContent (head() `scripts` maps to the match's
     // headScripts); ld+json is a non-executing data block, so CSP script-src
     // does not apply to it (see src/server.ts).
-    scripts: [{ type: "application/ld+json", children: JSON.stringify(JSON_LD) }],
+    scripts: [
+      { type: "application/ld+json", children: JSON.stringify(JSON_LD) },
+      ...(GTM_SNIPPET ? [{ children: GTM_SNIPPET }] : []),
+    ],
   }),
   shellComponent: RootDocument,
   errorComponent: RootErrorBoundary,

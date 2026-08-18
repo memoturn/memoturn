@@ -9,6 +9,9 @@
 #   worker is same-origin (/pagefind/pagefind-worker.js), covered by 'self'.
 # - The site CSS @imports Google Fonts → allow fonts.googleapis.com styles and
 #   fonts.gstatic.com font files.
+# - Google Tag Manager (injected from astro.config.mjs when PUBLIC_GTM_ID is set at
+#   build) → allow www.googletagmanager.com scripts and the GA4 collect endpoints in
+#   connect-src/img-src. This CSP is ENFORCING — a miss here silently kills analytics.
 
 /*
   Strict-Transport-Security: max-age=31536000; includeSubDomains
@@ -16,7 +19,7 @@
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://*.google-analytics.com https://*.googletagmanager.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; frame-ancestors 'none'; base-uri 'none'; object-src 'none'
 
 # Hashed build assets are content-addressed — cache forever.
 /_astro/*

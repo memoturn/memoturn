@@ -46,6 +46,10 @@ jobs:
         working-directory: ${{ matrix.dir }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # One GTM container serves both public sites. Set the GTM_ID repository
+          # variable (GTM-XXXXXXX) to enable analytics; unset ships no tag at all.
+          VITE_GTM_ID: ${{ vars.GTM_ID }}
+          PUBLIC_GTM_ID: ${{ vars.GTM_ID }}
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
             echo "CLOUDFLARE_API_TOKEN secret not set — skipping deploy." >&2

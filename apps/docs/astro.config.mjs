@@ -6,6 +6,23 @@ import starlightLlmsTxt from "starlight-llms-txt";
 
 const SITE = process.env.MEMOTURN_DOCS_URL ?? "https://docs.memoturn.com";
 
+// Google Tag Manager container id (GTM-XXXXXXX). Build-time and optional: unset (local,
+// self-host forks) ships zero analytics code. Set via the GTM_ID repository variable in
+// the deploy-site workflow. The enforcing CSP in public/_headers allowlists the GTM/GA
+// origins — keep the two in sync.
+const GTM_ID = /^GTM-[A-Z0-9]+$/.test(process.env.PUBLIC_GTM_ID ?? "") ? process.env.PUBLIC_GTM_ID : undefined;
+
+/** @type {import('@astrojs/starlight/types').StarlightUserConfig["head"]} */
+const gtmHead = GTM_ID
+  ? [
+      { tag: "link", attrs: { rel: "preconnect", href: "https://www.googletagmanager.com" } },
+      {
+        tag: "script",
+        content: `(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','${GTM_ID}');`,
+      },
+    ]
+  : [];
+
 // https://astro.build/config
 export default defineConfig({
   site: SITE,
@@ -29,6 +46,7 @@ export default defineConfig({
         { icon: "external", label: "memoturn.com", href: "https://memoturn.com" },
       ],
       head: [
+        ...gtmHead,
         { tag: "meta", attrs: { name: "theme-color", content: "#0f1213" } },
         { tag: "meta", attrs: { property: "og:type", content: "website" } },
         { tag: "meta", attrs: { property: "og:image", content: `${SITE}/og-image.png` } },
