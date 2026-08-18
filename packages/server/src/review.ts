@@ -193,6 +193,8 @@ export interface AnnotateTraceInput {
   value?: number;
   stringValue?: string;
   comment?: string;
+  /** Target span for span-scoped annotations (e.g. a generation's corrected output). */
+  observationId?: string;
 }
 
 /**
@@ -211,6 +213,7 @@ export async function annotateTrace(projectId: string, traceId: string, input: A
         body: {
           id: scoreId,
           traceId,
+          observationId: input.observationId,
           name: input.name,
           source: "ANNOTATION",
           dataType: input.dataType,

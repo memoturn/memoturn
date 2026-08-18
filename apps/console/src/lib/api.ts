@@ -285,6 +285,8 @@ export const api = {
       value?: number;
       stringValue?: string;
       comment?: string;
+      /** Target span for span-scoped annotations (e.g. a generation's corrected output). */
+      observationId?: string;
     },
   ) => post<AnnotationResult>(`/v1/traces/${encodeURIComponent(id)}/annotate`, body),
   setTraceTags: (id: string, tags: string[]) => post<TraceTags>(`/v1/traces/${encodeURIComponent(id)}/tags`, { tags }),
