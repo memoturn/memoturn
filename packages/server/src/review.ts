@@ -237,6 +237,7 @@ export interface CorrectScoreInput {
 export interface CorrectedScore {
   id: string;
   trace_id: string;
+  observation_id: string;
   name: string;
   source: string;
   data_type: string;
@@ -289,6 +290,7 @@ export async function correctScore(
   return {
     id: existing.id,
     trace_id: existing.trace_id,
+    observation_id: existing.observation_id,
     name: existing.name,
     source: existing.source,
     data_type: existing.data_type,

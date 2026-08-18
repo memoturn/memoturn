@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import {
   ChevronDown,
   ChevronRight,
@@ -7,6 +7,7 @@ import {
   Download,
   Flag,
   FlaskConical,
+  MessageSquare,
   Plus,
   RotateCcw,
   Tag,
@@ -367,6 +368,8 @@ interface Laid extends ObservationDetail {
   subtreeTokens: number;
   /** This node's duration as a fraction of the trace's slowest node (0–1) — drives latency heat. */
   heatFrac: number;
+  /** This node's cost as a fraction of the trace's most expensive node (0–1) — drives cost heat. */
+  costFrac: number;
 }
 
 /**
@@ -393,7 +396,11 @@ function failedPathIds(observations: ObservationDetail[]): Set<string> {
  * connector guides for its indent columns, and bar offset/width from times. Cyclic/orphaned
  * observations (parent not in the set) render as roots so nothing is dropped.
  */
-function layout(observations: ObservationDetail[], collapsed: Set<string>, failed: Set<string>): Laid[] {
+function layout(
+  observations: ObservationDetail[],
+  collapsed: Set<string>,
+  failed: Set<string>,
+): { rows: Laid[]; totalMs: number } {
   const byId = new Map(observations.map((o) => [o.id, o]));
   const startMs = (o: ObservationDetail) => ms(o.start_time) ?? 0;
 
@@ -453,6 +460,8 @@ function layout(observations: ObservationDetail[], collapsed: Set<string>, faile
 
   // Heat is relative to the slowest single node so one long generation doesn't wash out the rest.
   const maxLatency = Math.max(1, ...observations.map((o) => Number(o.latency_ms)));
+  // Same idea for cost: the most expensive node anchors the cost heat scale.
+  const maxCost = Math.max(...observations.map((o) => Number(o.total_cost)), 0);
 
   const out: Laid[] = [];
   const visited = new Set<string>();
@@ -482,6 +491,7 @@ function layout(observations: ObservationDetail[], collapsed: Set<string>, faile
       subtreeCost: rollup(node.id).cost,
       subtreeTokens: rollup(node.id).tokens,
       heatFrac: Number(node.latency_ms) / maxLatency,
+      costFrac: maxCost > 0 ? Number(node.total_cost) / maxCost : 0,
     });
     if (isCollapsed) {
       // Mark the hidden subtree visited so the orphan safety-net below doesn't re-add
@@ -506,7 +516,7 @@ function layout(observations: ObservationDetail[], collapsed: Set<string>, faile
   });
   // Safety net: any node not reached (part of a cycle) still gets a row, as a root.
   for (const o of observations) if (!visited.has(o.id)) place(o, 0, [], true);
-  return out;
+  return { rows: out, totalMs: total };
 }
 
 /** Every observation that has at least one child — the set "Collapse all" toggles. */
@@ -605,20 +615,60 @@ function TreeGuide({ kind, x }: { kind: GuideKind; x: number }) {
   );
 }
 
+/** Cost heat mirrors latency heat: the most expensive nodes tint red, medium amber. */
+function costTone(frac: number): string {
+  if (frac >= 0.66) return "text-destructive";
+  if (frac >= 0.33) return "text-amber-600 dark:text-amber-400";
+  return "text-muted-foreground";
+}
+
+/** Compact per-node score chip: name + value (numeric 2sf / category / ✓✗), comment in the title. */
+function ScoreChip({ score }: { score: ScoreRow }) {
+  const val =
+    score.value != null
+      ? score.data_type === "BOOLEAN"
+        ? score.value >= 1
+          ? "✓"
+          : "✗"
+        : Number.isInteger(score.value)
+          ? String(score.value)
+          : score.value.toFixed(2)
+      : score.string_value || "—";
+  return (
+    <span
+      className="inline-flex max-w-[11rem] items-center gap-1 rounded border border-primary/30 bg-primary/5 px-1 text-[0.625rem] text-muted-foreground"
+      title={`${score.name}: ${score.value ?? score.string_value}${score.comment ? ` — ${score.comment}` : ""}`}
+    >
+      <span className="truncate font-medium text-foreground/70">{score.name}</span>
+      <span className="shrink-0 tabular-nums">{val}</span>
+      {score.comment && <MessageSquare className="size-2.5 shrink-0" aria-label="Has comment" />}
+    </span>
+  );
+}
+
 function WaterfallRow({
   obs,
   selected,
   onSelect,
   onToggle,
+  scores,
 }: {
   obs: Laid;
   selected?: boolean;
   onSelect?: () => void;
   onToggle?: () => void;
+  /** Scores targeting this span (observation-scoped only), rendered as inline chips. */
+  scores?: ScoreRow[];
 }) {
   const collapsed = obs.hiddenCount > 0;
   const chips = metaChips(obs.metadata);
   const showRollup = collapsed && (obs.subtreeCost > 0 || obs.subtreeTokens > 0);
+  const spanScores = scores ?? [];
+  const shownScores = spanScores.slice(0, 3);
+  const tokenChip =
+    Number(obs.total_tokens) > 0
+      ? `${fmtTokensCompact(Number(obs.prompt_tokens))} → ${fmtTokensCompact(Number(obs.completion_tokens))} (Σ ${fmtTokensCompact(Number(obs.total_tokens))})`
+      : "";
   // Errors/warnings tint the whole row so failures pop while scanning the waterfall.
   const tint =
     obs.level === "ERROR"
@@ -696,13 +746,30 @@ function WaterfallRow({
           )}
           {obs.level !== "DEFAULT" && <KindBadge tone={toneForLevel(obs.level)}>{obs.level.toLowerCase()}</KindBadge>}
         </div>
-        {/* Inline annotations: a Σ cost/token rollup for collapsed subtrees, plus a few scalar
-            metadata chips so per-span context is visible without opening the payload pane. */}
-        {(showRollup || chips.length > 0) && (
+        {/* Inline annotations: a Σ cost/token rollup for collapsed subtrees, per-node token
+            counts, span-scoped score chips, and a few scalar metadata chips — per-span context
+            without opening the payload pane. */}
+        {(showRollup || chips.length > 0 || tokenChip || shownScores.length > 0) && (
           <div className="mt-1 flex flex-wrap items-center gap-1 pl-5">
             {showRollup && (
               <span className="rounded bg-muted px-1 text-[0.625rem] tabular-nums text-muted-foreground">
                 Σ {fmtCostCompact(obs.subtreeCost)} · {fmtTokensCompact(obs.subtreeTokens)} tok
+              </span>
+            )}
+            {tokenChip && (
+              <span
+                className="rounded bg-muted/60 px-1 text-[0.625rem] tabular-nums text-muted-foreground"
+                title={`${obs.prompt_tokens} prompt → ${obs.completion_tokens} completion (Σ ${obs.total_tokens})`}
+              >
+                {tokenChip}
+              </span>
+            )}
+            {shownScores.map((s) => (
+              <ScoreChip key={`${s.name}-${s.timestamp}`} score={s} />
+            ))}
+            {spanScores.length > shownScores.length && (
+              <span className="rounded bg-muted px-1 text-[0.625rem] tabular-nums text-muted-foreground">
+                +{spanScores.length - shownScores.length} more
               </span>
             )}
             {chips.map(([k, v]) => (
@@ -729,9 +796,13 @@ function WaterfallRow({
         />
       </div>
       {/* Duration tinted by latency heat (relative to the trace's slowest node) so slow spans
-          jump out while scanning. ERROR rows keep their red regardless. */}
-      <span className={`py-2 pr-3 text-right text-xs tabular-nums ${heatTone(obs.heatFrac)}`}>
-        {fmtDuration(obs.latency_ms)}
+          jump out while scanning; the node's cost sits below it with its own heat scale.
+          ERROR rows keep their red regardless. */}
+      <span className="flex flex-col items-end justify-center py-2 pr-3 text-right text-xs tabular-nums">
+        <span className={heatTone(obs.heatFrac)}>{fmtDuration(obs.latency_ms)}</span>
+        {Number(obs.total_cost) > 0 && (
+          <span className={`text-[0.625rem] ${costTone(obs.costFrac)}`}>{fmtCostCompact(Number(obs.total_cost))}</span>
+        )}
       </span>
     </div>
   );
@@ -837,13 +908,19 @@ function ObservationPayloadContent({ obs, siblings }: { obs: ObservationDetail; 
       <MediaPreview raw={obs.output} />
       {obs.input && (
         <div className="space-y-1">
-          <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Input</div>
+          <div className="flex items-center gap-1 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+            Input
+            <CopyButton value={obs.input} label="input" />
+          </div>
           <PayloadView raw={obs.input} />
         </div>
       )}
       {obs.output && (
         <div className="space-y-1">
-          <div className="text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">Output</div>
+          <div className="flex items-center gap-1 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+            Output
+            <CopyButton value={obs.output} label="output" />
+          </div>
           <PayloadView raw={obs.output} />
         </div>
       )}
@@ -870,6 +947,10 @@ function ObservationDetailPanel({ obs, siblings }: { obs: ObservationDetail; sib
       <div className="flex flex-wrap items-center gap-2 border-b pb-3">
         <KindBadge tone={toneForKind(obs.type)}>{obs.type.toLowerCase()}</KindBadge>
         <span className="font-medium">{obs.name || obs.id.slice(0, 8)}</span>
+        <span className="inline-flex items-center gap-0.5 text-muted-foreground">
+          <span className="font-mono text-[0.6875rem]">{obs.id.slice(0, 8)}</span>
+          <CopyButton value={obs.id} label="span id" />
+        </span>
         {obs.total_tokens > 0 && <span className="text-muted-foreground">· {obs.total_tokens} tok</span>}
         {Number(obs.total_cost) > 0 && (
           <span className="text-muted-foreground">· ${Number(obs.total_cost).toFixed(6)}</span>
@@ -1685,12 +1766,27 @@ export function TraceDetailBody({
   /** Pre-select a span (deep link from the span explorer). Only the initial selection. */
   initialObservationId?: string;
 }) {
+  // The selected span and view mode mirror into the URL (?observation= / ?view=) so any state
+  // of the explorer is deep-linkable. Local state stays the source of truth — host routes that
+  // don't declare the params (e.g. session detail) simply don't persist them.
+  const navigate = useNavigate();
+  const urlSearch = useSearch({ strict: false }) as { observation?: string; view?: string };
+  const syncUrl = (patch: { observation?: string; view?: string }) =>
+    navigate({
+      to: ".",
+      search: (prev: Record<string, unknown>) => ({ ...prev, ...patch }),
+      replace: true,
+    });
   // Master-detail: the waterfall selects one observation; its payload shows in the detail pane.
-  const [selectedId, setSelectedId] = useState<string | undefined>(initialObservationId);
+  const [selectedId, setSelectedId] = useState<string | undefined>(initialObservationId ?? urlSearch.observation);
   // Collapsed subgraphs in the waterfall (by observation id).
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Observations view: the waterfall timeline (default) or the agent-flow graph.
-  const [obsView, setObsView] = useState<"timeline" | "graph">("timeline");
+  const [obsView, setObsViewState] = useState<"timeline" | "graph">(urlSearch.view === "graph" ? "graph" : "timeline");
+  const setObsView = (v: "timeline" | "graph") => {
+    setObsViewState(v);
+    syncUrl({ view: v === "graph" ? "graph" : undefined });
+  };
   const payloadPanelRef = useRef<HTMLDivElement | null>(null);
   const qc = useQueryClient();
   const readOnly = useIsReadOnly();
@@ -1783,6 +1879,15 @@ export function TraceDetailBody({
   // Waterfall collapse/expand + failed-path highlight (small traces → recompute per render).
   const failedPath = failedPathIds(trace.observations);
   const collapsible = collapsibleIds(trace.observations);
+  const { rows: laidRows, totalMs } = layout(trace.observations, collapsed, failedPath);
+  // Span-scoped scores, grouped by observation id — rendered as chips on their waterfall rows.
+  const scoresByObs = new Map<string, ScoreRow[]>();
+  for (const s of trace.scores) {
+    if (!s.observation_id) continue;
+    const arr = scoresByObs.get(s.observation_id) ?? [];
+    arr.push(s);
+    scoresByObs.set(s.observation_id, arr);
+  }
   const allCollapsed = collapsible.size > 0 && [...collapsible].every((id) => collapsed.has(id));
   const toggleCollapse = (id: string) =>
     setCollapsed((prev) => {
@@ -1797,6 +1902,7 @@ export function TraceDetailBody({
   const selectObs = (id: string) => {
     if (!payloadIds.has(id)) return;
     setSelectedId(id);
+    syncUrl({ observation: id });
     requestAnimationFrame(() =>
       payloadPanelRef.current?.scrollIntoView({ behavior: scrollBehavior(), block: "nearest" }),
     );
@@ -1809,6 +1915,7 @@ export function TraceDetailBody({
     const cur = errorObsIds.indexOf(effectiveSelected ?? "");
     const next = errorObsIds[(cur + 1) % errorObsIds.length]!;
     setSelectedId(next);
+    syncUrl({ observation: next });
     requestAnimationFrame(() => {
       document
         .querySelector(`[data-obs-row="${CSS.escape(next)}"]`)
@@ -2049,21 +2156,44 @@ export function TraceDetailBody({
                     className={`grid ${WATERFALL_COLS} border-b bg-muted/30 py-1.5 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase`}
                   >
                     <span className="px-3">Observation</span>
-                    <span className="inline-flex items-center gap-1">
+                    {/* Time-axis ruler: labeled ticks at the same 0/25/50/75% positions as the
+                        per-row gridlines, so a bar's position reads in real time units. */}
+                    <span className="relative mr-4 inline-flex items-center gap-1">
                       Timeline
                       <HelpTip>
                         Each bar's position is its start offset within the trace; its length is the duration.
                       </HelpTip>
+                      {totalMs > 1 && (
+                        <>
+                          <span className="absolute left-1/4 -translate-x-1/2 font-normal tabular-nums normal-case opacity-70">
+                            {fmtDuration(Math.round(totalMs / 4))}
+                          </span>
+                          <span className="absolute left-1/2 -translate-x-1/2 font-normal tabular-nums normal-case opacity-70">
+                            {fmtDuration(Math.round(totalMs / 2))}
+                          </span>
+                          <span className="absolute left-3/4 -translate-x-1/2 font-normal tabular-nums normal-case opacity-70">
+                            {fmtDuration(Math.round((totalMs * 3) / 4))}
+                          </span>
+                        </>
+                      )}
                     </span>
-                    <span className="pr-3 text-right">Duration</span>
+                    <span className="pr-3 text-right">
+                      Duration
+                      {totalMs > 1 && (
+                        <span className="ml-1 font-normal tabular-nums normal-case opacity-70">
+                          / {fmtDuration(Math.round(totalMs))}
+                        </span>
+                      )}
+                    </span>
                   </div>
-                  {layout(trace.observations, collapsed, failedPath).map((obs) => (
+                  {laidRows.map((obs) => (
                     <WaterfallRow
                       key={obs.id}
                       obs={obs}
                       selected={obs.id === effectiveSelected}
                       onSelect={payloadIds.has(obs.id) ? () => selectObs(obs.id) : undefined}
                       onToggle={() => toggleCollapse(obs.id)}
+                      scores={scoresByObs.get(obs.id)}
                     />
                   ))}
                 </div>

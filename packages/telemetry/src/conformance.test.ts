@@ -174,6 +174,7 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     await store.deleteProjectData(`${P}-scorefilter`);
     await store.deleteProjectData(`${P}-scoreanalytics`);
     await store.deleteProjectData(`${P}-ordering`);
+    await store.deleteProjectData(`${P}-scorespan`);
   });
 
   it("lists traces with rollups, tag + search filters, and ISO timestamps", async () => {
@@ -521,6 +522,16 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     const scores = await store.listScoresByTrace(P, "t1");
     expect(scores).toHaveLength(1);
     expect(scores[0]!.value).toBeCloseTo(0.8);
+    expect(scores[0]!.observation_id).toBe(""); // trace-level score
+
+    // Span-scoped scores round-trip their observation_id (waterfall score chips key on it).
+    // Own project id so the row never skews the project-wide count/delete assertions.
+    await store.insertRows("scores", [
+      score({ id: "sc-obs", project_id: `${P}-scorespan`, trace_id: "t1", observation_id: "o1" }),
+    ]);
+    const withSpan = await store.listScoresByTrace(`${P}-scorespan`, "t1");
+    expect(withSpan).toHaveLength(1);
+    expect(withSpan[0]!.observation_id).toBe("o1");
   });
 
   it("lists observations as first-class rows with filters, facets, and paging", async () => {

@@ -23,7 +23,7 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import { Fragment, type ReactNode, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Timestamp } from "@/components/timestamp";
 import { EmptyState } from "../../components/empty-state";
@@ -53,6 +53,7 @@ import { VolumeHistogram } from "../../components/volume-histogram";
 import { api, downloadTracesExport, type FacetCount, type TraceSummary } from "../../lib/api";
 import { useIsReadOnly } from "../../lib/role";
 import { useRangeDays } from "../../lib/timeRange";
+import { writeTraceListContext } from "../../lib/trace-list-context";
 import { cn } from "../../lib/utils";
 
 interface TraceSearch {
@@ -68,6 +69,10 @@ interface TraceSearch {
   filter?: string;
   // Open trace id — drives the deep-linkable peek drawer, separate from filters.
   peek?: string;
+  // Selected span + timeline/graph mode inside the open peek (mirrored by TraceDetailBody),
+  // so a peeked span deep-links exactly like the full page.
+  observation?: string;
+  view?: string;
   // Pagination (1-based). Defaults (page 1 / size 50) are kept out of the URL to keep it clean.
   page?: number;
   pageSize?: number;
@@ -101,6 +106,8 @@ export const Route = createFileRoute("/traces/")({
     type: str(s.type),
     filter: str(s.filter),
     peek: str(s.peek),
+    observation: str(s.observation),
+    view: s.view === "graph" ? "graph" : undefined,
     page: posInt(s.page),
     pageSize: posInt(s.pageSize),
     orderBy: TRACE_ORDERS.includes(s.orderBy as TraceOrder) ? (s.orderBy as TraceOrder) : undefined,
@@ -445,10 +452,19 @@ function TracesPage() {
     });
   const visibleCols = order.filter((k) => !hidden.has(k));
 
-  // `peek`/`page`/`pageSize`/`orderBy`/`orderDir` are view state, not filters — keep them out of
-  // the list query's filter object (so facets/saved views use only real filters); page/size/sort
-  // still drive the list query itself.
-  const { peek, page: pageRaw, pageSize: pageSizeRaw, orderBy, orderDir, ...listFilters } = filters;
+  // `peek`/`observation`/`view`/`page`/`pageSize`/`orderBy`/`orderDir` are view state, not
+  // filters — keep them out of the list query's filter object (so facets/saved views use only
+  // real filters); page/size/sort still drive the list query itself.
+  const {
+    peek,
+    observation: _observation,
+    view: _view,
+    page: pageRaw,
+    pageSize: pageSizeRaw,
+    orderBy,
+    orderDir,
+    ...listFilters
+  } = filters;
   const page = pageRaw ?? 1;
   const pageSize = pageSizeRaw ?? DEFAULT_PAGE_SIZE;
   const sortKey = orderBy ?? "timestamp";
@@ -593,8 +609,15 @@ function TracesPage() {
     setFilter(key, current === value ? "" : value);
   };
 
-  // Peek drawer: open a trace inline over the list, deep-linkable via ?peek= (drawer owns J/K nav).
-  const setPeek = (id: string | undefined) => navigate({ search: (prev) => ({ ...prev, peek: id }) });
+  // Peek drawer: open a trace inline over the list, deep-linkable via ?peek= (drawer owns J/K
+  // nav). Switching or closing clears the span selection — it belongs to the previous trace.
+  const setPeek = (id: string | undefined) =>
+    navigate({ search: (prev) => ({ ...prev, peek: id, observation: undefined, view: undefined }) });
+
+  // Record this page of ids so the full-page trace detail can step prev/next through the list.
+  useEffect(() => {
+    if (traces && traces.length > 0) writeTraceListContext(traces.map((t) => t.id));
+  }, [traces]);
 
   const { data: savedViews } = useQuery({
     queryKey: ["saved-views", "traces"],
