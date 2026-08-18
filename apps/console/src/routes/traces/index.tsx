@@ -17,10 +17,13 @@ import {
   DollarSign,
   Download,
   GitCompare,
+  RefreshCw,
   Rows2,
   Rows3,
   Save,
+  ShieldAlert,
   SlidersHorizontal,
+  Timer,
   X,
 } from "lucide-react";
 import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
@@ -305,7 +308,64 @@ function ColumnsMenu({
   );
 }
 
-/** One facet dimension: a labeled list of value/count rows; the active value is highlighted. */
+const SLOW_THRESHOLDS = [2000, 5000, 10000]; // ms
+const COST_THRESHOLDS = [0.01, 0.05, 0.25]; // USD
+
+const levelPreset = (levels: string[]): SingleFilter => ({
+  type: "stringOptions",
+  column: "level",
+  operator: "any_of",
+  value: levels,
+});
+
+/** A quick-filter preset dropdown: each option swaps in a structured filter on its column. */
+function PresetMenu({
+  label,
+  icon: Icon,
+  active,
+  options,
+  onClear,
+}: {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  active: boolean;
+  options: { label: string; description: string; apply: () => void }[];
+  onClear: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant={active ? "secondary" : "outline"} size="sm" className="h-7 gap-1.5">
+          <Icon className="size-3.5" />
+          {label}
+          <ChevronDown className="size-3 opacity-60" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64">
+        {options.map((o) => (
+          <DropdownMenuItem key={o.label} onSelect={o.apply}>
+            <div className="flex flex-col">
+              <span>{o.label}</span>
+              <span className="text-xs text-muted-foreground">{o.description}</span>
+            </div>
+          </DropdownMenuItem>
+        ))}
+        {active && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onClear}>Clear {label.toLowerCase()} filter</DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Values shown per facet before the value-search input appears. */
+const FACET_SEARCH_MIN = 8;
+
+/** One facet dimension: a labeled list of value/count rows; the active value is highlighted.
+ *  Long lists get a search input; an active value gets a clear (✕) in the header. */
 function FacetSection({
   title,
   items,
@@ -317,9 +377,32 @@ function FacetSection({
   active?: string;
   onPick: (value: string) => void;
 }) {
+  const [q, setQ] = useState("");
+  const shown = q ? items?.filter((it) => it.value.toLowerCase().includes(q.toLowerCase())) : items;
   return (
     <div>
-      <div className="mb-1 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">{title}</div>
+      <div className="mb-1 flex items-center justify-between text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+        {title}
+        {active && (
+          <button
+            type="button"
+            onClick={() => onPick(active)}
+            className="normal-case hover:text-foreground"
+            title={`Clear ${title.toLowerCase()} filter`}
+          >
+            <X className="size-3" />
+          </button>
+        )}
+      </div>
+      {items && items.length >= FACET_SEARCH_MIN && (
+        <Input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Filter values…"
+          className="mb-1 h-6 px-2 text-xs"
+        />
+      )}
       {!items ? (
         <div className="space-y-1">
           <Skeleton className="h-5 w-full" />
@@ -327,9 +410,11 @@ function FacetSection({
         </div>
       ) : items.length === 0 ? (
         <div className="px-2 py-1 text-xs text-muted-foreground">None</div>
+      ) : shown && shown.length === 0 ? (
+        <div className="px-2 py-1 text-xs text-muted-foreground">No values match</div>
       ) : (
         <div className="space-y-0.5">
-          {items.map((it) => {
+          {(shown ?? []).map((it) => {
             const on = active === it.value;
             return (
               <button
@@ -358,6 +443,8 @@ function FacetSection({
 /** The active filter set the facet counts are computed against. */
 type FacetQuery = {
   days: number;
+  // Values fetched per facet (25 default; "Show more values" raises it to the server cap).
+  limit?: number;
   environment?: string;
   search?: string;
   userId?: string;
@@ -377,12 +464,22 @@ type FacetProps = FacetQuery & {
  * The facets query. Callers share one fetch (identical query key): the rail renders the counts,
  * and the page reuses the score names as key suggestions for the score filter columns.
  */
-function useTraceFacets({ days, environment, search, userId, tag, scoreName, level, type, filter }: FacetQuery) {
+function useTraceFacets({
+  days,
+  limit = 25,
+  environment,
+  search,
+  userId,
+  tag,
+  scoreName,
+  level,
+  type,
+  filter,
+}: FacetQuery) {
   // Counts are facet-excluding server-side; passing the active filters makes them narrow live.
   return useQuery({
-    queryKey: ["trace-facets", days, environment, search, userId, tag, scoreName, level, type, filter],
-    queryFn: () =>
-      api.traceFacets({ days, limit: 25, environment, search, userId, tag, scoreName, level, type, filter }),
+    queryKey: ["trace-facets", days, limit, environment, search, userId, tag, scoreName, level, type, filter],
+    queryFn: () => api.traceFacets({ days, limit, environment, search, userId, tag, scoreName, level, type, filter }),
     refetchInterval: 15_000,
     // Keep the current counts on screen while the next set loads — no skeleton flash on select.
     placeholderData: keepPreviousData,
@@ -399,8 +496,11 @@ function filterColumnsWithScoreNames(scores?: FacetCount[]): FilterColumnDef[] {
 }
 
 /** The facet sections — shared by the desktop rail and the mobile Filters sheet. */
-function FacetSections({ onPick, ...q }: FacetProps) {
+function FacetSections({ onPick, onToggleMore, ...q }: FacetProps & { onToggleMore?: () => void }) {
   const { data } = useTraceFacets(q);
+  const expanded = (q.limit ?? 25) > 25;
+  // "Show more" only earns its row when some facet actually hit the collapsed cap.
+  const atCap = !expanded && data && Object.values(data).some((items) => items.length >= 25);
   return (
     <div className="space-y-4">
       <FacetSection
@@ -414,12 +514,22 @@ function FacetSections({ onPick, ...q }: FacetProps) {
       <FacetSection title="Name" items={data?.names} active={q.search} onPick={(v) => onPick("search", v)} />
       <FacetSection title="Scores" items={data?.scores} active={q.scoreName} onPick={(v) => onPick("scoreName", v)} />
       <FacetSection title="Tags" items={data?.tags} active={q.tag} onPick={(v) => onPick("tag", v)} />
+      {onToggleMore && (atCap || expanded) && (
+        <button
+          type="button"
+          onClick={onToggleMore}
+          className="flex items-center gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+        >
+          {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+          {expanded ? "Show fewer values" : "Show more values"}
+        </button>
+      )}
     </div>
   );
 }
 
 /** Desktop filter rail — sticky so it stays put while the table scrolls. */
-function FacetPanel(props: FacetProps) {
+function FacetPanel({ onToggleMore, ...props }: FacetProps & { onToggleMore?: () => void }) {
   return (
     <aside className="sticky top-4 hidden max-h-[calc(100svh-2rem)] w-56 shrink-0 self-start overflow-y-auto lg:block">
       <div className="mb-3 flex items-center gap-1.5 text-sm font-medium">
@@ -428,7 +538,7 @@ function FacetPanel(props: FacetProps) {
           Click a value in any section to narrow the list; counts update to reflect the other active filters.
         </HelpTip>
       </div>
-      <FacetSections {...props} />
+      <FacetSections {...props} onToggleMore={onToggleMore} />
     </aside>
   );
 }
@@ -470,9 +580,14 @@ function TracesPage() {
   const sortKey = orderBy ?? "timestamp";
   const sortDir = orderDir ?? "desc";
 
+  // Auto-refresh: on by default (5s), pausable — a paused list stops shifting under investigation.
+  const [autoRefresh, setAutoRefresh] = usePersisted("memoturn.traces.autoRefresh", true);
+  // "Show more values" raises the per-facet value cap from 25 to the server cap (100).
+  const [facetLimit, setFacetLimit] = usePersisted("memoturn.traces.facetLimit", 25);
+
   // The facet rail and the filter builder share this one query (identical key): the rail draws the
   // counts, the builder borrows the observed score names for its `scores.<name>` key suggestions.
-  const facetQuery: FacetQuery = { ...listFilters, days };
+  const facetQuery: FacetQuery = { ...listFilters, days, limit: facetLimit };
   const { data: facets } = useTraceFacets(facetQuery);
   const filterColumns = useMemo(() => filterColumnsWithScoreNames(facets?.scores), [facets?.scores]);
 
@@ -483,7 +598,7 @@ function TracesPage() {
   } = useQuery({
     queryKey: ["traces", listFilters, days, page, pageSize, sortKey, sortDir],
     queryFn: () => api.listTracesPage({ ...listFilters, days, page, pageSize, orderBy: sortKey, orderDir: sortDir }),
-    refetchInterval: 5_000,
+    refetchInterval: autoRefresh ? 5_000 : false,
     // Keep the prior page/filter results on screen while the next loads — no blank flash on paging.
     placeholderData: keepPreviousData,
   });
@@ -525,6 +640,13 @@ function TracesPage() {
     navigate({
       search: (prev) => ({ ...prev, filter: next.length ? JSON.stringify(next) : undefined, page: undefined }),
     });
+
+  // Quick-filter presets: swap in structured filters on a column (replacing any existing filter
+  // on it), so presets compose with hand-built filters and render as the builder's chips.
+  const presetActive = (column: string) => filterSet.some((f) => f.column === column);
+  const applyPreset = (column: string, add: SingleFilter[]) =>
+    setFilterSet([...filterSet.filter((f) => f.column !== column), ...add]);
+  const clearPreset = (columns: string[]) => setFilterSet(filterSet.filter((f) => !columns.includes(f.column)));
 
   // Per-column cell renderers — the table header/body iterate `visibleCols` in the persisted order.
   const cellContent: Record<ColKey, (t: TraceSummary) => ReactNode> = {
@@ -693,6 +815,28 @@ function TracesPage() {
         help="A trace is one end-to-end request through your app, with all of its nested spans, tokens, cost, and scores."
         actions={
           <>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              title="Refresh now"
+              onClick={() => {
+                qc.invalidateQueries({ queryKey: ["traces"] });
+                qc.invalidateQueries({ queryKey: ["trace-facets"] });
+              }}
+            >
+              <RefreshCw />
+            </Button>
+            <Button
+              variant={autoRefresh ? "default" : "outline"}
+              size="sm"
+              onClick={() => setAutoRefresh(!autoRefresh)}
+              title={
+                autoRefresh ? "Auto-refresh is on (5s) — click to pause" : "Auto-refresh is paused — click to resume"
+              }
+            >
+              {autoRefresh ? "Auto 5s" : "Paused"}
+            </Button>
             <Select value={groupBy} onValueChange={(v) => setGroupBy(v as GroupKey)}>
               <SelectTrigger size="sm" className="h-8 w-auto gap-1.5">
                 <Rows3 className="size-4 text-muted-foreground" />
@@ -850,32 +994,59 @@ function TracesPage() {
         )}
       </div>
 
-      {/* Quick-filter presets — one-click level filters. Slow/Costly presets await the Phase 2
-          latency/cost filter builder (the current filter set has no numeric range fields). */}
+      {/* Quick-filter presets — opinionated debugging entry points that compile to structured
+          filters, so they compose with the filter builder and show up as its chips. */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm text-muted-foreground">Quick filters:</span>
-        <Button
-          variant={filters.level === "ERROR" ? "secondary" : "outline"}
-          size="sm"
-          className="h-7"
-          onClick={() => setFilter("level", filters.level === "ERROR" ? "" : "ERROR")}
-        >
-          <KindBadge tone="red" className="border-0 bg-transparent px-0">
-            ●
-          </KindBadge>
-          Errors
-        </Button>
-        <Button
-          variant={filters.level === "WARNING" ? "secondary" : "outline"}
-          size="sm"
-          className="h-7"
-          onClick={() => setFilter("level", filters.level === "WARNING" ? "" : "WARNING")}
-        >
-          <KindBadge tone="amber" className="border-0 bg-transparent px-0">
-            ●
-          </KindBadge>
-          Warnings
-        </Button>
+        <PresetMenu
+          label="Quality"
+          icon={ShieldAlert}
+          active={presetActive("level") || presetActive("type")}
+          options={[
+            {
+              label: "Errors only",
+              description: "Traces with at least one failing span",
+              apply: () => applyPreset("level", [levelPreset(["ERROR"])]),
+            },
+            {
+              label: "Warnings & errors",
+              description: "Anything logged at WARNING or ERROR",
+              apply: () => applyPreset("level", [levelPreset(["WARNING", "ERROR"])]),
+            },
+            {
+              label: "Review output (generations)",
+              description: "Traces with LLM generations, for reviewing response quality",
+              apply: () =>
+                applyPreset("type", [
+                  { type: "stringOptions", column: "type", operator: "any_of", value: ["GENERATION"] },
+                ]),
+            },
+          ]}
+          onClear={() => clearPreset(["level", "type"])}
+        />
+        <PresetMenu
+          label="Slow"
+          icon={Timer}
+          active={presetActive("latencyMs")}
+          options={SLOW_THRESHOLDS.map((msVal) => ({
+            label: `Slower than ${msVal / 1000}s`,
+            description: "By total trace latency",
+            apply: () =>
+              applyPreset("latencyMs", [{ type: "number", column: "latencyMs", operator: "gt", value: msVal }]),
+          }))}
+          onClear={() => clearPreset(["latencyMs"])}
+        />
+        <PresetMenu
+          label="Cost"
+          icon={DollarSign}
+          active={presetActive("cost")}
+          options={COST_THRESHOLDS.map((usd) => ({
+            label: `Over $${usd}`,
+            description: "By estimated trace cost",
+            apply: () => applyPreset("cost", [{ type: "number", column: "cost", operator: "gt", value: usd }]),
+          }))}
+          onClear={() => clearPreset(["cost"])}
+        />
         <span className="mx-1 h-4 w-px bg-border" aria-hidden />
         <FilterBuilder value={filterSet} onChange={setFilterSet} columns={filterColumns} />
       </div>
@@ -957,7 +1128,7 @@ function TracesPage() {
       )}
 
       <div className="flex gap-4">
-        <FacetPanel {...facetQuery} onPick={pickFacet} />
+        <FacetPanel {...facetQuery} onPick={pickFacet} onToggleMore={() => setFacetLimit(facetLimit > 25 ? 25 : 100)} />
         <div className="min-w-0 flex-1 space-y-3">
           <VolumeHistogram filters={{ ...listFilters, days }} />
           {isLoading ? (

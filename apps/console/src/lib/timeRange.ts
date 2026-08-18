@@ -10,7 +10,9 @@ const EVENT = "memoturn:range";
 
 export const RANGES = [
   { label: "24h", days: 1 },
+  { label: "3d", days: 3 },
   { label: "7d", days: 7 },
+  { label: "14d", days: 14 },
   { label: "30d", days: 30 },
   { label: "90d", days: 90 },
 ];
