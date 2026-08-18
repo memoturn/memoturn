@@ -740,7 +740,8 @@ export class DorisTelemetryStore implements TelemetryStore {
         name, source, data_type, \`value\` AS value,
         COALESCE(string_value, '') AS string_value,
         COALESCE(\`comment\`, '') AS comment,
-        DATE_FORMAT(\`timestamp\`, ${ISO_FMT}) AS \`timestamp\`
+        DATE_FORMAT(\`timestamp\`, ${ISO_FMT}) AS \`timestamp\`,
+        COALESCE(observation_id, '') AS observation_id
       FROM scores
       WHERE project_id = ? AND trace_id = ?
       ORDER BY \`timestamp\` ASC

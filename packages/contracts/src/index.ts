@@ -732,6 +732,8 @@ export const scoreRow = z.object({
   string_value: z.string(),
   comment: z.string(),
   timestamp: z.string(),
+  /** Span the score targets; "" for trace-level scores. Lets the waterfall pin scores to nodes. */
+  observation_id: z.string(),
 });
 export type ScoreRow = z.infer<typeof scoreRow>;
 

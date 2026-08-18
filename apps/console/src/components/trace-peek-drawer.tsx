@@ -1,7 +1,8 @@
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle } from "@memoturn/ui";
-import { Link } from "@tanstack/react-router";
-import { ChevronDown, ChevronUp, Maximize2, X } from "lucide-react";
+import { Link, useSearch } from "@tanstack/react-router";
+import { ChevronDown, ChevronUp, ExternalLink, Link2, Maximize2, X } from "lucide-react";
 import { useEffect } from "react";
+import { toast } from "sonner";
 import { TraceDetailBody } from "./trace-detail";
 import { Button } from "./ui/button";
 
@@ -19,6 +20,9 @@ export function TracePeekDrawer({
   peekId: string | undefined;
   onPeek: (id: string | undefined) => void;
 }) {
+  // Selected span inside the peek (mirrored to the URL by TraceDetailBody) — carried onto the
+  // maximize/open-in-new-tab targets so the full page lands on the same span.
+  const { observation } = useSearch({ strict: false }) as { observation?: string };
   const peekIndex = peekId && traces ? traces.findIndex((t) => t.id === peekId) : -1;
   const goto = (delta: number) => {
     if (!traces || peekIndex < 0) return;
@@ -90,12 +94,37 @@ export function TracePeekDrawer({
             >
               <ChevronDown />
             </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              aria-label="Copy link to this trace"
+              onClick={() => {
+                navigator.clipboard
+                  .writeText(window.location.href)
+                  .then(() => toast.success("Link copied"))
+                  .catch(() => toast.error("Couldn’t copy the link"));
+              }}
+            >
+              <Link2 />
+            </Button>
             {peekId && (
-              <Button asChild variant="ghost" size="icon" className="size-7" aria-label="Open full page">
-                <Link to="/traces/$id" params={{ id: peekId }}>
-                  <Maximize2 />
-                </Link>
-              </Button>
+              <>
+                <Button asChild variant="ghost" size="icon" className="size-7" aria-label="Open in new tab">
+                  <a
+                    href={`/traces/${encodeURIComponent(peekId)}${observation ? `?observation=${encodeURIComponent(observation)}` : ""}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <ExternalLink />
+                  </a>
+                </Button>
+                <Button asChild variant="ghost" size="icon" className="size-7" aria-label="Open full page">
+                  <Link to="/traces/$id" params={{ id: peekId }} search={{ observation }}>
+                    <Maximize2 />
+                  </Link>
+                </Button>
+              </>
             )}
             <SheetClose asChild>
               <Button variant="ghost" size="icon" className="size-7" aria-label="Close">
