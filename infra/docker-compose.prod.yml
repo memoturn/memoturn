@@ -314,6 +314,10 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?}
       AUTH_TRUSTED_ORIGINS: https://${MEMOTURN_DOMAIN:?}
+      # The worker sends Better Auth emails too (the demo finalize job emails the first
+      # sign-in magic link) — without AUTH_BASE_URL its links are built against the
+      # localhost fallback and land dead in inboxes. Keep in sync with the api service.
+      AUTH_BASE_URL: https://${MEMOTURN_DOMAIN:?}
       ALLOW_PRIVATE_WEBHOOK_TARGETS: ${ALLOW_PRIVATE_WEBHOOK_TARGETS:-0}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-10}
       # Bind the health/metrics server on all interfaces so the api container (ingest-health
