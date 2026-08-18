@@ -914,6 +914,9 @@ app.openapi(
         // Structured operator-based filter set (the power-path builder), JSON-encoded.
         filter: z.string().optional(),
         days: z.coerce.number().int().min(1).max(365).optional(),
+        // Whitelisted sort key + direction (default: timestamp desc).
+        orderBy: z.enum(["timestamp", "name", "latency", "cost", "tokens"]).optional(),
+        orderDir: z.enum(["asc", "desc"]).optional(),
       }),
     },
     responses: {
@@ -936,6 +939,8 @@ app.openapi(
       type,
       filter,
       days,
+      orderBy,
+      orderDir,
     } = c.req.valid("query");
     // `page`/`pageSize` drive pagination; `limit` stays as a legacy single-page cap (e.g. session view).
     const size = pageSize ?? limit ?? 50;
@@ -943,8 +948,9 @@ app.openapi(
     // Parse the JSON filter param defensively — a malformed set is ignored, never a 500.
     const filters = parseFilterSet(filter);
     const base = { userId, sessionId, environment, search, tag, promptId, scoreName, level, type, filters, days };
+    const ordered = { ...base, orderBy, orderDir };
     const [data, total] = await Promise.all([
-      listTraces(c.get("projectId"), { ...base, limit: size, offset }),
+      listTraces(c.get("projectId"), { ...ordered, limit: size, offset }),
       countTraces(c.get("projectId"), base),
     ]);
     // Attach each trace's scores (eval/annotation quality) so the list can show them at a glance.
@@ -1078,6 +1084,9 @@ app.openapi(
         limit: z.coerce.number().int().min(1).max(500).optional(),
         page: z.coerce.number().int().min(1).optional(),
         pageSize: z.coerce.number().int().min(1).max(500).optional(),
+        // Whitelisted sort key + direction (default: start_time desc).
+        orderBy: z.enum(["start_time", "name", "latency", "cost", "tokens"]).optional(),
+        orderDir: z.enum(["asc", "desc"]).optional(),
         ...observationQuery,
       }),
     },

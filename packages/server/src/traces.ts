@@ -15,6 +15,7 @@ import type {
 import { isoNow } from "@memoturn/core";
 import {
   type ObservationFilters,
+  TRACE_PREVIEW_CHARS,
   type TraceFilters,
   type TraceIO,
   type TraceScore,
@@ -212,6 +213,11 @@ export async function getTrace(projectId: string, traceId: string): Promise<Trac
 
   return {
     ...header,
+    // The detail carries full payloads; the summary previews are derived so TraceDetail
+    // stays a strict superset of the list row.
+    input_preview: (header.input ?? "").slice(0, TRACE_PREVIEW_CHARS),
+    output_preview: (header.output ?? "").slice(0, TRACE_PREVIEW_CHARS),
+    metadata_preview: (header.metadata ?? "").slice(0, TRACE_PREVIEW_CHARS),
     observation_count: observations.length,
     total_cost: observations.reduce((s, o) => s + o.total_cost, 0),
     total_tokens: observations.reduce((s, o) => s + o.total_tokens, 0),

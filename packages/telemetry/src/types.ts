@@ -169,9 +169,18 @@ export interface ScanPage<R> {
 
 // ── Read filters ─────────────────────────────────────────────────────────────────
 
+/** Whitelisted trace-list sort keys. `timestamp`/`name` sort on the trace row (fast path);
+ *  `latency`/`cost`/`tokens` sort on per-trace observation aggregates (adds an agg join). */
+export type TraceOrderField = "timestamp" | "name" | "latency" | "cost" | "tokens";
+
+/** Character budget for the inline input/output/metadata previews on trace list rows. */
+export const TRACE_PREVIEW_CHARS = 300;
+
 export interface TraceFilters {
   limit?: number;
   offset?: number; // rows to skip (pagination)
+  orderBy?: TraceOrderField; // sort key (default: timestamp)
+  orderDir?: "asc" | "desc"; // sort direction (default: desc)
   userId?: string;
   sessionId?: string;
   environment?: string;
@@ -190,9 +199,14 @@ export interface TraceFilters {
  * Span-level explorer filters. Every predicate applies to the observation row itself (not to
  * its trace), which is what makes "every retriever span over 2s this week" expressible.
  */
+/** Whitelisted span-explorer sort keys — all plain observation-row columns. */
+export type ObservationOrderField = "start_time" | "name" | "latency" | "cost" | "tokens";
+
 export interface ObservationFilters {
   limit?: number;
   offset?: number;
+  orderBy?: ObservationOrderField; // sort key (default: start_time)
+  orderDir?: "asc" | "desc"; // sort direction (default: desc)
   days?: number; // only observations started in the last N days
   search?: string; // matches observation name OR inline input/output content
   traceId?: string;

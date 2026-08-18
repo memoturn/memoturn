@@ -4,10 +4,12 @@ import { telemetry } from "./index.js";
 import type {
   EmbeddingProjectionRow,
   EmbeddingRow,
+  ObservationFilters,
   ObservationRow,
   RetrievalDocumentRow,
   ScanCursor,
   ScoreWriteRow,
+  TraceFilters,
   TraceRow,
 } from "./types.js";
 import { TELEMETRY_PRIMARY_KEYS } from "./types.js";
@@ -171,6 +173,7 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     await store.deleteProjectData(`${P}-scoretypes`);
     await store.deleteProjectData(`${P}-scorefilter`);
     await store.deleteProjectData(`${P}-scoreanalytics`);
+    await store.deleteProjectData(`${P}-ordering`);
   });
 
   it("lists traces with rollups, tag + search filters, and ISO timestamps", async () => {
@@ -209,6 +212,54 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(await store.countTraces(P, { tag: "alpha" })).toBe(1);
     expect(await store.countTraces(P, { environment: "nope" })).toBe(0);
     expect(await store.listTraces(P, { limit: 10, offset: 1 })).toHaveLength(0);
+  });
+
+  it("returns truncated input/output/metadata previews on list rows", async () => {
+    const [t] = await store.listTraces(P, {});
+    expect(t!.input_preview).toBe('{"q":"hi"}');
+    expect(t!.output_preview).toBe('{"a":"bye"}');
+    expect(t!.metadata_preview).toBe("{}");
+  });
+
+  it("orders trace lists by whitelisted keys, including observation aggregates", async () => {
+    const PO = `${P}-ordering`;
+    await store.insertRows("traces", [
+      // ta: cheap+fast, tb: expensive+slow, tc: no observations at all (aggregates coalesce to 0).
+      trace({ id: "ta", project_id: PO, name: "aaa", timestamp: iso(-3_000_000), input: "x".repeat(1000) }),
+      trace({ id: "tb", project_id: PO, name: "bbb", timestamp: iso(-2_000_000) }),
+      trace({ id: "tc", project_id: PO, name: "ccc", timestamp: iso(-1_000_000) }),
+    ]);
+    await store.insertRows("observations", [
+      observation({ id: "oa", trace_id: "ta", project_id: PO, total_cost: 0.001, total_tokens: 10, latency_ms: 50 }),
+      observation({ id: "ob", trace_id: "tb", project_id: PO, total_cost: 0.5, total_tokens: 900, latency_ms: 9000 }),
+    ]);
+
+    const ids = async (orderBy: TraceFilters["orderBy"], orderDir: TraceFilters["orderDir"]) =>
+      (await store.listTraces(PO, { orderBy, orderDir })).map((t) => t.id);
+
+    // Default stays newest-first.
+    expect((await store.listTraces(PO, {})).map((t) => t.id)).toEqual(["tc", "tb", "ta"]);
+    expect(await ids("timestamp", "asc")).toEqual(["ta", "tb", "tc"]);
+    expect(await ids("name", "asc")).toEqual(["ta", "tb", "tc"]);
+    expect(await ids("name", "desc")).toEqual(["tc", "tb", "ta"]);
+    // Aggregate sorts order the whole set (join before LIMIT); traces with no observations sort as 0.
+    expect(await ids("cost", "desc")).toEqual(["tb", "ta", "tc"]);
+    expect(await ids("tokens", "asc")).toEqual(["tc", "ta", "tb"]);
+    expect(await ids("latency", "desc")).toEqual(["tb", "ta", "tc"]);
+    // Aggregate sort composes with pagination + rollups intact.
+    const page = await store.listTraces(PO, { orderBy: "cost", orderDir: "desc", limit: 1, offset: 1 });
+    expect(page.map((t) => t.id)).toEqual(["ta"]);
+    expect(page[0]!.total_tokens).toBe(10);
+    // Long payloads come back clipped to the preview budget.
+    const [ta] = await store.listTraces(PO, { orderBy: "name", orderDir: "asc", limit: 1 });
+    expect(ta!.input_preview.length).toBe(300);
+
+    // Span explorer honors the same whitelist (all plain row columns).
+    const obsIds = async (orderBy: ObservationFilters["orderBy"], orderDir: ObservationFilters["orderDir"]) =>
+      (await store.listObservations(PO, { orderBy, orderDir })).map((o) => o.id);
+    expect(await obsIds("cost", "desc")).toEqual(["ob", "oa"]);
+    expect(await obsIds("latency", "asc")).toEqual(["oa", "ob"]);
+    expect(await obsIds("tokens", "desc")).toEqual(["ob", "oa"]);
   });
 
   it("buckets trace volume by day and hour for the histogram, honoring filters", async () => {

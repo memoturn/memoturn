@@ -4,8 +4,13 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   Activity,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   ChevronDown,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   ChevronUp,
   Coins,
   Columns3,
@@ -66,7 +71,14 @@ interface TraceSearch {
   // Pagination (1-based). Defaults (page 1 / size 50) are kept out of the URL to keep it clean.
   page?: number;
   pageSize?: number;
+  // Sort key + direction — view state like page, shareable via the URL. Default (timestamp desc)
+  // is kept out of the URL.
+  orderBy?: TraceOrder;
+  orderDir?: "asc" | "desc";
 }
+
+type TraceOrder = "timestamp" | "name" | "latency" | "cost" | "tokens";
+const TRACE_ORDERS: TraceOrder[] = ["timestamp", "name", "latency", "cost", "tokens"];
 
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
 const posInt = (v: unknown) => {
@@ -91,6 +103,8 @@ export const Route = createFileRoute("/traces/")({
     peek: str(s.peek),
     page: posInt(s.page),
     pageSize: posInt(s.pageSize),
+    orderBy: TRACE_ORDERS.includes(s.orderBy as TraceOrder) ? (s.orderBy as TraceOrder) : undefined,
+    orderDir: s.orderDir === "asc" || s.orderDir === "desc" ? s.orderDir : undefined,
   }),
   component: TracesPage,
 });
@@ -102,6 +116,8 @@ function fmtCost(n: number): string {
 // Toggleable + reorderable trace columns (Name is the identity column and always shown first).
 const TRACE_COLUMNS = [
   { key: "timestamp", label: "Timestamp", cellClass: "text-muted-foreground" },
+  { key: "input", label: "Input" },
+  { key: "output", label: "Output" },
   { key: "obs", label: "Obs", cellClass: "tabular-nums" },
   { key: "tokens", label: "Tokens", cellClass: "tabular-nums" },
   { key: "cost", label: "Cost", cellClass: "tabular-nums" },
@@ -109,7 +125,28 @@ const TRACE_COLUMNS = [
   { key: "scores", label: "Scores" },
   { key: "env", label: "Env" },
   { key: "tags", label: "Tags" },
+  { key: "metadata", label: "Metadata" },
 ] as const;
+
+/** Sort key behind each sortable column header (identity Name column handled separately). */
+const COL_SORT: Partial<Record<(typeof TRACE_COLUMNS)[number]["key"], TraceOrder>> = {
+  timestamp: "timestamp",
+  tokens: "tokens",
+  cost: "cost",
+  latency: "latency",
+};
+
+/** Single-line payload snippet for list cells (the store pre-truncates to ~300 chars). */
+function PreviewCell({ text }: { text: string }) {
+  if (!text || text === "{}" || text === "null" || text === '""') return <span>—</span>;
+  // Payloads offloaded to blob store a marker inline — label it instead of showing marker JSON.
+  const label = text.startsWith('{"_truncated"') ? "(large payload)" : text;
+  return (
+    <span className="block max-w-[18rem] truncate font-mono text-xs text-muted-foreground" title={label}>
+      {label}
+    </span>
+  );
+}
 type ColKey = (typeof TRACE_COLUMNS)[number]["key"];
 const COL_KEYS = TRACE_COLUMNS.map((c) => c.key) as ColKey[];
 const COL_LABEL = Object.fromEntries(TRACE_COLUMNS.map((c) => [c.key, c.label])) as Record<ColKey, string>;
@@ -130,7 +167,8 @@ function useColumnPrefs() {
     } catch {
       /* ignore malformed prefs */
     }
-    return { hidden: [], order: [] };
+    // Metadata starts hidden — it's the widest, least-scanned preview column.
+    return { hidden: ["metadata"], order: [] };
   });
   const persist = (next: { hidden: ColKey[]; order: ColKey[] }) => {
     try {
@@ -407,11 +445,14 @@ function TracesPage() {
     });
   const visibleCols = order.filter((k) => !hidden.has(k));
 
-  // `peek`/`page`/`pageSize` are view state, not filters — keep them out of the list query's
-  // filter object (so facets/saved views use only real filters), but page/size do drive the query.
-  const { peek, page: pageRaw, pageSize: pageSizeRaw, ...listFilters } = filters;
+  // `peek`/`page`/`pageSize`/`orderBy`/`orderDir` are view state, not filters — keep them out of
+  // the list query's filter object (so facets/saved views use only real filters); page/size/sort
+  // still drive the list query itself.
+  const { peek, page: pageRaw, pageSize: pageSizeRaw, orderBy, orderDir, ...listFilters } = filters;
   const page = pageRaw ?? 1;
   const pageSize = pageSizeRaw ?? DEFAULT_PAGE_SIZE;
+  const sortKey = orderBy ?? "timestamp";
+  const sortDir = orderDir ?? "desc";
 
   // The facet rail and the filter builder share this one query (identical key): the rail draws the
   // counts, the builder borrows the observed score names for its `scores.<name>` key suggestions.
@@ -424,8 +465,8 @@ function TracesPage() {
     isLoading,
     error,
   } = useQuery({
-    queryKey: ["traces", listFilters, days, page, pageSize],
-    queryFn: () => api.listTracesPage({ ...listFilters, days, page, pageSize }),
+    queryKey: ["traces", listFilters, days, page, pageSize, sortKey, sortDir],
+    queryFn: () => api.listTracesPage({ ...listFilters, days, page, pageSize, orderBy: sortKey, orderDir: sortDir }),
     refetchInterval: 5_000,
     // Keep the prior page/filter results on screen while the next loads — no blank flash on paging.
     placeholderData: keepPreviousData,
@@ -472,6 +513,9 @@ function TracesPage() {
   // Per-column cell renderers — the table header/body iterate `visibleCols` in the persisted order.
   const cellContent: Record<ColKey, (t: TraceSummary) => ReactNode> = {
     timestamp: (t) => <Timestamp value={t.timestamp} />,
+    input: (t) => <PreviewCell text={t.input_preview} />,
+    output: (t) => <PreviewCell text={t.output_preview} />,
+    metadata: (t) => <PreviewCell text={t.metadata_preview} />,
     obs: (t) => Number(t.observation_count).toLocaleString(),
     tokens: (t) => Number(t.total_tokens).toLocaleString(),
     cost: (t) => fmtCost(Number(t.total_cost)),
@@ -500,6 +544,38 @@ function TracesPage() {
   const setPage = (p: number) => navigate({ search: (prev) => ({ ...prev, page: p > 1 ? p : undefined }) });
   const setPageSize = (s: number) =>
     navigate({ search: (prev) => ({ ...prev, pageSize: s !== DEFAULT_PAGE_SIZE ? s : undefined, page: undefined }) });
+  // Header click: first click sorts by the column (desc for metrics, asc for name), second flips.
+  // The default (timestamp desc) stays out of the URL; sorting resets to page 1.
+  const setSort = (key: TraceOrder) => {
+    const dir = sortKey === key ? (sortDir === "desc" ? "asc" : "desc") : key === "name" ? "asc" : "desc";
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        orderBy: key === "timestamp" && dir === "desc" ? undefined : key,
+        orderDir: key === "timestamp" && dir === "desc" ? undefined : dir,
+        page: undefined,
+      }),
+    });
+  };
+  const SortHead = ({ label, order }: { label: string; order: TraceOrder }) => (
+    <button
+      type="button"
+      onClick={() => setSort(order)}
+      className="inline-flex items-center gap-1 hover:text-foreground"
+      title={`Sort by ${label.toLowerCase()}`}
+    >
+      {label}
+      {sortKey === order ? (
+        sortDir === "desc" ? (
+          <ArrowDown className="size-3.5" />
+        ) : (
+          <ArrowUp className="size-3.5" />
+        )
+      ) : (
+        <ArrowUpDown className="size-3.5 opacity-40" />
+      )}
+    </button>
+  );
   const hasFilters = Boolean(
     filters.search ||
       filters.environment ||
@@ -882,7 +958,9 @@ function TracesPage() {
                         aria-label="Select all shown"
                       />
                     </TableHead>
-                    <TableHead>Name</TableHead>
+                    <TableHead>
+                      <SortHead label="Name" order="name" />
+                    </TableHead>
                     {visibleCols.map((k) => (
                       <TableHead key={k}>
                         {k === "scores" ? (
@@ -890,6 +968,8 @@ function TracesPage() {
                             {COL_LABEL[k]}
                             <HelpTip>Evaluation scores attached to the trace by evaluators or human review.</HelpTip>
                           </span>
+                        ) : COL_SORT[k] ? (
+                          <SortHead label={COL_LABEL[k]} order={COL_SORT[k]} />
                         ) : (
                           COL_LABEL[k]
                         )}
@@ -973,14 +1053,51 @@ function TracesPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage(1)}
+                  aria-label="First page"
+                >
+                  <ChevronsLeft />
+                </Button>
                 <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
                   Prev
                 </Button>
-                <span className="tabular-nums text-muted-foreground">
-                  Page {page} / {pageCount}
+                <span className="flex items-center gap-1.5 tabular-nums text-muted-foreground">
+                  Page
+                  <Input
+                    key={page}
+                    type="number"
+                    min={1}
+                    max={pageCount}
+                    defaultValue={page}
+                    aria-label="Page number"
+                    className="h-8 w-16 text-center tabular-nums"
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      const p = Math.floor(Number(e.currentTarget.value));
+                      if (Number.isFinite(p)) setPage(Math.min(Math.max(1, p), pageCount));
+                    }}
+                    onBlur={(e) => {
+                      const p = Math.floor(Number(e.currentTarget.value));
+                      if (Number.isFinite(p) && p !== page) setPage(Math.min(Math.max(1, p), pageCount));
+                    }}
+                  />
+                  / {pageCount}
                 </span>
                 <Button variant="outline" size="sm" disabled={page >= pageCount} onClick={() => setPage(page + 1)}>
                   Next
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= pageCount}
+                  onClick={() => setPage(pageCount)}
+                  aria-label="Last page"
+                >
+                  <ChevronsRight />
                 </Button>
               </div>
             </div>

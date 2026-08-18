@@ -10,6 +10,7 @@ export { DorisTelemetryStore } from "./doris/store.js";
 export { PostgresTelemetryStore } from "./postgres/store.js";
 export type { TelemetryStore } from "./store.js";
 export type * from "./types.js";
+export { TRACE_PREVIEW_CHARS } from "./types.js";
 
 /**
  * Singleton telemetry store. The engine is selected by TELEMETRY_ENGINE (ADR-0002):
