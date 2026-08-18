@@ -17,6 +17,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "../../components/ui/breadcrumb";
+import { Button } from "../../components/ui/button";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
@@ -26,8 +27,79 @@ interface SessionSearch {
   peek?: string;
 }
 
-/** The Memory Explorer conversation view: each trace is a turn (input → output), oldest-first. */
-function Conversation({ sessionId, onPeek }: { sessionId: string; onPeek: (id: string) => void }) {
+/** One chat message extracted from a turn's payload. */
+interface TurnMessage {
+  role: string;
+  content: string;
+}
+
+/** Parse a payload into role-attributed chat messages: a message array, a single {role,content}
+ *  object, or null when it isn't chat-shaped (the caller falls back to the raw box). */
+function parseTurnMessages(raw: string): TurnMessage[] | null {
+  try {
+    const v = JSON.parse(raw) as unknown;
+    const toMsg = (m: unknown): TurnMessage | null => {
+      if (!m || typeof m !== "object" || !("role" in m)) return null;
+      const rec = m as { role: unknown; content?: unknown };
+      return {
+        role: String(rec.role),
+        content: typeof rec.content === "string" ? rec.content : JSON.stringify(rec.content ?? "", null, 2),
+      };
+    };
+    if (Array.isArray(v)) {
+      const msgs = v.map(toMsg);
+      return msgs.every((m): m is TurnMessage => m !== null) && msgs.length > 0 ? msgs : null;
+    }
+    const single = toMsg(v);
+    return single ? [single] : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Role-styled chat bubble; long system prompts start collapsed. */
+function RoleBubble({ role, content }: TurnMessage) {
+  const tone =
+    role === "assistant"
+      ? "border-primary/20 bg-primary/5"
+      : role === "system"
+        ? "border-border bg-muted/40"
+        : role === "tool"
+          ? "border-amber-500/30 bg-amber-500/5"
+          : "bg-muted/60";
+  const body = <div className="text-sm whitespace-pre-wrap">{content}</div>;
+  return (
+    <div className={`rounded-md border p-2 ${tone}`}>
+      <div className="mb-1 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">{role}</div>
+      {role === "system" && content.length > 280 ? (
+        <details>
+          <summary className="cursor-pointer text-xs text-muted-foreground">
+            {content.slice(0, 160)}… <span className="underline">expand system prompt</span>
+          </summary>
+          {body}
+        </details>
+      ) : (
+        body
+      )}
+    </div>
+  );
+}
+
+/**
+ * The Memory Explorer conversation view: each trace is a turn, oldest-first, rendered as
+ * role-attributed chat bubbles when the payload is chat-shaped (raw input/output boxes
+ * otherwise). The JSON toggle switches to the raw payloads.
+ */
+function Conversation({
+  sessionId,
+  onPeek,
+  scores,
+}: {
+  sessionId: string;
+  onPeek: (id: string) => void;
+  scores: Record<string, { name: string; value: number | null; string_value: string }[]>;
+}) {
+  const [rawJson, setRawJson] = useState(false);
   const { data, isLoading, error } = useQuery({
     queryKey: ["session-messages", sessionId],
     queryFn: () => api.getSessionMessages(sessionId),
@@ -40,33 +112,68 @@ function Conversation({ sessionId, onPeek }: { sessionId: string; onPeek: (id: s
 
   return (
     <div className="space-y-4">
-      {messages.map((m) => (
-        <button
-          type="button"
-          key={m.traceId}
-          onClick={() => onPeek(m.traceId)}
-          className="block w-full space-y-2 rounded-lg border p-3 text-left hover:border-primary/50"
-        >
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">{m.name || "(unnamed turn)"}</span>
-            <span>
-              <Timestamp value={m.timestamp} />
-            </span>
+      <div className="flex justify-end">
+        <div className="flex items-center gap-0.5 rounded-md border p-0.5">
+          <Button
+            variant={rawJson ? "ghost" : "secondary"}
+            size="sm"
+            className="h-6 px-2 text-xs"
+            onClick={() => setRawJson(false)}
+          >
+            Formatted
+          </Button>
+          <Button
+            variant={rawJson ? "secondary" : "ghost"}
+            size="sm"
+            className="h-6 px-2 text-xs"
+            onClick={() => setRawJson(true)}
+          >
+            JSON
+          </Button>
+        </div>
+      </div>
+      {messages.map((m) => {
+        const inMsgs = rawJson ? null : parseTurnMessages(m.input);
+        const outMsgs = rawJson ? null : parseTurnMessages(m.output);
+        // The last input message usually repeats as the model's user turn — render the input
+        // conversation once, then the output as the assistant's reply.
+        return (
+          <div key={m.traceId} className="space-y-2 rounded-lg border p-3">
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="truncate font-medium text-foreground">{m.name || "(unnamed turn)"}</span>
+                <ScoreBadges scores={scores[m.traceId] ?? []} />
+              </span>
+              <span className="flex shrink-0 items-center gap-2">
+                <Timestamp value={m.timestamp} />
+                <button type="button" onClick={() => onPeek(m.traceId)} className="text-primary hover:underline">
+                  View trace →
+                </button>
+              </span>
+            </div>
+            {m.input &&
+              (inMsgs ? (
+                inMsgs.map((msg, i) => <RoleBubble key={`${m.traceId}-in-${i}-${msg.role}`} {...msg} />)
+              ) : (
+                <div className="rounded-md bg-muted/60 p-2">
+                  <div className="mb-1 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                    Input
+                  </div>
+                  <JsonValue value={m.input} maxHeight="max-h-40" />
+                </div>
+              ))}
+            {m.output &&
+              (outMsgs ? (
+                outMsgs.map((msg, i) => <RoleBubble key={`${m.traceId}-out-${i}-${msg.role}`} {...msg} />)
+              ) : (
+                <div className="rounded-md border border-primary/20 bg-primary/5 p-2">
+                  <div className="mb-1 text-[10px] font-semibold tracking-wide text-primary uppercase">Output</div>
+                  <JsonValue value={m.output} maxHeight="max-h-40" />
+                </div>
+              ))}
           </div>
-          {m.input && (
-            <div className="rounded-md bg-muted/60 p-2">
-              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Input</div>
-              <JsonValue value={m.input} maxHeight="max-h-40" />
-            </div>
-          )}
-          {m.output && (
-            <div className="rounded-md border border-primary/20 bg-primary/5 p-2">
-              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">Output</div>
-              <JsonValue value={m.output} maxHeight="max-h-40" />
-            </div>
-          )}
-        </button>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -154,7 +261,7 @@ function SessionDetailPage() {
             </TabsList>
 
             <TabsContent value="conversation">
-              <Conversation sessionId={id} onPeek={setPeek} />
+              <Conversation sessionId={id} onPeek={setPeek} scores={scores} />
             </TabsContent>
 
             <TabsContent value="traces">
