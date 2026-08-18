@@ -519,6 +519,33 @@ function layout(
   return { rows: out, totalMs: total };
 }
 
+type ObsViewMode = "timeline" | "graph" | "log";
+
+/** Case-insensitive in-trace search over the fields someone scans a trace by. */
+function matchesObsSearch(o: ObservationDetail, q: string): boolean {
+  const needle = q.toLowerCase();
+  return [o.name, o.model, o.type, o.level, o.status_message, o.input, o.output].some((f) =>
+    (f ?? "").toLowerCase().includes(needle),
+  );
+}
+
+/** Matched observations plus all their ancestors, so a filtered timeline keeps its tree shape. */
+function searchFilterObservations(observations: ObservationDetail[], q: string): ObservationDetail[] {
+  if (!q.trim()) return observations;
+  const byId = new Map(observations.map((o) => [o.id, o]));
+  const keep = new Set<string>();
+  for (const o of observations) {
+    if (!matchesObsSearch(o, q)) continue;
+    keep.add(o.id);
+    let p: string | undefined = o.parent_observation_id;
+    while (p && byId.has(p) && !keep.has(p)) {
+      keep.add(p);
+      p = byId.get(p)?.parent_observation_id;
+    }
+  }
+  return observations.filter((o) => keep.has(o.id));
+}
+
 /** Every observation that has at least one child — the set "Collapse all" toggles. */
 function collapsibleIds(observations: ObservationDetail[]): Set<string> {
   const byId = new Set(observations.map((o) => o.id));
@@ -804,6 +831,95 @@ function WaterfallRow({
           <span className={`text-[0.625rem] ${costTone(obs.costFrac)}`}>{fmtCostCompact(Number(obs.total_cost))}</span>
         )}
       </span>
+    </div>
+  );
+}
+
+/**
+ * Flat, chronological log of every observation — depth, start offset, duration, cost — for
+ * quickly scanning a trace top-to-bottom without unfolding the tree.
+ */
+function LogView({
+  observations,
+  selectedId,
+  onSelect,
+  payloadIds,
+}: {
+  observations: ObservationDetail[];
+  selectedId?: string;
+  onSelect: (id: string) => void;
+  payloadIds: Set<string>;
+}) {
+  const byId = new Map(observations.map((o) => [o.id, o]));
+  const depthOf = (o: ObservationDetail): number => {
+    let d = 0;
+    let p: string | undefined = o.parent_observation_id;
+    const seen = new Set<string>([o.id]);
+    while (p && byId.has(p) && !seen.has(p)) {
+      seen.add(p);
+      d++;
+      p = byId.get(p)?.parent_observation_id;
+    }
+    return d;
+  };
+  const startMs = (o: ObservationDetail) => ms(o.start_time) ?? 0;
+  const rows = [...observations].sort((a, b) => startMs(a) - startMs(b) || a.id.localeCompare(b.id));
+  const traceStart = rows.length ? startMs(rows[0]!) : 0;
+  const maxLatency = Math.max(1, ...observations.map((o) => Number(o.latency_ms)));
+  return (
+    <div className="overflow-x-auto border-t">
+      <div className="grid grid-cols-[1fr_3rem_5rem_6.5rem] border-b bg-muted/30 py-1.5 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">
+        <span className="px-3">Observation</span>
+        <span>Depth</span>
+        <span className="text-right">Start</span>
+        <span className="pr-3 text-right">Duration</span>
+      </div>
+      {rows.map((o) => {
+        const clickable = payloadIds.has(o.id);
+        return (
+          // biome-ignore lint/a11y/noStaticElementInteractions: interactive only when clickable, where role/tabIndex/onKeyDown are all provided
+          <div
+            key={o.id}
+            className={cn(
+              "grid grid-cols-[1fr_3rem_5rem_6.5rem] items-center border-b py-1.5 transition-colors last:border-b-0",
+              o.level === "ERROR"
+                ? "bg-destructive/5 hover:bg-destructive/10"
+                : o.level === "WARNING"
+                  ? "bg-amber-500/5 hover:bg-amber-500/10"
+                  : "hover:bg-muted/40",
+              o.id === selectedId && "bg-muted/50 ring-1 ring-inset ring-primary/50",
+              clickable && "cursor-pointer",
+            )}
+            role={clickable ? "button" : undefined}
+            tabIndex={clickable ? 0 : undefined}
+            aria-current={o.id === selectedId || undefined}
+            onClick={clickable ? () => onSelect(o.id) : undefined}
+            onKeyDown={(e) => {
+              if (clickable && (e.key === "Enter" || e.key === " ")) {
+                e.preventDefault();
+                onSelect(o.id);
+              }
+            }}
+          >
+            <span className="flex min-w-0 items-center gap-1.5 px-3">
+              <KindBadge tone={toneForKind(o.type)}>{o.type.toLowerCase()}</KindBadge>
+              <span className="truncate font-medium">{o.name || o.id.slice(0, 8)}</span>
+              {o.model && <span className="truncate text-xs text-muted-foreground">· {o.model}</span>}
+              {o.level !== "DEFAULT" && <KindBadge tone={toneForLevel(o.level)}>{o.level.toLowerCase()}</KindBadge>}
+            </span>
+            <span className="text-xs tabular-nums text-muted-foreground">L{depthOf(o)}</span>
+            <span className="text-right text-xs tabular-nums text-muted-foreground">
+              +{fmtDuration(Math.max(0, Math.round(startMs(o) - traceStart)))}
+            </span>
+            <span className="flex flex-col items-end pr-3 text-right text-xs tabular-nums">
+              <span className={heatTone(Number(o.latency_ms) / maxLatency)}>{fmtDuration(Number(o.latency_ms))}</span>
+              {Number(o.total_cost) > 0 && (
+                <span className="text-[0.625rem] text-muted-foreground">{fmtCostCompact(Number(o.total_cost))}</span>
+              )}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1782,11 +1898,16 @@ export function TraceDetailBody({
   // Collapsed subgraphs in the waterfall (by observation id).
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Observations view: the waterfall timeline (default) or the agent-flow graph.
-  const [obsView, setObsViewState] = useState<"timeline" | "graph">(urlSearch.view === "graph" ? "graph" : "timeline");
-  const setObsView = (v: "timeline" | "graph") => {
+  const [obsView, setObsViewState] = useState<ObsViewMode>(
+    urlSearch.view === "graph" || urlSearch.view === "log" ? urlSearch.view : "timeline",
+  );
+  const setObsView = (v: ObsViewMode) => {
     setObsViewState(v);
-    syncUrl({ view: v === "graph" ? "graph" : undefined });
+    syncUrl({ view: v === "timeline" ? undefined : v });
   };
+  // In-trace search: filters the timeline (keeping matched nodes' ancestors so the tree stays
+  // coherent) and the log view. Local state only — it's a transient lens, not shareable state.
+  const [obsSearch, setObsSearch] = useState("");
   const payloadPanelRef = useRef<HTMLDivElement | null>(null);
   const qc = useQueryClient();
   const readOnly = useIsReadOnly();
@@ -1862,6 +1983,7 @@ export function TraceDetailBody({
   const payloadObs = visibleObservations(trace.observations);
   const payloadIds = new Set(payloadObs.map((o) => o.id));
   const showGraph = obsView === "graph";
+  const showLog = obsView === "log";
   // The detail pane defaults to the first failing observation (what you're usually here for),
   // else the first payload-bearing one. A stale selection from a previous trace falls back here.
   const effectiveSelected =
@@ -1879,7 +2001,12 @@ export function TraceDetailBody({
   // Waterfall collapse/expand + failed-path highlight (small traces → recompute per render).
   const failedPath = failedPathIds(trace.observations);
   const collapsible = collapsibleIds(trace.observations);
-  const { rows: laidRows, totalMs } = layout(trace.observations, collapsed, failedPath);
+  // In-trace search narrows both views; the timeline keeps matched nodes' ancestors for shape.
+  const searchedObs = searchFilterObservations(trace.observations, obsSearch);
+  const logObs = obsSearch.trim()
+    ? trace.observations.filter((o) => matchesObsSearch(o, obsSearch))
+    : trace.observations;
+  const { rows: laidRows, totalMs } = layout(searchedObs, collapsed, failedPath);
   // Span-scoped scores, grouped by observation id — rendered as chips on their waterfall rows.
   const scoresByObs = new Map<string, ScoreRow[]>();
   for (const s of trace.scores) {
@@ -2110,10 +2237,22 @@ export function TraceDetailBody({
               <CardDescription>
                 {showGraph
                   ? "Agent-flow graph derived from the observation tree — nodes are colored by type."
-                  : "Execution timeline for this trace — select a row to inspect its payload."}
-                {!showGraph && errorCount > 0 && " Branches leading to a failure are accented in red."}
+                  : showLog
+                    ? "Every observation concatenated chronologically — for quickly scanning through the trace."
+                    : "Execution timeline for this trace — select a row to inspect its payload."}
+                {obsView === "timeline" && errorCount > 0 && " Branches leading to a failure are accented in red."}
               </CardDescription>
               <CardAction className="flex items-center gap-2">
+                {!showGraph && (
+                  <Input
+                    type="search"
+                    value={obsSearch}
+                    onChange={(e) => setObsSearch(e.target.value)}
+                    placeholder="Search in trace…"
+                    aria-label="Search observations in this trace"
+                    className="h-6 w-40 px-2 text-xs"
+                  />
+                )}
                 <div className="flex items-center gap-0.5 rounded-md border p-0.5">
                   <Button
                     variant={obsView === "timeline" ? "secondary" : "ghost"}
@@ -2131,8 +2270,16 @@ export function TraceDetailBody({
                   >
                     Graph
                   </Button>
+                  <Button
+                    variant={obsView === "log" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => setObsView("log")}
+                  >
+                    Log
+                  </Button>
                 </div>
-                {!showGraph && collapsible.size > 0 && (
+                {obsView === "timeline" && collapsible.size > 0 && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -2149,6 +2296,23 @@ export function TraceDetailBody({
               ) : trace.observations.length === 0 ? (
                 <div className="px-6">
                   <EmptyState title="No observations." />
+                </div>
+              ) : showLog ? (
+                logObs.length === 0 ? (
+                  <div className="px-6">
+                    <EmptyState title="No observations match" description="Clear or adjust the in-trace search." />
+                  </div>
+                ) : (
+                  <LogView
+                    observations={logObs}
+                    selectedId={effectiveSelected}
+                    onSelect={selectObs}
+                    payloadIds={payloadIds}
+                  />
+                )
+              ) : searchedObs.length === 0 ? (
+                <div className="px-6">
+                  <EmptyState title="No observations match" description="Clear or adjust the in-trace search." />
                 </div>
               ) : (
                 <div className="overflow-x-auto border-t">

@@ -110,7 +110,7 @@ export const Route = createFileRoute("/traces/")({
     filter: str(s.filter),
     peek: str(s.peek),
     observation: str(s.observation),
-    view: s.view === "graph" ? "graph" : undefined,
+    view: s.view === "graph" || s.view === "log" ? s.view : undefined,
     page: posInt(s.page),
     pageSize: posInt(s.pageSize),
     orderBy: TRACE_ORDERS.includes(s.orderBy as TraceOrder) ? (s.orderBy as TraceOrder) : undefined,

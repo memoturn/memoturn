@@ -11,7 +11,7 @@ export const Route = createFileRoute("/traces/$id")({
   // mode; TraceDetailBody keeps both mirrored into the URL as the user navigates.
   validateSearch: (s: Record<string, unknown>): { observation?: string; view?: string } => ({
     observation: typeof s.observation === "string" && s.observation ? s.observation : undefined,
-    view: s.view === "graph" ? "graph" : undefined,
+    view: s.view === "graph" || s.view === "log" ? s.view : undefined,
   }),
   component: TraceDetailPage,
 });
