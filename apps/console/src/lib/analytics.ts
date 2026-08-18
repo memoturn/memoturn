@@ -35,6 +35,56 @@ export function initAnalytics(): void {
     window.dataLayer?.push(arguments);
   };
   window.gtag("js", new Date());
+  // Consent Mode v2: the demo shows no consent banner, so EEA/UK/CH visitors stay on
+  // denied analytics storage permanently (gtag sends cookieless pings only there);
+  // elsewhere granted. Ad signals are always denied — we run no ads. Keep the region
+  // list in sync with apps/web/src/lib/analytics.ts and apps/docs/astro.config.mjs.
+  window.gtag("consent", "default", {
+    ad_storage: "denied",
+    ad_user_data: "denied",
+    ad_personalization: "denied",
+    analytics_storage: "denied",
+    region: [
+      "AT",
+      "BE",
+      "BG",
+      "HR",
+      "CY",
+      "CZ",
+      "DK",
+      "EE",
+      "FI",
+      "FR",
+      "DE",
+      "GR",
+      "HU",
+      "IE",
+      "IT",
+      "LV",
+      "LT",
+      "LU",
+      "MT",
+      "NL",
+      "PL",
+      "PT",
+      "RO",
+      "SK",
+      "SI",
+      "ES",
+      "SE",
+      "IS",
+      "LI",
+      "NO",
+      "GB",
+      "CH",
+    ],
+  });
+  window.gtag("consent", "default", {
+    ad_storage: "denied",
+    ad_user_data: "denied",
+    ad_personalization: "denied",
+    analytics_storage: "granted",
+  });
   window.gtag("config", MEASUREMENT_ID, { send_page_view: false });
   const script = document.createElement("script");
   script.async = true;

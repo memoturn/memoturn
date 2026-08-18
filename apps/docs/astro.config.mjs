@@ -14,6 +14,14 @@ const GA_ID = /^G-[A-Z0-9]+$/.test(process.env.PUBLIC_GA_MEASUREMENT_ID ?? "")
   ? process.env.PUBLIC_GA_MEASUREMENT_ID
   : undefined;
 
+// Consent Mode v2: analytics storage defaults to denied in the EEA/UK/CH until the
+// visitor accepts the banner (public/consent-banner.js), granted elsewhere; ad signals
+// are always denied — we run no ads. A previously stored banner choice ("mt-consent" in
+// localStorage) is replayed before config. Keep the region list in sync with
+// apps/web/src/lib/analytics.ts and apps/console/src/lib/analytics.ts.
+const CONSENT_REGIONS =
+  '["AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU","IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE","IS","LI","NO","GB","CH"]';
+
 /** @type {import('@astrojs/starlight/types').StarlightUserConfig["head"]} */
 const gtagHead = GA_ID
   ? [
@@ -21,8 +29,16 @@ const gtagHead = GA_ID
       { tag: "script", attrs: { src: `https://www.googletagmanager.com/gtag/js?id=${GA_ID}`, async: true } },
       {
         tag: "script",
-        content: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${GA_ID}');`,
+        content:
+          `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}` +
+          `gtag('js',new Date());` +
+          `gtag('consent','default',{ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied',analytics_storage:'denied',region:${CONSENT_REGIONS}});` +
+          `gtag('consent','default',{ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied',analytics_storage:'granted'});` +
+          `try{var c=localStorage.getItem('mt-consent');if(c==='granted'||c==='denied'){gtag('consent','update',{analytics_storage:c});}}catch(e){}` +
+          `gtag('config','${GA_ID}');`,
       },
+      // Same-origin banner script (CSP script-src 'self'); only shipped when analytics is.
+      { tag: "script", attrs: { src: "/consent-banner.js", defer: true } },
     ]
   : [];
 
