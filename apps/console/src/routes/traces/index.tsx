@@ -26,7 +26,7 @@ import {
   Timer,
   X,
 } from "lucide-react";
-import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Timestamp } from "@/components/timestamp";
 import { EmptyState } from "../../components/empty-state";
@@ -49,6 +49,7 @@ import {
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu";
 import { Input } from "../../components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
@@ -83,7 +84,22 @@ interface TraceSearch {
   // is kept out of the URL.
   orderBy?: TraceOrder;
   orderDir?: "asc" | "desc";
+  // Active saved view — a shareable bookmark: opening a ?viewId= link applies the view's stored
+  // filters, columns, sort, and density (then the user can drift from it without losing the tag).
+  viewId?: string;
 }
+
+/** The full state a saved view captures (v2). Legacy views stored the bare filter object. */
+type ViewState = {
+  v: 2;
+  filters: Record<string, unknown>;
+  columns?: { hidden: string[]; order: string[] };
+  orderBy?: TraceOrder;
+  orderDir?: "asc" | "desc";
+  pageSize?: number;
+  groupBy?: GroupKey;
+  compact?: boolean;
+};
 
 type TraceOrder = "timestamp" | "name" | "latency" | "cost" | "tokens";
 const TRACE_ORDERS: TraceOrder[] = ["timestamp", "name", "latency", "cost", "tokens"];
@@ -115,6 +131,7 @@ export const Route = createFileRoute("/traces/")({
     pageSize: posInt(s.pageSize),
     orderBy: TRACE_ORDERS.includes(s.orderBy as TraceOrder) ? (s.orderBy as TraceOrder) : undefined,
     orderDir: s.orderDir === "asc" || s.orderDir === "desc" ? s.orderDir : undefined,
+    viewId: str(s.viewId),
   }),
   component: TracesPage,
 });
@@ -207,7 +224,13 @@ function useColumnPrefs() {
     [next[i], next[j]] = [next[j] as ColKey, next[i] as ColKey];
     persist({ hidden: [...hidden], order: next });
   };
-  return { order, hidden, toggle, move };
+  // Bulk replace — applying a saved view's stored column configuration.
+  const setAll = (next: { hidden: string[]; order: string[] }) =>
+    persist({
+      hidden: next.hidden.filter((k): k is ColKey => COL_KEYS.includes(k as ColKey)),
+      order: next.order.filter((k): k is ColKey => COL_KEYS.includes(k as ColKey)),
+    });
+  return { order, hidden, toggle, move, setAll };
 }
 
 /** localStorage-backed view preference (compact density, grouping), persisted across sessions. */
@@ -549,7 +572,7 @@ function TracesPage() {
   const days = useRangeDays();
   const readOnly = useIsReadOnly();
   const qc = useQueryClient();
-  const { order, hidden, toggle: toggleColumn, move: moveColumn } = useColumnPrefs();
+  const { order, hidden, toggle: toggleColumn, move: moveColumn, setAll: setAllColumns } = useColumnPrefs();
   const [compact, setCompact] = usePersisted("memoturn.traces.compact", false);
   const [groupBy, setGroupBy] = usePersisted<GroupKey>("memoturn.traces.groupBy", "none");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -573,6 +596,7 @@ function TracesPage() {
     pageSize: pageSizeRaw,
     orderBy,
     orderDir,
+    viewId,
     ...listFilters
   } = filters;
   const page = pageRaw ?? 1;
@@ -745,24 +769,83 @@ function TracesPage() {
     queryKey: ["saved-views", "traces"],
     queryFn: () => api.listSavedViews("traces"),
   });
+  const activeView = viewId ? savedViews?.find((v) => v.id === viewId) : undefined;
+
+  // Everything a saved view captures, as of right now.
+  const captureViewState = (): ViewState => ({
+    v: 2,
+    filters: listFilters,
+    columns: { hidden: order.filter((k) => hidden.has(k)), order },
+    orderBy,
+    orderDir,
+    pageSize: pageSizeRaw,
+    groupBy: groupBy !== "none" ? groupBy : undefined,
+    compact: compact || undefined,
+  });
+
+  // Apply a view's stored state: URL search (filters + sort + the viewId tag) plus the
+  // localStorage-backed preferences (columns, grouping, density). Legacy v1 views stored the
+  // bare filter object — everything else stays as-is for those.
+  const applyViewState = (view: { id: string; filters: Record<string, unknown> }) => {
+    const raw = view.filters as Partial<ViewState> | Record<string, unknown>;
+    const isV2 = (raw as Partial<ViewState>).v === 2 && typeof (raw as Partial<ViewState>).filters === "object";
+    const s = isV2 ? (raw as ViewState) : undefined;
+    const viewFilters = (s ? s.filters : raw) as TraceSearch;
+    appliedViewRef.current = view.id;
+    if (s?.columns) setAllColumns(s.columns);
+    if (s) {
+      setGroupBy(s.groupBy ?? "none");
+      setCompact(s.compact ?? false);
+    }
+    navigate({
+      search: {
+        ...viewFilters,
+        orderBy: s?.orderBy,
+        orderDir: s?.orderDir,
+        pageSize: s?.pageSize,
+        viewId: view.id,
+      },
+    });
+  };
+  // A shared ?viewId= link applies the view once its definition loads; re-navigations with the
+  // same viewId (the user drifting from the view) don't re-apply and clobber their changes.
+  const appliedViewRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!viewId || !savedViews || appliedViewRef.current === viewId) return;
+    const v = savedViews.find((x) => x.id === viewId);
+    if (v) {
+      appliedViewRef.current = viewId;
+      applyViewState(v);
+    }
+  });
+
   const saveView = useMutation({
-    mutationFn: (name: string) => api.createSavedView({ name, table: "traces", filters: listFilters }),
-    onSuccess: () => {
+    mutationFn: (name: string) => api.createSavedView({ name, table: "traces", filters: captureViewState() }),
+    onSuccess: (created) => {
       toast.success("View saved");
       qc.invalidateQueries({ queryKey: ["saved-views", "traces"] });
+      appliedViewRef.current = created.id; // already showing this state — don't re-apply
+      navigate({ search: (prev) => ({ ...prev, viewId: created.id }) });
     },
     onError: (e) => toast.error(`Failed to save view: ${String(e)}`),
   });
+  const updateView = useMutation({
+    mutationFn: (id: string) => api.updateSavedView(id, { filters: captureViewState() }),
+    onSuccess: () => {
+      toast.success("View updated");
+      qc.invalidateQueries({ queryKey: ["saved-views", "traces"] });
+    },
+    onError: (e) => toast.error(`Failed to update view: ${String(e)}`),
+  });
   const removeView = useMutation({
     mutationFn: (id: string) => api.deleteSavedView(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["saved-views", "traces"] }),
+    onSuccess: (_r, id) => {
+      qc.invalidateQueries({ queryKey: ["saved-views", "traces"] });
+      if (viewId === id) navigate({ search: (prev) => ({ ...prev, viewId: undefined }) });
+    },
     onError: (e) => toast.error(`Failed to delete view: ${String(e)}`),
   });
-  const applyView = (f: Record<string, unknown>) => navigate({ search: f as TraceSearch });
-  const promptSaveView = () => {
-    const name = window.prompt("Name this view");
-    if (name) saveView.mutate(name);
-  };
+  const [viewName, setViewName] = useState("");
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [action, setAction] = useState("add-to-dataset");
@@ -863,10 +946,55 @@ function TracesPage() {
             </Button>
             <HelpTip>Toggle denser rows to fit more traces on screen.</HelpTip>
             <ColumnsMenu order={order} hidden={hidden} toggle={toggleColumn} move={moveColumn} />
-            <Button variant="outline" size="sm" onClick={promptSaveView} disabled={readOnly} className="gap-2">
-              <Save />
-              Save view
-            </Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" disabled={readOnly} className="gap-2">
+                  <Save />
+                  {activeView ? `View: ${activeView.name}` : "Save view"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 space-y-2">
+                <div className="text-sm font-medium">Save this view</div>
+                <p className="text-xs text-muted-foreground">
+                  Captures filters, columns, sort, grouping, and density. Views are shareable — the URL carries the view
+                  id.
+                </p>
+                <Input
+                  value={viewName}
+                  onChange={(e) => setViewName(e.target.value)}
+                  placeholder="View name"
+                  className="h-8"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && viewName.trim()) {
+                      saveView.mutate(viewName.trim());
+                      setViewName("");
+                    }
+                  }}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    disabled={!viewName.trim() || saveView.isPending}
+                    onClick={() => {
+                      saveView.mutate(viewName.trim());
+                      setViewName("");
+                    }}
+                  >
+                    Save as new view
+                  </Button>
+                  {activeView && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={updateView.isPending}
+                      onClick={() => updateView.mutate(activeView.id)}
+                    >
+                      Update “{activeView.name}”
+                    </Button>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-2">
@@ -1055,11 +1183,17 @@ function TracesPage() {
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-muted-foreground">Saved views:</span>
           {savedViews.map((v) => (
-            <span key={v.id} className="inline-flex items-center gap-1 border bg-muted px-1.5 py-0.5">
+            <span
+              key={v.id}
+              className={cn(
+                "inline-flex items-center gap-1 border px-1.5 py-0.5",
+                v.id === viewId ? "border-primary/50 bg-primary/10" : "bg-muted",
+              )}
+            >
               <button
                 type="button"
                 className="text-xs font-medium hover:underline"
-                onClick={() => applyView(v.filters)}
+                onClick={() => applyViewState(v)}
                 title="Apply this view"
               >
                 {v.name}

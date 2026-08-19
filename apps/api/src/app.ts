@@ -205,6 +205,7 @@ import {
   UserPatternError,
   updateAlertRule,
   updateNotificationPreferences,
+  updateSavedView,
   updateWidgetGrid,
 } from "@memoturn/server";
 import { Scalar } from "@scalar/hono-api-reference";
@@ -4313,6 +4314,43 @@ app.openapi(
     const view = await createSavedView(c.get("projectId"), body);
     await recordAudit(c.get("projectId"), c.get("actor"), "saved-view.create", `view:${body.name}`);
     return c.json(view, 201);
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "patch",
+    path: "/v1/saved-views/{id}",
+    summary: "Update a saved view's name and/or stored state",
+    tags: ["platform"],
+    security,
+    request: {
+      params: z.object({ id: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              name: z.string().min(1).optional(),
+              filters: z.record(z.string(), z.any()).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Updated", content: { "application/json": { schema: C.savedView } } },
+      403: { description: "Forbidden" },
+      404: { description: "Not found" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const id = c.req.valid("param").id;
+    const view = await updateSavedView(c.get("projectId"), id, c.req.valid("json"));
+    if (!view) return c.json({ error: "view not found" }, 404);
+    await recordAudit(c.get("projectId"), c.get("actor"), "saved-view.update", id);
+    return c.json(view, 200);
   },
 );
 

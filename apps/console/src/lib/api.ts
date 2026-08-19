@@ -511,6 +511,8 @@ export const api = {
     get<{ data: SavedView[] }>(`/v1/saved-views${qs({ table })}`).then((r) => r.data),
   createSavedView: (body: { name: string; table?: string; filters: Record<string, unknown> }) =>
     post<SavedView>(`/v1/saved-views`, body),
+  updateSavedView: (id: string, body: { name?: string; filters?: Record<string, unknown> }) =>
+    patch<SavedView>(`/v1/saved-views/${encodeURIComponent(id)}`, body),
   deleteSavedView: (id: string) => del(`/v1/saved-views/${encodeURIComponent(id)}`),
   listComments: (objectType: string, objectId: string) =>
     get<{ data: Comment[] }>(`/v1/comments${qs({ objectType, objectId })}`).then((r) => r.data),

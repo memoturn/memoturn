@@ -37,6 +37,24 @@ export async function listSavedViews(projectId: string, table = "traces") {
   return rows.map(serialize);
 }
 
+/** Update a view's name and/or stored state ("update view with current filters" / rename). */
+export async function updateSavedView(
+  projectId: string,
+  id: string,
+  input: { name?: string; filters?: Record<string, unknown> },
+) {
+  const existing = await prisma.savedView.findFirst({ where: { projectId, id } });
+  if (!existing) return null;
+  const v = await prisma.savedView.update({
+    where: { id: existing.id },
+    data: {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.filters !== undefined ? { filters: input.filters as object } : {}),
+    },
+  });
+  return serialize(v);
+}
+
 export async function deleteSavedView(projectId: string, id: string) {
   await prisma.savedView.deleteMany({ where: { projectId, id } });
   return { deleted: true };

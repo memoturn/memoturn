@@ -189,7 +189,7 @@ Server-executed experiments run a prompt/model across a dataset and auto-score e
 | PATCH | `/v1/scores/{id}` | Correct a score's `value`/`stringValue`/`comment` (inserts a replacement row; audited). |
 | DELETE | `/v1/scores/{id}` | Hard-delete a score (Doris `DELETE`, project-scoped). |
 | GET / POST | `/v1/saved-views` | List / save a table view (named set of filters). |
-| DELETE | `/v1/saved-views/{id}` | Delete a saved view. |
+| PATCH / DELETE | `/v1/saved-views/{id}` | Update a saved view’s name/state / delete it. |
 | GET / POST | `/v1/comments` | List comments on an object (trace/observation/session/prompt) / add one. |
 | GET | `/v1/comments/mentions` | Comments in this project that @mention the signed-in user. |
 | DELETE | `/v1/comments/{id}` | Delete a comment. |
