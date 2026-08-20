@@ -12,22 +12,53 @@ export interface ModelPrice {
 
 export const MODEL_PRICES: ModelPrice[] = [
   // Anthropic
+  { match: /^claude-fable-5/i, provider: "anthropic", inputPerMTok: 10, outputPerMTok: 50 },
+  { match: /^claude-opus-5/i, provider: "anthropic", inputPerMTok: 5, outputPerMTok: 25 },
+  // Opus 4.5+ dropped to the $5/$25 tier; the catch-all below keeps 4 / 4.1 at legacy pricing.
+  { match: /^claude-opus-4-[5-8]/i, provider: "anthropic", inputPerMTok: 5, outputPerMTok: 25 },
   { match: /^claude-opus-4/i, provider: "anthropic", inputPerMTok: 15, outputPerMTok: 75 },
+  { match: /^claude-sonnet-5/i, provider: "anthropic", inputPerMTok: 3, outputPerMTok: 15 },
   { match: /^claude-sonnet-4/i, provider: "anthropic", inputPerMTok: 3, outputPerMTok: 15 },
   { match: /^claude-haiku-4/i, provider: "anthropic", inputPerMTok: 1, outputPerMTok: 5 },
   { match: /^claude-3-5-sonnet/i, provider: "anthropic", inputPerMTok: 3, outputPerMTok: 15 },
-  // OpenAI
+  // OpenAI (gpt-5.6 = Sol/Terra/Luna tiers; dotted families before the legacy ^gpt-5 catch-all)
+  { match: /^gpt-5\.6-sol/i, provider: "openai", inputPerMTok: 5, outputPerMTok: 30 },
+  { match: /^gpt-5\.6-terra/i, provider: "openai", inputPerMTok: 2, outputPerMTok: 12 },
+  { match: /^gpt-5\.6-luna/i, provider: "openai", inputPerMTok: 0.2, outputPerMTok: 1.2 },
+  { match: /^gpt-5\.5-pro/i, provider: "openai", inputPerMTok: 30, outputPerMTok: 180 },
+  { match: /^gpt-5\.5-cyber/i, provider: "openai", inputPerMTok: 12.5, outputPerMTok: 75 },
+  { match: /^gpt-5\.5/i, provider: "openai", inputPerMTok: 5, outputPerMTok: 30 },
+  { match: /^gpt-5\.4-mini/i, provider: "openai", inputPerMTok: 0.75, outputPerMTok: 4.5 },
+  { match: /^gpt-5\.4-nano/i, provider: "openai", inputPerMTok: 0.2, outputPerMTok: 1.25 },
+  { match: /^gpt-5\.4-pro/i, provider: "openai", inputPerMTok: 30, outputPerMTok: 180 },
+  { match: /^gpt-5\.4/i, provider: "openai", inputPerMTok: 2.5, outputPerMTok: 15 },
+  { match: /^gpt-5-mini/i, provider: "openai", inputPerMTok: 0.25, outputPerMTok: 2 },
+  { match: /^gpt-5-nano/i, provider: "openai", inputPerMTok: 0.05, outputPerMTok: 0.4 },
+  { match: /^gpt-5/i, provider: "openai", inputPerMTok: 1.25, outputPerMTok: 10 },
   { match: /^gpt-4o-mini/i, provider: "openai", inputPerMTok: 0.15, outputPerMTok: 0.6 },
   { match: /^gpt-4o/i, provider: "openai", inputPerMTok: 2.5, outputPerMTok: 10 },
   { match: /^gpt-4\.1-mini/i, provider: "openai", inputPerMTok: 0.4, outputPerMTok: 1.6 },
   { match: /^gpt-4\.1/i, provider: "openai", inputPerMTok: 2, outputPerMTok: 8 },
+  { match: /^o4-mini/i, provider: "openai", inputPerMTok: 1.1, outputPerMTok: 4.4 },
   { match: /^o3-mini/i, provider: "openai", inputPerMTok: 1.1, outputPerMTok: 4.4 },
-  // Google Gemini
+  // Google Gemini (standard ≤200K-context tier)
+  { match: /^gemini-3\.6-flash/i, provider: "gemini", inputPerMTok: 1.5, outputPerMTok: 7.5 },
+  { match: /^gemini-3\.5-flash-lite/i, provider: "gemini", inputPerMTok: 0.3, outputPerMTok: 2.5 },
+  { match: /^gemini-3\.5-flash/i, provider: "gemini", inputPerMTok: 1.5, outputPerMTok: 9 },
+  { match: /^gemini-3\.1-pro/i, provider: "gemini", inputPerMTok: 2, outputPerMTok: 12 },
+  { match: /^gemini-3-flash/i, provider: "gemini", inputPerMTok: 0.5, outputPerMTok: 3 },
+  { match: /^gemini-3-pro/i, provider: "gemini", inputPerMTok: 2, outputPerMTok: 12 },
   { match: /^gemini-2\.5-pro/i, provider: "gemini", inputPerMTok: 1.25, outputPerMTok: 10 },
   { match: /^gemini-2\.5-flash-lite/i, provider: "gemini", inputPerMTok: 0.1, outputPerMTok: 0.4 },
   { match: /^gemini-2\.5-flash/i, provider: "gemini", inputPerMTok: 0.3, outputPerMTok: 2.5 },
   { match: /^gemini-2\.0-flash/i, provider: "gemini", inputPerMTok: 0.1, outputPerMTok: 0.4 },
   // AWS Bedrock (model ids are prefixed by vendor, optionally a region shard like `us.`)
+  {
+    match: /^(?:[a-z]{2}\.)?anthropic\.claude-(?:opus-5|opus-4-[5-8])/i,
+    provider: "bedrock",
+    inputPerMTok: 5,
+    outputPerMTok: 25,
+  },
   {
     match: /^(?:[a-z]{2}\.)?anthropic\.claude-(?:opus|3-opus)/i,
     provider: "bedrock",
