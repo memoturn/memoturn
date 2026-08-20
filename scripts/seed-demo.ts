@@ -20,7 +20,7 @@ import { parseArgs } from "node:util";
 import { prisma } from "@memoturn/db";
 import { telemetry } from "@memoturn/telemetry";
 import { type IngestEvent, ingestRequest } from "../packages/core/src/events";
-import { type DemoDataConfig, demoDayWindow, generateDemoDay, packBatches } from "../packages/server/src/demodata";
+import { type DemoDataConfig, generateDemoDay, packBatches } from "../packages/server/src/demodata";
 
 // ── CLI + guards ─────────────────────────────────────────────────────────────────
 

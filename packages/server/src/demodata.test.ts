@@ -115,3 +115,81 @@ describe("wire contract", () => {
     }
   });
 });
+
+describe("enriched archetypes", () => {
+  // A big single day so every weighted scenario appears.
+  const bigCfg = { days: 1, tracesPerDay: 400, seed: "archetype-seed", now: NOW };
+  const events = generateDemoDay(bigCfg, 0);
+  const traces = events.filter((e) => e.type === "trace-create");
+  const names = new Set(traces.map((e) => (e.body as { name: string }).name));
+
+  it("every generated event validates against the ingest wire schema", () => {
+    for (const batch of packBatches(events)) {
+      const parsed = ingestRequest.safeParse({ batch });
+      if (!parsed.success)
+        throw new Error(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+    }
+  });
+
+  it("covers all scenario archetypes", () => {
+    for (const n of [
+      "chat-completion",
+      "support-thread",
+      "rag-pipeline",
+      "rag-rerank",
+      "agent-loop",
+      "guardrail-check",
+      "image-generation",
+    ]) {
+      expect(names.has(n), `missing scenario ${n}`).toBe(true);
+    }
+  });
+
+  it("agent-loop traces are real trees (steps nested under an AGENT parent)", () => {
+    const agentTrace = traces.find((e) => (e.body as { name: string }).name === "agent-loop");
+    expect(agentTrace).toBeDefined();
+    const tid = (agentTrace?.body as { id: string }).id;
+    const obs = events.filter(
+      (e) => e.type !== "trace-create" && e.type !== "score-create" && (e.body as { traceId: string }).traceId === tid,
+    );
+    const parents = new Set(obs.map((o) => (o.body as { parentObservationId?: string }).parentObservationId ?? ""));
+    parents.delete("");
+    expect(parents.size).toBeGreaterThanOrEqual(2); // agent span + at least one step parent
+    const kinds = new Set(obs.map((o) => (o.body as { observationType?: string }).observationType ?? ""));
+    expect(kinds.has("AGENT")).toBe(true);
+    expect(kinds.has("TOOL")).toBe(true);
+    expect(kinds.has("THOUGHT")).toBe(true);
+  });
+
+  it("support threads share a session across multiple turn traces", () => {
+    const threads = traces.filter((e) => (e.body as { name: string }).name === "support-thread");
+    expect(threads.length).toBeGreaterThan(0);
+    const bySession = new Map<string, number>();
+    for (const t of threads) {
+      const sid = (t.body as { sessionId: string }).sessionId;
+      bySession.set(sid, (bySession.get(sid) ?? 0) + 1);
+    }
+    expect([...bySession.values()].some((n) => n >= 2)).toBe(true);
+    expect(
+      threads.every((t) => String((t.body as { sessionPath?: string }).sessionPath ?? "").startsWith("/support/")),
+    ).toBe(true);
+  });
+
+  it("emits span-scoped corrections and reranked document sets", () => {
+    const scores = events.filter((e) => e.type === "score-create");
+    const corrections = scores.filter((e) => (e.body as { dataType?: string }).dataType === "CORRECTION");
+    expect(corrections.length).toBeGreaterThan(0);
+    expect(corrections.every((c) => Boolean((c.body as { observationId?: string }).observationId))).toBe(true);
+    const rerank = events.find((e) => (e.body as { name?: string }).name === "rerank-docs");
+    expect(rerank).toBeDefined();
+    expect(((rerank?.body as { retrievedDocuments?: unknown[] }).retrievedDocuments ?? []).length).toBeGreaterThan(0);
+  });
+
+  it("reports reasoning and cache-read token usage somewhere in the set", () => {
+    const usages = events
+      .map((e) => (e.body as { usage?: { reasoningTokens?: number; cacheReadTokens?: number } }).usage)
+      .filter(Boolean) as { reasoningTokens?: number; cacheReadTokens?: number }[];
+    expect(usages.some((u) => (u.reasoningTokens ?? 0) > 0)).toBe(true);
+    expect(usages.some((u) => (u.cacheReadTokens ?? 0) > 0)).toBe(true);
+  });
+});
