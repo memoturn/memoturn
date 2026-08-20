@@ -184,6 +184,105 @@ const EVAL_COMMENTS = [
   "Response is generic and misses the specific error the user described.",
 ];
 
+const REVIEW_NOTES = [
+  "Tone is fine but the answer should link the relevant docs page.",
+  "Good answer — worth adding to the golden dataset.",
+  "Response hedges too much; the docs are definitive on this.",
+  "Escalated to support engineering for a deeper look.",
+];
+
+// Multi-turn support conversations (chat-thread scenario) — coherent follow-ups so the
+// session Memory Explorer reads like a real transcript.
+const CONVERSATIONS = [
+  {
+    topic: "billing",
+    turns: [
+      [
+        "Why was my card charged twice this month?",
+        "One of the two entries is a temporary authorization hold — it drops off within 3-5 business days.",
+      ],
+      [
+        "It's been a week and both charges are still there.",
+        "Then the second charge settled incorrectly — I've flagged it for a refund; you'll see it reversed within 2 business days.",
+      ],
+      [
+        "Will I get an email when the refund lands?",
+        "Yes — a confirmation email goes to the billing contact the moment the reversal posts.",
+      ],
+    ],
+  },
+  {
+    topic: "webhooks",
+    turns: [
+      [
+        "My webhook stopped firing yesterday, nothing changed on our side.",
+        "The delivery log shows 502s from your endpoint starting 14:10 UTC — the retries exhausted after 6 attempts.",
+      ],
+      [
+        "That was a bad deploy on our end. Can you replay the missed deliveries?",
+        "Done — 47 missed deliveries were re-enqueued and all returned 200. You're caught up.",
+      ],
+    ],
+  },
+  {
+    topic: "sso",
+    turns: [
+      [
+        "How do I set up SSO with Okta?",
+        "Register your Okta app as an OIDC provider under Organization → SSO, then map your email domain to it.",
+      ],
+      [
+        "Which redirect URI do I give Okta?",
+        "Use https://app.example.com/auth/sso/callback — it's shown verbatim on the provider registration form.",
+      ],
+      [
+        "Do existing password users get migrated?",
+        "They keep working; on their next login with a mapped domain they're routed through your IdP automatically.",
+      ],
+      ["Perfect, that worked. Thanks!", "Great to hear — the setup looks healthy from our side too."],
+    ],
+  },
+  {
+    topic: "exports",
+    turns: [
+      [
+        "Can I schedule a nightly export of traces to S3?",
+        "Yes — Scheduled Exports under Settings run daily and write JSONL/CSV/Parquet to your bucket.",
+      ],
+      [
+        "The export only contains yesterday's traces — I need the full history once.",
+        "Kick off a one-time backfill from the same page; scheduled runs then continue incrementally from there.",
+      ],
+    ],
+  },
+] as const;
+
+// Guardrail scenario: categories the checker flags, mirroring /v1/guardrails/check verdicts.
+const GUARDRAIL_FINDINGS = [
+  { category: "pii-email", count: 1 },
+  { category: "pii-phone", count: 1 },
+  { category: "prompt-injection", count: 1 },
+  { category: "toxicity", count: 2 },
+] as const;
+
+const IMAGE_PROMPTS = [
+  "A sunset over mountains in watercolor",
+  "Isometric illustration of a data pipeline",
+  "Minimal line art of a lighthouse in fog",
+] as const;
+
+// A real 24×16 gradient PNG (155 bytes) so image outputs render in the media preview.
+const DEMO_IMAGE_PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAQCAIAAACDRijCAAAAYklEQVR42mPw37EpdNuamC3LkzYtytwwt2DdjLI1k2tX9bWs6Oxa1jJxSf2MRVXzFpQsnZe/Zk7WplmpO2ckHJgWfWxK2NlJgVcm+Nzqc3/Y4/Siy5Zh1KBRg0YNGjWIMoMAt3+Mv2OXg+UAAAAASUVORK5CYII=";
+
+const AB_VARIANTS = ["control", "variant-a", "variant-b"] as const;
+const CLIENTS = [
+  ["web", 0.6],
+  ["mobile", 0.3],
+  ["api", 0.1],
+] as const;
+const REGIONS = ["us-east", "eu-west", "ap-south"] as const;
+
 // Diurnal weight per hour (UTC) — business-hours peak, quiet nights.
 const HOUR_WEIGHTS = [1, 1, 1, 1, 1, 2, 3, 5, 8, 10, 11, 11, 10, 10, 11, 10, 9, 8, 6, 5, 4, 3, 2, 1].map(
   (w, h) => [h, w] as const,
@@ -228,7 +327,14 @@ function addObservation(
 
 function makeGenerationBody(
   rng: Rng,
-  opts: { promptMean: number; completionMean: number; input: unknown; output: unknown },
+  opts: {
+    promptMean: number;
+    completionMean: number;
+    input: unknown;
+    output: unknown;
+    /** Mean cached prompt tokens (multi-turn threads reuse their history from the cache). */
+    cacheReadMean?: number;
+  },
 ) {
   const [model, , meanLatency] = weightedPick(
     rng,
@@ -237,12 +343,25 @@ function makeGenerationBody(
   const promptTokens = gauss(rng, opts.promptMean, opts.promptMean * 0.4, 20);
   const completionTokens = gauss(rng, opts.completionMean, opts.completionMean * 0.5, 5);
   const durationMs = Math.max(120, Math.round(meanLatency * Math.exp((rng() + rng() - 1) * 0.8)));
+  // Reasoning models spend thinking tokens (a subset of completion pricing-wise, reported
+  // separately); cached prompt reads show up on thread follow-ups.
+  const reasoningTokens =
+    model === "o3-mini" || model === "claude-opus-4-1" ? gauss(rng, completionTokens * 1.6, completionTokens, 32) : 0;
+  const cacheReadTokens = opts.cacheReadMean
+    ? Math.min(promptTokens - 10, gauss(rng, opts.cacheReadMean, opts.cacheReadMean * 0.3, 0))
+    : 0;
   return {
     durationMs,
     body: {
       model,
       modelParameters: { temperature: 0.2 + Math.round(rng() * 6) / 10, max_tokens: 1024 },
-      usage: { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens },
+      usage: {
+        promptTokens,
+        completionTokens,
+        totalTokens: promptTokens + completionTokens,
+        ...(reasoningTokens > 0 ? { reasoningTokens } : {}),
+        ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+      },
       input: opts.input,
       output: opts.output,
     },
@@ -284,6 +403,115 @@ function makeRetrievedDocs(rng: Rng, question: string, n: number) {
   }));
 }
 
+/**
+ * A multi-turn support conversation: 2-4 traces sharing one session, each turn carrying the
+ * accumulated message history (with cache reads on the follow-ups) — the session Memory
+ * Explorer renders it as a coherent role-attributed transcript.
+ */
+function makeChatThread(
+  rng: Rng,
+  baseTraceId: string,
+  sessionSuffix: string,
+  startMs: number,
+  cutoffMs: number,
+  environment: string,
+  userId: string,
+  release: string,
+): IngestEvent[] {
+  const convo = pick(rng, CONVERSATIONS);
+  const nTurns = Math.min(convo.turns.length, randInt(rng, 2, 4));
+  const sessionId = `demo-thread-${sessionSuffix}`;
+  const events: IngestEvent[] = [];
+  const history: { role: string; content: string }[] = [
+    { role: "system", content: "You are a concise, factual support agent for the product. Cite settings paths." },
+  ];
+  let cursor = Math.min(startMs, cutoffMs - nTurns * 60_000);
+
+  for (let turn = 0; turn < nTurns; turn++) {
+    const [q, a] = convo.turns[turn] as readonly [string, string];
+    const traceId = `${baseTraceId}-t${turn}`;
+    const ctx: Ctx = { traceId, rng, environment, events, obsSeq: 0 };
+    history.push({ role: "user", content: q });
+    const input = [...history];
+    const output = { role: "assistant", content: a };
+    const gen = makeGenerationBody(rng, {
+      promptMean: 250 + turn * 220,
+      completionMean: 160,
+      input,
+      output,
+      // Follow-ups replay the growing history from the prompt cache.
+      cacheReadMean: turn > 0 ? 180 * turn : 0,
+    });
+    const genId = addObservation(ctx, "generation-create", cursor, cursor + gen.durationMs, {
+      name: "support-turn",
+      metadata: { turn: turn + 1, channel: "chat" },
+      embedding: demoEmbedding(rng, topicOf(q)),
+      ...gen.body,
+    });
+    events.unshift({
+      id: `evt-${traceId}`,
+      timestamp: iso(cursor),
+      type: "trace-create",
+      body: {
+        id: traceId,
+        name: "support-thread",
+        timestamp: iso(cursor),
+        userId,
+        sessionId,
+        sessionPath: `/support/${convo.topic}`,
+        release,
+        environment,
+        tags: ["chat", "thread"],
+        metadata: { demo: true, seededBy: "seed-demo", topic: convo.topic },
+        input,
+        output,
+      },
+    } as IngestEvent);
+    if (turn === nTurns - 1 && rng() < 0.7) {
+      const scoreId = `demo-score-${traceId}-user-feedback`;
+      events.push({
+        id: `evt-${scoreId}`,
+        timestamp: iso(cursor + gen.durationMs + 30_000),
+        type: "score-create",
+        body: {
+          id: scoreId,
+          traceId,
+          name: "user-feedback",
+          timestamp: iso(cursor + gen.durationMs + 30_000),
+          environment,
+          source: "API",
+          dataType: "BOOLEAN",
+          value: rng() < 0.9 ? 1 : 0,
+        },
+      } as IngestEvent);
+    }
+    if (rng() < 0.3) {
+      const scoreId = `demo-score-${traceId}-answer-relevance`;
+      events.push({
+        id: `evt-${scoreId}`,
+        timestamp: iso(cursor + gen.durationMs + 5_000),
+        type: "score-create",
+        body: {
+          id: scoreId,
+          traceId,
+          observationId: genId,
+          name: "answer-relevance",
+          timestamp: iso(cursor + gen.durationMs + 5_000),
+          environment,
+          source: "EVAL",
+          dataType: "NUMERIC",
+          value: Math.round((0.65 + rng() ** 2 * 0.35) * 100) / 100,
+          comment: pick(rng, EVAL_COMMENTS),
+        },
+      } as IngestEvent);
+    }
+    history.push(output);
+    // Next turn arrives 1-6 minutes later (clamped inside the day window).
+    cursor = Math.min(cursor + gen.durationMs + randInt(rng, 60_000, 360_000), cutoffMs - 1_000);
+  }
+  return events;
+}
+
 /** Builds all ingest events for one trace. Fully deterministic from (SEED, dayIndex, traceIndex). */
 export function makeTrace(
   cfg: Cfg,
@@ -308,11 +536,32 @@ export function makeTrace(
     ),
   );
   const userId = USERS[userIdx]?.[0] ?? "user-unknown";
+  const releaseIdx = Math.min(
+    RELEASES.length - 1,
+    Math.floor((1 - dayIndex / Math.max(1, cfg.days)) * RELEASES.length),
+  );
+  const release = RELEASES[releaseIdx] ?? "v1.6.0";
   const scenario = weightedPick(rng, [
-    ["chat-completion", 0.55],
-    ["rag-pipeline", 0.3],
-    ["agent-loop", 0.15],
+    ["chat-completion", 0.36],
+    ["chat-thread", 0.14],
+    ["rag-pipeline", 0.2],
+    ["rag-rerank", 0.08],
+    ["agent-loop", 0.12],
+    ["guardrail-check", 0.06],
+    ["image-generation", 0.04],
   ] as const);
+  if (scenario === "chat-thread") {
+    return makeChatThread(
+      rng,
+      traceId,
+      `d${dayIndex}-${traceIndex}`,
+      traceStart,
+      dayCutoffMs,
+      environment,
+      userId,
+      release,
+    );
+  }
   const [question, answer] = pick(rng, QA_PAIRS);
   const isError = rng() < 0.03;
   const hasWarning = !isError && rng() < 0.05;
@@ -323,6 +572,7 @@ export function makeTrace(
   const traceInput = [{ role: "user", content: question }];
   const traceOutput = isError ? null : { role: "assistant", content: answer };
 
+  let sessionPath = "";
   if (scenario === "chat-completion") {
     const gen = makeGenerationBody(rng, {
       promptMean: 350,
@@ -332,18 +582,23 @@ export function makeTrace(
     });
     finalGenerationId = addObservation(ctx, "generation-create", cursor, cursor + gen.durationMs, {
       name: "chat",
+      metadata: { channel: weightedPick(rng, CLIENTS) },
       embedding: demoEmbedding(rng, topicOf(question)),
       ...gen.body,
     });
     cursor += gen.durationMs;
-  } else if (scenario === "rag-pipeline") {
+  } else if (scenario === "rag-pipeline" || scenario === "rag-rerank") {
+    sessionPath = "/rag/answer";
     const retrieveMs = randInt(rng, 40, 280);
-    const numDocs = randInt(rng, 2, 5);
+    const numDocs = scenario === "rag-rerank" ? 5 : randInt(rng, 2, 5);
+    const docs = makeRetrievedDocs(rng, question, numDocs);
     const spanId = addObservation(ctx, "span-create", cursor, cursor + retrieveMs, {
       name: "retrieve-docs",
+      observationType: "RETRIEVER",
       input: { query: question, topK: 5 },
       output: { hits: numDocs },
-      retrievedDocuments: makeRetrievedDocs(rng, question, numDocs),
+      metadata: { index: "kb-main", k: 5 },
+      retrievedDocuments: docs,
       ...(hasWarning ? { level: "WARNING", statusMessage: pick(rng, WARNING_MESSAGES) } : {}),
     });
     if (rng() < 0.6) {
@@ -354,6 +609,29 @@ export function makeTrace(
       });
     }
     cursor += retrieveMs + randInt(rng, 5, 20);
+    if (scenario === "rag-rerank") {
+      // Rerank the retrieved set: same doc ids, new order + scores — the reranker panel
+      // shows the rank movement against the retriever stage.
+      const rerankMs = randInt(rng, 60, 220);
+      const shuffled = [...docs]
+        .map((d) => ({ ...d, sortKey: rng() * 0.6 + (numDocs - d.rank) / numDocs }))
+        .sort((a, b) => b.sortKey - a.sortKey)
+        .map(({ sortKey: _sortKey, ...d }, i) => ({
+          ...d,
+          rank: i,
+          score: Math.max(0, Number((0.98 - i * 0.12 - rng() * 0.04).toFixed(4))),
+        }));
+      addObservation(ctx, "span-create", cursor, cursor + rerankMs, {
+        name: "rerank-docs",
+        observationType: "RERANKER",
+        parentObservationId: spanId,
+        input: { candidates: numDocs, model: "rerank-lite-1" },
+        output: { kept: Math.min(3, numDocs) },
+        metadata: { reranker: "rerank-lite-1" },
+        retrievedDocuments: shuffled,
+      });
+      cursor += rerankMs + randInt(rng, 5, 15);
+    }
     const gen = makeGenerationBody(rng, {
       promptMean: 900,
       completionMean: 220,
@@ -368,36 +646,122 @@ export function makeTrace(
       ...gen.body,
     });
     cursor += gen.durationMs;
+  } else if (scenario === "guardrail-check") {
+    sessionPath = "/support/guarded";
+    const gen = makeGenerationBody(rng, {
+      promptMean: 400,
+      completionMean: 200,
+      input: traceInput,
+      output: traceOutput,
+    });
+    const draftId = addObservation(ctx, "generation-create", cursor, cursor + gen.durationMs, {
+      name: "draft-reply",
+      embedding: demoEmbedding(rng, topicOf(question)),
+      ...gen.body,
+    });
+    cursor += gen.durationMs;
+    const guardMs = randInt(rng, 20, 90);
+    const blocked = rng() < 0.35;
+    const finding = pick(rng, GUARDRAIL_FINDINGS);
+    addObservation(ctx, "span-create", cursor, cursor + guardMs, {
+      name: "guardrail:outbound",
+      observationType: "GUARDRAIL",
+      parentObservationId: draftId,
+      input: { policy: "outbound-replies", checks: ["pii", "prompt-injection", "toxicity"] },
+      output: blocked
+        ? {
+            verdict: "flagged",
+            findings: [finding],
+            redactedText: `${answer.slice(0, 60)}… [${finding.category} redacted]`,
+          }
+        : { verdict: "pass", findings: [] },
+      ...(blocked ? { level: "WARNING", statusMessage: `guardrail flagged ${finding.category}` } : {}),
+    });
+    cursor += guardMs;
+    finalGenerationId = draftId;
+  } else if (scenario === "image-generation") {
+    const prompt = pick(rng, IMAGE_PROMPTS);
+    const gen = makeGenerationBody(rng, {
+      promptMean: 40,
+      completionMean: 8,
+      input: prompt,
+      output: DEMO_IMAGE_PNG,
+    });
+    finalGenerationId = addObservation(ctx, "generation-create", cursor, cursor + gen.durationMs * 4, {
+      name: "generate-image",
+      metadata: { size: "1024x1024", quality: "standard" },
+      ...gen.body,
+    });
+    cursor += gen.durationMs * 4;
   } else {
+    // agent-loop: a real tree — plan (THOUGHT), then an AGENT span parenting each step,
+    // each step parenting its tool call (TOOL) + decision generation. Exercises tree
+    // guides, collapse rollups, Log depth, and the agent graph.
+    sessionPath = "/agent/plan-execute";
     const planMs = randInt(rng, 80, 400);
+    const steps = randInt(rng, 2, 4);
     addObservation(ctx, "span-create", cursor, cursor + planMs, {
       name: "plan",
+      observationType: "THOUGHT",
       input: { goal: question },
-      output: { steps: randInt(rng, 2, 4) },
+      output: { steps },
     });
     cursor += planMs;
-    const steps = randInt(rng, 2, 4);
-    for (let s = 0; s < steps; s++) {
+    // Precompute the steps so the parent AGENT span can be emitted with its full duration.
+    const stepPlans = Array.from({ length: steps }, (_, s) => {
       const tool = pick(rng, TOOLS);
-      const toolMs = randInt(rng, 30, 300);
-      addObservation(ctx, "span-create", cursor, cursor + toolMs, {
-        name: `execute-tool:${tool}`,
-        input: { tool, args: { query: question.slice(0, 40) } },
+      return {
+        tool,
+        toolMs: randInt(rng, 30, 300),
+        gen: makeGenerationBody(rng, {
+          promptMean: 500,
+          completionMean: 90,
+          input: [
+            { role: "system", content: "Decide the next action from the tool result." },
+            { role: "tool", content: JSON.stringify({ tool, ok: true }) },
+          ],
+          output: {
+            role: "assistant",
+            content: s === steps - 1 ? "All sub-goals satisfied — finalize." : `Need more context; call ${tool} next.`,
+            tool_calls:
+              s === steps - 1
+                ? []
+                : [{ id: `call_${s}`, type: "function", function: { name: tool, arguments: `{"query":"…"}` } }],
+          },
+        }),
+      };
+    });
+    const agentMs = stepPlans.reduce((a, p) => a + p.toolMs + p.gen.durationMs + 10, 0);
+    const agentId = addObservation(ctx, "span-create", cursor, cursor + agentMs, {
+      name: "run-agent",
+      observationType: "AGENT",
+      input: { goal: question, maxSteps: steps },
+      output: { completedSteps: steps },
+      metadata: { strategy: "plan-execute" },
+    });
+    for (let s = 0; s < steps; s++) {
+      const p = stepPlans[s] as (typeof stepPlans)[number];
+      const stepMs = p.toolMs + p.gen.durationMs + 10;
+      const stepId = addObservation(ctx, "span-create", cursor, cursor + stepMs, {
+        name: `step-${s + 1}`,
+        parentObservationId: agentId,
+        input: { step: s + 1 },
+        output: { decision: s === steps - 1 ? "finalize" : "continue" },
+      });
+      addObservation(ctx, "span-create", cursor, cursor + p.toolMs, {
+        name: `execute-tool:${p.tool}`,
+        observationType: "TOOL",
+        parentObservationId: stepId,
+        input: { tool: p.tool, args: { query: question.slice(0, 40) } },
         output: { ok: true },
         ...(hasWarning && s === 0 ? { level: "WARNING", statusMessage: pick(rng, WARNING_MESSAGES) } : {}),
       });
-      cursor += toolMs;
-      const stepGen = makeGenerationBody(rng, {
-        promptMean: 500,
-        completionMean: 90,
-        input: { role: "tool", tool },
-        output: { decision: s === steps - 1 ? "finalize" : "continue" },
+      addObservation(ctx, "generation-create", cursor + p.toolMs + 10, cursor + stepMs, {
+        name: `step-${s + 1}-decide`,
+        parentObservationId: stepId,
+        ...p.gen.body,
       });
-      addObservation(ctx, "generation-create", cursor, cursor + stepGen.durationMs, {
-        name: `step-${s + 1}`,
-        ...stepGen.body,
-      });
-      cursor += stepGen.durationMs;
+      cursor += stepMs;
     }
     const gen = makeGenerationBody(rng, {
       promptMean: 1200,
@@ -420,10 +784,6 @@ export function makeTrace(
     failed.body.output = null;
   }
 
-  const releaseIdx = Math.min(
-    RELEASES.length - 1,
-    Math.floor((1 - dayIndex / Math.max(1, cfg.days)) * RELEASES.length),
-  );
   ctx.events.unshift({
     id: `evt-${traceId}`,
     timestamp: iso(traceStart),
@@ -434,10 +794,17 @@ export function makeTrace(
       timestamp: iso(traceStart),
       userId,
       sessionId: `demo-session-u${userIdx}-d${dayIndex}`,
-      release: RELEASES[releaseIdx],
+      ...(sessionPath ? { sessionPath } : {}),
+      release,
       environment,
       tags: [scenario.split("-")[0] ?? scenario, ...(rng() < 0.4 ? [pick(rng, EXTRA_TAGS)] : [])],
-      metadata: { demo: true, seededBy: "seed-demo" },
+      metadata: {
+        demo: true,
+        seededBy: "seed-demo",
+        client: weightedPick(rng, CLIENTS),
+        region: pick(rng, REGIONS),
+        ...(rng() < 0.5 ? { experiment: pick(rng, AB_VARIANTS) } : {}),
+      },
       input: traceInput,
       output: traceOutput,
     },
@@ -462,17 +829,40 @@ export function makeTrace(
     );
   }
   if (rng() < 0.25) {
-    const base = isError ? 0.15 + rng() * 0.3 : 0.6 + rng() ** 2 * 0.4;
+    // Mostly-good answers with a real weak tail (~15%) — weak ones can earn a correction.
+    const base = isError ? 0.15 + rng() * 0.3 : rng() < 0.15 ? 0.3 + rng() * 0.25 : 0.6 + rng() ** 2 * 0.4;
+    const relevance = Math.round(base * 100) / 100;
     addScore(
       "answer-relevance",
       {
         source: "EVAL",
         dataType: "NUMERIC",
-        value: Math.round(base * 100) / 100,
+        value: relevance,
         comment: pick(rng, EVAL_COMMENTS),
         observationId: finalGenerationId,
       },
       cursor + randInt(rng, 1_000, 10_000),
+    );
+    // A weak answer sometimes earns a human-corrected output — ground truth the
+    // Corrected Output panel (and future dataset exports) can show.
+    if (relevance < 0.55 && !isError && rng() < 0.7) {
+      addScore(
+        "corrected-output",
+        {
+          source: "ANNOTATION",
+          dataType: "CORRECTION",
+          stringValue: `${answer} (Reviewed: cite the exact settings path and link the docs page.)`,
+          observationId: finalGenerationId,
+        },
+        cursor + randInt(rng, 60_000, 600_000),
+      );
+    }
+  }
+  if (rng() < 0.06) {
+    addScore(
+      "review-note",
+      { source: "ANNOTATION", dataType: "TEXT", stringValue: pick(rng, REVIEW_NOTES) },
+      cursor + randInt(rng, 30_000, 300_000),
     );
   }
   if (rng() < 0.1) {
