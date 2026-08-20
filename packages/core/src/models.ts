@@ -12,22 +12,38 @@ export interface ModelPrice {
 
 export const MODEL_PRICES: ModelPrice[] = [
   // Anthropic
+  { match: /^claude-fable-5/i, provider: "anthropic", inputPerMTok: 10, outputPerMTok: 50 },
+  { match: /^claude-opus-5/i, provider: "anthropic", inputPerMTok: 5, outputPerMTok: 25 },
+  // Opus 4.5+ dropped to the $5/$25 tier; the catch-all below keeps 4 / 4.1 at legacy pricing.
+  { match: /^claude-opus-4-[5-8]/i, provider: "anthropic", inputPerMTok: 5, outputPerMTok: 25 },
   { match: /^claude-opus-4/i, provider: "anthropic", inputPerMTok: 15, outputPerMTok: 75 },
+  { match: /^claude-sonnet-5/i, provider: "anthropic", inputPerMTok: 3, outputPerMTok: 15 },
   { match: /^claude-sonnet-4/i, provider: "anthropic", inputPerMTok: 3, outputPerMTok: 15 },
   { match: /^claude-haiku-4/i, provider: "anthropic", inputPerMTok: 1, outputPerMTok: 5 },
   { match: /^claude-3-5-sonnet/i, provider: "anthropic", inputPerMTok: 3, outputPerMTok: 15 },
   // OpenAI
+  { match: /^gpt-5-mini/i, provider: "openai", inputPerMTok: 0.25, outputPerMTok: 2 },
+  { match: /^gpt-5-nano/i, provider: "openai", inputPerMTok: 0.05, outputPerMTok: 0.4 },
+  { match: /^gpt-5/i, provider: "openai", inputPerMTok: 1.25, outputPerMTok: 10 },
   { match: /^gpt-4o-mini/i, provider: "openai", inputPerMTok: 0.15, outputPerMTok: 0.6 },
   { match: /^gpt-4o/i, provider: "openai", inputPerMTok: 2.5, outputPerMTok: 10 },
   { match: /^gpt-4\.1-mini/i, provider: "openai", inputPerMTok: 0.4, outputPerMTok: 1.6 },
   { match: /^gpt-4\.1/i, provider: "openai", inputPerMTok: 2, outputPerMTok: 8 },
+  { match: /^o4-mini/i, provider: "openai", inputPerMTok: 1.1, outputPerMTok: 4.4 },
   { match: /^o3-mini/i, provider: "openai", inputPerMTok: 1.1, outputPerMTok: 4.4 },
   // Google Gemini
+  { match: /^gemini-3-pro/i, provider: "gemini", inputPerMTok: 2, outputPerMTok: 12 },
   { match: /^gemini-2\.5-pro/i, provider: "gemini", inputPerMTok: 1.25, outputPerMTok: 10 },
   { match: /^gemini-2\.5-flash-lite/i, provider: "gemini", inputPerMTok: 0.1, outputPerMTok: 0.4 },
   { match: /^gemini-2\.5-flash/i, provider: "gemini", inputPerMTok: 0.3, outputPerMTok: 2.5 },
   { match: /^gemini-2\.0-flash/i, provider: "gemini", inputPerMTok: 0.1, outputPerMTok: 0.4 },
   // AWS Bedrock (model ids are prefixed by vendor, optionally a region shard like `us.`)
+  {
+    match: /^(?:[a-z]{2}\.)?anthropic\.claude-(?:opus-5|opus-4-[5-8])/i,
+    provider: "bedrock",
+    inputPerMTok: 5,
+    outputPerMTok: 25,
+  },
   {
     match: /^(?:[a-z]{2}\.)?anthropic\.claude-(?:opus|3-opus)/i,
     provider: "bedrock",

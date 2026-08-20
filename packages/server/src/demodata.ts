@@ -96,12 +96,13 @@ const USERS = ADJECTIVES.flatMap((a) => NOUNS.map((n) => `user-${a}-${n}`)).map(
 
 // [model, weight, meanLatencyMs] — names must match the registry in packages/core/src/models.ts for nonzero cost.
 const MODELS = [
-  ["claude-sonnet-4-6", 0.35, 1800],
-  ["gpt-4o-mini", 0.25, 700],
-  ["claude-haiku-4-5", 0.15, 600],
-  ["gpt-4.1", 0.1, 1500],
-  ["claude-opus-4-1", 0.08, 3200],
-  ["o3-mini", 0.07, 2500],
+  ["claude-sonnet-5", 0.3, 1800],
+  ["gpt-5-mini", 0.2, 900],
+  ["claude-haiku-4-5", 0.14, 600],
+  ["gpt-5", 0.12, 2200],
+  ["gemini-2.5-flash", 0.1, 500],
+  ["claude-opus-5", 0.08, 3000],
+  ["gemini-3-pro", 0.06, 2000],
 ] as const;
 
 const ENVIRONMENTS = [
@@ -346,7 +347,9 @@ function makeGenerationBody(
   // Reasoning models spend thinking tokens (a subset of completion pricing-wise, reported
   // separately); cached prompt reads show up on thread follow-ups.
   const reasoningTokens =
-    model === "o3-mini" || model === "claude-opus-4-1" ? gauss(rng, completionTokens * 1.6, completionTokens, 32) : 0;
+    model === "gpt-5" || model === "claude-opus-5" || model === "gemini-3-pro"
+      ? gauss(rng, completionTokens * 1.6, completionTokens, 32)
+      : 0;
   const cacheReadTokens = opts.cacheReadMean
     ? Math.min(promptTokens - 10, gauss(rng, opts.cacheReadMean, opts.cacheReadMean * 0.3, 0))
     : 0;
