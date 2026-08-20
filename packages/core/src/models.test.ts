@@ -20,9 +20,18 @@ describe("computeCost", () => {
   it("prices the current model generation", () => {
     expect(computeCost("claude-opus-5", 1_000_000, 1_000_000).totalCost).toBeCloseTo(30); // 5 + 25
     expect(computeCost("claude-sonnet-5", 1_000_000, 1_000_000).totalCost).toBeCloseTo(18); // 3 + 15
-    expect(computeCost("gpt-5", 1_000_000, 1_000_000).totalCost).toBeCloseTo(11.25); // 1.25 + 10
+    expect(computeCost("gpt-5.6-terra", 1_000_000, 1_000_000).totalCost).toBeCloseTo(14); // 2 + 12
+    expect(computeCost("gpt-5.6-sol", 1_000_000, 1_000_000).totalCost).toBeCloseTo(35); // 5 + 30
+    expect(computeCost("gemini-3.1-pro-preview", 1_000_000, 1_000_000).totalCost).toBeCloseTo(14); // 2 + 12
+    expect(computeCost("gemini-3.5-flash", 1_000_000, 1_000_000).totalCost).toBeCloseTo(10.5); // 1.5 + 9
+  });
+
+  it("keeps dotted gpt-5.x families ahead of the legacy ^gpt-5 catch-all", () => {
+    // Ordering regression: /^gpt-5/ must not shadow the dotted families.
+    expect(computeCost("gpt-5.6-luna", 1_000_000, 1_000_000).totalCost).toBeCloseTo(1.4); // 0.2 + 1.2
+    expect(computeCost("gpt-5.4", 1_000_000, 1_000_000).totalCost).toBeCloseTo(17.5); // 2.5 + 15
+    expect(computeCost("gpt-5", 1_000_000, 1_000_000).totalCost).toBeCloseTo(11.25); // legacy 1.25 + 10
     expect(computeCost("gpt-5-mini", 1_000_000, 1_000_000).totalCost).toBeCloseTo(2.25); // 0.25 + 2
-    expect(computeCost("gemini-3-pro", 1_000_000, 1_000_000).totalCost).toBeCloseTo(14); // 2 + 12
   });
 
   it("prices opus 4.5+ at the $5/$25 tier without disturbing legacy opus 4/4.1", () => {
@@ -80,8 +89,8 @@ describe("providerForModel", () => {
     expect(providerForModel("gpt-4o-mini")).toBe("openai");
     expect(providerForModel("claude-opus-4-1")).toBe("anthropic");
     expect(providerForModel("claude-opus-5")).toBe("anthropic");
-    expect(providerForModel("gpt-5-nano")).toBe("openai");
-    expect(providerForModel("gemini-3-pro")).toBe("gemini");
+    expect(providerForModel("gpt-5.6-sol")).toBe("openai");
+    expect(providerForModel("gemini-3.5-flash")).toBe("gemini");
   });
 
   it("uses an override's provider when matched", () => {
