@@ -210,6 +210,9 @@ function ModelBarChart({
   footer?: ReactNode;
 }) {
   const config = { value: { label: metric, color } } satisfies ChartConfig;
+  // Grow with the row count so every category keeps ≥ 24px — recharts drops tick labels
+  // (interval=0 notwithstanding, they'd overlap) when rows get tighter than the label height.
+  const height = Math.max(240, data.length * 24 + 16);
   return (
     <Card>
       <CardHeader>
@@ -217,7 +220,7 @@ function ModelBarChart({
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
-        <ChartContainer config={config} className="aspect-auto h-[240px] w-full">
+        <ChartContainer config={config} className="aspect-auto w-full" style={{ height }}>
           <BarChart data={data} layout="vertical" margin={{ left: 8, right: 16 }}>
             <CartesianGrid horizontal={false} />
             <XAxis type="number" hide />
@@ -228,6 +231,7 @@ function ModelBarChart({
               axisLine={false}
               width={132}
               tickMargin={6}
+              interval={0}
               tick={<ModelYTick />}
             />
             <ChartTooltip cursor={false} content={<ChartTooltipContent />} />

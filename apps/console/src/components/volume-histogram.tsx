@@ -7,7 +7,7 @@ const config = { count: { label: "Traces", color: "var(--chart-1)" } } satisfies
 
 /**
  * Compact trace-volume bar chart above the traces list. Honors the active filters (same as the
- * list), so the bars track the on-screen result set. Hidden until there are ≥ 2 buckets to compare.
+ * list), so the bars track the on-screen result set. Hidden while the range holds no traces.
  */
 export function VolumeHistogram({ filters }: { filters: TraceFilters }) {
   const { data } = useQuery({
@@ -18,9 +18,10 @@ export function VolumeHistogram({ filters }: { filters: TraceFilters }) {
   });
 
   const buckets = data?.buckets ?? [];
-  if (buckets.length < 2) return null;
-
   const total = buckets.reduce((a, b) => a + b.count, 0);
+  // Buckets are zero-filled server-side to span the whole range, so emptiness (not bucket
+  // count) is the signal for hiding the chart.
+  if (buckets.length < 2 || total === 0) return null;
   const hour = data?.interval === "hour";
   // day buckets: "2026-07-12" → "07-12"; hour buckets: "2026-07-12T14:00" → "14:00".
   const tick = (b: string) => (hour ? b.slice(11, 16) : b.slice(5));

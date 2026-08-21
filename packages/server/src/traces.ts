@@ -8,6 +8,7 @@ import type {
   SingleFilter,
   TraceDetail,
   TraceFacets,
+  TraceHistogramBucket,
   TraceSummary,
   TraceTags,
   UserSummary,
@@ -72,7 +73,47 @@ export async function traceHistogram(
 ): Promise<import("@memoturn/contracts").TraceHistogram> {
   const interval = filters.days && filters.days > 0 && filters.days <= 2 ? "hour" : "day";
   const buckets = await telemetry().traceHistogram(projectId, filters, interval);
-  return { interval, buckets };
+  return { interval, buckets: zeroFillBuckets(buckets, interval, filters.days) };
+}
+
+const BUCKET_STEP_MS = { hour: 3_600_000, day: 86_400_000 } as const;
+
+/** UTC bucket key for an instant, matching the stores' DATE_FORMAT/to_char output. */
+function bucketKey(ms: number, interval: "hour" | "day"): string {
+  const iso = new Date(ms).toISOString();
+  return interval === "hour" ? `${iso.slice(0, 13)}:00` : iso.slice(0, 10);
+}
+
+/**
+ * Fill the histogram with zero-count buckets so it spans the whole selected window. The
+ * stores' GROUP BY emits only buckets that contain traces, which would collapse quiet gaps
+ * and leave the chart unchanged when the range widens past the oldest data. With a `days`
+ * window the fill runs from the cutoff to now; without one (unbounded range) it runs from
+ * the oldest observed bucket to now. Bucket boundaries are UTC — both engines pin their
+ * sessions to UTC, so epoch-aligned stepping lands on the same keys they format.
+ */
+export function zeroFillBuckets(
+  buckets: TraceHistogramBucket[],
+  interval: "hour" | "day",
+  days: number | undefined,
+  now = Date.now(),
+): TraceHistogramBucket[] {
+  const counts = new Map(buckets.map((b) => [b.bucket, b.count]));
+  const oldest = buckets[0];
+  const start =
+    days && days > 0
+      ? now - Math.floor(days) * BUCKET_STEP_MS.day
+      : oldest
+        ? Date.parse(interval === "hour" ? `${oldest.bucket}:00Z` : `${oldest.bucket}T00:00:00Z`)
+        : Number.NaN;
+  if (!Number.isFinite(start)) return buckets;
+  const step = BUCKET_STEP_MS[interval];
+  const filled: TraceHistogramBucket[] = [];
+  for (let t = Math.floor(start / step) * step; t <= now; t += step) {
+    const key = bucketKey(t, interval);
+    filled.push({ bucket: key, count: counts.get(key) ?? 0 });
+  }
+  return filled;
 }
 
 export async function traceFacets(
