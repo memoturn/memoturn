@@ -4,7 +4,7 @@ const listTraces = vi.fn();
 const getTraceIO = vi.fn();
 vi.mock("@memoturn/telemetry", () => ({ telemetry: () => ({ listTraces, getTraceIO }) }));
 
-const { getSessionMessages } = await import("./traces.js");
+const { getSessionMessages, zeroFillBuckets } = await import("./traces.js");
 
 describe("getSessionMessages", () => {
   beforeEach(() => {
@@ -51,5 +51,59 @@ describe("getSessionMessages", () => {
     getTraceIO.mockResolvedValueOnce([]);
     const empty = await getSessionMessages("p1", "none");
     expect(empty.messages).toEqual([]);
+  });
+});
+
+describe("zeroFillBuckets", () => {
+  // 2026-08-20T12:30:00Z — mid-day so partial first/last buckets are exercised.
+  const now = Date.parse("2026-08-20T12:30:00Z");
+
+  it("spans the whole day window, zero-filling days the store didn't emit", () => {
+    const sparse = [
+      { bucket: "2026-08-18", count: 3 },
+      { bucket: "2026-08-20", count: 5 },
+    ];
+    const filled = zeroFillBuckets(sparse, "day", 7, now);
+    // Cutoff is now − 7d = 08-13T12:30 → first bucket is the partial day 08-13, last is today.
+    expect(filled.map((b) => b.bucket)).toEqual([
+      "2026-08-13",
+      "2026-08-14",
+      "2026-08-15",
+      "2026-08-16",
+      "2026-08-17",
+      "2026-08-18",
+      "2026-08-19",
+      "2026-08-20",
+    ]);
+    expect(filled.find((b) => b.bucket === "2026-08-18")?.count).toBe(3);
+    expect(filled.find((b) => b.bucket === "2026-08-20")?.count).toBe(5);
+    expect(filled.filter((b) => b.count === 0)).toHaveLength(6);
+  });
+
+  it("widening the window grows the series even when no older data exists", () => {
+    const sparse = [{ bucket: "2026-08-20", count: 1 }];
+    expect(zeroFillBuckets(sparse, "day", 30, now)).toHaveLength(31);
+    expect(zeroFillBuckets(sparse, "day", 90, now)).toHaveLength(91);
+  });
+
+  it("fills hour buckets in the stores' key format", () => {
+    const filled = zeroFillBuckets([{ bucket: "2026-08-20T09:00", count: 2 }], "hour", 1, now);
+    // now − 24h = 08-19T12:30 → hours 08-19T12:00 through 08-20T12:00 inclusive.
+    expect(filled).toHaveLength(25);
+    expect(filled[0]?.bucket).toBe("2026-08-19T12:00");
+    expect(filled.at(-1)?.bucket).toBe("2026-08-20T12:00");
+    expect(filled.find((b) => b.bucket === "2026-08-20T09:00")?.count).toBe(2);
+  });
+
+  it("without a days window, fills from the oldest observed bucket to now", () => {
+    const filled = zeroFillBuckets([{ bucket: "2026-08-17", count: 4 }], "day", undefined, now);
+    expect(filled.map((b) => b.bucket)).toEqual(["2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20"]);
+    expect(filled[0]?.count).toBe(4);
+  });
+
+  it("returns an empty series when there is no window and no data", () => {
+    expect(zeroFillBuckets([], "day", undefined, now)).toEqual([]);
+    // With a window, an empty store result still yields the full zeroed range.
+    expect(zeroFillBuckets([], "day", 3, now)).toHaveLength(4);
   });
 });
