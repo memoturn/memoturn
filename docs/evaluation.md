@@ -18,6 +18,9 @@ flowchart TD
   ev2 --> score
   rev --> score
   score --> trace[Shown on the trace]
+
+  classDef focal fill:#dbeaf5,stroke:#0072B2,stroke-width:2px,color:#062033
+  class score focal
 ```
 
 | Mode | Source | How |
