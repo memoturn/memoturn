@@ -1,5 +1,5 @@
 # memoturn worker (BullMQ) — runs on Bun.
-FROM oven/bun:1.3 AS base
+FROM oven/bun:1.4 AS base
 WORKDIR /app
 
 FROM base AS deps

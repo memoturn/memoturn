@@ -3,7 +3,7 @@
 # a production server). NOTE: production routing of /api -> the API service and dashboard
 # auth (Better Auth session) are wired in the front proxy (infra/Caddyfile); in dev the
 # Vite proxy handles /api. Build-time API base is configurable via VITE_API_BASE.
-FROM oven/bun:1.3 AS base
+FROM oven/bun:1.4 AS base
 WORKDIR /app
 
 FROM base AS deps
