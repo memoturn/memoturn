@@ -5,4 +5,4 @@ batch, and importing it from the package root would be circular (the root import
 Kept in lockstep with pyproject.toml by the doc-drift checker.
 """
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
