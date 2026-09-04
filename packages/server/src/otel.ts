@@ -428,6 +428,45 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
   const events: IngestEvent[] = [];
   const seenTraces = new Set<string>();
 
+  // Which span defines each trace's name, session and user.
+  //
+  // Spans end child-first, so a root span is normally the LAST one in an OTLP batch. Taking
+  // these from whichever span happened to be seen first therefore named almost every trace
+  // after a leaf — a FastAPI request arrived as "POST /chat http receive" (an ASGI event
+  // span) rather than "POST /chat" — and, worse, read `session.id` / `user.id` off a span
+  // that does not carry them, silently dropping session and user grouping for any exporter
+  // that sets those on the root.
+  //
+  // Prefer a root: no parent, or a parent that is not in this payload (its trace is split
+  // across batches). Ties break on the earliest start, which is the outermost span.
+  const spanIdsInPayload = new Set<string>();
+  for (const rs of payload.resourceSpans ?? [])
+    for (const ss of rs.scopeSpans ?? [])
+      for (const sp of ss.spans ?? []) if (sp.spanId) spanIdsInPayload.add(sp.spanId);
+
+  const traceDefiningSpanId = new Map<string, string>();
+  const traceDefiningRank = new Map<string, { root: boolean; start: bigint }>();
+  for (const rs of payload.resourceSpans ?? [])
+    for (const ss of rs.scopeSpans ?? [])
+      for (const sp of ss.spans ?? []) {
+        if (!sp.traceId || !sp.spanId) continue;
+        const isRoot = !sp.parentSpanId || !spanIdsInPayload.has(sp.parentSpanId);
+        let start: bigint;
+        try {
+          start = BigInt(sp.startTimeUnixNano ?? 0);
+        } catch {
+          start = 0n;
+        }
+        const cur = traceDefiningRank.get(sp.traceId);
+        const better = !cur || (isRoot && !cur.root) || (isRoot === cur.root && start < cur.start);
+        if (better) {
+          traceDefiningRank.set(sp.traceId, { root: isRoot, start });
+          traceDefiningSpanId.set(sp.traceId, sp.spanId);
+        }
+      }
+  // Traces already emitted from their defining span — so the upgrade below happens once.
+  const definedTraces = new Set<string>();
+
   for (const rs of payload.resourceSpans ?? []) {
     const resourceAttrs: Record<string, unknown> = {};
     for (const a of rs.resource?.attributes ?? []) resourceAttrs[a.key] = attrValue(a);
@@ -487,8 +526,15 @@ export function otlpToEvents(payload: OtlpPayload): IngestEvent[] {
         const ccToolName =
           span.name === "claude_code.tool" ? (str(attrs.tool_name) ?? str(attrs["gen_ai.tool.name"])) : undefined;
 
-        if (!seenTraces.has(span.traceId)) {
+        // Emit on first sight so a trace always exists, and again from the defining span
+        // when that is a different one. `trace-create` merges field-by-field into the
+        // authoritative state row (ADR-0001), and the defining span is emitted later in
+        // the batch, so its name/session/user win.
+        const isDefiningSpan = traceDefiningSpanId.get(span.traceId) === span.spanId;
+        const needsTrace = !seenTraces.has(span.traceId) || (isDefiningSpan && !definedTraces.has(span.traceId));
+        if (needsTrace) {
           seenTraces.add(span.traceId);
+          if (isDefiningSpan) definedTraces.add(span.traceId);
           events.push({
             id: newId(),
             type: "trace-create",
