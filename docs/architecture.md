@@ -26,6 +26,9 @@ flowchart LR
   worker -- merge + insert --> ch
   api -- read --> ch
   api -- read --> pg
+
+  classDef focal fill:#dbeaf5,stroke:#0072B2,stroke-width:2px,color:#062033
+  class api,worker focal
 ```
 
 ## Services

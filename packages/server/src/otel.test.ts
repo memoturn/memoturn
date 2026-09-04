@@ -775,3 +775,90 @@ describe("decodeOtlpLogs (protobuf)", () => {
     expect((ev?.metadata as Record<string, unknown>)["log.severity"]).toBe("INFO");
   });
 });
+
+describe("otlpToEvents — the trace is named from its root span", () => {
+  // The shape a real FastAPI/OTel export has: the ASGI child events end first, so they are
+  // emitted ahead of the request span they belong to. Only the root carries session/user.
+  const childFirst = {
+    resourceSpans: [
+      {
+        resource: { attributes: [{ key: "service.name", value: { stringValue: "felix" } }] },
+        scopeSpans: [
+          {
+            spans: [
+              {
+                traceId: "aa000000000000000000000000000001",
+                spanId: "c000000000000001",
+                parentSpanId: "a000000000000001",
+                name: "POST /chat http receive",
+                startTimeUnixNano: "1700000000500000000",
+                endTimeUnixNano: "1700000000600000000",
+                attributes: [{ key: "asgi.event.type", value: { stringValue: "http.request" } }],
+              },
+              {
+                traceId: "aa000000000000000000000000000001",
+                spanId: "c000000000000002",
+                parentSpanId: "a000000000000001",
+                name: "chat claude-sonnet-4-5",
+                startTimeUnixNano: "1700000000600000000",
+                endTimeUnixNano: "1700000002000000000",
+                attributes: [
+                  { key: "gen_ai.operation.name", value: { stringValue: "chat" } },
+                  { key: "gen_ai.request.model", value: { stringValue: "claude-sonnet-4-5" } },
+                ],
+              },
+              {
+                // The root: no parent, ends last, so an exporter emits it last.
+                traceId: "aa000000000000000000000000000001",
+                spanId: "a000000000000001",
+                name: "POST /chat",
+                startTimeUnixNano: "1700000000000000000",
+                endTimeUnixNano: "1700000004000000000",
+                attributes: [
+                  { key: "session.id", value: { stringValue: "thread-7" } },
+                  { key: "user.id", value: { stringValue: "user-42" } },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  it("names the trace after the root, not whichever span arrived first", () => {
+    const events = otlpToEvents(childFirst as never);
+    const traces = events.filter((e) => e.type === "trace-create");
+    expect(traces.length).toBeGreaterThan(0);
+    // The last write wins in the field-by-field state merge.
+    const final = traces[traces.length - 1]?.body as Record<string, unknown>;
+    expect(final.name).toBe("POST /chat");
+  });
+
+  it("takes session and user from the root, which is where an exporter puts them", () => {
+    const events = otlpToEvents(childFirst as never);
+    const traces = events.filter((e) => e.type === "trace-create");
+    const final = traces[traces.length - 1]?.body as Record<string, unknown>;
+    expect(final.sessionId).toBe("thread-7");
+    expect(final.userId).toBe("user-42");
+  });
+
+  it("still emits exactly one trace id, however many spans define it", () => {
+    const events = otlpToEvents(childFirst as never);
+    const ids = new Set(events.filter((e) => e.type === "trace-create").map((e) => (e.body as { id: string }).id));
+    expect([...ids]).toEqual(["aa000000000000000000000000000001"]);
+  });
+
+  it("falls back to the earliest span when the root is in another batch", () => {
+    // Trace split across OTLP requests: every span here has a parent we cannot see.
+    const orphaned = structuredClone(childFirst);
+    orphaned.resourceSpans[0]!.scopeSpans[0]!.spans = orphaned.resourceSpans[0]!.scopeSpans[0]!.spans.filter(
+      (s) => s.spanId !== "a000000000000001",
+    );
+    const events = otlpToEvents(orphaned as never);
+    const traces = events.filter((e) => e.type === "trace-create");
+    const final = traces[traces.length - 1]?.body as Record<string, unknown>;
+    // Earliest of the remaining spans, not simply the first in the array.
+    expect(final.name).toBe("POST /chat http receive");
+  });
+});
