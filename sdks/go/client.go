@@ -32,7 +32,7 @@ import (
 // JS/Python SDK versions by the doc-drift checker — bump all of them together.
 const (
 	SDKName    = "memoturn-go"
-	SDKVersion = "0.5.0"
+	SDKVersion = "0.6.0"
 )
 
 func sdkInfo() map[string]string {
