@@ -29,7 +29,8 @@ The `npm` and `pypi` jobs request `id-token: write`; npm additionally attaches *
 
 Before tagging, run the workflow from the **Actions → Release → Run workflow** menu with
 **Dry run** checked. It exercises the pipeline without publishing: `npm publish --dry-run`,
-`uv build`, and all three images built but **not** pushed. (Trusted Publishing itself can only
+`uv build`, and all three images built on **both** architectures but **not** pushed (the
+manifest job is skipped — there are no digests to join). (Trusted Publishing itself can only
 be exercised by a real publish, so a green dry run confirms the builds, not the OIDC handshake.)
 
 ## Cut a release
@@ -51,9 +52,20 @@ be exercised by a real publish, so a green dry run confirms the builds, not the 
    - **npm** — `bun install` → `bun --filter @memoturn/sdk build` → flatten `publishConfig`
      into the manifest (points `main`/`types`/`exports` at `dist/`) → `npm publish --provenance`.
    - **pypi** — `uv build` (wheel + sdist) → `uv publish --trusted-publishing always`.
-   - **images** — matrix over `api` / `worker` / `console`: build each
-     `docker/<svc>.Dockerfile` and push to `ghcr.io/memoturn/<svc>` tagged
-     `{version}`, `{major}.{minor}`, and `latest`.
+   - **images** — matrix over `api` / `worker` / `console` **× `amd64` / `arm64`**: build
+     each `docker/<svc>.Dockerfile` and push it to `ghcr.io/memoturn/<svc>` *by digest*,
+     untagged. A follow-on **image-manifests** job then joins each service's two digests
+     into one manifest list and applies the tags — `{version}`, `{major}.{minor}`, `latest`
+     — so every published tag is multi-arch (see
+     [Deployment → Architectures](./deployment.md#architectures)).
+
+     Each architecture builds on a **native runner** (`ubuntu-latest` / `ubuntu-24.04-arm`)
+     rather than cross-building under QEMU: these are Bun images, and Bun's JIT is not
+     reliable under `qemu-user`. arm64 runners are free for public repositories. The tags
+     are applied only to the manifest list — tagging the per-arch builds would let the two
+     race for `:latest` and leave a single-arch image behind. The manifest job ends by
+     `imagetools inspect`ing the tag it just wrote and failing if either architecture is
+     missing, so a silent single-arch regression can't ship.
 
 ## How the SDK entrypoints work
 

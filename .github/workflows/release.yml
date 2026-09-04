@@ -119,20 +119,117 @@ jobs:
           git tag "sdks/go/${GITHUB_REF_NAME}" "${GITHUB_SHA}"
           git push origin "sdks/go/${GITHUB_REF_NAME}"
 
+  # Container images are multi-arch (linux/amd64 + linux/arm64) so self-hosters on Apple
+  # Silicon Macs and arm64 servers run natively instead of under emulation.
+  #
+  # Each architecture builds on its OWN native runner rather than cross-building both with
+  # QEMU. These are Bun images, and Bun's JIT is unreliable under qemu-user emulation — a
+  # cross-built arm64 layer tends to die inside `bun install`, and when it doesn't it takes
+  # an order of magnitude longer. arm64 runners are free for public repositories.
+  #
+  # The per-arch builds push by digest and carry NO tags: two jobs racing to tag the same
+  # `:latest` would leave whichever finished last as a single-arch image. The manifest job
+  # below applies the tags once, to the manifest list that indexes both digests — that
+  # index is what `docker pull ghcr.io/memoturn/api:0.6.0` resolves against.
   images:
-    name: Build + push ${{ matrix.service }} image
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.service }} image (${{ matrix.platform.arch }})
+    runs-on: ${{ matrix.platform.runner }}
     permissions:
       contents: read
       packages: write
     strategy:
+      fail-fast: false
       matrix:
         service: [api, worker, console]
+        platform:
+          - { arch: amd64, docker: linux/amd64, runner: ubuntu-latest }
+          - { arch: arm64, docker: linux/arm64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR
         if: ${{ !inputs.dry_run }}
+        uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Only the OCI labels are used here (org.opencontainers.image.source/revision/version,
+      # which GHCR reads to link the package to this repo). Tags are deliberately NOT passed
+      # to a per-arch build — see the job comment.
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}
+
+      # Dry run stops here: prove the image still builds on this architecture, push nothing.
+      - name: Build (no push)
+        if: ${{ inputs.dry_run }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/${{ matrix.service }}.Dockerfile
+          platforms: ${{ matrix.platform.docker }}
+          push: false
+          labels: ${{ steps.meta.outputs.labels }}
+          # Scope the cache per service AND per architecture: one shared scope has the two
+          # architectures evicting each other's layers on every run.
+          cache-from: type=gha,scope=${{ matrix.service }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}-${{ matrix.platform.arch }}
+
+      - name: Build + push by digest
+        id: build
+        if: ${{ !inputs.dry_run }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/${{ matrix.service }}.Dockerfile
+          platforms: ${{ matrix.platform.docker }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/${{ matrix.service }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.service }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}-${{ matrix.platform.arch }}
+      # The digest is the whole payload — an empty file named after it is enough for the
+      # manifest job to reassemble `<image>@sha256:<digest>` for each architecture.
+      - name: Export digest
+        if: ${{ !inputs.dry_run }}
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+      - name: Upload digest
+        if: ${{ !inputs.dry_run }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.service }}-${{ matrix.platform.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Stitch each service's two per-arch digests into one tagged manifest list. This is the
+  # job that actually publishes `:{version}`, `:{major}.{minor}` and `:latest`.
+  image-manifests:
+    name: Publish ${{ matrix.service }} manifest
+    if: ${{ !inputs.dry_run }}
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, worker, console]
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: /tmp/digests
+          pattern: digest-${{ matrix.service }}-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v4
+      - name: Log in to GHCR
         uses: docker/login-action@v4.6.0
         with:
           registry: ghcr.io
@@ -147,13 +244,40 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
-      - name: Build${{ inputs.dry_run && ' (no push)' || ' + push' }}
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: docker/${{ matrix.service }}.Dockerfile
-          push: ${{ !inputs.dry_run }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create manifest list
+        working-directory: /tmp/digests
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+          ANNOTATIONS: ${{ steps.meta.outputs.annotations }}
+        run: |
+          tags=()
+          while read -r tag; do
+            if [ -n "$tag" ]; then tags+=(-t "$tag"); fi
+          done <<< "$TAGS"
+          # Each downloaded artifact is an empty file named for its digest.
+          refs=()
+          for digest in *; do refs+=("${IMAGE}@sha256:${digest}"); done
+          # Labels live on each per-arch image; the index itself carries annotations.
+          annotations=()
+          while read -r annotation; do
+            if [ -n "$annotation" ]; then annotations+=(--annotation "$annotation"); fi
+          done <<< "$ANNOTATIONS"
+          echo "Joining ${#refs[@]} per-arch digests under: ${TAGS//$'\n'/ }"
+          docker buildx imagetools create "${annotations[@]}" "${tags[@]}" "${refs[@]}"
+
+      # A single-arch regression is silent until a Mac user pulls it, so assert the
+      # published tag really does index both architectures.
+      - name: Verify both architectures are published
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest}}' \
+            | jq -r '.manifests[]?.platform | select(.os == "linux") | "\(.os)/\(.architecture)"' \
+            | sort -u > platforms.txt
+          cat platforms.txt
+          for want in linux/amd64 linux/arm64; do
+            grep -qx "$want" platforms.txt \
+              || { echo "::error::${IMAGE}:${VERSION} does not include ${want}"; exit 1; }
+          done
