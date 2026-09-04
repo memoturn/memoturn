@@ -50,7 +50,18 @@ be exercised by a real publish, so a green dry run confirms the builds, not the 
    ```
 3. The workflow runs three independent jobs:
    - **npm** — `bun install` → `bun --filter @memoturn/sdk build` → flatten `publishConfig`
-     into the manifest (points `main`/`types`/`exports` at `dist/`) → `npm publish --provenance`.
+     into the manifest (points `main`/`types`/`exports` at `dist/`) →
+     `npm publish --provenance --tag latest`.
+
+     > **Why `--tag latest` is explicit.** A `@memoturn/sdk@1.0.0` belonging to a *different*
+     > project (the private `memoturn-coordination` repo) was published to this package name
+     > on 2026-08-29, so the registry's highest version sits above this repo's 0.x line. npm
+     > refuses to apply `latest` **implicitly** when the version being published is lower than
+     > the highest published one (`Cannot implicitly apply the "latest" tag…`), which fails the
+     > job. Naming the tag explicitly opts out of that guard so `latest` keeps tracking this
+     > repo's releases. The stray 1.0.0 is past npm's 72-hour unpublish window, so it is
+     > deprecated in place rather than removed; the long-term fix is to move the coordination
+     > SDK to its own package name.
    - **pypi** — `uv build` (wheel + sdist) → `uv publish --trusted-publishing always`.
    - **images** — matrix over `api` / `worker` / `console` **× `amd64` / `arm64`**: build
      each `docker/<svc>.Dockerfile` and push it to `ghcr.io/memoturn/<svc>` *by digest*,
