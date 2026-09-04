@@ -1,5 +1,9 @@
 # memoturn worker (BullMQ) — runs on Bun.
-FROM oven/bun:1.4 AS base
+# Pinned by digest, not just the floating `1.4` tag: the amd64 and arm64 images are built
+# by SEPARATE jobs on separate runners, so a tag that moves between them would put two
+# different Bun versions in one manifest list. The digest is the multi-arch index, so it
+# still resolves per-architecture. Dependabot updates digest pins.
+FROM oven/bun:1.4@sha256:9e123d5fc069e29d519fd4c981afb61b8542ac80274771961136db1e4538d53e AS base
 WORKDIR /app
 
 FROM base AS deps
