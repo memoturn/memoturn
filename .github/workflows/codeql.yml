@@ -39,7 +39,7 @@ jobs:
       # the branch's require-conversation-resolution rule, block every workflow-touching
       # PR. Pin actions to SHAs + re-enable the suite later if desired.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4.37.6
+        uses: github/codeql-action/init@v4.37.9
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -55,6 +55,6 @@ jobs:
               - '**/*_test.go'
               - 'sdks/**/tests/**'
       - name: Analyze
-        uses: github/codeql-action/analyze@v4.37.6
+        uses: github/codeql-action/analyze@v4.37.9
         with:
           category: "/language:${{ matrix.language }}"
