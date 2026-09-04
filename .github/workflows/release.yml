@@ -71,12 +71,21 @@ jobs:
         working-directory: sdks/js
         # Trusted Publishing: npm authenticates via the OIDC id-token (no NODE_AUTH_TOKEN),
         # and provenance is attached automatically.
+        #
+        # `--tag latest` is explicit on purpose. A `@memoturn/sdk@1.0.0` from a DIFFERENT
+        # project (the private memoturn-coordination repo) was published to this package on
+        # 2026-08-29, so the registry's highest version now sits above this repo's 0.x line.
+        # npm refuses to apply the `latest` tag IMPLICITLY when the version being published
+        # is lower than the highest published one — it fails the job with "Cannot implicitly
+        # apply the latest tag". Naming the tag explicitly opts out of that guard, which is
+        # what we want: `latest` should track this repo's releases. That 1.0.0 is past npm's
+        # 72-hour unpublish window and is deprecated in place instead.
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             echo "Dry run — packing, not publishing."
-            npm publish --dry-run
+            npm publish --dry-run --tag latest
           else
-            npm publish --provenance --access public
+            npm publish --provenance --access public --tag latest
           fi
 
   pypi:
