@@ -325,6 +325,27 @@ function checkSdkEnvVars(): CheckResult {
   return { name: "SDK env vars (sdk sources → docs/sdk-*.md)", findings };
 }
 
+/**
+ * 10. Every released version has a changelog entry. The root package.json version is what a
+ * `v*` tag ships; a release without a `## [x.y.z]` heading leaves self-hosters upgrading
+ * blind (0.6.0 shipped without one).
+ */
+function checkChangelog(): CheckResult {
+  const findings: Finding[] = [];
+  const version = (JSON.parse(read("package.json")) as { version: string }).version;
+  const changelog = read("CHANGELOG.md");
+  // Literal line match — no regex built from the version string (CodeQL js/incomplete-sanitization).
+  const heading = `## [${version}]`;
+  if (!changelog.split("\n").some((line) => line.startsWith(heading))) {
+    findings.push({
+      doc: "CHANGELOG.md",
+      line: 0,
+      message: `no \`## [${version}]\` entry for the current package.json version — add one before tagging`,
+    });
+  }
+  return { name: "Changelog entry for the current version (package.json → CHANGELOG.md)", findings };
+}
+
 const checks = [
   checkScriptNames,
   checkCredentials,
@@ -335,6 +356,7 @@ const checks = [
   checkSdkVersions,
   checkSdkBaseUrl,
   checkSdkEnvVars,
+  checkChangelog,
 ];
 
 let drift = 0;

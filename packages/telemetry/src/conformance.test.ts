@@ -26,6 +26,13 @@ import { TELEMETRY_PRIMARY_KEYS } from "./types.js";
  */
 const store = telemetry();
 const reachable = await store.ping();
+// Locally an unreachable engine just skips the suite; in CI that would be a green build that
+// tested nothing (this happened silently when the compose port mapping changed) — fail instead.
+if (!reachable && process.env.CI) {
+  throw new Error(
+    `telemetry conformance: no ${process.env.TELEMETRY_ENGINE ?? "doris"} store reachable in CI — the engine must be up`,
+  );
+}
 
 const P = `conf-${Date.now()}`;
 const now = Date.now();

@@ -136,14 +136,17 @@ jobs:
             sleep 2
           done
           echo "minio did not become ready" >&2; exit 1
-      - run: bun run test
-      # Second-engine conformance (ADR-0002): the same behavioral suite against the
-      # postgres telemetry engine. Engine selection is process-wide (singleton factory),
-      # so this is a separate vitest invocation, not a matrix.
+      # CI=true makes the store conformance suite FAIL (not skip) when no engine answers.
+      - run: CI=true bun run test
+      # Second engine (ADR-0002): the WHOLE suite again on the postgres telemetry tier — not
+      # just the store conformance. The API route suite and the worker's blob→store
+      # integration test run here too (they accept TELEMETRY_ENGINE=postgres in place of
+      # DORIS_HOST), so server/worker behaviour is exercised on both engines in CI. Engine
+      # selection is process-wide (singleton factory), so this is a separate invocation.
       - name: Postgres telemetry migrations
         run: TELEMETRY_ENGINE=postgres bun packages/telemetry/src/migrate.ts
-      - name: Postgres-engine conformance
-        run: TELEMETRY_ENGINE=postgres bun --filter @memoturn/telemetry test
+      - name: Full test suite on the Postgres telemetry tier
+        run: TELEMETRY_ENGINE=postgres CI=true bun run test
       # Python SDK unit tests (stdlib-only SDK; pytest mocks urllib, no infra needed).
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - name: Python SDK tests

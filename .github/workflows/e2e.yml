@@ -94,6 +94,11 @@ jobs:
       # The plain `build` job deliberately unsets DORIS_* so these skip there.
       - name: Worker integration tests (real Doris)
         run: bun --filter @memoturn/worker test
+      # The authenticated API route suite (auth middleware, scope + role gates, tenant
+      # isolation, ingest contract, erasure) gates on DORIS_HOST too — this is the only job
+      # that has the engine, so it is the only place those tests actually execute.
+      - name: API route tests (real Doris)
+        run: bun --filter @memoturn/api test
       # Cache the Playwright browser + OS deps so a transient download stall doesn't hang
       # the run (the version key busts the cache on a Playwright bump).
       - name: Resolve Playwright version

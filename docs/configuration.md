@@ -8,7 +8,6 @@ defaults match `infra/docker-compose.dev.yml`.
 | Var | Default | Notes |
 | --- | --- | --- |
 | `DATABASE_URL` | `postgresql://memoturn:memoturn@localhost:5433/memoturn?schema=public` | Host port is **5433** in dev to avoid clashing with other local Postgres |
-
 | `PRISMA_POOL_SIZE` | `10` | Prisma (metadata) connection pool size **per replica**. |
 | `PRISMA_CONNECT_TIMEOUT_MS` | `10000` | How long to wait for a pooled Postgres connection before failing the query. |
 
@@ -38,7 +37,6 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | `DORIS_STREAM_LOAD_HOST` | `DORIS_HOST` | Override for a host-run worker that should load a BE directly instead of going through the FE redirect. |
 | `DORIS_STREAM_LOAD_PORT` | `8030` | FE HTTP port by default; point at a BE webserver (`8040`) to load it directly. |
 | `DORIS_STREAM_LOAD_TIMEOUT_MS` | `60000` | Per-call Stream Load timeout so a wedged BE can't pin an ingest worker slot forever. |
-
 | `DORIS_REPLICATION_NUM` | `1` | Replicas per tablet for NEW tables/partitions (`${REPLICATION_NUM}` in DDL, the migrations ledger). Raise on multi-BE clusters; existing tables are changed with `bun run telemetry:repartition -- --set-replication N`. |
 | `DORIS_POOL_SIZE` | `10` | Doris FE connection pool size **per replica**. |
 | `DORIS_CONNECT_TIMEOUT_MS` | `10000` | Connect timeout to the FE. |
@@ -103,7 +101,6 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | `API_DOCS_PUBLIC` | `true` | Set `false` to put `/docs` + `/openapi.json` behind auth. |
 | `API_KEY_DEFAULT_EXPIRY_DAYS` | unset | Default lifetime for API keys minted without an explicit `expiresInDays` (unset = never expire). |
 | `PLAYGROUND_MAX_TOKENS` | `32768` | Ceiling on `maxTokens` for a single playground/assistant completion (these spend the project's provider key) |
-| `INGEST_EVENTS_PER_MINUTE` | `0` | Per-project ingest event-rate budget (events/minute; `0` = disabled). Meters actual event volume — a single POST can carry up to 1000 events, so this catches burst loads that the request-count limit would miss. Returns `429` with `Retry-After` when exceeded. |
 | `MCP_RATE_LIMIT_PER_MINUTE` | `120` | Per-IP budget for the remote MCP endpoint (`/v1/mcp/:projectId`). Unlike the project limiter it defaults **on** — the route runs a credential lookup before auth resolves, so unauthenticated clients must not get unthrottled tries. `0` disables. |
 | `INGEST_MAX_EVENT_BYTES` | `1048576` | Per-event size cap on `/v1/ingest` (serialized). Over-limit events are rejected individually in the 207 body; large payloads belong in `/v1/media`. |
 | `INGEST_MAX_JSON_DEPTH` | `32` | Per-event nesting cap — protects the worker's recursive masking/offload walks. |

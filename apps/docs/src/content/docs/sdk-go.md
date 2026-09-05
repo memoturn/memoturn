@@ -10,6 +10,12 @@ env vars `MEMOTURN_BASE_URL`, `MEMOTURN_PUBLIC_KEY`, `MEMOTURN_SECRET_KEY`,
 and `MEMOTURN_ALLOW_HTTP` (suppress the cleartext-http warning) — options win over
 env vars.
 
+Flushing is request-sized: a large buffer (e.g. after an outage) is sent as several
+`POST /v1/ingest` calls of at most 1000 events / ~10 MB each (`WithMaxBatchSize`), never one
+over-limit request the API would reject. After a transient failure the background flusher
+backs off exponentially with jitter (honouring `Retry-After`); an explicit `Flush()` always
+tries.
+
 ## Tracing
 
 ```go

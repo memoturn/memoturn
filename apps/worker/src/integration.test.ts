@@ -14,7 +14,9 @@ import { processIngest } from "./processors/ingest.js";
  * configured (so the default `bun run test` stays infra-free); CI sets the env +
  * service containers.
  */
-const HAS_INFRA = Boolean(process.env.DATABASE_URL && process.env.DORIS_HOST && process.env.BLOB_ENDPOINT);
+// Either engine: DORIS_HOST for Doris, or the Postgres tier (which needs only DATABASE_URL).
+const PG_TIER = (process.env.TELEMETRY_ENGINE ?? "").toLowerCase() === "postgres";
+const HAS_INFRA = Boolean(process.env.DATABASE_URL && process.env.BLOB_ENDPOINT && (process.env.DORIS_HOST || PG_TIER));
 
 const iso = (d = new Date()) => d.toISOString();
 const newId = () => `it-${Math.random().toString(36).slice(2)}-${Date.now()}`;

@@ -124,6 +124,7 @@ export default defineConfig({
         },
         { label: "Deployment", slug: "deployment" },
         { label: "Security hardening", slug: "hardening" },
+        { label: "Runbooks", slug: "runbooks" },
         { label: "Roadmap", slug: "roadmap" },
       ],
     }),

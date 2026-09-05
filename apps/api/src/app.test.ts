@@ -24,8 +24,10 @@ vi.mock("@memoturn/db/blob", async (importOriginal) => {
  * auth caches in Redis, reads hit Doris) and is skipped otherwise, mirroring the
  * worker integration test. CI sets the env + service containers.
  */
+// Either engine: DORIS_HOST for Doris, or the Postgres tier (which needs only DATABASE_URL).
+const PG_TIER = (process.env.TELEMETRY_ENGINE ?? "").toLowerCase() === "postgres";
 const HAS_INFRA = Boolean(
-  process.env.DATABASE_URL && process.env.DORIS_HOST && process.env.REDIS_URL && process.env.BLOB_ENDPOINT,
+  process.env.DATABASE_URL && process.env.REDIS_URL && process.env.BLOB_ENDPOINT && (process.env.DORIS_HOST || PG_TIER),
 );
 
 const basic = (pk: string, sk: string) => `Basic ${Buffer.from(`${pk}:${sk}`).toString("base64")}`;
