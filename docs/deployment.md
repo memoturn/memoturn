@@ -235,6 +235,33 @@ render a default-deny NetworkPolicy (`networkPolicy.enabled`).
 See `infra/helm/memoturn/README.md` for required values (datastore URLs, `betterAuthSecret`,
 `encryptionKey`) and the ingress / autoscaling options.
 
+## Repartitioning
+
+Fresh installs create the three time-series tables (`traces`, `observations`, `scores`)
+**AUTO-partitioned by day** (`packages/telemetry/src/doris/schema.ts`): time-range queries
+prune to the partitions they touch, and `TELEMETRY_MAX_RETENTION_DAYS` maps onto Doris's
+native `partition.retention_count` so old partitions drop for free (per-project retention
+is still a key-predicate `DELETE`, now partition-pruned). Installs created before this
+change have unpartitioned tables — the migrator warns on every deploy until they are
+converted:
+
+```bash
+bun run telemetry:repartition -- --plan     # which tables are unpartitioned, row counts
+bun run telemetry:repartition               # bulk copy into <t>__v2, verify, atomic swap (system live)
+# pause the worker (API keeps acking; queue + blob buffer ingest)
+bun run telemetry:repartition               # fast top-up of anything ingested during the bulk copy
+# resume the worker
+bun run telemetry:repartition -- --cleanup  # drop the retained legacy copies once satisfied
+```
+
+Each conversion copies the table month by month with `INSERT … SELECT` (disk temporarily
+doubles for that table), verifies per-project row counts on both copies, refuses to swap on
+any mismatch, and then runs `ALTER TABLE … REPLACE WITH TABLE` — an atomic rename, so reads
+and writes never see a half-state. Every write is last-writer-wins by `event_ts`, so a top-up
+run over live ingest is idempotent. `--set-replication N` raises `replication_num` on every
+table (and the migrations ledger) for multi-BE clusters; set `DORIS_REPLICATION_NUM` so new
+partitions inherit it.
+
 ## Migrations
 
 ```bash

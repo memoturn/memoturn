@@ -43,6 +43,9 @@ export function envInt(name: string, fallback: number, min = 0, max = Number.MAX
  */
 export const DORIS_QUERY_TIMEOUT_S = envInt("DORIS_QUERY_TIMEOUT_S", 60, 1);
 
+/** Replicas per tablet for new tables/partitions (DORIS_REPLICATION_NUM; 1 for the single-BE stacks). */
+export const REPLICATION_NUM = envInt("DORIS_REPLICATION_NUM", 1, 1, 9);
+
 export function dorisConfig(): DorisConfig {
   return {
     host: process.env.DORIS_HOST ?? "localhost",

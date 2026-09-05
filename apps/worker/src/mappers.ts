@@ -1,4 +1,11 @@
-import { clampTokens, computeCost, type IngestEvent, type ModelPrice, providerForModel } from "@memoturn/core";
+import {
+  clampFuture,
+  clampTokens,
+  computeCost,
+  type IngestEvent,
+  type ModelPrice,
+  providerForModel,
+} from "@memoturn/core";
 import type { EmbeddingRow, ObservationRow, RetrievalDocumentRow, ScoreWriteRow, TraceRow } from "@memoturn/telemetry";
 
 /**
@@ -48,6 +55,18 @@ function assign<T extends object>(acc: Partial<T>, patch: Record<string, unknown
   for (const [k, v] of Object.entries(patch)) {
     if (v !== undefined) (acc as Record<string, unknown>)[k] = v;
   }
+}
+
+// ── Time-column invariants ─────────────────────────────────────────────────────────
+// On Doris, `timestamp` (traces) and `start_time` (observations) are PART OF THE UNIQUE KEY
+// because they partition the tables (packages/telemetry/src/doris/schema.ts). The logical
+// identity is still (project_id, id): that is only true if an existing row's time column is
+// NEVER rewritten — the first value wins for the life of the entity (the state upsert in
+// packages/server enforces the same rule on the authoritative path).
+
+/** Existing row's time column if known, else the incoming value, else the event time — clamped. */
+export function stableTime(existing: string | null | undefined, incoming: string | undefined, eventTs: string): string {
+  return clampFuture(existing ?? incoming ?? eventTs);
 }
 
 export function mapEvents(
@@ -107,7 +126,7 @@ export function mapEvents(
     return {
       id: b.id,
       project_id: projectId,
-      timestamp: b.timestamp ?? base?.timestamp ?? event_ts,
+      timestamp: stableTime(base?.timestamp, b.timestamp, event_ts),
       name: b.name ?? base?.name ?? "",
       user_id: b.userId ?? base?.user_id ?? "",
       session_id: b.sessionId ?? base?.session_id ?? "",
@@ -158,7 +177,7 @@ export function mapEvents(
       reasoningTokens = base.reasoning_tokens;
       cost = { inputCost: base.input_cost, outputCost: base.output_cost, totalCost: base.total_cost };
     }
-    const startTime: string = b.startTime ?? base?.start_time ?? event_ts;
+    const startTime: string = stableTime(base?.start_time, b.startTime, event_ts);
     const endTime: string | null = b.endTime ?? base?.end_time ?? null;
     return {
       id: b.id,

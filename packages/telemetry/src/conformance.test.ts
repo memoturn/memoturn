@@ -1228,4 +1228,38 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect((await store.countProjectRows(other)).traces).toBe(1);
     await store.deleteProjectData(other);
   });
+
+  it.skipIf((process.env.TELEMETRY_ENGINE ?? "doris").toLowerCase() !== "doris")(
+    "Doris: the three time-series tables are AUTO-partitioned by day and time-range scans prune",
+    async () => {
+      const { createDorisPool } = await import("./doris/client.js");
+      const { inspectTable } = await import("./doris/migrate.js");
+      const pool = createDorisPool();
+      try {
+        for (const table of ["traces", "observations", "scores"]) {
+          const shape = await inspectTable(pool, table);
+          expect(shape?.partitioned, `${table} partitioned`).toBe(true);
+        }
+        // A row 40 days back plus today's rows exist from the retention test above; a 7-day
+        // window must not touch the old partition.
+        await store.insertRows("traces", [
+          trace({ id: "part-old", timestamp: iso(-40 * 86_400_000), event_ts: iso(-40 * 86_400_000) }),
+          trace({ id: "part-new" }),
+        ]);
+        const [plan] = (await pool.query("EXPLAIN SELECT id FROM traces WHERE project_id = ? AND `timestamp` >= ?", [
+          P,
+          iso(-7 * 86_400_000)
+            .slice(0, 19)
+            .replace("T", " "),
+        ])) as unknown as [Record<string, string>[]];
+        const text = plan.map((r) => Object.values(r)[0]).join("\n");
+        const m = /partitions=(\d+)\/(\d+)/.exec(text);
+        expect(m, "explain shows partition pruning").not.toBeNull();
+        expect(Number(m?.[1])).toBeLessThan(Number(m?.[2]));
+        await store.deleteTraces(P, ["part-old", "part-new"]);
+      } finally {
+        await pool.end();
+      }
+    },
+  );
 });

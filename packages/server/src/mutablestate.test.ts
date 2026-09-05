@@ -20,9 +20,27 @@ const maskedScore = (over: Record<string, unknown>): ScoreBody =>
   }) as unknown as ScoreBody;
 
 describe("extractTracePatch", () => {
-  it("includes only fields present in the raw wire body", () => {
+  it("includes only fields present in the raw wire body — plus the entity time, always proposed", () => {
     const p = extractTracePatch({ id: "t1", name: "Chat" }, maskedTrace({ name: "Chat" }), TS);
-    expect(p).toEqual({ id: "t1", mergeVersion: V, scalars: { name: "Chat" } });
+    // `timestamp` is the one exception to provided-ness: it is a partition key on Doris, so the
+    // state must always hold one (the event time when the client sent none). The upsert keeps the
+    // FIRST stored value, so proposing it on every event never moves an existing row.
+    expect(p).toEqual({ id: "t1", mergeVersion: V, scalars: { name: "Chat", timestamp: new Date(TS) } });
+  });
+
+  it("prefers the client's timestamp over the event time, and clamps far-future values", () => {
+    const sent = extractTracePatch(
+      { id: "t1", timestamp: "2026-01-01T00:00:00.000Z" },
+      maskedTrace({ timestamp: "2026-01-01T00:00:00.000Z" }),
+      TS,
+    );
+    expect(sent.scalars.timestamp).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+    const future = extractTracePatch(
+      { id: "t1", timestamp: "2099-01-01T00:00:00.000Z" },
+      maskedTrace({ timestamp: "2099-01-01T00:00:00.000Z" }),
+      TS,
+    );
+    expect((future.scalars.timestamp as Date).getTime()).toBeLessThan(Date.now() + 2 * 86_400_000);
   });
 
   it("ignores the zod-filled environment default when the client did not send it", () => {

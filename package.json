@@ -44,6 +44,7 @@
     "dlq": "bun --env-file=.env scripts/replay-dlq.ts",
     "replay": "bun --env-file=.env scripts/replay-blob.ts",
     "telemetry:migrate": "bun --env-file=.env scripts/telemetry-migrate.ts",
+    "telemetry:repartition": "bun --env-file=.env scripts/telemetry-repartition.ts",
     "quickstart": "bun --env-file=.env examples/quickstart.ts",
     "screenshots": "bun scripts/screenshots.ts",
     "docs:check": "bun scripts/check-doc-drift.ts",

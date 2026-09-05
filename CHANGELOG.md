@@ -66,6 +66,15 @@ Production-readiness tranche, phase 2 (data durability + lifecycle).
   (`TELEMETRY_MAX_RETENTION_DAYS`); the hourly state prune is chunked so it converges on
   large tables instead of timing out every run.
 
+- **Doris tables are partitioned.** Fresh installs create `traces`/`observations`/`scores`
+  AUTO-partitioned by day (time-range queries prune; `TELEMETRY_MAX_RETENTION_DAYS` maps to
+  Doris's native partition TTL). Existing installs convert with the new
+  `bun run telemetry:repartition` (month-chunked copy, count verification, atomic swap,
+  `--set-replication N` for multi-BE clusters, `DORIS_REPLICATION_NUM` for new DDL). The
+  worker now pins a row's time column for the life of the entity and clamps far-future
+  timestamps, which the partition key relies on. The migrator warns on every deploy until
+  legacy tables are converted.
+
 Production-readiness tranche, phase 1 (operability).
 
 - **Typed environment validation.** Every knob the API/worker read is declared with its

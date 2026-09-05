@@ -23,7 +23,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createDorisPool, dorisConfig, envInt, isFatalConnectionError } from "./client.js";
+import { createDorisPool, dorisConfig, envInt, isFatalConnectionError, REPLICATION_NUM } from "./client.js";
+import { ALL_TABLES, createTableDdl, PARTITIONED_TABLES } from "./schema.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "..", "infra", "doris");
@@ -31,7 +32,7 @@ const MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "..", "infra", "doris")
 const BOOT_ATTEMPTS = 30;
 const BOOT_DELAY_MS = 3_000;
 
-export const REPLICATION_NUM = envInt("DORIS_REPLICATION_NUM", 1, 1, 9);
+export { REPLICATION_NUM };
 
 /** Errors that mean "the cluster isn't ready yet" (worth waiting for), not "this DDL is wrong". */
 export function isBootError(err: unknown): boolean {
@@ -100,6 +101,77 @@ async function columnExists(pool: Querier, database: string, table: string, colu
   return rows.length > 0;
 }
 
+/** Retention ceiling in days (TELEMETRY_MAX_RETENTION_DAYS, 0 = unset) → partition.retention_count. */
+export function retentionCountFromEnv(): number {
+  return envInt("TELEMETRY_MAX_RETENTION_DAYS", 0, 0);
+}
+
+export interface TableShape {
+  table: string;
+  partitioned: boolean;
+  replication: number | null;
+  retentionCount: number | null;
+}
+
+/** Inspect a table's physical shape via SHOW CREATE TABLE (partitioning, replication, TTL). */
+export async function inspectTable(pool: Querier, table: string): Promise<TableShape | null> {
+  let rows: { "Create Table": string }[];
+  try {
+    [rows] = (await pool.query(`SHOW CREATE TABLE ${table}`)) as [{ "Create Table": string }[]];
+  } catch {
+    return null;
+  }
+  const ddl = rows[0]?.["Create Table"] ?? "";
+  const rep = /"replication_allocation"\s*=\s*"tag\.location\.default:\s*(\d+)"/.exec(ddl);
+  const ret = /"partition\.retention_count"\s*=\s*"(\d+)"/.exec(ddl);
+  return {
+    table,
+    partitioned: /\bPARTITION BY\b/i.test(ddl),
+    replication: rep ? Number(rep[1]) : null,
+    retentionCount: ret ? Number(ret[1]) : null,
+  };
+}
+
+/**
+ * Post-migration checks. Never fails the boot: an unpartitioned table is a performance and
+ * retention concern, not a correctness one — but say so loudly, every deploy, until fixed.
+ */
+export async function reportShape(pool: Querier): Promise<TableShape[]> {
+  const shapes: TableShape[] = [];
+  for (const table of ALL_TABLES) {
+    const shape = await inspectTable(pool, table);
+    if (!shape) continue;
+    shapes.push(shape);
+    if ((PARTITIONED_TABLES as readonly string[]).includes(table) && !shape.partitioned) {
+      console.warn(
+        `⚠ ${table} is UNPARTITIONED (legacy schema): time-range queries scan the whole table and retention ` +
+          "is a full-table DELETE. Convert it with `bun run telemetry:repartition` (docs/deployment.md#repartitioning).",
+      );
+    }
+    if (shape.replication !== null && shape.replication !== REPLICATION_NUM) {
+      console.warn(
+        `⚠ ${table} has replication_num=${shape.replication} but DORIS_REPLICATION_NUM=${REPLICATION_NUM}; ` +
+          "apply with `bun run telemetry:repartition -- --set-replication N`.",
+      );
+    }
+  }
+  return shapes;
+}
+
+/** Keep partition.retention_count on the partitioned tables in step with TELEMETRY_MAX_RETENTION_DAYS. */
+export async function syncPartitionRetention(pool: Querier, shapes: TableShape[]): Promise<void> {
+  const want = retentionCountFromEnv();
+  for (const shape of shapes) {
+    if (!shape.partitioned || !(PARTITIONED_TABLES as readonly string[]).includes(shape.table)) continue;
+    const have = shape.retentionCount ?? 0;
+    if (want === have) continue;
+    // Doris has no "unset" for this property; a large count is effectively "keep everything".
+    const value = want > 0 ? String(want) : "1000000";
+    await pool.query(`ALTER TABLE ${shape.table} SET ("partition.retention_count" = "${value}")`);
+    console.log(`→ ${shape.table}: partition.retention_count ${have || "unset"} → ${want > 0 ? want : "unset"}`);
+  }
+}
+
 export async function migrateDoris(): Promise<void> {
   const { database } = dorisConfig();
   if (!/^[a-zA-Z0-9_]+$/.test(database)) {
@@ -123,6 +195,14 @@ export async function migrateDoris(): Promise<void> {
        PROPERTIES ("replication_num" = "${REPLICATION_NUM}")`,
     ),
   );
+
+  // Step 0: canonical (partitioned) tables for fresh installs. `IF NOT EXISTS` makes this a
+  // no-op on an existing install, whose legacy tables are converted by the repartition CLI.
+  for (const table of ALL_TABLES) {
+    await withBootRetry(`create ${table}`, () =>
+      pool.query(createTableDdl(table, { retentionCount: retentionCountFromEnv() })),
+    );
+  }
 
   const [appliedRows] = await pool.query("SELECT name FROM schema_migrations");
   const applied = new Set((appliedRows as { name: string }[]).map((r) => r.name));
@@ -158,6 +238,9 @@ export async function migrateDoris(): Promise<void> {
     }
     await pool.query("INSERT INTO schema_migrations (name, applied_at) VALUES (?, NOW())", [file]);
   }
+
+  const shapes = await reportShape(pool);
+  await syncPartitionRetention(pool, shapes);
 
   console.log("Telemetry migrations applied (doris).");
   await pool.end();

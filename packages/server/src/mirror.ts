@@ -1,4 +1,4 @@
-import { clampTokens, computeCost, type ModelPrice, providerForModel } from "@memoturn/core";
+import { clampFuture, clampTokens, computeCost, type ModelPrice, providerForModel } from "@memoturn/core";
 import type { ObservationState, ScoreState, TraceState } from "@memoturn/db";
 import type { ObservationRow, ScoreWriteRow, TraceRow } from "@memoturn/telemetry";
 
@@ -19,7 +19,7 @@ export function mirrorTraceRow(s: TraceState): TraceRow {
   return {
     id: s.id,
     project_id: s.projectId,
-    timestamp: iso(s.timestamp) || verTs(s.stateVersion),
+    timestamp: clampFuture(iso(s.timestamp) || verTs(s.stateVersion)),
     name: s.name ?? "",
     user_id: s.userId ?? "",
     session_id: s.sessionId ?? "",
@@ -42,7 +42,7 @@ export function mirrorObservationRow(s: ObservationState, prices: ModelPrice[]):
   const completionTokens = clampTokens(s.completionTokens ?? undefined);
   const totalTokens = clampTokens(s.totalTokens ?? promptTokens + completionTokens);
   const cost = computeCost(model, promptTokens, completionTokens, prices);
-  const startTime = iso(s.startTime) || verTs(s.stateVersion);
+  const startTime = clampFuture(iso(s.startTime) || verTs(s.stateVersion));
   const endTime = s.endTime ? iso(s.endTime) : null;
   return {
     id: s.id,
@@ -86,7 +86,7 @@ export function mirrorScoreRow(s: ScoreState): ScoreWriteRow {
     trace_id: s.traceId ?? "",
     observation_id: s.observationId ?? "",
     name: s.name ?? "",
-    timestamp: iso(s.timestamp) || verTs(s.stateVersion),
+    timestamp: clampFuture(iso(s.timestamp) || verTs(s.stateVersion)),
     environment: s.environment ?? "default",
     source: (s.source ?? "API") as ScoreWriteRow["source"],
     data_type: (s.dataType ?? "NUMERIC") as ScoreWriteRow["data_type"],
