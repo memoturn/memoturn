@@ -5,6 +5,12 @@ Tracing, prompts, and an OpenAI wrapper. Configure via constructor or the env va
 `MEMOTURN_MAX_BUFFER_SIZE` (buffered-event cap, default 10000), and `MEMOTURN_ALLOW_HTTP`
 (suppress the cleartext-http warning for non-local hosts).
 
+Flushing is request-sized: a large buffer (e.g. after an outage) is sent as several
+`POST /v1/ingest` calls of at most 1000 events / ~10 MB each (`maxBatchSize`), never one
+over-limit request the API would reject. After a transient failure the background flusher
+backs off exponentially with jitter (honouring `Retry-After`); an explicit `flush()` always
+tries. Set `flushOnSignals: true` to also flush on SIGTERM/SIGINT in containers.
+
 ## Tracing
 
 ```ts
