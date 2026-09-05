@@ -28,6 +28,7 @@ const rand = () => randomBytes(18).toString("base64url");
 // Dev defaults are used in non-production; production (ALLOW_SEED=1) gets random secrets.
 const DEV_PUBLIC_KEY = isProd ? `pk-mt-${rand()}` : "pk-mt-dev";
 const DEV_SECRET_KEY = isProd ? `sk-mt-${rand()}` : "sk-mt-dev";
+const DEV_SCOPES = ["read", "write", "ingest", "admin"];
 const DEV_EMAIL = process.env.SEED_ADMIN_EMAIL ?? "admin@memoturn.dev";
 const DEV_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? (isProd ? rand() : "memoturn-dev-123");
 
@@ -46,13 +47,17 @@ async function main() {
 
   await prisma.apiKey.upsert({
     where: { publicKey: DEV_PUBLIC_KEY },
-    update: { projectId: project.id, secretHash: hashSecret(DEV_SECRET_KEY) },
+    // The dev key carries `admin` so local curl/scripts can reach admin-only routes
+    // (project lifecycle, DLQ replay, key management). Production keys default to
+    // read+write+ingest — `admin` must be requested explicitly by an admin.
+    update: { projectId: project.id, secretHash: hashSecret(DEV_SECRET_KEY), scopes: DEV_SCOPES },
     create: {
       projectId: project.id,
       publicKey: DEV_PUBLIC_KEY,
       secretHash: hashSecret(DEV_SECRET_KEY),
       secretHint: DEV_SECRET_KEY.slice(-4),
       name: "dev key",
+      scopes: DEV_SCOPES,
     },
   });
 

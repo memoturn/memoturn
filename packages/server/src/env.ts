@@ -30,6 +30,10 @@ export function isProduction(): boolean {
   return process.env.NODE_ENV === "production";
 }
 
+function isTruthy(v: string | undefined): boolean {
+  return v === "1" || v?.toLowerCase() === "true";
+}
+
 function secretProblem(name: string): string | null {
   const v = process.env[name];
   if (!v || v.length < MIN_SECRET_LEN) {
@@ -57,6 +61,24 @@ export function validateRuntimeEnv(service: string): void {
     if (!process.env.AUTH_TRUSTED_ORIGINS) {
       problems.push("AUTH_TRUSTED_ORIGINS must be set to your console origin(s) in production");
     }
+    // The dev `.env.example` ships ALLOW_PRIVATE_WEBHOOK_TARGETS=1 (webhooks to localhost are
+    // a normal dev need). `prod:up` reads `.env`, so an operator who copied the dev file and
+    // only replaced the secrets would silently ship an SSRF-open install — refuse unless they
+    // acknowledge it explicitly.
+    if (
+      isTruthy(process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS) &&
+      !isTruthy(process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS_ACK)
+    ) {
+      problems.push(
+        "ALLOW_PRIVATE_WEBHOOK_TARGETS=1 lets project admins point webhooks at private/loopback " +
+          "addresses (cloud metadata, internal services). Unset it, or set " +
+          "ALLOW_PRIVATE_WEBHOOK_TARGETS_ACK=1 if your deployment genuinely needs LAN targets",
+      );
+    }
+    // Test-suite knob; there is no production reason to turn off auth brute-force protection.
+    if (isTruthy(process.env.AUTH_RATE_LIMIT_DISABLED)) {
+      problems.push("AUTH_RATE_LIMIT_DISABLED is a test-only switch — never set it in production");
+    }
     if (problems.length > 0) {
       throw new Error(
         `[${service}] refusing to start — insecure production configuration:\n  - ${problems.join("\n  - ")}\n` +
@@ -69,6 +91,15 @@ export function validateRuntimeEnv(service: string): void {
       console.warn(
         `[${service}] RATE_LIMIT_PER_MINUTE is unset/0 — the API is unthrottled. Set it (and ` +
           "INGEST_EVENTS_PER_MINUTE) or ensure an upstream proxy enforces limits in production.",
+      );
+    }
+    // DEMO_MODE exposes an UNAUTHENTICATED provisioning endpoint (POST /v1/demo/start creates
+    // orgs/projects/users and seeds telemetry). It's one env var away on every install, so
+    // announce it at boot where an operator reviewing logs will see it.
+    if (isTruthy(process.env.DEMO_MODE)) {
+      console.warn(
+        `[${service}] DEMO_MODE is ON — this deployment is a PUBLIC DEMO: anyone with an email address ` +
+          "can provision a read-only sandbox via POST /v1/demo/start. Unset DEMO_MODE for a normal install.",
       );
     }
     return;

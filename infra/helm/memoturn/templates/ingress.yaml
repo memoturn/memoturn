@@ -32,6 +32,17 @@ spec:
                 port:
                   number: {{ $.Values.api.service.port }}
           {{- end }}
+          # OAuth discovery for remote MCP clients is served by the API at the domain root
+          # (mirrors infra/Caddyfile); without these, discovery falls through to the SPA.
+          {{- range $path := list "/.well-known/oauth-authorization-server" "/.well-known/oauth-protected-resource" "/.well-known/openid-configuration" }}
+          - path: {{ $path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullName }}-api
+                port:
+                  number: {{ $.Values.api.service.port }}
+          {{- end }}
           {{- if $.Values.console.enabled }}
           # Everything else -> console SPA.
           - path: /
