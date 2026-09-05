@@ -163,6 +163,67 @@ def test_207_partial_rejects_are_logged(capture: Capture, caplog: pytest.LogCapt
     assert any("rejected at ingest" in r.getMessage() for r in caplog.records)
 
 
+def test_flush_chunks_large_buffers_in_order(capture: Capture) -> None:
+    client = Memoturn(**{**CREDS, "max_batch_size": 2})
+    for i in range(5):
+        client.trace(name=f"t{i}")
+    client.flush()
+    sizes = [len(__import__("json").loads(r.data.decode())["batch"]) for r in capture.requests]
+    assert sizes == [2, 2, 1]
+    names = [e["body"]["name"] for r in capture.requests for e in __import__("json").loads(r.data.decode())["batch"]]
+    assert names == ["t0", "t1", "t2", "t3", "t4"]
+
+
+def test_transient_failure_rebuffers_remaining_chunks(capture: Capture) -> None:
+    client = Memoturn(**{**CREDS, "max_batch_size": 2})
+    for i in range(5):
+        client.trace(name=f"t{i}")
+
+    def responder(_req):  # second request fails transiently
+        if len(capture.requests) == 2:
+            raise http_error(503, "down")
+        return {}
+
+    capture.responder = responder
+    with pytest.raises(urllib.error.HTTPError):
+        client.flush()
+    capture.responder = lambda _req: {}
+    client.flush()
+    names = [e["body"]["name"] for r in capture.requests[2:] for e in __import__("json").loads(r.data.decode())["batch"]]
+    assert names == ["t2", "t3", "t4"]  # t0,t1 were delivered by the first request
+
+
+def test_permanent_reject_drops_only_that_chunk(capture: Capture) -> None:
+    client = Memoturn(**{**CREDS, "max_batch_size": 2})
+    for i in range(5):
+        client.trace(name=f"t{i}")
+
+    def responder(_req):  # first request is a permanent reject
+        if len(capture.requests) == 1:
+            raise http_error(400, "bad")
+        return {}
+
+    capture.responder = responder
+    with pytest.raises(urllib.error.HTTPError):
+        client.flush()
+    assert len(capture.requests) == 3  # every chunk was attempted
+    client.flush()  # nothing re-buffered
+    assert len(capture.requests) == 3
+
+
+def test_backoff_suppresses_background_flush_after_transient_failure(capture: Capture) -> None:
+    client = Memoturn(**{**CREDS, "flush_at": 1})
+    capture.error = http_error(503, "down")
+    client.trace()  # size-triggered background flush → 503 → backoff
+    assert len(capture.requests) == 1
+    capture.error = None
+    client.trace()  # size trigger again, inside the backoff window → suppressed
+    assert len(capture.requests) == 1
+    client.flush()  # explicit: ignores backoff, sends both
+    assert len(capture.requests) == 2
+    assert len(capture.batch()) == 2
+
+
 def test_buffer_cap_drops_new_events(capture: Capture) -> None:
     client = Memoturn(**{**CREDS, "max_buffer_size": 2})
     client.trace()
