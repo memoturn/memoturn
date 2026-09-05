@@ -176,6 +176,52 @@ describe.skipIf(!HAS_INFRA)("authenticated /v1 routes (infra)", () => {
     }
   });
 
+  it("replays the original 207 for a retried Idempotency-Key instead of accepting a second batch", async () => {
+    const event = {
+      id: `${slug}-evt-idem`,
+      type: "trace-create",
+      timestamp: new Date().toISOString(),
+      body: { id: `${slug}-trace-idem`, name: "apitest", environment: "test" },
+    };
+    const headers = {
+      authorization: basic(full.publicKey, full.secretKey),
+      "content-type": "application/json",
+      "idempotency-key": `${slug}-key-1`,
+    };
+    const first = await app.request("/v1/ingest", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ batch: [event] }),
+    });
+    expect(first.status).toBe(207);
+    expect(first.headers.get("idempotent-replayed")).toBeNull();
+    const firstBody = await first.text();
+    const second = await app.request("/v1/ingest", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ batch: [event] }),
+    });
+    expect(second.status).toBe(207);
+    expect(second.headers.get("idempotent-replayed")).toBe("true");
+    expect(await second.text()).toBe(firstBody);
+    const bad = await app.request("/v1/ingest", {
+      method: "POST",
+      headers: { ...headers, "idempotency-key": "has spaces!" },
+      body: JSON.stringify({ batch: [event] }),
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it("answers OTLP metrics exports with an explicit 501", async () => {
+    const res = await app.request("/v1/otel/v1/metrics", {
+      method: "POST",
+      headers: { authorization: basic(full.publicKey, full.secretKey), "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(501);
+    expect(((await res.json()) as { error: string }).error).toContain("not ingested");
+  });
+
   it("rejects a malformed batch with 400", async () => {
     const res = await app.request("/v1/ingest", {
       method: "POST",

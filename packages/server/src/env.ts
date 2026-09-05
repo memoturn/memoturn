@@ -98,6 +98,8 @@ export const ENV_SCHEMA: Record<string, EnvVar> = {
   SSE_MAX_STREAMS_PER_PROJECT: { spec: int(0) },
   RATE_LIMIT_PER_MINUTE: { spec: int(0) },
   INGEST_EVENTS_PER_MINUTE: { spec: int(0) },
+  INGEST_MAX_EVENT_BYTES: { spec: int(1024) },
+  INGEST_MAX_JSON_DEPTH: { spec: int(4, 512) },
   RATE_LIMIT_TRUSTED_PROXIES: { spec: int(0, 16) },
   MCP_RATE_LIMIT_PER_MINUTE: { spec: int(0) },
   PLAYGROUND_MAX_TOKENS: { spec: int(1) },
