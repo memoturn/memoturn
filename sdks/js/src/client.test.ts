@@ -263,6 +263,64 @@ describe("transport hardening", () => {
     expect(String(err?.message).length).toBeLessThan(300);
   });
 
+  it("flushes a large buffer as several ≤maxBatchSize requests, in order", async () => {
+    const m = setup(() => ({ status: 207 }));
+    const client = new Memoturn({ ...creds, flushAt: 100_000, maxBatchSize: 2 });
+    for (let i = 0; i < 5; i++) client.trace({ name: `t${i}` });
+    await client.flush();
+    expect(m.calls.map((c) => (c.body as { batch: unknown[] }).batch.length)).toEqual([2, 2, 1]);
+    const names = m.calls.flatMap((c) =>
+      (c.body as { batch: { body: { name: string } }[] }).batch.map((e) => e.body.name),
+    );
+    expect(names).toEqual(["t0", "t1", "t2", "t3", "t4"]);
+  });
+
+  it("a transient failure mid-flush re-buffers that chunk and every later one — nothing lost, order kept", async () => {
+    let n = 0;
+    setup(() => (n++ === 1 ? { status: 503, text: "down" } : { status: 207 }));
+    const client = new Memoturn({ ...creds, flushAt: 100_000, maxBatchSize: 2 });
+    for (let i = 0; i < 5; i++) client.trace({ name: `t${i}` });
+    await expect(client.flush()).rejects.toThrow(/failed: 503/);
+    active?.restore();
+    const ok = setup(() => ({ status: 207 }));
+    await client.flush();
+    const names = ok.calls.flatMap((c) =>
+      (c.body as { batch: { body: { name: string } }[] }).batch.map((e) => e.body.name),
+    );
+    expect(names).toEqual(["t2", "t3", "t4"]); // t0,t1 were delivered by the first request
+  });
+
+  it("a permanent reject drops only that chunk; later chunks are still sent", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    let n = 0;
+    const m = setup(() => (n++ === 0 ? { status: 400, text: "bad" } : { status: 207 }));
+    const client = new Memoturn({ ...creds, flushAt: 100_000, maxBatchSize: 2 });
+    for (let i = 0; i < 5; i++) client.trace({ name: `t${i}` });
+    await expect(client.flush()).rejects.toThrow(/rejected: 400/);
+    expect(m.calls).toHaveLength(3); // every chunk was attempted
+    await client.flush(); // nothing re-buffered
+    expect(m.calls).toHaveLength(3);
+    err.mockRestore();
+  });
+
+  it("backs off background flushes after a transient failure; an explicit flush() still tries", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const m = setup(() => ({ status: 503, text: "down" }));
+    const client = new Memoturn({ ...creds, flushAt: 1 });
+    client.trace(); // size-triggered background flush → 503 → backoff
+    await new Promise((r) => setTimeout(r, 5));
+    expect(m.calls).toHaveLength(1);
+    client.trace(); // size trigger again, but inside the backoff window → suppressed
+    await new Promise((r) => setTimeout(r, 5));
+    expect(m.calls).toHaveLength(1);
+    active?.restore();
+    const ok = setup(() => ({ status: 207 }));
+    await client.flush(); // explicit: ignores backoff, sends both events
+    expect(ok.calls).toHaveLength(1);
+    expect((ok.calls[0].body as { batch: unknown[] }).batch).toHaveLength(2);
+    err.mockRestore();
+  });
+
   it("caps the buffer at maxBufferSize, dropping new events with a warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const m = setup(() => ({ status: 207 }));

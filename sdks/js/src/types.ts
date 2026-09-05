@@ -146,6 +146,12 @@ export interface MemoturnOptions {
   /** Hard cap on buffered events; incoming events are dropped (with a one-time
    * warning) once reached. Default 10000, or `MEMOTURN_MAX_BUFFER_SIZE`. */
   maxBufferSize?: number;
+  /** Events per ingest request when flushing (a large buffer is sent as several requests).
+   * Default and hard maximum 1000 — the API's per-request limit. */
+  maxBatchSize?: number;
+  /** Also flush on SIGTERM/SIGINT (then re-raise the signal). Default false — opt in for
+   * containers, where `beforeExit` never fires on a stop signal. Node only. */
+  flushOnSignals?: boolean;
   /** Per-request timeout (ms) for ingest calls. Default 10000. */
   requestTimeout?: number;
   /** Flush buffered events on Node `beforeExit`. Default true (no-op outside Node). */
