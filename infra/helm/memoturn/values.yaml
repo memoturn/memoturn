@@ -80,7 +80,10 @@ api:
 
 worker:
   replicaCount: 1
-  port: 3002 # /health + /metrics
+  port: 3002 # /health + /metrics (bound on 0.0.0.0 in-pod; exposed only via the ClusterIP Service)
+  # Seconds the kubelet waits for the drain before SIGKILL. Experiment and evaluator-backfill
+  # jobs run for minutes — size this above your longest expected job.
+  terminationGracePeriodSeconds: 600
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }
