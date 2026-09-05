@@ -4,6 +4,7 @@ import {
   getUserProjectAccess,
   parseBasicAuth,
   requiredScope,
+  roleForScopes,
   type WorkspaceRole,
 } from "@memoturn/server";
 import type { Context, Next } from "hono";
@@ -15,6 +16,8 @@ const TRUSTED_ORIGINS = (process.env.AUTH_TRUSTED_ORIGINS ?? "http://localhost:3
   .filter(Boolean);
 
 export type AuthVars = {
+  /** Per-request correlation id — set by the first middleware in app.ts, before auth. */
+  requestId: string;
   projectId: string;
   role: WorkspaceRole;
   actor: string;
@@ -26,8 +29,11 @@ export type AuthVars = {
 
 /**
  * Authenticates two ways and resolves the active project + role:
- *  1. API key (Basic auth) — SDK/programmatic; full access to its project (role OWNER),
- *     subject to the key's scopes + expiry + per-key rate limit.
+ *  1. API key (Basic auth) — SDK/programmatic; scoped to its project. The role is DERIVED
+ *     from the key's scopes (`roleForScopes`): MEMBER for the default read+write+ingest key,
+ *     OWNER only when the key carries the explicit `admin` scope. A default key therefore
+ *     passes `denyIfReadOnly` but not `denyIfNotAdmin` — a MEMBER who mints a key can't use
+ *     it to reach OWNER-only surfaces (project delete, membership, DLQ replay).
  *  2. Better Auth session — dashboard; honors the `x-memoturn-project` header (project
  *     switcher) when the user has access, else their default project, with their role.
  */
@@ -41,7 +47,7 @@ export async function requireAuth(c: Context<{ Variables: AuthVars }>, next: Nex
       return c.json({ error: `forbidden: API key lacks the '${need}' scope` }, 403);
     }
     c.set("projectId", ctx.projectId);
-    c.set("role", "OWNER");
+    c.set("role", roleForScopes(ctx.scopes));
     c.set("actor", `apikey:${creds.publicKey}`);
     c.set("userId", "");
     c.set("organizationId", "");
@@ -87,7 +93,10 @@ export function denyIfReadOnly(c: Context<{ Variables: AuthVars }>) {
   return WRITE_ROLES.includes(c.get("role")) ? null : c.json({ error: "forbidden: read-only role" }, 403);
 }
 
-/** Guard for admin-only ops surfaces (DLQ, worker metrics): OWNER/ADMIN only. */
+/**
+ * Guard for admin-only surfaces (project lifecycle, membership, API keys, DLQ replay):
+ * OWNER/ADMIN only. API-key principals reach OWNER only via the `admin` scope.
+ */
 export function denyIfNotAdmin(c: Context<{ Variables: AuthVars }>) {
   const role = c.get("role");
   return role === "OWNER" || role === "ADMIN" ? null : c.json({ error: "forbidden: admin only" }, 403);

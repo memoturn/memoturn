@@ -39,6 +39,10 @@ spec:
           env:
             - name: API_PORT
               value: {{ .Values.api.port | quote }}
+            # The ops console's ingest-health panel scrapes the worker's /metrics through
+            # the worker Service (the default is loopback, which is a different pod here).
+            - name: WORKER_METRICS_URL
+              value: {{ printf "http://%s-worker:%d/metrics" (include "memoturn.fullname" .) (int .Values.worker.port) | quote }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

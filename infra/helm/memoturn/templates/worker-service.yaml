@@ -1,0 +1,18 @@
+# In-cluster address for the worker's /health + /metrics server. The API's
+# WORKER_METRICS_URL points here (see api-deployment.yaml); nothing else should.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "memoturn.fullname" . }}-worker
+  labels:
+    {{- include "memoturn.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  ports:
+    - name: health
+      port: {{ .Values.worker.port }}
+      targetPort: health
+  selector:
+    {{- include "memoturn.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: worker

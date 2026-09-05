@@ -25,7 +25,28 @@ const MUTATING = new Set(["post", "put", "patch", "delete"]);
 
 // Routes that legitimately bypass the write-role gate: SDK ingest (API-key OWNER)
 // and stateless compute. Everything else that mutates must guard.
-const EXEMPT_PATHS = new Set(["/v1/ingest", "/v1/otel/v1/traces", "/v1/playground/chat", "/v1/playground/stream"]);
+const EXEMPT_PATHS = new Set(["/v1/ingest", "/v1/otel/v1/traces"]);
+
+// Admin-only surfaces: routes that manage credentials, membership, the project's lifecycle,
+// or the ingest pipeline must ALSO call `denyIfNotAdmin(c)` (OWNER/ADMIN — API keys only via
+// the `admin` scope) and record an audit entry. A MEMBER reaching any of these — directly or
+// through a key they minted — is the privilege-escalation class this list guards against.
+// Matched by path prefix so new sub-routes inherit the requirement.
+const ADMIN_PREFIXES = [
+  "/v1/api-keys",
+  "/v1/projects/{id}",
+  "/v1/ingest/dlq",
+  "/v1/ingest/health",
+  "/v1/sso",
+  "/v1/organizations/{id}/members",
+];
+// Reads that enumerate credentials or pipeline internals are admin-only too; other reads
+// under an admin prefix (e.g. listing members) stay open to any member.
+const ADMIN_READ_PATHS = new Set(["/v1/api-keys", "/v1/ingest/health"]);
+const isAdminPath = (method: string, path: string): boolean =>
+  MUTATING.has(method)
+    ? ADMIN_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`))
+    : ADMIN_READ_PATHS.has(path);
 
 interface Route {
   method: string;
@@ -66,26 +87,38 @@ const failures: Finding[] = [];
 const noAudit: { method: string; path: string; line: number }[] = [];
 let checked = 0;
 let exempt = 0;
+let adminChecked = 0;
 
 for (const r of routes) {
-  if (!MUTATING.has(r.method)) continue;
+  const admin = isAdminPath(r.method, r.path);
+  // Admin surfaces are checked on every method (a GET that lists credentials is still admin-only).
+  if (!MUTATING.has(r.method) && !admin) continue;
   if (EXEMPT_PATHS.has(r.path) || /rbac-exempt/.test(r.block)) {
     exempt++;
     continue;
   }
-  checked++;
   const missing: string[] = [];
-  if (!/denyIfReadOnly\(/.test(r.block)) missing.push("denyIfReadOnly(c)");
+  if (MUTATING.has(r.method)) {
+    checked++;
+    if (!/denyIfReadOnly\(/.test(r.block)) missing.push("denyIfReadOnly(c)");
+  }
+  if (admin) {
+    adminChecked++;
+    if (!/denyIfNotAdmin\(/.test(r.block)) missing.push("denyIfNotAdmin(c)");
+    if (MUTATING.has(r.method) && !/recordAudit\(|recordAuthAudit\(/.test(r.block)) {
+      missing.push("recordAudit(...) (required on admin routes)");
+    }
+  }
   if (!/\b403:/.test(r.block)) missing.push("403 response");
   if (missing.length > 0) {
     failures.push({ method: r.method, path: r.path, line: lineOf(r.index), missing });
-  } else if (!/recordAudit\(/.test(r.block)) {
+  } else if (MUTATING.has(r.method) && !/recordAudit\(/.test(r.block)) {
     noAudit.push({ method: r.method, path: r.path, line: lineOf(r.index) });
   }
 }
 
 const up = (m: string): string => m.toUpperCase().padEnd(6);
-console.log(`rbac guard check — ${checked} mutating route(s), ${exempt} exempt\n`);
+console.log(`rbac guard check — ${checked} mutating route(s), ${adminChecked} admin-only route(s), ${exempt} exempt\n`);
 
 if (failures.length === 0) {
   console.log("  OK    every mutating route guards denyIfReadOnly + declares 403");
@@ -103,8 +136,9 @@ if (noAudit.length > 0) {
 
 console.log("");
 if (failures.length > 0) {
-  console.log(`✗ ${failures.length} route(s) missing the read-only guard. Add denyIfReadOnly(c) + a 403,`);
-  console.log(`  or mark intentional exceptions with an inline \`// rbac-exempt: <reason>\` comment.`);
+  console.log(`✗ ${failures.length} route(s) missing a guard. Add denyIfReadOnly(c) (+ denyIfNotAdmin(c) and`);
+  console.log(`  recordAudit on admin surfaces) and a 403, or mark intentional exceptions with an inline`);
+  console.log(`  \`// rbac-exempt: <reason>\` comment.`);
   process.exit(1);
 }
 console.log("✓ all mutating routes enforce the read-only role gate.");

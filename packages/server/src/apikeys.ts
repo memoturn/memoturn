@@ -18,7 +18,28 @@ interface ApiKeyRow {
   lastUsedAt: Date | null;
 }
 
-const ALL_SCOPES = ["read", "write", "ingest"];
+/**
+ * Scopes a key can carry. `read`/`write`/`ingest` are the coarse method/path gate applied
+ * by `requiredScope`; `admin` additionally lets the key act as an OWNER on admin-only
+ * surfaces (project delete/rename, membership, DLQ replay, key management). It is NEVER
+ * granted by default — an API key is a bearer credential, so a stolen default key must
+ * not be able to destroy the project or escalate a user's role.
+ */
+export const DEFAULT_SCOPES = ["read", "write", "ingest"] as const;
+export const VALID_SCOPES = [...DEFAULT_SCOPES, "admin"] as const;
+const ALL_SCOPES: readonly string[] = DEFAULT_SCOPES;
+
+/**
+ * The workspace role an API-key principal acts as. Keys are not org members, so the role
+ * is derived from scopes: `admin` → OWNER (admin surfaces), any write/ingest → MEMBER,
+ * read-only keys → VIEWER (the method gate already blocks their writes; the role keeps
+ * `denyIfReadOnly` consistent with it).
+ */
+export function roleForScopes(scopes: readonly string[]): "OWNER" | "MEMBER" | "VIEWER" {
+  if (scopes.includes("admin")) return "OWNER";
+  if (scopes.includes("write") || scopes.includes("ingest")) return "MEMBER";
+  return "VIEWER";
+}
 
 function shape(k: ApiKeyRow) {
   return {
@@ -46,19 +67,25 @@ export interface CreateApiKeyInput {
   rateLimitPerMinute?: number | null;
 }
 
-export type Scope = "read" | "write" | "ingest";
+export type Scope = (typeof VALID_SCOPES)[number];
 
-/** The coarse scope a request requires: ingest endpoints, GET reads, everything else writes. */
-export function requiredScope(method: string, path: string): Scope {
+/**
+ * The coarse scope a request requires: ingest endpoints, GET reads, everything else writes.
+ * `admin` is never *required* here — admin-only routes gate on the derived role via
+ * `denyIfNotAdmin`, so an `admin` key still needs `write` for the method gate.
+ */
+export function requiredScope(method: string, path: string): Exclude<Scope, "admin"> {
   if (path.startsWith("/v1/ingest") || path.startsWith("/v1/otel")) return "ingest";
   return method.toUpperCase() === "GET" ? "read" : "write";
 }
 
-/** Normalize create-key options: valid scopes (default all), expiry date, per-key limit. */
+/** Normalize create-key options: valid scopes (default read+write+ingest — never admin), expiry, per-key limit. */
 export function resolveKeyControls(input: CreateApiKeyInput, nowMs = Date.now()) {
-  const requested = input.scopes?.length ? input.scopes.filter((s) => ALL_SCOPES.includes(s)) : [];
+  const requested = input.scopes?.length
+    ? input.scopes.filter((s) => (VALID_SCOPES as readonly string[]).includes(s))
+    : [];
   return {
-    scopes: requested.length ? requested : ALL_SCOPES,
+    scopes: requested.length ? requested : [...ALL_SCOPES],
     expiresAt:
       input.expiresInDays && input.expiresInDays > 0 ? new Date(nowMs + input.expiresInDays * 86_400_000) : null,
     rateLimitPerMinute: input.rateLimitPerMinute ?? null,
