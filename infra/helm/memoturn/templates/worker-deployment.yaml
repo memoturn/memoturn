@@ -25,6 +25,9 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "memoturn.serviceAccountName" . }}
+      # Experiment / evaluator-backfill jobs run for minutes; give the drain (worker.close)
+      # time to finish in-flight work before the kubelet SIGKILLs the pod.
+      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -39,6 +42,14 @@ spec:
           env:
             - name: WORKER_PORT
               value: {{ .Values.worker.port | quote }}
+            # The worker binds its /health + /metrics server to loopback by default (the
+            # metrics leak queue depths). Kubelet probes and the API's ingest-health panel
+            # reach it over the pod network, so bind all interfaces here — the pod is only
+            # reachable in-cluster (add a NetworkPolicy if the cluster isn't trusted).
+            - name: WORKER_HOST
+              value: "0.0.0.0"
+            - name: WORKER_SHUTDOWN_TIMEOUT_MS
+              value: {{ sub .Values.worker.terminationGracePeriodSeconds 30 | mul 1000 | quote }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

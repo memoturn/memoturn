@@ -1,4 +1,5 @@
 import {
+  DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   ListObjectsV2Command,
@@ -42,6 +43,11 @@ export async function putRawBatch(projectId: string, batchId: string, payload: u
     }),
   );
   return key;
+}
+
+/** Delete one object (no-op if absent). Used to roll back a blob write whose enqueue failed. */
+export async function deleteBlobObject(key: string): Promise<void> {
+  await blob().send(new DeleteObjectCommand({ Bucket: BLOB_BUCKET, Key: key }));
 }
 
 export async function getRawBatch(key: string): Promise<string> {

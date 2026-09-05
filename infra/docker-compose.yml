@@ -183,8 +183,16 @@ services:
       BLOB_ACCESS_KEY_ID: ${BLOB_ACCESS_KEY_ID:?set BLOB_ACCESS_KEY_ID in .env}
       BLOB_SECRET_ACCESS_KEY: ${BLOB_SECRET_ACCESS_KEY:?set BLOB_SECRET_ACCESS_KEY in .env}
       BLOB_FORCE_PATH_STYLE: "true"
+      # Per-project request + ingest-event budgets — ON by default (0 disables either).
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
+      INGEST_EVENTS_PER_MINUTE: ${INGEST_EVENTS_PER_MINUTE:-60000}
+      RATE_LIMIT_TRUSTED_PROXIES: ${RATE_LIMIT_TRUSTED_PROXIES:-0}
+    # Bound to loopback by default: this stack has NO TLS termination, so an API published on
+    # 0.0.0.0 would carry session cookies, API keys, and ingest payloads in cleartext on every
+    # interface. Put a TLS-terminating proxy in front (or use docker-compose.prod.yml, which
+    # ships Caddy) and only then set API_BIND=0.0.0.0 if the proxy runs on another host.
     ports:
-      - "${API_PORT:-3001}:3001"
+      - "${API_BIND:-127.0.0.1}:${API_PORT:-3001}:3001"
     # Probe with bun itself — the oven/bun base image doesn't guarantee curl/wget.
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3001/v1/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]

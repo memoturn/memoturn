@@ -52,7 +52,14 @@ const ingestWorker = new Worker<IngestJob>(QUEUE_NAMES.ingest, processIngest, {
 
 ingestWorker.on("ready", () => console.log(`[worker] ingest ready (concurrency=${concurrency})`));
 ingestWorker.on("failed", async (job, err) => {
-  logJson("error", "ingest job failed", { jobId: job?.id, attemptsMade: job?.attemptsMade, error: err.message });
+  logJson("error", "ingest job failed", {
+    jobId: job?.id,
+    projectId: job?.data.projectId,
+    batchId: job?.data.batchId,
+    requestId: job?.data.requestId,
+    attemptsMade: job?.attemptsMade,
+    error: err.message,
+  });
   // DLQ on a terminal failure: retries exhausted OR a stalled job (which BullMQ fails with
   // attemptsMade possibly still below `attempts`). See shouldDeadLetter.
   const maxAttempts = job?.opts.attempts ?? 1;
@@ -330,16 +337,31 @@ healthServer.listen(healthPort, healthHost, () =>
   console.log(`[worker] health + metrics on http://${healthHost}:${healthPort} (/health, /metrics)`),
 );
 
+// Drain budget: every BullMQ worker waits for its in-flight jobs on close(), and
+// experiment / eval-backfill jobs run for minutes. Past the budget we exit non-zero so an
+// orchestrator's grace period (Helm sets this from terminationGracePeriodSeconds) is never
+// exceeded silently — the abandoned jobs are retried by BullMQ once their locks lapse.
+const SHUTDOWN_TIMEOUT_MS = Math.max(1000, Number(process.env.WORKER_SHUTDOWN_TIMEOUT_MS) || 570_000);
+
 async function shutdown(signal: string) {
-  console.log(`[worker] ${signal} received, draining…`);
+  console.log(`[worker] ${signal} received, draining (up to ${SHUTDOWN_TIMEOUT_MS} ms)…`);
+  const forceExit = setTimeout(() => {
+    logJson("error", "shutdown drain timed out — exiting with in-flight jobs (BullMQ will retry them)", {
+      timeoutMs: SHUTDOWN_TIMEOUT_MS,
+    });
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+  forceExit.unref();
   healthServer.close();
   await Promise.all([
     ingestWorker.close(),
     experimentWorker.close(),
+    evalBackfillWorker.close(),
     maintenanceWorker.close(),
     sandboxWorker?.close(),
     dlq.close(),
   ]);
+  clearTimeout(forceExit);
   process.exit(0);
 }
 

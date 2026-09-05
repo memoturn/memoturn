@@ -74,6 +74,12 @@ exits non-zero (do not flip) on any mismatch. `--verify-only` re-runs just the c
 docker compose -f infra/docker-compose.yml up -d --build
 ```
 
+This stack has **no TLS termination**, so the API is published on `127.0.0.1:3001` only. Put a
+TLS-terminating reverse proxy in front of it (or use the single-VM stack below, which ships
+Caddy); set `API_BIND=0.0.0.0` only when that proxy runs on another host and the network
+between them is trusted. Per-project rate limits are on by default here (`RATE_LIMIT_PER_MINUTE`,
+`INGEST_EVENTS_PER_MINUTE`).
+
 Images are built from `docker/{api,worker,console}.Dockerfile` (all `oven/bun`). The
 console is a static SPA — build it (`bun --filter @memoturn/console build`) and serve the
 output behind any static host / CDN, with a reverse proxy routing `/api/*` to the API and
@@ -121,7 +127,8 @@ bun run prod:up                          # docker compose -f infra/docker-compos
 
 Companion scripts: `bun run prod:ps` (status), `bun run prod:logs` (tail logs), `bun run prod:down` (stop).
 
-The compose file derives `AUTH_BASE_URL=https://DOMAIN/api` and `AUTH_TRUSTED_ORIGINS=https://DOMAIN`
+The compose file derives `AUTH_BASE_URL=https://DOMAIN` (the **origin only — no `/api`**; Better
+Auth mounts at `/auth` and a path in the base URL would break it) and `AUTH_TRUSTED_ORIGINS=https://DOMAIN`
 from `MEMOTURN_DOMAIN`; required secrets use `${VAR:?}` so a missing value aborts the command. Caddy
 routes `/api/*` to the API (prefix stripped, matching the dev Vite proxy) and everything else to the
 console SPA — so the console's default `VITE_API_BASE=/api` works unchanged.
@@ -249,6 +256,14 @@ If you deploy prebuilt images (`ghcr.io/memoturn/*`) instead of building, pin th
 the *application* back to the previous tag only if no migration shipped in between; otherwise
 restore Postgres from the pre-upgrade backup. Doris is rebuildable from the blob raw-event log
 (the replay path), so telemetry is never the thing that blocks a recovery.
+
+**Resource limits + logs (single-VM stack):** every service runs under a memory limit
+(`API_MEM_LIMIT` 1g, `WORKER_MEM_LIMIT` 2g, `POSTGRES_MEM_LIMIT` 2g, `MINIO_MEM_LIMIT` 1g,
+`REDIS_MEM_LIMIT` 512m, `CONSOLE_MEM_LIMIT`/`CADDY_MEM_LIMIT` 256m — Doris caps itself via
+`DORIS_FE_XMX`/`DORIS_BE_MEM_LIMIT`) and rotated json-file logging (`LOG_MAX_SIZE` 50m ×
+`LOG_MAX_FILES` 5), so one runaway process or an unrotated request log can't take the host down.
+The worker gets `stop_grace_period` 600s (`WORKER_STOP_GRACE_PERIOD`) so minutes-long experiment
+and evaluator-backfill jobs drain on restart instead of being SIGKILLed.
 
 ## Scaling
 

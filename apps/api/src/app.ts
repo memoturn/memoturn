@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import * as C from "@memoturn/contracts";
 import {
@@ -178,6 +179,7 @@ import {
   runPlayground,
   runProjectionForProject,
   runScheduledExport,
+  StorageUnavailableError,
   safeServeContentType,
   setAnalyticsSink,
   setCostBudget,
@@ -211,6 +213,7 @@ import {
 import { Scalar } from "@scalar/hono-api-reference";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
+import { HTTPException } from "hono/http-exception";
 import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
 import { partitionIngestBatch } from "./ingest-partition.js";
@@ -228,10 +231,19 @@ type Env = { Variables: AuthVars };
 
 export const app = new OpenAPIHono<Env>();
 
-// ── Observability: time every request, record metrics, structured-log ────────────
+// ── Observability: request id, time every request, record metrics, structured-log ─
 // First middleware so the timing wraps the whole pipeline. Buckets by the matched route
 // PATTERN (c.req.routePath), never the raw path, to keep cardinality bounded.
+//
+// Request id: honour an inbound `x-request-id` (proxies/SDKs) or mint one; it is echoed on
+// the response, stamped on every log line, carried into the ingest job so the worker's
+// lines join up, and returned in error bodies so a support ticket can quote it.
+const REQUEST_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
 app.use("*", async (c, next) => {
+  const inbound = c.req.header("x-request-id");
+  const requestId = inbound && REQUEST_ID_RE.test(inbound) ? inbound : randomUUID();
+  c.set("requestId", requestId);
+  c.header("x-request-id", requestId);
   const start = performance.now();
   requestStarted();
   try {
@@ -240,15 +252,47 @@ app.use("*", async (c, next) => {
     const ms = performance.now() - start;
     const route = c.req.routePath && c.req.routePath !== "/*" ? c.req.routePath : "(unmatched)";
     const status = c.res.status;
+    if (!c.res.headers.has("x-request-id")) c.res.headers.set("x-request-id", requestId);
     recordRequest(c.req.method, route, status, ms);
     logJson(status >= 500 ? "error" : "info", "request", {
       method: c.req.method,
       route,
       status,
       ms: Math.round(ms),
+      requestId,
     });
   }
 });
+
+// ── Error contract ───────────────────────────────────────────────────────────────
+// Every failure leaves as JSON `{ error, requestId }`. Storage/queue outages on the ingest
+// path become 503 + Retry-After (SDKs re-send), Hono's own HTTPExceptions (body-limit 413 …)
+// keep their status, and anything unexpected is a 500 whose details go to the log only —
+// never the client. Hono's default was a plain-text "Internal Server Error".
+app.onError((err, c) => {
+  const requestId = c.get("requestId");
+  if (err instanceof StorageUnavailableError) {
+    logJson("error", "ingest storage unavailable", { requestId, stage: err.stage, error: err.message });
+    c.header("Retry-After", String(err.retryAfterSeconds));
+    return c.json(
+      { error: "storage temporarily unavailable — retry", retryAfter: err.retryAfterSeconds, requestId },
+      503,
+    );
+  }
+  if (err instanceof HTTPException) {
+    const res = err.getResponse();
+    // Re-shape into the JSON contract, preserving the status Hono chose.
+    return c.json({ error: err.message || res.statusText || "request failed", requestId }, res.status as 400);
+  }
+  logJson("error", "unhandled error", {
+    requestId,
+    route: c.req.routePath,
+    error: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined,
+  });
+  return c.json({ error: "internal error", requestId }, 500);
+});
+app.notFound((c) => c.json({ error: "not found", requestId: c.get("requestId") }, 404));
 
 // Liveness probe (public, unauthenticated) — cheap, no dependencies touched.
 app.get("/health", (c) => c.json({ status: "ok", service: "memoturn-api" }));
@@ -432,9 +476,58 @@ const security = [{ apiKey: [] }];
 const PROVIDER_IDS = ["anthropic", "openai", "gemini", "bedrock", "azure", "openai_compatible"] as const;
 const RUN_PROVIDER_IDS = ["mock", ...PROVIDER_IDS] as const;
 
+// Ceiling on a single playground/assistant completion. The provider gateway spends the
+// operator's key, so an unbounded `maxTokens` is a direct cost lever for anyone with write
+// access; the cap is generous for interactive use and overridable per install.
+const PLAYGROUND_MAX_TOKENS = Math.max(1, Number(process.env.PLAYGROUND_MAX_TOKENS) || 32_768);
+const chatMessages = z
+  .array(z.object({ role: z.enum(["system", "user", "assistant"]), content: z.string().max(200_000) }))
+  .min(1)
+  .max(200);
+// One schema for /v1/playground/chat (OpenAPI) and /v1/playground/stream (plain SSE route) so
+// the streaming path can't be used to bypass validation.
+const playgroundChatBody = z.object({
+  provider: z.enum(RUN_PROVIDER_IDS),
+  model: z.string().min(1).max(200),
+  messages: chatMessages,
+  temperature: z.number().min(0).max(2).optional(),
+  maxTokens: z.number().int().positive().max(PLAYGROUND_MAX_TOKENS).optional(),
+  tools: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(100),
+        description: z.string().max(2000).optional(),
+        parameters: z.record(z.string(), z.any()),
+      }),
+    )
+    .max(64)
+    .optional(),
+  responseFormat: z.object({ type: z.literal("json_schema"), schema: z.record(z.string(), z.any()) }).optional(),
+  trace: z.boolean().optional(),
+});
+const assistantChatBody = z.object({
+  provider: z.enum(RUN_PROVIDER_IDS),
+  model: z.string().min(1).max(200),
+  messages: chatMessages,
+  context: z
+    .object({
+      organization: z.string().max(200).optional(),
+      project: z.string().max(200).optional(),
+      page: z.string().max(500).optional(),
+      rangeDays: z.number().int().positive().max(3650).optional(),
+    })
+    .optional(),
+});
+
 // Streaming playground (SSE) — plain route; emits { delta } events then [DONE].
+// Spends the project's provider key, so it is write-gated like /v1/playground/chat: a VIEWER
+// (including every public-demo sandbox visitor) must not be able to run completions.
 app.post("/v1/playground/stream", async (c) => {
-  const input = (await c.req.json()) as Parameters<typeof streamPlayground>[1];
+  const denied = denyIfReadOnly(c);
+  if (denied) return denied; // 403: read-only role
+  const parsed = playgroundChatBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: "invalid body", details: z.flattenError(parsed.error) }, 400);
+  const { trace: _trace, ...input } = parsed.data;
   return streamSSE(c, async (s) => {
     try {
       for await (const delta of streamPlayground(c.get("projectId"), input)) {
@@ -668,6 +761,7 @@ app.openapi(
       400: { description: "Invalid batch" },
       401: { description: "Unauthorized" },
       429: { description: "Event rate limit exceeded" },
+      503: { description: "Blob store or queue unavailable — transient; honour `Retry-After` and re-send" },
     },
   }),
   async (c) => {
@@ -701,7 +795,11 @@ app.openapi(
     // mutable-state merge (ADR-0001) needs that; the Doris path re-applies defaults on re-parse.
     if (persist.length > 0) {
       // `sdk` rides along into the blob so the identity survives replay, where headers don't exist.
-      await submitBatch(c.get("projectId"), { batch: persist as IngestEvent[], sdk: readSdkInfo(envelope.data.sdk) });
+      await submitBatch(
+        c.get("projectId"),
+        { batch: persist as IngestEvent[], sdk: readSdkInfo(envelope.data.sdk) },
+        { requestId: c.get("requestId") },
+      );
     }
     if (errors.length > 0) {
       console.error(
@@ -795,7 +893,7 @@ app.post("/v1/otel/v1/traces", async (c) => {
   if (events.length > 0) {
     const parsed = ingestRequest.safeParse({ batch: events });
     if (!parsed.success) return c.json({ error: "mapping failed" }, 400);
-    await submitBatch(c.get("projectId"), parsed.data);
+    await submitBatch(c.get("projectId"), parsed.data, { requestId: c.get("requestId") });
   }
 
   // OTLP success: an empty ExportTraceServiceResponse. For protobuf, an empty body is a
@@ -830,7 +928,7 @@ app.post("/v1/otel/v1/logs", async (c) => {
   if (events.length > 0) {
     const parsed = ingestRequest.safeParse({ batch: events });
     if (!parsed.success) return c.json({ error: "mapping failed" }, 400);
-    await submitBatch(c.get("projectId"), parsed.data);
+    await submitBatch(c.get("projectId"), parsed.data, { requestId: c.get("requestId") });
   }
 
   if (contentType.includes("protobuf")) {
@@ -2482,26 +2580,7 @@ app.openapi(
       body: {
         content: {
           "application/json": {
-            schema: z.object({
-              provider: z.enum(RUN_PROVIDER_IDS),
-              model: z.string(),
-              messages: z.array(z.object({ role: z.enum(["system", "user", "assistant"]), content: z.string() })),
-              temperature: z.number().optional(),
-              maxTokens: z.number().int().optional(),
-              tools: z
-                .array(
-                  z.object({
-                    name: z.string(),
-                    description: z.string().optional(),
-                    parameters: z.record(z.string(), z.any()),
-                  }),
-                )
-                .optional(),
-              responseFormat: z
-                .object({ type: z.literal("json_schema"), schema: z.record(z.string(), z.any()) })
-                .optional(),
-              trace: z.boolean().optional(),
-            }),
+            schema: playgroundChatBody,
           },
         },
       },
@@ -2509,9 +2588,13 @@ app.openapi(
     responses: {
       200: { description: "Completion", content: { "application/json": { schema: z.any() } } },
       400: { description: "Error" },
+      403: { description: "Forbidden (read-only role)" },
     },
   }),
   async (c) => {
+    // Spends the project's provider key — write-gated so VIEWERs (and demo sandboxes) can't.
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
     try {
       const { trace, ...input } = c.req.valid("json");
       const result = await runPlayground(c.get("projectId"), input, { trace });
@@ -2523,8 +2606,9 @@ app.openapi(
   },
 );
 
-// In-app assistant — a read-only copilot that runs an agentic loop over the project's READ MCP
-// tools. POST (structured body) but read-only (only non-write tools are exposed), so VIEWERs may use it.
+// In-app assistant — a copilot that runs an agentic loop over the project's READ MCP tools.
+// It never mutates project data, but every turn spends the operator's provider key, so it is
+// write-gated like the playground: a VIEWER (and every public-demo sandbox) gets a 403.
 app.openapi(
   createRoute({
     method: "post",
@@ -2532,24 +2616,11 @@ app.openapi(
     summary: "Ask the in-app assistant (agentic loop over read-only project tools)",
     tags: ["playground"],
     security,
-    // rbac-exempt: read-only — the assistant only exposes non-write MCP tools, never mutates.
     request: {
       body: {
         content: {
           "application/json": {
-            schema: z.object({
-              provider: z.enum(RUN_PROVIDER_IDS),
-              model: z.string(),
-              messages: z.array(z.object({ role: z.enum(["system", "user", "assistant"]), content: z.string() })),
-              context: z
-                .object({
-                  organization: z.string().max(200).optional(),
-                  project: z.string().max(200).optional(),
-                  page: z.string().max(500).optional(),
-                  rangeDays: z.number().int().positive().max(3650).optional(),
-                })
-                .optional(),
-            }),
+            schema: assistantChatBody,
           },
         },
       },
@@ -2557,9 +2628,12 @@ app.openapi(
     responses: {
       200: { description: "Assistant answer + tool steps", content: { "application/json": { schema: z.any() } } },
       400: { description: "Error" },
+      403: { description: "Forbidden (read-only role)" },
     },
   }),
   async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
     try {
       const result = await runAssistant(c.get("projectId"), c.req.valid("json"));
       return c.json(result);
@@ -2572,10 +2646,13 @@ app.openapi(
 
 // Streaming assistant (SSE) — same loop as /v1/assistant/chat, but tool steps are emitted as
 // they execute and answer text arrives as deltas. Plain route (like /v1/playground/stream);
-// read-only, so VIEWERs may use it. Events: { delta } | { step } | { error }, then [DONE].
+// write-gated for the same cost reason. Events: { delta } | { step } | { error }, then [DONE].
 app.post("/v1/assistant/stream", async (c) => {
-  // rbac-exempt: read-only — the assistant only exposes non-write MCP tools, never mutates.
-  const input = (await c.req.json()) as Parameters<typeof runAssistantStream>[1];
+  const denied = denyIfReadOnly(c);
+  if (denied) return denied; // 403: read-only role
+  const parsed = assistantChatBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: "invalid body", details: z.flattenError(parsed.error) }, 400);
+  const input = parsed.data;
   return streamSSE(c, async (s) => {
     try {
       for await (const event of runAssistantStream(c.get("projectId"), input)) {
@@ -5075,9 +5152,16 @@ app.openapi(
     security,
     responses: {
       200: { description: "API keys", content: { "application/json": { schema: C.listOf(C.apiKey) } } },
+      403: { description: "Forbidden" },
     },
   }),
-  async (c) => c.json({ data: await listApiKeys(c.get("projectId")) }),
+  async (c) => {
+    // Credential inventory (public keys, hints, scopes) is admin-only — a VIEWER has no
+    // reason to enumerate the project's keys.
+    const denied = denyIfNotAdmin(c);
+    if (denied) return denied;
+    return c.json({ data: await listApiKeys(c.get("projectId")) });
+  },
 );
 
 app.openapi(
@@ -5093,7 +5177,9 @@ app.openapi(
           "application/json": {
             schema: z.object({
               name: z.string().optional(),
-              scopes: z.array(z.enum(["read", "write", "ingest"])).optional(),
+              // `admin` lets the key act as OWNER on admin-only routes; only an admin can mint it
+              // (this route is admin-gated), and it is never part of the default scope set.
+              scopes: z.array(z.enum(["read", "write", "ingest", "admin"])).optional(),
               expiresInDays: z.number().int().positive().nullable().optional(),
               rateLimitPerMinute: z.number().int().positive().nullable().optional(),
             }),
@@ -5107,7 +5193,9 @@ app.openapi(
     },
   }),
   async (c) => {
-    const denied = denyIfReadOnly(c);
+    // Minting a credential is an admin act: a MEMBER must not be able to create a key that
+    // outlives their membership or (with `admin`) outranks their role.
+    const denied = denyIfReadOnly(c) ?? denyIfNotAdmin(c);
     if (denied) return denied;
     const key = await createApiKey(c.get("projectId"), c.req.valid("json"));
     await recordAudit(c.get("projectId"), c.get("actor"), "api-key.create", key.publicKey, { scopes: key.scopes });
@@ -5129,7 +5217,7 @@ app.openapi(
     },
   }),
   async (c) => {
-    const denied = denyIfReadOnly(c);
+    const denied = denyIfReadOnly(c) ?? denyIfNotAdmin(c);
     if (denied) return denied;
     const id = c.req.valid("param").id;
     const result = await revokeApiKey(c.get("projectId"), id);

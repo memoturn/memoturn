@@ -1,7 +1,19 @@
 import { prisma } from "@memoturn/db";
 import { createApiKey } from "@memoturn/server";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { app } from "./app.js";
+
+// Fault injection for the ingest write path: flip `blobFault.on` to make the blob store
+// reject, the way an S3/MinIO outage would. Delegates to the real module otherwise.
+const blobFault = vi.hoisted(() => ({ on: false }));
+vi.mock("@memoturn/db/blob", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@memoturn/db/blob")>();
+  return {
+    ...mod,
+    putRawBatch: (...args: Parameters<typeof mod.putRawBatch>) =>
+      blobFault.on ? Promise.reject(new Error("connect ECONNREFUSED 127.0.0.1:9000")) : mod.putRawBatch(...args),
+  };
+});
 
 /**
  * HTTP-level tests against the Hono app via `app.request(...)` — they exercise the real
@@ -29,16 +41,38 @@ describe("public + auth gating (no infra)", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("returns 404 for an unknown path", async () => {
+  it("returns a JSON 404 with a request id for an unknown path", async () => {
     const res = await app.request("/v1/does-not-exist");
     expect(res.status).toBe(404);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const body = (await res.json()) as { error: string; requestId: string };
+    expect(body.error).toBe("not found");
+    expect(body.requestId).toBeTruthy();
+    expect(res.headers.get("x-request-id")).toBe(body.requestId);
+  });
+
+  it("echoes a well-formed inbound x-request-id and mints one otherwise", async () => {
+    const echoed = await app.request("/v1/health", { headers: { "x-request-id": "proxy-abc.123" } });
+    expect(echoed.headers.get("x-request-id")).toBe("proxy-abc.123");
+    const minted = await app.request("/v1/health", { headers: { "x-request-id": "not valid: spaces & symbols!" } });
+    expect(minted.headers.get("x-request-id")).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("turns a body-limit HTTPException into the JSON error contract (413)", async () => {
+    const res = await app.request("/v1/traces", {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-length": String(2 * 1024 * 1024) },
+      body: "x",
+    });
+    expect(res.status).toBe(413);
+    expect(((await res.json()) as { requestId: string }).requestId).toBeTruthy();
   });
 });
 
 describe.skipIf(!HAS_INFRA)("authenticated /v1 routes (infra)", () => {
   const slug = `apitest-${Date.now()}`;
   let projectId = "";
-  let full = { publicKey: "", secretKey: "" };
+  let full = { publicKey: "", secretKey: "", scopes: [] as string[] };
   let readOnly = { publicKey: "", secretKey: "" };
   const foreignSlug = `apitest-foreign-${Date.now()}`;
   let foreignProjectId = "";
@@ -110,6 +144,36 @@ describe.skipIf(!HAS_INFRA)("authenticated /v1 routes (infra)", () => {
     expect(body.errors).toHaveLength(0);
   });
 
+  it("answers 503 + Retry-After (JSON, with request id) when the blob store is down — never a bare 500", async () => {
+    const event = {
+      id: `${slug}-evt-outage`,
+      type: "trace-create",
+      timestamp: new Date().toISOString(),
+      body: { id: `${slug}-trace-outage`, name: "apitest", environment: "test" },
+    };
+    blobFault.on = true;
+    try {
+      const res = await app.request("/v1/ingest", {
+        method: "POST",
+        headers: {
+          authorization: basic(full.publicKey, full.secretKey),
+          "content-type": "application/json",
+          "x-request-id": "sdk-retry-7",
+        },
+        body: JSON.stringify({ batch: [event] }),
+      });
+      expect(res.status).toBe(503);
+      expect(res.headers.get("retry-after")).toBe("5");
+      expect(res.headers.get("x-request-id")).toBe("sdk-retry-7");
+      const body = (await res.json()) as { error: string; requestId: string; retryAfter: number };
+      expect(body.requestId).toBe("sdk-retry-7");
+      expect(body.retryAfter).toBe(5);
+      expect(body.error).not.toContain("ECONNREFUSED"); // internals stay in the log
+    } finally {
+      blobFault.on = false;
+    }
+  });
+
   it("rejects a malformed batch with 400", async () => {
     const res = await app.request("/v1/ingest", {
       method: "POST",
@@ -156,6 +220,77 @@ describe.skipIf(!HAS_INFRA)("authenticated /v1 routes (infra)", () => {
     expect(body.errors).toHaveLength(2);
     expect(body.errors[0]?.id).toBe(""); // no readable id on the rejected event
     expect(body.errors.map((e) => e.index)).toEqual([0, 1]);
+  });
+
+  // ── Privilege boundaries for API-key principals ─────────────────────────────────────
+  // A default key (read+write+ingest) acts as MEMBER, never OWNER: it must not reach the
+  // admin-only surfaces even though it can write. Only an explicit `admin` scope does.
+  it("a default (non-admin) key cannot list, mint, or revoke API keys (403)", async () => {
+    const auth = { authorization: basic(full.publicKey, full.secretKey), "content-type": "application/json" };
+    const list = await app.request("/v1/api-keys", { headers: auth });
+    expect(list.status).toBe(403);
+    const mint = await app.request("/v1/api-keys", { method: "POST", headers: auth, body: JSON.stringify({}) });
+    expect(mint.status).toBe(403);
+    const revoke = await app.request("/v1/api-keys/does-not-matter", { method: "DELETE", headers: auth });
+    expect(revoke.status).toBe(403);
+  });
+
+  it("a default (non-admin) key cannot delete the project or change member roles (403)", async () => {
+    const auth = { authorization: basic(full.publicKey, full.secretKey), "content-type": "application/json" };
+    const del = await app.request(`/v1/projects/${projectId}`, { method: "DELETE", headers: auth });
+    expect(del.status).toBe(403);
+    const member = await app.request(`/v1/projects/${projectId}/members/some-user`, {
+      method: "PUT",
+      headers: auth,
+      body: JSON.stringify({ role: "owner" }),
+    });
+    expect(member.status).toBe(403);
+    // And the project still exists.
+    expect(await prisma.project.findUnique({ where: { id: projectId } })).not.toBeNull();
+  });
+
+  it("an admin-scoped key can list the project's keys; `admin` is never granted by default", async () => {
+    const admin = await createApiKey(projectId, { name: "admin", scopes: ["read", "write", "ingest", "admin"] });
+    expect(full.scopes).not.toContain("admin");
+    expect(admin.scopes).toContain("admin");
+    const res = await app.request("/v1/api-keys", {
+      headers: { authorization: basic(admin.publicKey, admin.secretKey) },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { scopes: string[] }[] };
+    expect(body.data.some((k) => k.scopes.includes("admin"))).toBe(true);
+  });
+
+  // ── Cost-bearing routes are write-gated ───────────────────────────────────────────────
+  // The playground/assistant never mutate project data but spend the operator's provider
+  // key. A read-only principal (a VIEWER, every public-demo sandbox visitor) must get 403,
+  // not a completion — this is the guarantee `demo.ts` relies on.
+  it("a read-only key cannot run the playground or the assistant (403)", async () => {
+    const auth = { authorization: basic(readOnly.publicKey, readOnly.secretKey), "content-type": "application/json" };
+    const body = JSON.stringify({ provider: "mock", model: "mock", messages: [{ role: "user", content: "hi" }] });
+    for (const path of ["/v1/playground/chat", "/v1/playground/stream", "/v1/assistant/chat", "/v1/assistant/stream"]) {
+      const res = await app.request(path, { method: "POST", headers: auth, body });
+      expect(res.status, path).toBe(403);
+    }
+  });
+
+  it("the streaming playground validates its body like the OpenAPI route (400 + maxTokens cap)", async () => {
+    const auth = { authorization: basic(full.publicKey, full.secretKey), "content-type": "application/json" };
+    const empty = await app.request("/v1/playground/stream", { method: "POST", headers: auth, body: "{}" });
+    expect(empty.status).toBe(400);
+    const huge = await app.request("/v1/playground/stream", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({
+        provider: "mock",
+        model: "mock",
+        messages: [{ role: "user", content: "hi" }],
+        maxTokens: 1e9,
+      }),
+    });
+    expect(huge.status).toBe(400);
+    const streamBad = await app.request("/v1/assistant/stream", { method: "POST", headers: auth, body: "not json" });
+    expect(streamBad.status).toBe(400);
   });
 
   it("rejects an MCP call to another tenant's project with a key scoped to this one (401)", async () => {

@@ -26,6 +26,8 @@ export interface IngestJob {
   projectId: string;
   batchId: string;
   blobKey: string;
+  /** The API request that accepted the batch — correlates API + worker log lines. */
+  requestId?: string;
 }
 
 /** Dead-lettered ingest job — the original payload plus failure context. */

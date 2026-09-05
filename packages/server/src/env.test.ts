@@ -7,7 +7,15 @@ import { validateRuntimeEnv } from "./env.js";
  */
 describe("validateRuntimeEnv (production)", () => {
   const saved: Record<string, string | undefined> = {};
-  const keys = ["NODE_ENV", "ENCRYPTION_KEY", "BETTER_AUTH_SECRET", "AUTH_TRUSTED_ORIGINS"];
+  const keys = [
+    "NODE_ENV",
+    "ENCRYPTION_KEY",
+    "BETTER_AUTH_SECRET",
+    "AUTH_TRUSTED_ORIGINS",
+    "ALLOW_PRIVATE_WEBHOOK_TARGETS",
+    "ALLOW_PRIVATE_WEBHOOK_TARGETS_ACK",
+    "AUTH_RATE_LIMIT_DISABLED",
+  ];
 
   beforeEach(() => {
     for (const k of keys) saved[k] = process.env[k];
@@ -26,6 +34,18 @@ describe("validateRuntimeEnv (production)", () => {
 
   it("accepts strong secrets", () => {
     expect(() => validateRuntimeEnv("api")).not.toThrow();
+  });
+
+  it("refuses the dev .env's ALLOW_PRIVATE_WEBHOOK_TARGETS=1 unless explicitly acknowledged", () => {
+    process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS = "1";
+    expect(() => validateRuntimeEnv("api")).toThrow(/ALLOW_PRIVATE_WEBHOOK_TARGETS_ACK/);
+    process.env.ALLOW_PRIVATE_WEBHOOK_TARGETS_ACK = "1";
+    expect(() => validateRuntimeEnv("api")).not.toThrow();
+  });
+
+  it("refuses the test-only AUTH_RATE_LIMIT_DISABLED switch", () => {
+    process.env.AUTH_RATE_LIMIT_DISABLED = "true";
+    expect(() => validateRuntimeEnv("api")).toThrow(/AUTH_RATE_LIMIT_DISABLED/);
   });
 
   it("rejects the .env.example ENCRYPTION_KEY placeholder", () => {

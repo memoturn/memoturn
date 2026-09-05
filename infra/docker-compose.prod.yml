@@ -12,10 +12,24 @@
 # see packages/server/src/env.ts).
 name: memoturn
 
+# Every service logs through Docker's json-file driver with rotation — the API writes one
+# JSON line per request, and an unrotated json-file log is the classic way a single-VM
+# install fills its disk. Tune with LOG_MAX_SIZE / LOG_MAX_FILES.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: ${LOG_MAX_SIZE:-50m}
+    max-file: ${LOG_MAX_FILES:-5}
+
 services:
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2.10-alpine
     restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: ${CADDY_MEM_LIMIT:-256m}
     # service_healthy so Caddy never routes to a booting API/console (502s on deploy).
     depends_on:
       api: { condition: service_healthy }
@@ -34,6 +48,11 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_MEM_LIMIT:-2g}
     environment:
       POSTGRES_USER: memoturn
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -51,6 +70,7 @@ services:
   doris-fe:
     image: apache/doris:fe-4.1.2
     restart: unless-stopped
+    logging: *logging
     # Fixed-size FE heap (stock fe.conf asks for 8 GB, sized for a dedicated host; this
     # stack shares one VM with the BE + Postgres + MinIO + the apps). Override via
     # DORIS_FE_XMX in .env if the host has memory to spare.
@@ -85,6 +105,7 @@ services:
   doris-be:
     image: apache/doris:be-4.1.2
     restart: unless-stopped
+    logging: *logging
     # Cap BE process memory (default is ~90% of system memory, which assumes a dedicated
     # host and starves the co-located services under sustained ingest — queries then fail
     # with MEM_ALLOC_FAILED). Override via DORIS_BE_MEM_LIMIT in .env (absolute or %).
@@ -138,6 +159,11 @@ services:
   redis:
     image: valkey/valkey:8-alpine
     restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: ${REDIS_MEM_LIMIT:-512m}
     command: ["valkey-server", "--save", "60", "1"]
     volumes:
       - redisdata:/data
@@ -148,8 +174,13 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: ${MINIO_MEM_LIMIT:-1g}
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${BLOB_ACCESS_KEY_ID:-memoturn}
@@ -163,7 +194,7 @@ services:
       retries: 10
 
   minio-setup:
-    image: minio/mc:latest
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
       minio:
         condition: service_healthy
@@ -182,6 +213,7 @@ services:
       context: ..
       dockerfile: docker/api.Dockerfile
     restart: "no"
+    logging: *logging
     depends_on:
       postgres: { condition: service_healthy }
       doris-fe: { condition: service_healthy }
@@ -208,6 +240,11 @@ services:
       context: ..
       dockerfile: docker/api.Dockerfile
     restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: ${API_MEM_LIMIT:-1g}
     depends_on:
       migrate: { condition: service_completed_successfully }
       postgres: { condition: service_healthy }
@@ -246,7 +283,15 @@ services:
       # to taste, or set 0 to disable). INGEST_EVENTS_PER_MINUTE additionally caps event
       # volume (0 = off) for deployments that need to bound a single project's ingest.
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
-      INGEST_EVENTS_PER_MINUTE: ${INGEST_EVENTS_PER_MINUTE:-0}
+      INGEST_EVENTS_PER_MINUTE: ${INGEST_EVENTS_PER_MINUTE:-60000}
+      # How many proxies sit in front of the API (Caddy here = 1) — the real client IP is read
+      # from the right of X-Forwarded-For. Wrong values let a spoofed XFF evade per-IP limits.
+      RATE_LIMIT_TRUSTED_PROXIES: ${RATE_LIMIT_TRUSTED_PROXIES:-1}
+      AUTH_IP_HEADERS: ${AUTH_IP_HEADERS:-}
+      MCP_RATE_LIMIT_PER_MINUTE: ${MCP_RATE_LIMIT_PER_MINUTE:-120}
+      # Token-gate the /metrics scrape endpoint (unset = 404).
+      API_METRICS_TOKEN: ${API_METRICS_TOKEN:-}
+      PLAYGROUND_MAX_TOKENS: ${PLAYGROUND_MAX_TOKENS:-}
       # Ingest-health page probes the worker's /metrics over HTTP. api + worker are separate
       # containers here, so point it at the worker by service name (the default 127.0.0.1 only
       # works in `bun run dev`, where both share one host). Requires WORKER_HOST=0.0.0.0 below.
@@ -288,6 +333,11 @@ services:
       context: ..
       dockerfile: docker/worker.Dockerfile
     restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: ${WORKER_MEM_LIMIT:-2g}
     depends_on:
       migrate: { condition: service_completed_successfully }
       postgres: { condition: service_healthy }
@@ -320,6 +370,11 @@ services:
       AUTH_BASE_URL: https://${MEMOTURN_DOMAIN:?}
       ALLOW_PRIVATE_WEBHOOK_TARGETS: ${ALLOW_PRIVATE_WEBHOOK_TARGETS:-0}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-10}
+      # Doris HTTP Stream Load instead of multi-row INSERT (higher throughput; see docs).
+      TELEMETRY_STREAM_LOAD: ${TELEMETRY_STREAM_LOAD:-}
+      # Drain budget on SIGTERM before the worker force-exits (compose's stop_grace_period below
+      # must be at least this long or Docker SIGKILLs first).
+      WORKER_SHUTDOWN_TIMEOUT_MS: ${WORKER_SHUTDOWN_TIMEOUT_MS:-570000}
       # Bind the health/metrics server on all interfaces so the api container (ingest-health
       # page) can reach it across the Docker network. Only exposed on the internal network —
       # no host port is published for 3002 — so this isn't internet-reachable.
@@ -344,6 +399,7 @@ services:
       DEMO_MEMBER_ROLE: ${DEMO_MEMBER_ROLE:-}
       DEMO_FINALIZE_DELAY_MS: ${DEMO_FINALIZE_DELAY_MS:-}
       DEMO_START_RATE_LIMIT_PER_MINUTE: ${DEMO_START_RATE_LIMIT_PER_MINUTE:-}
+    stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-600s}
     # The worker's health server binds 127.0.0.1 by default — in-container probes still reach it.
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
@@ -367,6 +423,11 @@ services:
         # (empty default = analytics module compiled out; see docker/console.Dockerfile).
         VITE_GA_MEASUREMENT_ID: ${VITE_GA_MEASUREMENT_ID:-}
     restart: unless-stopped
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: ${CONSOLE_MEM_LIMIT:-256m}
     # No command override: the image's Caddy static server listens on :3000.
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
