@@ -220,6 +220,144 @@ func TestTransient5xxRebuffers(t *testing.T) {
 	}
 }
 
+func TestFlushChunksLargeBuffersInOrder(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.srv.Close()
+	mt := newTestClient(cs, WithMaxBatchSize(2))
+	for i := 0; i < 5; i++ {
+		mt.Trace(TraceInput{Name: "t" + string(rune('0'+i))})
+	}
+	if err := mt.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if len(cs.batches) != 3 || len(cs.batches[0]) != 2 || len(cs.batches[1]) != 2 || len(cs.batches[2]) != 1 {
+		t.Fatalf("batch sizes = %v, want [2 2 1]", batchSizes(cs.batches))
+	}
+	var names []string
+	for _, b := range cs.batches {
+		for _, e := range b {
+			names = append(names, e.Body["name"].(string))
+		}
+	}
+	if got := strings.Join(names, ","); got != "t0,t1,t2,t3,t4" {
+		t.Errorf("order = %s", got)
+	}
+}
+
+func batchSizes(b [][]envelope) []int {
+	out := make([]int, len(b))
+	for i := range b {
+		out[i] = len(b[i])
+	}
+	return out
+}
+
+// failNth answers the n-th request (1-based) with `status`, everything else with 207.
+func failNth(n, status int) (*httptest.Server, func() [][]envelope) {
+	var (
+		mu      sync.Mutex
+		batches [][]envelope
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Batch []envelope `json:"batch"`
+		}
+		_ = json.Unmarshal(b, &payload)
+		mu.Lock()
+		batches = append(batches, payload.Batch)
+		k := len(batches)
+		mu.Unlock()
+		if k == n {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(status)
+			return
+		}
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = w.Write([]byte(`{"errors":[]}`))
+	}))
+	return srv, func() [][]envelope {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([][]envelope(nil), batches...)
+	}
+}
+
+func TestTransientFailureRebuffersRemainingChunks(t *testing.T) {
+	srv, batches := failNth(2, http.StatusServiceUnavailable)
+	defer srv.Close()
+	mt := New(WithBaseURL(srv.URL), WithCredentials("pk", "sk"), WithFlushInterval(0), WithMaxBatchSize(2))
+	for i := 0; i < 5; i++ {
+		mt.Trace(TraceInput{Name: "t" + string(rune('0'+i))})
+	}
+	if err := mt.Flush(); err == nil {
+		t.Fatal("want error on 503")
+	}
+	if err := mt.Flush(); err != nil {
+		t.Fatalf("retry flush: %v", err)
+	}
+	var names []string
+	for _, b := range batches()[2:] { // requests after the failed one
+		for _, e := range b {
+			names = append(names, e.Body["name"].(string))
+		}
+	}
+	if got := strings.Join(names, ","); got != "t2,t3,t4" {
+		t.Errorf("re-sent = %s, want t2,t3,t4 (t0,t1 were delivered by the first request)", got)
+	}
+}
+
+func TestPermanentRejectDropsOnlyThatChunk(t *testing.T) {
+	srv, batches := failNth(1, http.StatusBadRequest)
+	defer srv.Close()
+	mt := New(WithBaseURL(srv.URL), WithCredentials("pk", "sk"), WithFlushInterval(0), WithMaxBatchSize(2))
+	for i := 0; i < 5; i++ {
+		mt.Trace(TraceInput{Name: "t"})
+	}
+	if err := mt.Flush(); err == nil {
+		t.Fatal("want error on 400")
+	}
+	if got := len(batches()); got != 3 {
+		t.Fatalf("requests = %d, want 3 (every chunk attempted)", got)
+	}
+	if err := mt.Flush(); err != nil {
+		t.Fatalf("second flush: %v", err)
+	}
+	if got := len(batches()); got != 3 {
+		t.Errorf("requests = %d, want 3 (nothing re-buffered after a permanent reject)", got)
+	}
+}
+
+func TestBackoffSuppressesBackgroundFlushAfterTransientFailure(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.srv.Close()
+	cs.setStatus(http.StatusServiceUnavailable)
+	mt := newTestClient(cs, WithFlushAt(1))
+
+	mt.Trace(TraceInput{Name: "a"}) // size-triggered background flush → 503 → backoff
+	deadline := time.Now().Add(2 * time.Second)
+	for cs.requestCount() < 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := cs.requestCount(); got != 1 {
+		t.Fatalf("requests = %d, want 1", got)
+	}
+	cs.setStatus(http.StatusMultiStatus)
+	mt.Trace(TraceInput{Name: "b"}) // size trigger again, inside the backoff window → suppressed
+	time.Sleep(50 * time.Millisecond)
+	if got := cs.requestCount(); got != 1 {
+		t.Fatalf("requests = %d, want 1 (background flush must back off)", got)
+	}
+	if err := mt.Flush(); err != nil { // explicit: ignores backoff
+		t.Fatalf("flush: %v", err)
+	}
+	if got := len(cs.lastBatch()); got != 2 {
+		t.Errorf("batch len = %d, want 2 (nothing lost)", got)
+	}
+}
+
 func TestBufferCapDropsNewEvents(t *testing.T) {
 	cs := newCaptureServer()
 	defer cs.srv.Close()

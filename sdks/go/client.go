@@ -15,9 +15,11 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	mathrand "math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -43,6 +45,26 @@ const defaultBaseURL = "http://localhost:3001"
 
 const defaultMaxBufferSize = 10_000
 
+// Hard limits of POST /v1/ingest: at most 1000 events per request and a 12 MB body. A
+// flush never sends more than one request's worth at a time — the buffer can hold far
+// more than one request (it exists to ride out an outage), and a single over-limit POST
+// would be rejected as a permanent 400/413 and drop everything it carried.
+const (
+	maxBatchEvents = 1000
+	maxBatchBytes  = 10 * 1024 * 1024 // headroom under the API's 12 MB cap
+	backoffBase    = time.Second
+	backoffMax     = 60 * time.Second
+)
+
+// transientError marks an ingest failure worth retrying; the chunk is re-buffered.
+type transientError struct {
+	err        error
+	retryAfter time.Duration // 0 = not provided
+}
+
+func (t *transientError) Error() string { return t.err.Error() }
+func (t *transientError) Unwrap() error { return t.err }
+
 // maskErrorSentinel replaces a value when a WithMask function panics — the event is
 // never dropped and the unmasked value is never sent.
 const maskErrorSentinel = "<memoturn: mask error>"
@@ -63,6 +85,7 @@ type Client struct {
 	flushAt           int
 	flushInterval     time.Duration
 	maxBufferSize     int
+	maxBatchSize      int
 	allowInsecureHTTP bool
 	mask              func(field string, v any) any
 	http              *http.Client
@@ -71,6 +94,9 @@ type Client struct {
 	buffer     []envelope
 	flushing   bool // a size-triggered background flush is in flight (single-flight)
 	warnedFull bool
+	// Backoff for background flushes after a transient failure (an explicit Flush always tries).
+	transientFailures int
+	backoffUntil      time.Time
 
 	// Prompt cache (see prompt.go). Separate mutex: a prompt resolve must never contend
 	// with the ingest buffer.
@@ -112,6 +138,20 @@ func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h
 // one-time warning, and a re-buffered failed batch drops its oldest events first.
 func WithMaxBufferSize(n int) Option { return func(c *Client) { c.maxBufferSize = n } }
 
+// WithMaxBatchSize sets the events per ingest request when flushing — a large buffer is
+// sent as several requests. Default and hard maximum 1000 (the API's per-request limit).
+func WithMaxBatchSize(n int) Option {
+	return func(c *Client) {
+		if n < 1 {
+			n = 1
+		}
+		if n > maxBatchEvents {
+			n = maxBatchEvents
+		}
+		c.maxBatchSize = n
+	}
+}
+
 // WithMask sets a redaction hook applied to the "input", "output", and "metadata"
 // fields of every event body before it is buffered. If the function panics, the
 // value is replaced with a sentinel string — the event is never dropped and the
@@ -132,6 +172,7 @@ func New(opts ...Option) *Client {
 		flushAt:       20,
 		flushInterval: 5 * time.Second,
 		maxBufferSize: envInt("MEMOTURN_MAX_BUFFER_SIZE", defaultMaxBufferSize),
+		maxBatchSize:  maxBatchEvents,
 		http:          &http.Client{Timeout: 10 * time.Second},
 		stop:          make(chan struct{}),
 		done:          make(chan struct{}),
@@ -160,7 +201,7 @@ func (c *Client) loop() {
 		case <-c.stop:
 			return
 		case <-t.C:
-			if err := c.Flush(); err != nil {
+			if err := c.flushQuietly(); err != nil {
 				log.Printf("memoturn: background flush failed: %v", err)
 			}
 		}
@@ -200,7 +241,7 @@ func (c *Client) enqueue(typ string, b map[string]any) {
 	c.mu.Unlock()
 	if full {
 		go func() {
-			if err := c.Flush(); err != nil {
+			if err := c.flushQuietly(); err != nil {
 				log.Printf("memoturn: flush failed: %v", err)
 			}
 			c.mu.Lock()
@@ -232,20 +273,140 @@ func (c *Client) safeMask(field string, v any) (out any) {
 	return c.mask(field, v)
 }
 
-// Flush sends all buffered events now. Safe to call repeatedly and concurrently. On a
-// transient failure (network error, 5xx, 408, 429) the batch is re-buffered so the next
-// flush retries; a permanent reject (other 4xx) drops the batch — retrying it can never
-// succeed. Schema-rejected events (reported in the 207 body) are logged, not retried.
+// flushQuietly is Flush for the background timer and the size trigger: it honours the
+// backoff window after a transient failure so a fleet of clients doesn't hammer a
+// recovering API in lockstep every flushInterval.
+func (c *Client) flushQuietly() error {
+	c.mu.Lock()
+	wait := time.Now().Before(c.backoffUntil)
+	c.mu.Unlock()
+	if wait {
+		return nil
+	}
+	return c.Flush()
+}
+
+func (c *Client) noteTransientFailure(retryAfter time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	exp := backoffBase << uint(c.transientFailures)
+	if exp > backoffMax || exp <= 0 {
+		exp = backoffMax
+	}
+	delay := retryAfter
+	if delay <= 0 {
+		// ±25% jitter so retries de-synchronize across processes.
+		delay = time.Duration(float64(exp) * (0.75 + mathrand.Float64()*0.5))
+	}
+	if c.transientFailures < 16 {
+		c.transientFailures++
+	}
+	c.backoffUntil = time.Now().Add(delay)
+}
+
+// chunkBatch splits a buffer into request-sized chunks (by event count AND serialized
+// bytes). An event that alone exceeds the byte cap can never be accepted — it is dropped
+// here with an error rather than poisoning the chunk it would ride in.
+func (c *Client) chunkBatch(events []envelope) [][]envelope {
+	var chunks [][]envelope
+	var current []envelope
+	currentBytes := 0
+	for _, ev := range events {
+		b, err := json.Marshal(ev)
+		if err != nil {
+			log.Printf("memoturn: dropping event %s (%s) — not serializable: %v", ev.ID, ev.Type, err)
+			continue
+		}
+		size := len(b) + 1
+		if size > maxBatchBytes {
+			log.Printf("memoturn: dropping event %s (%s) — %d bytes exceeds the ingest limit", ev.ID, ev.Type, size)
+			continue
+		}
+		if len(current) >= c.maxBatchSize || currentBytes+size > maxBatchBytes {
+			chunks = append(chunks, current)
+			current, currentBytes = nil, 0
+		}
+		current = append(current, ev)
+		currentBytes += size
+	}
+	if len(current) > 0 {
+		chunks = append(chunks, current)
+	}
+	return chunks
+}
+
+// Flush sends all buffered events now, in request-sized chunks (≤ 1000 events / ~10 MB
+// each). Safe to call repeatedly and concurrently. On a transient failure (network error,
+// 5xx, 408, 429) the failing chunk and every chunk after it are re-buffered — nothing is
+// lost, order is kept — and the error is returned; a permanent reject (other 4xx) drops only
+// that chunk and continues, returning the first such error after the rest has been sent.
+// Schema-rejected events (reported in the 207 body) are logged, not retried.
 func (c *Client) Flush() error {
 	c.mu.Lock()
 	if len(c.buffer) == 0 {
 		c.mu.Unlock()
 		return nil
 	}
-	batch := c.buffer
+	pending := c.buffer
 	c.buffer = nil
 	c.mu.Unlock()
 
+	chunks := c.chunkBatch(pending)
+	var firstReject error
+	for i, chunk := range chunks {
+		err := c.send(chunk)
+		if err == nil {
+			continue
+		}
+		var t *transientError
+		if errors.As(err, &t) {
+			var rest []envelope
+			for _, ch := range chunks[i:] {
+				rest = append(rest, ch...)
+			}
+			c.rebuffer(rest)
+			c.noteTransientFailure(t.retryAfter)
+			return t.err
+		}
+		if firstReject == nil {
+			firstReject = err
+		}
+	}
+	c.mu.Lock()
+	c.transientFailures = 0
+	c.backoffUntil = time.Time{}
+	c.mu.Unlock()
+	return firstReject
+}
+
+func retryAfterHeader(res *http.Response) time.Duration {
+	raw := strings.TrimSpace(res.Header.Get("Retry-After"))
+	if raw == "" {
+		return 0
+	}
+	if secs, err := strconv.ParseFloat(raw, 64); err == nil && secs >= 0 {
+		d := time.Duration(secs * float64(time.Second))
+		if d > backoffMax {
+			d = backoffMax
+		}
+		return d
+	}
+	if at, err := http.ParseTime(raw); err == nil {
+		d := time.Until(at)
+		if d < 0 {
+			d = 0
+		}
+		if d > backoffMax {
+			d = backoffMax
+		}
+		return d
+	}
+	return 0
+}
+
+// send performs one POST /v1/ingest. It returns a *transientError when the chunk should
+// be retried, or a plain error for a permanent reject (the chunk is dropped and logged).
+func (c *Client) send(batch []envelope) error {
 	payload, err := json.Marshal(map[string]any{"batch": batch, "sdk": sdkInfo()})
 	if err != nil {
 		return err
@@ -259,8 +420,7 @@ func (c *Client) Flush() error {
 
 	res, err := c.http.Do(req)
 	if err != nil {
-		c.rebuffer(batch)
-		return err
+		return &transientError{err: err}
 	}
 	defer res.Body.Close()
 
@@ -268,8 +428,10 @@ func (c *Client) Flush() error {
 		bodyText, _ := io.ReadAll(res.Body)
 		detail := truncate(strings.TrimSpace(string(bodyText)))
 		if isTransient(res.StatusCode) {
-			c.rebuffer(batch)
-			return fmt.Errorf("memoturn ingest failed: %d %s", res.StatusCode, detail)
+			return &transientError{
+				err:        fmt.Errorf("memoturn ingest failed: %d %s", res.StatusCode, detail),
+				retryAfter: retryAfterHeader(res),
+			}
 		}
 		// Permanent reject (bad request/auth) — retrying can never succeed; drop the batch.
 		log.Printf("memoturn: dropping %d event(s) rejected at ingest: %d %s", len(batch), res.StatusCode, detail)
