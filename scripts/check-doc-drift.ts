@@ -334,7 +334,9 @@ function checkChangelog(): CheckResult {
   const findings: Finding[] = [];
   const version = (JSON.parse(read("package.json")) as { version: string }).version;
   const changelog = read("CHANGELOG.md");
-  if (!new RegExp(`^## \\[${version.replace(/\./g, "\\.")}\\]`, "m").test(changelog)) {
+  // Literal line match — no regex built from the version string (CodeQL js/incomplete-sanitization).
+  const heading = `## [${version}]`;
+  if (!changelog.split("\n").some((line) => line.startsWith(heading))) {
     findings.push({
       doc: "CHANGELOG.md",
       line: 0,
