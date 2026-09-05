@@ -486,7 +486,7 @@ export const api = {
     patch<AlertRule>(`/v1/alerts/${encodeURIComponent(id)}`, body),
   deleteAlert: (id: string) => del(`/v1/alerts/${encodeURIComponent(id)}`),
   getBudget: () => get<CostBudget>(`/v1/budgets`),
-  setBudget: (body: { monthlyUsd: number; thresholds?: number[]; channels?: AlertChannel[] }) =>
+  setBudget: (body: { monthlyUsd: number; thresholds?: number[]; channels?: AlertChannel[]; hardCap?: boolean }) =>
     put<CostBudget>(`/v1/budgets`, body),
   deleteBudget: () => del(`/v1/budgets`),
   getIngestHealth: () => get<IngestHealth>(`/v1/ingest/health`),

@@ -1,6 +1,7 @@
 import { prisma } from "@memoturn/db";
 import { telemetry, type WindowMetric } from "@memoturn/telemetry";
 import { type ChannelMessage, type ChannelType, deliverToChannel, type NotifyChannel } from "./automations.js";
+import { invalidateBudgetGuard } from "./budgetguard.js";
 import { mapConcurrent } from "./concurrency.js";
 
 /**
@@ -156,6 +157,7 @@ interface CostBudgetRow {
   thresholds: unknown;
   notifiedThreshold: number;
   channels: unknown;
+  hardCap: boolean;
   createdAt: Date;
 }
 
@@ -165,6 +167,7 @@ function shapeBudget(b: CostBudgetRow | null) {
     monthlyUsd: b.monthlyUsd,
     thresholds: parseThresholds(b.thresholds),
     channels: parseChannels(b.channels),
+    hardCap: b.hardCap,
     createdAt: b.createdAt.toISOString(),
   };
 }
@@ -184,6 +187,7 @@ export interface CostBudgetInput {
   monthlyUsd: number;
   thresholds?: number[];
   channels?: NotifyChannel[];
+  hardCap?: boolean;
 }
 
 export async function setCostBudget(projectId: string, input: CostBudgetInput) {
@@ -191,7 +195,9 @@ export async function setCostBudget(projectId: string, input: CostBudgetInput) {
     monthlyUsd: input.monthlyUsd,
     thresholds: (input.thresholds ?? [0.5, 0.8, 1.0]) as object,
     channels: (input.channels ?? []) as object,
+    hardCap: input.hardCap ?? false,
   };
+  await invalidateBudgetGuard(projectId);
   const b = await prisma.costBudget.upsert({
     where: { projectId },
     // Changing the budget resets the notified step so the new budget re-notifies cleanly.
@@ -202,6 +208,7 @@ export async function setCostBudget(projectId: string, input: CostBudgetInput) {
 }
 
 export async function deleteCostBudget(projectId: string) {
+  await invalidateBudgetGuard(projectId);
   await prisma.costBudget.deleteMany({ where: { projectId } });
   return { deleted: true };
 }

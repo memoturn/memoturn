@@ -166,7 +166,9 @@ import {
   otlpLogsToEvents,
   otlpToEvents,
   PromptCompositionError,
+  PublicError,
   previewEvaluatorBackfill,
+  publicErrorMessage,
   RoleHierarchyError,
   readiness,
   recordAudit,
@@ -290,6 +292,10 @@ app.use("*", async (c, next) => {
 // never the client. Hono's default was a plain-text "Internal Server Error".
 app.onError((err, c) => {
   const requestId = c.get("requestId");
+  if (err instanceof PublicError) {
+    // Safe-to-show errors (hard cost cap, …) keep their status and message.
+    return c.json({ error: err.message, requestId }, err.status);
+  }
   if (err instanceof StorageUnavailableError) {
     logJson("error", "ingest storage unavailable", { requestId, stage: err.stage, error: err.message });
     c.header("Retry-After", String(err.retryAfterSeconds));
@@ -588,7 +594,7 @@ app.post("/v1/playground/stream", async (c) => {
       await s.writeSSE({ data: "[DONE]" });
     } catch (err) {
       console.error(JSON.stringify({ level: "error", scope: "playground.stream", message: String(err) }));
-      await s.writeSSE({ data: JSON.stringify({ error: String(err instanceof Error ? err.message : err) }) });
+      await s.writeSSE({ data: JSON.stringify({ error: publicErrorMessage(err) }) });
     } finally {
       await slot.release();
     }
@@ -923,7 +929,8 @@ app.openapi(
   async (c) => {
     const denied = denyIfNotAdmin(c);
     if (denied) return denied;
-    return c.json(await getIngestHealth());
+    // Scoped to the caller's project: a tenant never sees another tenant's batch ids or errors.
+    return c.json(await getIngestHealth(c.get("projectId")));
   },
 );
 
@@ -956,7 +963,7 @@ app.openapi(
     const { limit } = c.req.valid("json");
     let result: { replayed: number; failed: number };
     try {
-      result = await replayDlq(limit ?? Number.POSITIVE_INFINITY);
+      result = await replayDlq(limit ?? Number.POSITIVE_INFINITY, c.get("projectId"));
     } catch (err) {
       if (err instanceof DlqReplayInProgressError) return c.json({ error: err.message }, 409);
       throw err;
@@ -1463,7 +1470,7 @@ app.openapi(
       const data = await runAnalyticsQuery(c.get("projectId"), c.req.valid("json"));
       return c.json(data, 200);
     } catch (e) {
-      return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+      return c.json({ error: publicErrorMessage(e) }, 400);
     }
   },
 );
@@ -1690,7 +1697,7 @@ app.openapi(
       return c.json(result, 200);
     } catch (err) {
       console.error(JSON.stringify({ level: "error", scope: "trace.replay", message: String(err) }));
-      return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+      return c.json({ error: publicErrorMessage(err) }, 400);
     }
   },
 );
@@ -2772,7 +2779,7 @@ app.openapi(
       return c.json(result);
     } catch (err) {
       console.error(JSON.stringify({ level: "error", scope: "playground.run", message: String(err) }));
-      return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+      return c.json({ error: publicErrorMessage(err) }, 400);
     }
   },
 );
@@ -2810,7 +2817,7 @@ app.openapi(
       return c.json(result);
     } catch (err) {
       console.error(JSON.stringify({ level: "error", scope: "assistant.run", message: String(err) }));
-      return c.json({ error: String(err instanceof Error ? err.message : err) }, 400);
+      return c.json({ error: publicErrorMessage(err) }, 400);
     }
   },
 );
@@ -2835,7 +2842,7 @@ app.post("/v1/assistant/stream", async (c) => {
       await s.writeSSE({ data: "[DONE]" });
     } catch (err) {
       console.error(JSON.stringify({ level: "error", scope: "assistant.stream", message: String(err) }));
-      await s.writeSSE({ data: JSON.stringify({ error: String(err instanceof Error ? err.message : err) }) });
+      await s.writeSSE({ data: JSON.stringify({ error: publicErrorMessage(err) }) });
     } finally {
       await slot.release();
     }
@@ -3480,7 +3487,7 @@ app.openapi(
     try {
       deleted = await deleteProject(projectId);
     } catch (e) {
-      return c.json({ error: e instanceof Error ? e.message : "delete failed" }, 400);
+      return c.json({ error: publicErrorMessage(e, "delete failed") }, 400);
     }
     // The project's own audit log died with it — record on the organization instead.
     await recordAuthAudit({
@@ -5070,6 +5077,8 @@ app.openapi(
               monthlyUsd: z.number().positive(),
               thresholds: z.array(z.number().positive()).optional(),
               channels: z.array(alertChannelBody).optional(),
+              // Hard cap: refuse LLM spend (402) once month-to-date cost reaches monthlyUsd.
+              hardCap: z.boolean().optional(),
             }),
           },
         },
@@ -5506,7 +5515,7 @@ app.openapi(
       await assignProjectMember(c.get("projectId"), userId, role, c.get("role"));
     } catch (e) {
       if (e instanceof RoleHierarchyError) return c.json({ error: e.message }, 403);
-      return c.json({ error: e instanceof Error ? e.message : "assign failed" }, 400);
+      return c.json({ error: publicErrorMessage(e, "assign failed") }, 400);
     }
     await recordAudit(c.get("projectId"), c.get("actor"), "project-member.assign", userId, { role });
     return c.json({ ok: true });
@@ -5538,6 +5547,13 @@ app.openapi(
 );
 
 // ── OpenAPI document + Scalar API reference ──────────────────────────────────────
+// The OpenAPI document + Scalar UI are public by default (a self-hosted API's own docs);
+// API_DOCS_PUBLIC=false puts them behind auth for installs that treat the route inventory
+// as sensitive.
+if (process.env.API_DOCS_PUBLIC?.toLowerCase() === "false" || process.env.API_DOCS_PUBLIC === "0") {
+  app.use("/openapi.json", requireAuth);
+  app.use("/docs", requireAuth);
+}
 app.doc("/openapi.json", {
   openapi: "3.0.0",
   info: {

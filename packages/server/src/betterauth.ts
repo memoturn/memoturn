@@ -68,6 +68,18 @@ const socialProviders = socialProvidersFromEnv();
 // stderr. In production with no transport, hide it rather than offer a dead button.
 const passwordlessUsable = mailerStatus().configured || !isProduction();
 
+function envIntLocal(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : fallback;
+}
+
+function requireEmailVerificationDefault(): boolean {
+  const v = process.env.AUTH_REQUIRE_EMAIL_VERIFICATION?.toLowerCase();
+  if (v === "true" || v === "1") return true;
+  if (v === "false" || v === "0") return false;
+  return isProduction() && mailerStatus().configured;
+}
+
 // WebAuthn relying-party identity for passkeys. rpID must be the registrable domain (no
 // scheme/port) and `origin` the full console origin. Defaults derive from the console origin;
 // override per-deploy with PASSKEY_RP_ID / PASSKEY_ORIGIN (e.g. behind a custom domain).
@@ -219,9 +231,11 @@ export const auth = betterAuth({
     // 12-char floor (NIST leans length-over-complexity; HIBP below rejects breached ones).
     // Only gates NEW passwords — existing shorter passwords still sign in.
     minPasswordLength: Number(process.env.AUTH_MIN_PASSWORD_LENGTH) || 12,
-    // Cloud/enterprise deployments flip this on to require a verified email before sign-in;
-    // default off so existing dev/self-host accounts aren't locked out.
-    requireEmailVerification: process.env.AUTH_REQUIRE_EMAIL_VERIFICATION === "true",
+    // Verified email before sign-in. Default: ON in production whenever an email transport is
+    // configured (an unverified address can otherwise claim any identity); off in dev and on
+    // installs with no mailer (nothing could deliver the link). AUTH_REQUIRE_EMAIL_VERIFICATION
+    // =true/false overrides either way.
+    requireEmailVerification: requireEmailVerificationDefault(),
     // A password reset is a recovery from possible compromise — kill every other session.
     revokeSessionsOnPasswordReset: true,
     onPasswordReset: async ({ user }) => {
@@ -292,6 +306,16 @@ export const auth = betterAuth({
     window: 60,
     max: 30,
     customStorage: rateLimitStorage,
+    // Brute-force guards beyond the generic window. Keyed per client IP (Better Auth's
+    // limiter key), which is what an online guess needs: 10 password attempts / 15 min,
+    // and a bound on unauthenticated OAuth dynamic client registrations (rows are created
+    // before any user is involved).
+    customRules: {
+      "/sign-in/email": { window: 900, max: envIntLocal("AUTH_SIGNIN_MAX_PER_15M", 10) },
+      "/two-factor/verify-totp": { window: 900, max: 10 },
+      "/two-factor/verify-backup-code": { window: 900, max: 5 },
+      "/oauth2/register": { window: 3600, max: envIntLocal("AUTH_OAUTH_REGISTER_MAX_PER_HOUR", 20) },
+    },
   },
   advanced: {
     cookiePrefix: "memoturn",

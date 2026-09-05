@@ -48,6 +48,27 @@ Production-readiness tranche, phase 0 (see the audit plan for the full picture).
 - Docs: `AUTH_BASE_URL` is the origin (no `/api`); rate-limit defaults corrected; console
   image now sets its own CSP/security headers so Kubernetes deployments keep them.
 
+Production-readiness tranche, phase 3 (tenant isolation + abuse controls).
+
+- **DLQ views are project-scoped**: `/v1/ingest/health` and `/v1/ingest/dlq/replay` see and
+  replay only the caller's project (the operator CLI stays global).
+- **Hard cost caps**: a budget can refuse spend (402) once month-to-date cost reaches it —
+  playground, assistant, evaluators, experiments all pass through the gate (`hardCap` on
+  `PUT /v1/budgets`, checkbox in Settings → Alerts).
+- **Rate limits on by default** (600 req/min, 60000 events/min per project; `0` disables) and
+  now also applied to the remote MCP endpoint per project.
+- **Auth defaults**: email verification required by default in production when a mailer is
+  configured; password sign-in and 2FA code checks get brute-force sub-limits
+  (`AUTH_SIGNIN_MAX_PER_15M`); unauthenticated OAuth client registration is throttled;
+  organizations can require 2FA (`{"requireTwoFactor": true}` in org metadata → 403 until
+  enrolled); unknown IdP roles resolve to VIEWER; `API_KEY_DEFAULT_EXPIRY_DAYS`.
+- **Secrets at rest**: scrypt-derived keys, `v2.<keyId>.…` envelopes, an `ENCRYPTION_KEYS`
+  ring with dual-read, and `bun run rotate-secrets` — rotation no longer invalidates stored
+  keys. Webhook signing secrets are now encrypted (legacy plaintext rows migrate on use).
+- **Error hygiene**: internal error text (drivers, hosts, paths) is no longer echoed to
+  clients; `API_DOCS_PUBLIC=false` puts the OpenAPI docs behind auth; blob keys reject `..`;
+  LLM-judge prompts fence the traced content as data, not instructions.
+
 Production-readiness tranche, phase 2 (data durability + lifecycle).
 
 - **Blob replay tool** (`bun run replay`): rebuilds or backfills the telemetry store from the

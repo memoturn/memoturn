@@ -1,5 +1,6 @@
 import { prisma } from "@memoturn/db";
 import { decryptSecret, encryptSecret, maskSecret, type Provider, type ProviderConfig } from "@memoturn/llm";
+import { assertWithinBudget } from "./budgetguard.js";
 import { assertPublicUrl } from "./net.js";
 
 /**
@@ -78,6 +79,9 @@ export async function deleteProviderConnection(projectId: string, provider: stri
  */
 export async function resolveProviderConfig(projectId: string, provider: Provider): Promise<ProviderConfig> {
   if (provider === "mock") return {};
+  // Every real-provider call (playground, assistant, evaluators, experiments) passes through
+  // here — the one place a hard cost cap can refuse to spend. Throws BudgetExceededError (402).
+  await assertWithinBudget(projectId);
   const conn = await prisma.providerConnection.findUnique({
     where: { projectId_provider: { projectId, provider } },
   });

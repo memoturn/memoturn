@@ -17,6 +17,9 @@ const DLQ_STATES = ["waiting", "delayed", "failed", "completed", "active"] as co
 const REPLAYABLE_STATES = ["waiting", "delayed", "failed", "completed"] as const;
 const REPLAY_PAGE = 500;
 const REPLAY_LOCK_TTL_S = 300;
+const DLQ_PAGE = 500;
+/** Upper bound on how deep a per-project scan goes (a pathological queue still answers). */
+const DLQ_SCAN_CAP = 50_000;
 
 export class DlqReplayInProgressError extends Error {
   constructor() {
@@ -33,8 +36,37 @@ export interface DlqBatch {
 }
 
 /** Recent dead-lettered batches + total depth, read straight from the DLQ. */
-export async function inspectDlq(limit = 50): Promise<{ depth: number; batches: DlqBatch[] }> {
+/**
+ * Recent dead-lettered batches + total depth. With `projectId` (the API path — every project
+ * admin sees ONLY their own tenant's failures, never another project's ids or error strings),
+ * the depth is that project's count and the listing is filtered; without it (the operator
+ * CLI) the whole queue is visible.
+ */
+export async function inspectDlq(limit = 50, projectId?: string): Promise<{ depth: number; batches: DlqBatch[] }> {
   const dlq = getDlqQueue();
+  if (projectId) {
+    // Scan in pages and keep the first `limit` matches; a tenant's share of a deep DLQ is
+    // normally small, and this never loads the whole queue at once.
+    const batches: DlqBatch[] = [];
+    let depth = 0;
+    for (let start = 0; ; start += DLQ_PAGE) {
+      const page = await dlq.getJobs([...DLQ_STATES], start, start + DLQ_PAGE - 1);
+      for (const j of page) {
+        if (j.data.projectId !== projectId) continue;
+        depth++;
+        if (batches.length < limit) {
+          batches.push({
+            batchId: j.data.batchId,
+            projectId: j.data.projectId,
+            failedAt: j.data.failedAt ?? "",
+            error: j.data.error ?? "",
+          });
+        }
+      }
+      if (page.length < DLQ_PAGE || start + DLQ_PAGE >= DLQ_SCAN_CAP) break;
+    }
+    return { depth, batches };
+  }
   const counts = await dlq.getJobCounts(...DLQ_STATES);
   const depth = DLQ_STATES.reduce((n, s) => n + (counts[s] ?? 0), 0);
   // Page the fetch to the limit — a deep DLQ must not be loaded wholesale into API memory.
@@ -54,7 +86,10 @@ export async function inspectDlq(limit = 50): Promise<{ depth: number; batches: 
  * racing each other would otherwise double-enqueue the same batches. Throws
  * DlqReplayInProgressError when another replay holds the lock.
  */
-export async function replayDlq(limit = Number.POSITIVE_INFINITY): Promise<{ replayed: number; failed: number }> {
+export async function replayDlq(
+  limit = Number.POSITIVE_INFINITY,
+  projectId?: string,
+): Promise<{ replayed: number; failed: number }> {
   const result = await withLock(
     "dlq-replay",
     REPLAY_LOCK_TTL_S,
@@ -63,21 +98,27 @@ export async function replayDlq(limit = Number.POSITIVE_INFINITY): Promise<{ rep
       const ingest = getIngestQueue();
       let replayed = 0;
       let failed = 0;
-      // Page through the queue; each page is re-fetched from offset 0 because replayed
-      // jobs are removed as we go (failed ones stay, so skip past them via `failed`).
+      // Jobs that stay in the queue (failed re-adds, other tenants' jobs when scoped) shift
+      // the page window; removed jobs don't, so the offset is exactly the count of kept ones.
+      let kept = 0;
       while (replayed < limit) {
         const want = Math.min(REPLAY_PAGE, limit - replayed);
-        const jobs = await dlq.getJobs([...REPLAYABLE_STATES], failed, failed + want - 1);
+        const jobs = await dlq.getJobs([...REPLAYABLE_STATES], kept, kept + want - 1);
         if (jobs.length === 0) break;
         for (const job of jobs) {
           if (replayed >= limit) break;
-          const { projectId, batchId, blobKey, requestId } = job.data;
+          if (projectId && job.data.projectId !== projectId) {
+            kept++;
+            continue;
+          }
+          const { batchId, blobKey, requestId } = job.data;
           try {
-            await ingest.add("ingest", { projectId, batchId, blobKey, requestId });
+            await ingest.add("ingest", { projectId: job.data.projectId, batchId, blobKey, requestId });
             await job.remove();
             replayed++;
           } catch {
             failed++;
+            kept++;
           }
         }
         if (jobs.length < want) break;
@@ -102,14 +143,14 @@ interface WorkerMetrics {
  * the DLQ depth + recent failed batches (from Redis). Never throws — a down worker just
  * yields `workerReachable: false`.
  */
-export async function getIngestHealth(): Promise<{
+export async function getIngestHealth(projectId?: string): Promise<{
   workerReachable: boolean;
   dlqDepth: number;
   insertLatencyMs: number | null;
   counters: Record<string, number>;
   recentFailures: DlqBatch[];
 }> {
-  const { depth, batches } = await inspectDlq(50);
+  const { depth, batches } = await inspectDlq(50, projectId);
 
   let worker: WorkerMetrics | null = null;
   const url = process.env.WORKER_METRICS_URL ?? "http://127.0.0.1:3002/metrics";
@@ -122,7 +163,7 @@ export async function getIngestHealth(): Promise<{
 
   return {
     workerReachable: worker !== null,
-    dlqDepth: worker?.dlqDepth ?? depth,
+    dlqDepth: projectId ? depth : (worker?.dlqDepth ?? depth),
     insertLatencyMs: worker?.metrics?.telemetry_insert?.avgMs ?? null,
     counters: worker?.metrics?.counters ?? {},
     recentFailures: batches,

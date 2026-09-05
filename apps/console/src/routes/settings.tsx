@@ -147,6 +147,7 @@ const budgetSchema = z.object({
   monthlyUsd: z.string().min(1, "Budget is required"),
   channelType: z.string(),
   channelTarget: z.string().min(1, "Channel target is required"),
+  hardCap: z.boolean(),
 });
 type BudgetForm = z.infer<typeof budgetSchema>;
 
@@ -580,7 +581,7 @@ function SettingsPage() {
   const { data: budget } = useQuery({ queryKey: ["budget"], queryFn: () => api.getBudget() });
   const budgetForm = useForm<BudgetForm>({
     resolver: zodResolver(budgetSchema),
-    defaultValues: { monthlyUsd: "", channelType: "slack", channelTarget: "" },
+    defaultValues: { monthlyUsd: "", channelType: "slack", channelTarget: "", hardCap: false },
   });
   useEffect(() => {
     if (budget)
@@ -588,12 +589,14 @@ function SettingsPage() {
         monthlyUsd: String(budget.monthlyUsd),
         channelType: budget.channels[0]?.type ?? "slack",
         channelTarget: budget.channels[0]?.target ?? "",
+        hardCap: budget.hardCap,
       });
   }, [budget, budgetForm]);
   const saveBudget = useMutation({
     mutationFn: (v: BudgetForm) =>
       api.setBudget({
         monthlyUsd: Number(v.monthlyUsd),
+        hardCap: v.hardCap,
         channels: v.channelTarget
           ? [{ type: v.channelType as "slack" | "webhook" | "pagerduty" | "email", target: v.channelTarget }]
           : [],
@@ -608,7 +611,7 @@ function SettingsPage() {
     mutationFn: () => api.deleteBudget(),
     onSuccess: () => {
       toast.success("Budget removed");
-      budgetForm.reset({ monthlyUsd: "", channelType: "slack", channelTarget: "" });
+      budgetForm.reset({ monthlyUsd: "", channelType: "slack", channelTarget: "", hardCap: false });
       qc.invalidateQueries({ queryKey: ["budget"] });
     },
     onError: (e) => toast.error(`Failed to remove budget: ${String(e)}`),
@@ -1733,6 +1736,26 @@ function SettingsPage() {
                             <Input type="number" step="any" placeholder="500" {...field} />
                           </FormControl>
                           <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={budgetForm.control}
+                      name="hardCap"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center gap-2 space-y-0 pt-7">
+                          <FormControl>
+                            <Checkbox checked={field.value} onCheckedChange={(c) => field.onChange(c === true)} />
+                          </FormControl>
+                          <FormLabel className="font-normal">
+                            <span className="inline-flex items-center gap-1">
+                              Hard cap
+                              <HelpTip>
+                                Refuse playground, assistant, evaluator, and experiment LLM calls (HTTP 402) once
+                                month-to-date cost reaches the budget, instead of only notifying.
+                              </HelpTip>
+                            </span>
+                          </FormLabel>
                         </FormItem>
                       )}
                     />

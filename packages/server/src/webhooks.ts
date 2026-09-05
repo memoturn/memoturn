@@ -1,5 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { prisma } from "@memoturn/db";
+import { decryptSecret, encryptSecret, isEncryptedSecret } from "@memoturn/llm";
 import { mapConcurrent } from "./concurrency.js";
 import { isPublicUrl } from "./net.js";
 
@@ -23,6 +24,21 @@ export function signWebhook(secret: string, timestamp: string, body: string): st
   return `sha256=${createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex")}`;
 }
 
+/**
+ * Signing secrets are stored encrypted (same envelope as provider keys). Rows written before
+ * this carried the plaintext `whsec_…`; those still verify, and `bun run rotate-secrets`
+ * rewrites them encrypted.
+ */
+export function webhookSecretPlaintext(stored: string | null): string {
+  if (!stored) return "";
+  if (!isEncryptedSecret(stored)) return stored; // legacy plaintext row
+  try {
+    return decryptSecret(stored);
+  } catch {
+    return ""; // written under a key no longer in the ring — unusable, not fatal (unsigned delivery)
+  }
+}
+
 export async function createWebhook(projectId: string, input: CreateWebhookInput) {
   const secret = `whsec_${randomBytes(24).toString("base64url")}`;
   const w = await prisma.webhook.create({
@@ -31,7 +47,7 @@ export async function createWebhook(projectId: string, input: CreateWebhookInput
       url: input.url,
       event: input.event ?? "score.created",
       threshold: input.threshold ?? null,
-      secret,
+      secret: encryptSecret(secret),
     },
   });
   // `secret` is returned only here (never by list) so the caller can configure verification.
@@ -109,11 +125,14 @@ async function deliverWebhook(
   if (!(await isPublicUrl(h.url))) return false; // SSRF re-check at dispatch (DNS rebinding)
   const body = JSON.stringify({ event, projectId, ...payload });
   const timestamp = Math.floor(Date.now() / 1000).toString();
+  // Legacy plaintext rows are re-encrypted by `bun run rotate-secrets`, not here — the
+  // delivery hot path stays read-only.
+  const secret = webhookSecretPlaintext(h.secret);
   const headers = {
     "content-type": "application/json",
     "user-agent": "memoturn-webhooks/1",
     "x-memoturn-timestamp": timestamp,
-    ...(h.secret ? { "x-memoturn-signature": signWebhook(h.secret, timestamp, body) } : {}),
+    ...(secret ? { "x-memoturn-signature": signWebhook(secret, timestamp, body) } : {}),
   };
 
   // Up to 3 attempts; retry only on 5xx / network errors (4xx is the receiver's choice).

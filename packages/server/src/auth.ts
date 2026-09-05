@@ -56,17 +56,23 @@ export async function authenticateKeys(publicKey: string, secretKey: string): Pr
 
 export type WorkspaceRole = "OWNER" | "ADMIN" | "MEMBER" | "VIEWER";
 
-/** Map a Better Auth org member role (lowercase string) to our WorkspaceRole. */
+/**
+ * Map a Better Auth org member role (lowercase string) to our WorkspaceRole. Unknown values
+ * — a typo in an IdP group mapping, a future plugin role — resolve to VIEWER (read-only),
+ * never to a writing role: failing closed is the only safe default for authorization.
+ */
 export function toWorkspaceRole(role: string | null | undefined): WorkspaceRole {
   switch ((role ?? "").toLowerCase()) {
     case "owner":
       return "OWNER";
     case "admin":
       return "ADMIN";
+    case "member":
+      return "MEMBER";
     case "viewer":
       return "VIEWER";
     default:
-      return "MEMBER";
+      return "VIEWER";
   }
 }
 
@@ -211,3 +217,34 @@ async function writeCache(publicKey: string, value: CachedKey): Promise<void> {
 }
 
 const cacheKey = (publicKey: string) => `memoturn:apikey:${publicKey}`;
+
+// ── Organization policy: require two-factor ───────────────────────────────────────
+// Stored in the Better Auth organization's `metadata` JSON as {"requireTwoFactor": true}
+// (set via authClient.organization.update({ metadata })). Read per request (cached) by the
+// API's session path: a member without 2FA enrolled is refused with 403 until they enrol.
+const ORG_2FA_CACHE_S = 60;
+
+export async function orgRequiresTwoFactor(organizationId: string): Promise<boolean> {
+  const key = `memoturn:org2fa:${organizationId}`;
+  try {
+    const cached = await redisConnection().get(key);
+    if (cached !== null) return cached === "1";
+  } catch {
+    // fall through to the DB
+  }
+  const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { metadata: true } });
+  let required = false;
+  if (org?.metadata) {
+    try {
+      required = (JSON.parse(org.metadata) as { requireTwoFactor?: unknown }).requireTwoFactor === true;
+    } catch {
+      required = false;
+    }
+  }
+  try {
+    await redisConnection().set(key, required ? "1" : "0", "EX", ORG_2FA_CACHE_S);
+  } catch {
+    // best-effort cache
+  }
+  return required;
+}

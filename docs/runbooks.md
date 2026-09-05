@@ -70,10 +70,17 @@ blob (above) — Doris data is never the only copy.
 
 ## Rotate `ENCRYPTION_KEY`
 
-Rotating it invalidates every provider key, automation secret, and analytics-sink key stored
-at rest — there is no dual-read yet. Procedure: export the list of configured providers per
-project (Settings → Providers), set the new key, restart, re-enter each secret. Schedule a
-window; evaluators and the playground fail with a decrypt error until re-entered.
+Secrets at rest (provider keys, automation secrets, analytics-sink keys, webhook signing
+secrets) are encrypted under a key ring; rotation never loses anything:
+
+1. `ENCRYPTION_KEYS="<new>,<old>"` on api + worker (first = active), restart. Existing
+   ciphertexts still open with `<old>`; anything written from now on uses `<new>`.
+2. `bun run rotate-secrets` (add `--dry-run` first) — rewrites every stored secret under
+   `<new>`; rows it cannot open with any key in the ring are listed and left alone (the owner
+   must re-enter those).
+3. `ENCRYPTION_KEYS="<new>"` (or `ENCRYPTION_KEY=<new>`), restart, destroy `<old>`.
+
+Pre-v2 ciphertexts (SHA-256-derived) are also rewritten by step 2.
 
 ## Right to erasure
 

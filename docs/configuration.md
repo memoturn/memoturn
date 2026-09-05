@@ -98,7 +98,10 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | `API_PORT` | `3001` | Hono API |
 | `CONSOLE_PORT` | `3000` | Vite SPA |
 | `MEMOTURN_API_URL` | `http://localhost:3001` | API target for the console dev proxy |
-| `RATE_LIMIT_PER_MINUTE` | `0` (compose stacks: `600`) | Per-project global request rate limit (requests/minute); `0` disables it (per-key limits still apply) |
+| `RATE_LIMIT_PER_MINUTE` | `600` | Per-project global request rate limit (requests/minute). ON by default; `0` disables it (per-key limits still apply). Also applied to the remote MCP endpoint once its principal resolves. |
+| `INGEST_EVENTS_PER_MINUTE` | `60000` | Per-project ingest **event** budget (a POST can carry 1000 events). ON by default; `0` disables. |
+| `API_DOCS_PUBLIC` | `true` | Set `false` to put `/docs` + `/openapi.json` behind auth. |
+| `API_KEY_DEFAULT_EXPIRY_DAYS` | unset | Default lifetime for API keys minted without an explicit `expiresInDays` (unset = never expire). |
 | `PLAYGROUND_MAX_TOKENS` | `32768` | Ceiling on `maxTokens` for a single playground/assistant completion (these spend the project's provider key) |
 | `INGEST_EVENTS_PER_MINUTE` | `0` | Per-project ingest event-rate budget (events/minute; `0` = disabled). Meters actual event volume — a single POST can carry up to 1000 events, so this catches burst loads that the request-count limit would miss. Returns `429` with `Retry-After` when exceeded. |
 | `MCP_RATE_LIMIT_PER_MINUTE` | `120` | Per-IP budget for the remote MCP endpoint (`/v1/mcp/:projectId`). Unlike the project limiter it defaults **on** — the route runs a credential lookup before auth resolves, so unauthenticated clients must not get unthrottled tries. `0` disables. |
@@ -121,6 +124,7 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | `CONSOLE_PUBLIC_URL` | first `AUTH_TRUSTED_ORIGINS` entry | Public origin of the console, used for links in emails (mentions, sign-in, invites). Defaults to the first `AUTH_TRUSTED_ORIGINS` entry, which is already the console origin — set this only when they differ. Deliberately **not** `AUTH_BASE_URL`: that is the API origin (`:3001`). A localhost value means "no public URL", so notification emails ship without a link rather than a dead one. |
 | `AUTH_TRUSTED_ORIGINS` | `http://localhost:3000` | **Required in production** — comma-separated console origins for CORS + auth. |
 | `ENCRYPTION_KEY` | dev placeholder | **Required in production** — AES-256-GCM key for provider API keys stored at rest. Independent of `BETTER_AUTH_SECRET`. Rotating this invalidates all stored provider keys (they must be re-entered in Settings → Providers). |
+| `ENCRYPTION_KEYS` | unset | Comma-separated key ring for rotation — first entry is ACTIVE (used to encrypt), the rest only decrypt. Procedure: `ENCRYPTION_KEYS=new,old` → restart → `bun run rotate-secrets` → `ENCRYPTION_KEYS=new`. Ciphertexts are `v2.<keyId>.…` (scrypt-derived AES-256-GCM); pre-v2 ciphertexts still decrypt and are rewritten by the rotation. |
 | `MCP_LOGIN_PAGE` | `<first AUTH_TRUSTED_ORIGINS>/login` | Console sign-in page the remote-MCP OAuth 2.1 flow (Better Auth `@better-auth/oauth-provider` plugin) redirects unauthenticated users to. Override only if the console login lives elsewhere. |
 | `MCP_CONSENT_PAGE` | `<first AUTH_TRUSTED_ORIGINS>/consent` | Console consent page where the OAuth flow asks the signed-in user to approve the client's requested scopes. |
 
@@ -132,6 +136,8 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | unset | Set `true` to require a verified email before sign-in (needs a working email transport). Default off so self-host accounts aren't locked out. |
 | `AUTH_MIN_PASSWORD_LENGTH` | `12` | Minimum length for **new** passwords (existing shorter passwords still sign in). |
 | `AUTH_HIBP_DISABLED` | unset | The breached-password check (k-anonymity, `api.pwnedpasswords.com`) is on by default and **fails closed** — signup/password-change return 500 when the service is unreachable. Airgapped/offline installs must set `true`. |
+| `AUTH_SIGNIN_MAX_PER_15M` | `10` | Password sign-in attempts per client IP per 15 minutes (brute-force guard, on top of the generic 30/min auth window). 2FA code verification has fixed sub-limits (10 TOTP, 5 backup codes / 15 min). |
+| `AUTH_OAUTH_REGISTER_MAX_PER_HOUR` | `20` | Unauthenticated OAuth dynamic client registrations per IP per hour (remote MCP clients). |
 | `AUTH_COOKIE_CACHE_MAX_AGE` | `300` | Session cookie cache lifetime (seconds) — `getSession` is served from a short-lived signed cookie instead of a Postgres query. Revocations/bans take up to this long to bite on issued cookies. |
 | `AUTH_COOKIE_CACHE_DISABLED` | unset | Set `true` to disable the session cookie cache entirely (every `getSession` hits Postgres). |
 | `AUTH_ORG_MEMBERSHIP_LIMIT` | `10000` | Max members per organization. |
