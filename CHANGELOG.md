@@ -10,6 +10,44 @@ released together from `v*` tags.
 
 ## [Unreleased]
 
+Production-readiness tranche, phase 0 (see the audit plan for the full picture).
+
+- **Breaking — API keys no longer act as OWNER.** A key's role is derived from its scopes:
+  the default `read`/`write`/`ingest` key acts as MEMBER; only a key minted with the new
+  explicit `admin` scope acts as OWNER on admin-only routes (project delete/rename,
+  membership, DLQ replay, key management). Minting, listing, and revoking keys is now
+  admin-only. Automations that used a default key against those routes need an `admin`
+  key (`bun run seed` gives the dev key `admin`). This closes a MEMBER→OWNER escalation.
+- **Playground and assistant are write-gated.** `/v1/playground/*` and `/v1/assistant/*`
+  spend the project's provider key, so VIEWERs (including public-demo sandboxes) now get
+  403. Both streaming routes validate their bodies like the OpenAPI routes; `maxTokens` is
+  capped by `PLAYGROUND_MAX_TOKENS` (default 32768).
+- **Ingest error contract.** Every API error is JSON `{ error, requestId }`; a blob-store or
+  queue outage on `/v1/ingest` returns `503` + `Retry-After` (SDKs re-send) instead of a
+  plain-text 500; a blob written before a failed enqueue is removed. Every request carries
+  an `x-request-id` (inbound honoured, else minted) that is echoed, logged, and stamped on
+  the ingest job so API and worker log lines correlate.
+- **SDKs (JS, Python, Go): request-sized flushes.** A large buffer is sent as several
+  `POST /v1/ingest` calls of ≤1000 events / ~10 MB (the API's limits) — previously a buffer
+  that grew past 1000 events during an outage was rejected as one over-limit request and
+  dropped. Background flushes back off exponentially with jitter and honour `Retry-After`;
+  the JS SDK gains opt-in `flushOnSignals`.
+- **Helm chart works as shipped:** the worker binds `0.0.0.0` so probes pass (it
+  CrashLooped before), a worker Service + `WORKER_METRICS_URL` wire the ingest-health
+  panel, OAuth discovery paths route to the API, `terminationGracePeriodSeconds` is set,
+  and `Chart.yaml` tracks the release version (enforced by `docs:check`; linted in CI).
+- **Worker shutdown** closes the evaluator-backfill worker too and force-exits after
+  `WORKER_SHUTDOWN_TIMEOUT_MS` instead of hanging past the orchestrator's grace period.
+- **Compose hardening.** The single-VM stack pins MinIO/mc/Caddy tags, rotates json-file
+  logs, sets memory limits and a worker `stop_grace_period`, and passes through
+  `RATE_LIMIT_TRUSTED_PROXIES`, `API_METRICS_TOKEN`, `MCP_RATE_LIMIT_PER_MINUTE`,
+  `TELEMETRY_STREAM_LOAD` (ingest-event budget defaults on). The plain
+  `infra/docker-compose.yml` no longer publishes the API on every interface without TLS.
+- **Startup guard** refuses to boot in production with `ALLOW_PRIVATE_WEBHOOK_TARGETS=1`
+  (unless `..._ACK=1`) or `AUTH_RATE_LIMIT_DISABLED`, and announces `DEMO_MODE` loudly.
+- Docs: `AUTH_BASE_URL` is the origin (no `/api`); rate-limit defaults corrected; console
+  image now sets its own CSP/security headers so Kubernetes deployments keep them.
+
 ## [0.5.0] — 2026-08-02
 
 - Postgres telemetry tier (ADR-0002): `TELEMETRY_ENGINE=postgres` runs the whole

@@ -381,6 +381,8 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
 
   logJson("info", "ingest ok", {
     projectId,
+    batchId: job.data.batchId,
+    requestId: job.data.requestId,
     traces: traces.length,
     observations: observations.length,
     scores: scores.length,

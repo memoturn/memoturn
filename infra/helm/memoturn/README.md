@@ -4,7 +4,9 @@ Deploys the memoturn **API** (Hono/Bun), **worker** (BullMQ), and **console** (S
 Kubernetes. The stateful dependencies — Postgres, Apache Doris, Redis, and an S3-compatible
 blob store — are **not** bundled; point the chart at managed services or in-cluster
 operators. This keeps the app tier stateless and horizontally scalable (the API runs behind
-an HPA; the worker scales on queue load).
+a CPU HPA; the worker ships with an optional CPU HPA, but its work is I/O-bound — for
+queue-depth scaling, drive replicas from the BullMQ `waiting` count in the worker's
+`/metrics` with an external autoscaler such as KEDA).
 
 ## Prerequisites
 

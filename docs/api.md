@@ -109,10 +109,10 @@ filter=[{"column":"scores","type":"numberObject","key":"accuracy","operator":"lt
 
 | Method | Path | Description |
 | --- | --- | --- |
-| POST | `/v1/playground/chat` | One-shot completion. `trace:true` (default) records it as a trace. |
-| POST | `/v1/assistant/chat` | In-app assistant: a bounded agentic loop over the project's read-only MCP tools. Body: `provider`, `model`, `messages[]`, optional `context` (organization/project/page/rangeDays); returns `{content, steps[]}`. Read-only. |
-| POST | `/v1/assistant/stream` | Streaming assistant (SSE): same loop and body as `/chat`, but tool steps are emitted as they execute and answer text arrives incrementally (`data: {"step":...}` \| `{"delta":...}` then `[DONE]`). Read-only. |
-| POST | `/v1/playground/stream` | Streaming completion (SSE: `data: {"delta":...}` then `[DONE]`). |
+| POST | `/v1/playground/chat` | One-shot completion. `trace:true` (default) records it as a trace. Write-gated (spends the project's provider key — VIEWERs get 403); `maxTokens` is capped at `PLAYGROUND_MAX_TOKENS` (default 32768). |
+| POST | `/v1/assistant/chat` | In-app assistant: a bounded agentic loop over the project's read-only MCP tools. Body: `provider`, `model`, `messages[]`, optional `context` (organization/project/page/rangeDays); returns `{content, steps[]}`. Never mutates project data, but write-gated because each turn spends the provider key (VIEWERs get 403). |
+| POST | `/v1/assistant/stream` | Streaming assistant (SSE): same loop and body as `/chat`, but tool steps are emitted as they execute and answer text arrives incrementally (`data: {"step":...}` \| `{"delta":...}` then `[DONE]`). Write-gated like `/chat`. |
+| POST | `/v1/playground/stream` | Streaming completion (SSE: `data: {"delta":...}` then `[DONE]`). Same body, validation, and write gate as `/chat`. |
 
 ### Evaluators
 
@@ -245,8 +245,8 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | POST | `/v1/guardrails/check` | Runtime guardrails: scan `{ text }` for PII / prompt injection / SQL injection / blocked terms / required-match / JSON shape, plus opt-in LLM guards — evaluator (judge) guards and built-in **restricted-topic** + **toxicity** model guards; returns `{ verdict: allow\|redact\|block, findings, redactedText? }`. Read-only compute (the LLM guard calls write nothing and fail open on timeout/error). SDK: `checkGuardrails` / `check_guardrails`. |
 | GET / POST | `/v1/guardrails` | Get / configure the project's guardrail policy (PII action, prompt-injection/SQL-injection detection, blocked terms, `requireMatch`, `requireValidJson`/`requiredJsonKeys`, evaluator-backed `evaluatorGuards`, and model guards `restrictedTopics`/`toxicity`+`toxicityThreshold` judged by `judgeProvider`/`judgeModel`). |
 | GET / POST | `/v1/analytics-sink` | Get / configure the event sink — forwarding trace/score events to a product-analytics/CDP endpoint (PostHog-compatible capture API). POST `host` URL is SSRF-validated (400 on private/loopback targets). |
-| GET / POST | `/v1/api-keys` | List project API keys (public key + hint) / mint a new pair (secret returned once). |
-| DELETE | `/v1/api-keys/{id}` | Revoke an API key. |
+| GET / POST | `/v1/api-keys` | List project API keys (public key + hint) / mint a new pair (secret returned once). **Admin-only** (OWNER/ADMIN). Scopes: `read`, `write`, `ingest` (the default set) and `admin`. A key acts as MEMBER unless it carries `admin`, in which case it acts as OWNER on admin-only routes — never granted by default. |
+| DELETE | `/v1/api-keys/{id}` | Revoke an API key. Admin-only. |
 | GET | `/v1/account/mcp-connections` | List the OAuth clients (remote MCP IDEs/agents) the signed-in user has authorized. Empty for API-key callers (no user). |
 | DELETE | `/v1/account/mcp-connections/{consentId}` | Disconnect an OAuth client: deletes the consent and revokes its refresh tokens (access ends when the last ≤1 h JWT expires). |
 | GET | `/v1/health` | Liveness (no auth). |

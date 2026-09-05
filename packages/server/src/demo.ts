@@ -42,8 +42,10 @@ export function demoConfig() {
     // the seed batches into the telemetry store first, so experiments/review-items reference
     // real traces and the embedding projection has vectors to reduce.
     finalizeDelayMs: intEnv("DEMO_FINALIZE_DELAY_MS", 120_000),
-    // `viewer` is read-only (every mutating route is denyIfReadOnly-gated), which is what
-    // keeps a public sandbox from ingesting, spending on the playground, or minting keys.
+    // `viewer` is read-only (every mutating route is denyIfReadOnly-gated — including the
+    // playground/assistant routes, which spend the operator's provider key even though they
+    // don't mutate), which is what keeps a public sandbox from ingesting, spending on LLM
+    // calls, or minting keys. `scripts/check-rbac.ts` enforces the gate in CI.
     memberRole: process.env.DEMO_MEMBER_ROLE || "viewer",
   };
 }

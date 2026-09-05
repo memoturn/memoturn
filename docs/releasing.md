@@ -42,6 +42,8 @@ be exercised by a real publish, so a green dry run confirms the builds, not the 
    - `sdks/python/pyproject.toml` → `[project].version`
    - `sdks/python/src/memoturn/_version.py` → `__version__` (reported to `/v1/ingest`)
    - `sdks/go/client.go` → `SDKVersion` (reported to `/v1/ingest`)
+   - `infra/helm/memoturn/Chart.yaml` → `version` **and** `appVersion` (the chart's default
+     image tag — a stale value makes `helm install` pull old images)
    - (optional) root `package.json` → `version`
 2. Commit, then tag and push:
    ```bash

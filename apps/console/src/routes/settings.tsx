@@ -55,7 +55,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { Textarea } from "../components/ui/textarea";
 import { WebhookLogButton } from "../components/webhook-deliveries";
 import { api } from "../lib/api";
-import { useIsReadOnly } from "../lib/role";
+import { useIsReadOnly, useIsWorkspaceAdmin } from "../lib/role";
 import { cn } from "../lib/utils";
 
 /**
@@ -179,7 +179,14 @@ function SettingsPage() {
     });
 
   // ── API keys ──────────────────────────────────────────────────────────────
-  const { data: apiKeys } = useQuery({ queryKey: ["api-keys"], queryFn: () => api.listApiKeys() });
+  // Listing/minting/revoking keys is admin-only on the server (OWNER/ADMIN — a credential
+  // inventory is not for every member), so don't even issue the request for other roles.
+  const isAdmin = useIsWorkspaceAdmin();
+  const { data: apiKeys } = useQuery({
+    queryKey: ["api-keys"],
+    queryFn: () => api.listApiKeys(),
+    enabled: isAdmin,
+  });
   const [newSecret, setNewSecret] = useState<{ publicKey: string; secretKey: string } | null>(null);
   const apiKeyForm = useForm<ApiKeyForm>({
     resolver: zodResolver(apiKeySchema),
@@ -843,123 +850,135 @@ function SettingsPage() {
 
         {/* ── API Keys ──────────────────────────────────────────────────── */}
         <TabsContent value="api-keys" className="min-w-0 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Create API key</CardTitle>
-              <CardDescription>
-                Project-scoped keys for the SDK / ingestion API (Basic auth: <code>publicKey:secretKey</code>). The
-                secret is shown once at creation — store it now; it can&apos;t be retrieved later.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Form {...apiKeyForm}>
-                <form
-                  onSubmit={apiKeyForm.handleSubmit((v) =>
-                    createKey.mutate({
-                      name: v.name || undefined,
-                      scopes: v.scopes,
-                      expiresInDays: v.expiresInDays ? Number(v.expiresInDays) : null,
-                      rateLimitPerMinute: v.rateLimitPerMinute ? Number(v.rateLimitPerMinute) : null,
-                    }),
-                  )}
-                  className="space-y-4"
-                >
-                  <div className="grid gap-4 sm:grid-cols-3">
+          {!isAdmin && (
+            <EmptyState
+              icon={KeyRound}
+              title="API keys are managed by project admins"
+              description="Ask an OWNER or ADMIN of this project to mint or revoke keys."
+            />
+          )}
+          {isAdmin && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Create API key</CardTitle>
+                <CardDescription>
+                  Project-scoped keys for the SDK / ingestion API (Basic auth: <code>publicKey:secretKey</code>). The
+                  secret is shown once at creation — store it now; it can&apos;t be retrieved later.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Form {...apiKeyForm}>
+                  <form
+                    onSubmit={apiKeyForm.handleSubmit((v) =>
+                      createKey.mutate({
+                        name: v.name || undefined,
+                        scopes: v.scopes,
+                        expiresInDays: v.expiresInDays ? Number(v.expiresInDays) : null,
+                        rateLimitPerMinute: v.rateLimitPerMinute ? Number(v.rateLimitPerMinute) : null,
+                      }),
+                    )}
+                    className="space-y-4"
+                  >
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      <FormField
+                        control={apiKeyForm.control}
+                        name="name"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Name</FormLabel>
+                            <FormControl>
+                              <Input placeholder="key name (optional)" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={apiKeyForm.control}
+                        name="expiresInDays"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Expires (days)</FormLabel>
+                            <FormControl>
+                              <Input type="number" min="1" placeholder="never" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={apiKeyForm.control}
+                        name="rateLimitPerMinute"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>
+                              <span className="inline-flex items-center gap-1">
+                                Rate / min
+                                <HelpTip>
+                                  Caps how many requests per minute this key may make; blank means unlimited.
+                                </HelpTip>
+                              </span>
+                            </FormLabel>
+                            <FormControl>
+                              <Input type="number" min="1" placeholder="unlimited" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
                     <FormField
                       control={apiKeyForm.control}
-                      name="name"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Name</FormLabel>
-                          <FormControl>
-                            <Input placeholder="key name (optional)" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={apiKeyForm.control}
-                      name="expiresInDays"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Expires (days)</FormLabel>
-                          <FormControl>
-                            <Input type="number" min="1" placeholder="never" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={apiKeyForm.control}
-                      name="rateLimitPerMinute"
-                      render={({ field }) => (
+                      name="scopes"
+                      render={() => (
                         <FormItem>
                           <FormLabel>
                             <span className="inline-flex items-center gap-1">
-                              Rate / min
+                              Scopes
                               <HelpTip>
-                                Caps how many requests per minute this key may make; blank means unlimited.
+                                read grants query access, write allows changes, and ingest permits sending telemetry.
+                                admin additionally lets the key act as an OWNER on admin-only routes (project lifecycle,
+                                membership, DLQ replay, key management) — leave it off unless the caller genuinely needs
+                                that.
                               </HelpTip>
                             </span>
                           </FormLabel>
-                          <FormControl>
-                            <Input type="number" min="1" placeholder="unlimited" {...field} />
-                          </FormControl>
+                          <div className="flex flex-wrap gap-4">
+                            {["read", "write", "ingest", "admin"].map((s) => (
+                              <FormField
+                                key={s}
+                                control={apiKeyForm.control}
+                                name="scopes"
+                                render={({ field }) => (
+                                  <FormItem className="flex flex-row items-center gap-2 space-y-0">
+                                    <FormControl>
+                                      <Checkbox
+                                        checked={field.value?.includes(s)}
+                                        onCheckedChange={(c) =>
+                                          c
+                                            ? field.onChange([...field.value, s])
+                                            : field.onChange(field.value.filter((x: string) => x !== s))
+                                        }
+                                      />
+                                    </FormControl>
+                                    <FormLabel className="font-normal">{s}</FormLabel>
+                                  </FormItem>
+                                )}
+                              />
+                            ))}
+                          </div>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                  </div>
-                  <FormField
-                    control={apiKeyForm.control}
-                    name="scopes"
-                    render={() => (
-                      <FormItem>
-                        <FormLabel>
-                          <span className="inline-flex items-center gap-1">
-                            Scopes
-                            <HelpTip>
-                              read grants query access, write allows changes, and ingest permits sending telemetry.
-                            </HelpTip>
-                          </span>
-                        </FormLabel>
-                        <div className="flex flex-wrap gap-4">
-                          {["read", "write", "ingest"].map((s) => (
-                            <FormField
-                              key={s}
-                              control={apiKeyForm.control}
-                              name="scopes"
-                              render={({ field }) => (
-                                <FormItem className="flex flex-row items-center gap-2 space-y-0">
-                                  <FormControl>
-                                    <Checkbox
-                                      checked={field.value?.includes(s)}
-                                      onCheckedChange={(c) =>
-                                        c
-                                          ? field.onChange([...field.value, s])
-                                          : field.onChange(field.value.filter((x: string) => x !== s))
-                                      }
-                                    />
-                                  </FormControl>
-                                  <FormLabel className="font-normal">{s}</FormLabel>
-                                </FormItem>
-                              )}
-                            />
-                          ))}
-                        </div>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <Button type="submit" disabled={readOnly || createKey.isPending}>
-                    {createKey.isPending ? "Creating…" : "Create key"}
-                  </Button>
-                </form>
-              </Form>
-            </CardContent>
-          </Card>
+                    <Button type="submit" disabled={readOnly || createKey.isPending}>
+                      {createKey.isPending ? "Creating…" : "Create key"}
+                    </Button>
+                  </form>
+                </Form>
+              </CardContent>
+            </Card>
+          )}
 
           {newSecret && (
             <Card className="border-emerald-500/40">
@@ -987,15 +1006,16 @@ function SettingsPage() {
             </Card>
           )}
 
-          {!apiKeys || apiKeys.length === 0 ? (
-            <EmptyState
-              icon={KeyRound}
-              title="No API keys yet"
-              description="Create one above to use the SDK or ingestion API."
-            />
-          ) : (
-            <DataTable columns={apiKeyColumns} data={apiKeys} />
-          )}
+          {isAdmin &&
+            (!apiKeys || apiKeys.length === 0 ? (
+              <EmptyState
+                icon={KeyRound}
+                title="No API keys yet"
+                description="Create one above to use the SDK or ingestion API."
+              />
+            ) : (
+              <DataTable columns={apiKeyColumns} data={apiKeys} />
+            ))}
         </TabsContent>
 
         {/* ── Providers ─────────────────────────────────────────────────── */}

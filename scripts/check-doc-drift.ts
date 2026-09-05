@@ -249,7 +249,26 @@ function checkSdkVersions(): CheckResult {
       message: `version \`${js}\` ≠ python \`${pyToml}\` — SDKs release in lockstep`,
     });
   }
-  return { name: "SDK versions (js ↔ python ↔ go, declared + reported)", findings };
+  // The Helm chart's appVersion is the DEFAULT image tag (`image.tag` falls back to it), so a
+  // stale chart deploys stale images by default. It rides the same release train.
+  const chart = read("infra/helm/memoturn/Chart.yaml");
+  const chartApp = chart.match(/^appVersion:\s*"?([^"\n]+)"?/m)?.[1]?.trim() ?? "";
+  const chartVersion = chart.match(/^version:\s*"?([^"\n]+)"?/m)?.[1]?.trim() ?? "";
+  if (chartApp !== js) {
+    findings.push({
+      doc: "infra/helm/memoturn/Chart.yaml",
+      line: 0,
+      message: `appVersion \`${chartApp}\` ≠ release \`${js}\` — \`helm install\` would pull stale images by default`,
+    });
+  }
+  if (chartVersion !== js) {
+    findings.push({
+      doc: "infra/helm/memoturn/Chart.yaml",
+      line: 0,
+      message: `chart version \`${chartVersion}\` ≠ release \`${js}\` — bump it with the SDKs`,
+    });
+  }
+  return { name: "SDK + Helm chart versions (js ↔ python ↔ go ↔ chart, declared + reported)", findings };
 }
 
 /** 8. All three SDK clients must default to the same base URL (the API port — 3000 is the console). */

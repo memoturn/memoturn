@@ -86,6 +86,17 @@ jobs:
       # + declare a 403 (or be marked `// rbac-exempt`). Hard gate.
       - name: RBAC guard check
         run: bun run rbac:check
+      # The Helm chart must lint and render with the minimum required values — a template
+      # error here is otherwise only found by the first person to `helm install` a release.
+      - name: Helm chart lint + render
+        run: |
+          helm lint infra/helm/memoturn
+          helm template memoturn infra/helm/memoturn \
+            --set config.databaseUrl=postgresql://ci --set config.redisUrl=redis://ci \
+            --set config.betterAuthSecret=ci-secret-not-real-0123456789 \
+            --set config.encryptionKey=ci-secret-not-real-0123456789 \
+            --set config.doris.host=doris --set config.blob.endpoint=http://minio:9000 \
+            --set ingress.enabled=true > /dev/null
       # Doris FE+BE need static IPs to register with each other, which GitHub service
       # containers can't provide — reuse the repo's dev compose definitions instead.
       # Explicit polling instead of `up --wait`: compose's waiter treats a dependency

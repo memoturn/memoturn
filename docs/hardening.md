@@ -41,18 +41,25 @@ See [Configuration](./configuration.md) for the full variable reference and
 
 ## Rate limits
 
-- [ ] `RATE_LIMIT_PER_MINUTE` — per-project API request budget. Defaults to `0` (disabled); the
-  API logs a startup warning in production when unset. Set it, or enforce limits at your edge.
+- [ ] `RATE_LIMIT_PER_MINUTE` — per-project API request budget. The code default is `0`
+  (disabled — the API logs a startup warning in production when unset); both shipped compose
+  stacks set it to `600`. Set it, or enforce limits at your edge.
 - [ ] `INGEST_EVENTS_PER_MINUTE` — per-project ingest **event** budget. The request limit alone
   is bypassable by packing up to 1000 events into one POST; this meters actual event volume.
+  Code default `0`; the compose stacks set `60000`.
+- [ ] `PLAYGROUND_MAX_TOKENS` — ceiling on a single playground/assistant completion (default
+  `32768`). The playground and assistant spend the project's provider key, so they are
+  write-gated (VIEWERs get 403) and every request is validated against this cap.
 - [ ] `MCP_RATE_LIMIT_PER_MINUTE` — per-IP throttle on the remote MCP endpoint. **On by default
   (120/min)** because the route performs a credential lookup before auth resolves; keep it on.
 - [ ] Better Auth's built-in limiter throttles auth routes (60 s window, max 30, with a stricter
   sign-in sub-limit) — on by default, Redis-backed so the counter is shared across API replicas,
   and degrades to per-replica in-memory counting during a Redis outage rather than switching
   off. `AUTH_RATE_LIMIT_DISABLED` exists for test suites only — never set it in production.
-- [ ] Request body sizes are already capped (1 MB default; 12 MB for `/v1/ingest`, `/v1/otel/*`,
-  and `/v1/media`). If your proxy adds its own limit, keep it at or above these.
+- [ ] Request body sizes are capped on `/v1/*` (1 MB default; 12 MB for `/v1/ingest`,
+  `/v1/otel/*`, `/v1/media`, and `/v1/mcp/*`). The `/auth/*` routes are **not** yet capped
+  in-app — set a body limit for them at your proxy (Caddy `request_body { max_size 256KB }`).
+  If your proxy adds its own limit elsewhere, keep it at or above the in-app values.
 
 ## Ingest sampling & usage
 
@@ -84,6 +91,11 @@ Per-project settings (`/v1/sampling`, `/v1/usage`, or the console **Settings** p
   (needs a working [email transport](./configuration.md#email); default off).
 - [ ] `AUTH_DISABLE_PASSWORD_SIGNUP=true` — once your IdP/SSO (or social sign-in) is live,
   disable **new** email/password signups; existing password logins keep working.
+- [ ] **API keys act as MEMBER, not OWNER.** A key with the default `read`/`write`/`ingest`
+  scopes can write telemetry and project data but cannot reach admin-only routes (project
+  delete/rename, membership, key management, DLQ replay). Only a key minted with the explicit
+  `admin` scope acts as OWNER — and only an OWNER/ADMIN can mint or list keys. Treat `admin`
+  keys like root credentials: short expiry, one per automation, revoke on rotation.
 - [ ] `SUPERADMIN_USER_IDS` — platform-admin override (list/ban users, impersonate). Keep it
   empty unless you operate a multi-tenant install and need it; audit whoever is on it.
 - [ ] Password resets revoke all other sessions automatically, and auth events land in the
@@ -108,7 +120,10 @@ Per-project settings (`/v1/sampling`, `/v1/usage`, or the console **Settings** p
 - [ ] `ALLOW_PRIVATE_WEBHOOK_TARGETS` — webhook, automation, and analytics-sink URLs are
   restricted to public HTTPS in every environment by default, so a project admin can't point
   a webhook at your cloud metadata endpoint or an internal service. Set `1` only when you
-  genuinely need LAN/`http://` targets, and understand what that opens up.
+  genuinely need LAN/`http://` targets, and understand what that opens up. In production the
+  startup guard **refuses to boot** with it set unless `ALLOW_PRIVATE_WEBHOOK_TARGETS_ACK=1`
+  is also present — the dev `.env.example` ships it on, and this stops that file from being
+  copied to a server unnoticed. `AUTH_RATE_LIMIT_DISABLED` is refused outright.
 
 ## Seeding & data
 
