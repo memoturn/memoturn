@@ -7,7 +7,16 @@ import { PrismaClient } from "@prisma/client";
  * driver adapter; the connection URL lives here + in prisma.config.ts, not the schema.
  */
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+// Pool per replica. With the Helm defaults (api ×2..10 + worker) every replica's Prisma pool
+// PLUS its telemetry pool counts against Postgres max_connections (default 100): keep
+// Σ replicas × (PRISMA_POOL_SIZE + TELEMETRY_PG_POOL_SIZE) comfortably under it, or front
+// Postgres with PgBouncer. See docs/deployment.md#scaling.
+const poolSize = Math.min(1000, Math.max(1, Number(process.env.PRISMA_POOL_SIZE) || 10));
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL,
+  max: poolSize,
+  connectionTimeoutMillis: Math.max(100, Number(process.env.PRISMA_CONNECT_TIMEOUT_MS) || 10_000),
+});
 export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({

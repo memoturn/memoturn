@@ -25,6 +25,8 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "memoturn.serviceAccountName" . }}
+      securityContext:
+        {{- include "memoturn.podSecurityContext" . | nindent 8 }}
       # Experiment / evaluator-backfill jobs run for minutes; give the drain (worker.close)
       # time to finish in-flight work before the kubelet SIGKILLs the pod.
       terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds }}
@@ -36,6 +38,8 @@ spec:
         - name: worker
           image: {{ include "memoturn.image" (list . "worker") }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "memoturn.containerSecurityContext" (list . .Values.worker) | nindent 12 }}
           ports:
             - name: health
               containerPort: {{ .Values.worker.port }}
@@ -55,9 +59,10 @@ spec:
             {{- end }}
           envFrom:
             {{- include "memoturn.envFrom" . | nindent 12 }}
+          # Readiness pings Postgres/Redis/telemetry/blob (cached 5s); liveness stays cheap.
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: health
             initialDelaySeconds: 5
             periodSeconds: 10

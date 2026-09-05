@@ -45,7 +45,16 @@ ingress:
 
 ```bash
 helm install memoturn ./infra/helm/memoturn -f my-values.yaml
+# or the published chart (pushed to GHCR on every release tag, versioned with the platform):
+helm install memoturn oci://ghcr.io/memoturn/charts/memoturn --version 0.6.0 -f my-values.yaml
 ```
+
+Every pod runs as uid 1000 with all capabilities dropped and privilege escalation
+forbidden (`podSecurityContext` / `containerSecurityContext`); the console's root
+filesystem is read-only. PodDisruptionBudgets keep one api/console replica through drains;
+`networkPolicy.enabled` adds a default-deny policy once you fill in the datastore egress.
+Readiness probes hit `/ready` (which pings every datastore); liveness stays on the cheap
+health routes.
 
 Prefer to manage secrets yourself? Create a Secret with the keys `DATABASE_URL`,
 `REDIS_URL`, `BETTER_AUTH_SECRET`, `ENCRYPTION_KEY`, `DORIS_HOST`,

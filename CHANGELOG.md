@@ -48,6 +48,44 @@ Production-readiness tranche, phase 0 (see the audit plan for the full picture).
 - Docs: `AUTH_BASE_URL` is the origin (no `/api`); rate-limit defaults corrected; console
   image now sets its own CSP/security headers so Kubernetes deployments keep them.
 
+Production-readiness tranche, phase 1 (operability).
+
+- **Typed environment validation.** Every knob the API/worker read is declared with its
+  shape; a malformed value (`WORKER_CONCURRENCY=ten`) fails at boot instead of becoming
+  `NaN`, and in production the datastore URLs/credentials are required (their code
+  fallbacks are dev-only). A public https `AUTH_BASE_URL` without `NODE_ENV=production`
+  refuses to start (every production protection keys on it). The Better Auth secret is
+  resolved at point of use so no process can sign a session with the dev fallback.
+- **Readiness probes.** `GET /ready` on the API and the worker pings Postgres, Redis, the
+  telemetry store, and the blob bucket (2 s each, cached 5 s) and answers 503 when any is
+  down; the Helm chart's readiness probes use it. `/health` stays pure liveness.
+- **Prometheus exposition.** `/metrics` on both services renders `text/plain; version=0.0.4`
+  when the scraper asks for it (`Accept: text/plain` / `?format=prometheus`) — request
+  counts, status classes, per-route latency percentiles, queue depths, DLQ depth, insert
+  latency, worker counters. JSON stays the default. `LOG_LEVEL` gates structured logs.
+- **Worker lifecycle.** Ingest jobs get a 60 s lock (`INGEST_LOCK_DURATION_MS`) and
+  experiments/backfills 10 min (`LONG_JOB_LOCK_DURATION_MS`) instead of BullMQ's 30 s; a
+  missing or malformed blob dead-letters on the first attempt (`UnrecoverableError`) instead
+  of burning eight retries; the DLQ logs an error past `DLQ_ALERT_DEPTH`; DLQ replay is
+  serialized by a Redis lock (409 when one is running), skips active jobs, and pages instead
+  of loading the whole queue.
+- **Pools + timeouts.** `PRISMA_POOL_SIZE`, `DORIS_POOL_SIZE`, `TELEMETRY_PG_POOL_SIZE` and
+  connect timeouts are configurable; Doris sessions get `query_timeout`
+  (`DORIS_QUERY_TIMEOUT_S`, 60) and Postgres-tier sessions `statement_timeout`; non-streaming
+  `/v1` requests answer 504 past `API_REQUEST_TIMEOUT_MS` (60 s); `/auth/*` bodies are
+  capped at 256 KB; open SSE streams are capped per project across replicas
+  (`SSE_MAX_STREAMS_PER_PROJECT`, 20 → 429).
+- **Helm hardening.** Pods run as uid 1000 with all capabilities dropped and privilege
+  escalation forbidden; the console's root filesystem is read-only; PodDisruptionBudgets
+  for api/console; an api `preStop` sleep; the migrate Job has a deadline, TTL, and
+  resources; an opt-in default-deny NetworkPolicy. The chart is published to
+  `oci://ghcr.io/memoturn/charts` on every release.
+- **Supply chain.** Every GitHub Action is pinned by commit SHA; images carry an SBOM and
+  max-mode provenance; PR builds are Trivy-scanned (CRITICAL/HIGH with a fix fail) and the
+  published `:latest` images are re-scanned weekly into the Security tab; `bun audit` runs
+  in CI (advisory); the api/worker images drop devDependencies and non-runtime trees; the
+  console's Caddy base is digest-pinned.
+
 ## [0.5.0] — 2026-08-02
 
 - Postgres telemetry tier (ADR-0002): `TELEMETRY_ENGINE=postgres` runs the whole

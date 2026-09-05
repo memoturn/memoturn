@@ -13,10 +13,12 @@ import {
   applyAllRetention,
   consumeRehydrateRate,
   demoModeEnabled,
+  envInt,
   evaluateAllAlerts,
   evaluateBudgets,
   pruneExpiredSandboxes,
   pruneMutableState,
+  readiness,
   runAllEmbeddingProjections,
   runAllScheduledExports,
   runAllThreadEvaluations,
@@ -26,7 +28,7 @@ import {
 } from "@memoturn/server";
 import { Queue, Worker } from "bullmq";
 import { shouldDeadLetter } from "./dlq.js";
-import { logJson, snapshot } from "./metrics.js";
+import { logJson, PROMETHEUS_CONTENT_TYPE, renderPrometheus, snapshot, wantsPrometheus } from "./metrics.js";
 import { processEvalBackfill } from "./processors/eval-backfill.js";
 import { processExperiment } from "./processors/experiment.js";
 import { processIngest } from "./processors/ingest.js";
@@ -44,11 +46,19 @@ const concurrency = Number(process.env.WORKER_CONCURRENCY ?? 10);
 // of being discarded, so lost batches can be inspected and replayed.
 const dlq = getDlqQueue();
 
+// Lock/stall tuning. BullMQ's defaults (30s lock, one stall allowed) were sized for
+// short jobs; an ingest batch under a slow Doris insert, or a GC pause, can exceed 30s and
+// get marked stalled → duplicated work. Long LLM-bound jobs get a lock that spans minutes.
 const ingestWorker = new Worker<IngestJob>(QUEUE_NAMES.ingest, processIngest, {
   connection: connectionOptions(),
   prefix: QUEUE_PREFIX,
   concurrency,
+  lockDuration: envInt("INGEST_LOCK_DURATION_MS", 60_000),
+  maxStalledCount: 2,
 });
+// Above this many dead-lettered batches something systemic is wrong (not one bad batch) —
+// log at error level so it pages through the log pipeline even before the alert cron runs.
+const DLQ_ALERT_DEPTH = envInt("DLQ_ALERT_DEPTH", 1000);
 
 ingestWorker.on("ready", () => console.log(`[worker] ingest ready (concurrency=${concurrency})`));
 ingestWorker.on("failed", async (job, err) => {
@@ -71,6 +81,13 @@ ingestWorker.on("failed", async (job, err) => {
         { removeOnComplete: false, removeOnFail: false },
       );
       logJson("warn", "ingest job sent to DLQ", { jobId: job.id, blobKey: job.data.blobKey });
+      const depth = await dlq.count().catch(() => 0);
+      if (DLQ_ALERT_DEPTH > 0 && depth >= DLQ_ALERT_DEPTH) {
+        logJson("error", "DLQ depth above threshold — ingest is failing systemically", {
+          depth,
+          threshold: DLQ_ALERT_DEPTH,
+        });
+      }
     } catch (e) {
       logJson("error", "failed to enqueue DLQ job", {
         jobId: job.id,
@@ -88,6 +105,8 @@ const experimentWorker = new Worker<ExperimentJob>(QUEUE_NAMES.experiment, proce
   connection: connectionOptions(),
   prefix: QUEUE_PREFIX,
   concurrency: experimentConcurrency,
+  lockDuration: envInt("LONG_JOB_LOCK_DURATION_MS", 600_000),
+  maxStalledCount: 1,
 });
 experimentWorker.on("ready", () => console.log(`[worker] experiment ready (concurrency=${experimentConcurrency})`));
 experimentWorker.on("failed", (job, err) =>
@@ -102,6 +121,8 @@ const evalBackfillWorker = new Worker<EvalBackfillJob>(QUEUE_NAMES.eval, process
   connection: connectionOptions(),
   prefix: QUEUE_PREFIX,
   concurrency: backfillConcurrency,
+  lockDuration: envInt("LONG_JOB_LOCK_DURATION_MS", 600_000),
+  maxStalledCount: 1,
 });
 evalBackfillWorker.on("ready", () =>
   console.log(`[worker] evaluator backfill ready (concurrency=${backfillConcurrency})`),
@@ -301,8 +322,16 @@ const healthHost = process.env.WORKER_HOST ?? "127.0.0.1";
 const ingestQueue = getIngestQueue();
 
 const healthServer = createServer(async (req, res) => {
-  const path = (req.url ?? "/").split("?")[0];
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const path = url.pathname;
   res.setHeader("content-type", "application/json");
+  if (path === "/ready") {
+    // Readiness (vs /health liveness): every datastore this worker writes to must answer.
+    const report = await readiness((msg) => logJson("warn", "readiness check failed", { check: msg }));
+    res.statusCode = report.ok ? 200 : 503;
+    res.end(JSON.stringify({ status: report.ok ? "ok" : "degraded", service: "memoturn-worker", ...report }));
+    return;
+  }
   if (path === "/health") {
     res.end(
       JSON.stringify({
@@ -320,14 +349,13 @@ const healthServer = createServer(async (req, res) => {
       dlq.getJobCounts(),
     ]);
     const dlqDepth = (dlqCounts.waiting ?? 0) + (dlqCounts.completed ?? 0) + (dlqCounts.failed ?? 0);
-    res.end(
-      JSON.stringify({
-        concurrency,
-        queues: { ingest, maintenance, dlq: dlqCounts },
-        dlqDepth,
-        metrics: snapshot(),
-      }),
-    );
+    const queues = { ingest, maintenance, dlq: dlqCounts };
+    if (wantsPrometheus(req.headers.accept, url.searchParams.get("format") ?? undefined)) {
+      res.setHeader("content-type", PROMETHEUS_CONTENT_TYPE);
+      res.end(renderPrometheus(queues, { concurrency, dlqDepth }));
+      return;
+    }
+    res.end(JSON.stringify({ concurrency, queues, dlqDepth, metrics: snapshot() }));
     return;
   }
   res.statusCode = 404;

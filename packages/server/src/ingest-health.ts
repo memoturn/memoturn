@@ -1,4 +1,5 @@
 import { getDlqQueue, getIngestQueue } from "@memoturn/db/queue";
+import { withLock } from "./lock.js";
 
 /**
  * Ingest-pipeline health + DLQ replay, shared by the console API and the `dlq` CLI.
@@ -11,6 +12,18 @@ import { getDlqQueue, getIngestQueue } from "@memoturn/db/queue";
  */
 
 const DLQ_STATES = ["waiting", "delayed", "failed", "completed", "active"] as const;
+// Replay must not touch a job another replayer is holding (`active`), and never scans the
+// whole queue into memory — `getJobs` is paged to the requested limit.
+const REPLAYABLE_STATES = ["waiting", "delayed", "failed", "completed"] as const;
+const REPLAY_PAGE = 500;
+const REPLAY_LOCK_TTL_S = 300;
+
+export class DlqReplayInProgressError extends Error {
+  constructor() {
+    super("a DLQ replay is already in progress");
+    this.name = "DlqReplayInProgressError";
+  }
+}
 
 export interface DlqBatch {
   batchId: string;
@@ -24,7 +37,8 @@ export async function inspectDlq(limit = 50): Promise<{ depth: number; batches: 
   const dlq = getDlqQueue();
   const counts = await dlq.getJobCounts(...DLQ_STATES);
   const depth = DLQ_STATES.reduce((n, s) => n + (counts[s] ?? 0), 0);
-  const jobs = await dlq.getJobs([...DLQ_STATES]);
+  // Page the fetch to the limit — a deep DLQ must not be loaded wholesale into API memory.
+  const jobs = await dlq.getJobs([...DLQ_STATES], 0, Math.max(0, limit - 1));
   const batches = jobs.slice(0, limit).map((j) => ({
     batchId: j.data.batchId,
     projectId: j.data.projectId,
@@ -34,25 +48,46 @@ export async function inspectDlq(limit = 50): Promise<{ depth: number; batches: 
   return { depth, batches };
 }
 
-/** Re-enqueue dead-lettered batches onto the ingest queue and clear them from the DLQ. */
+/**
+ * Re-enqueue dead-lettered batches onto the ingest queue and clear them from the DLQ.
+ * Serialized by a Redis lock (fail-closed): the console button and `bun run dlq --replay`
+ * racing each other would otherwise double-enqueue the same batches. Throws
+ * DlqReplayInProgressError when another replay holds the lock.
+ */
 export async function replayDlq(limit = Number.POSITIVE_INFINITY): Promise<{ replayed: number; failed: number }> {
-  const dlq = getDlqQueue();
-  const ingest = getIngestQueue();
-  const jobs = await dlq.getJobs([...DLQ_STATES]);
-  let replayed = 0;
-  let failed = 0;
-  for (const job of jobs) {
-    if (replayed >= limit) break;
-    const { projectId, batchId, blobKey } = job.data;
-    try {
-      await ingest.add("ingest", { projectId, batchId, blobKey });
-      await job.remove();
-      replayed++;
-    } catch {
-      failed++;
-    }
-  }
-  return { replayed, failed };
+  const result = await withLock(
+    "dlq-replay",
+    REPLAY_LOCK_TTL_S,
+    async () => {
+      const dlq = getDlqQueue();
+      const ingest = getIngestQueue();
+      let replayed = 0;
+      let failed = 0;
+      // Page through the queue; each page is re-fetched from offset 0 because replayed
+      // jobs are removed as we go (failed ones stay, so skip past them via `failed`).
+      while (replayed < limit) {
+        const want = Math.min(REPLAY_PAGE, limit - replayed);
+        const jobs = await dlq.getJobs([...REPLAYABLE_STATES], failed, failed + want - 1);
+        if (jobs.length === 0) break;
+        for (const job of jobs) {
+          if (replayed >= limit) break;
+          const { projectId, batchId, blobKey, requestId } = job.data;
+          try {
+            await ingest.add("ingest", { projectId, batchId, blobKey, requestId });
+            await job.remove();
+            replayed++;
+          } catch {
+            failed++;
+          }
+        }
+        if (jobs.length < want) break;
+      }
+      return { replayed, failed };
+    },
+    { failClosed: true },
+  );
+  if (result === null) throw new DlqReplayInProgressError();
+  return result;
 }
 
 interface WorkerMetrics {

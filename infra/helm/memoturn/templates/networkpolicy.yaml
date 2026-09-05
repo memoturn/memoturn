@@ -1,0 +1,40 @@
+{{- if .Values.networkPolicy.enabled }}
+# Default-deny for every pod in this release. Allowed: ingress to the api/console/worker
+# ports from within the cluster (front it with your ingress controller's own policy), egress
+# within the release (api → worker /metrics), DNS, and whatever `networkPolicy.egress` adds
+# (datastores, LLM provider endpoints, email transport).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "memoturn.fullname" . }}
+  labels:
+    {{- include "memoturn.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "memoturn.selectorLabels" . | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - ports:
+        - port: {{ .Values.api.port }}
+        - port: {{ .Values.console.port }}
+        - port: {{ .Values.worker.port }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "memoturn.selectorLabels" . | nindent 14 }}
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- with .Values.networkPolicy.egress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

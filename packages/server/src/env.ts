@@ -34,6 +34,192 @@ function isTruthy(v: string | undefined): boolean {
   return v === "1" || v?.toLowerCase() === "true";
 }
 
+// ── Typed environment schema ─────────────────────────────────────────────────────
+// Every knob the API/worker read is declared here with its shape, so a typo'd value
+// (`WORKER_CONCURRENCY=ten`, `RATE_LIMIT_PER_MINUTE=1,000`) fails at boot with a clear
+// message instead of silently becoming NaN somewhere deep in a queue or rate-limit call.
+// Hand-rolled on purpose: this module must stay dependency-free (it runs before anything
+// else and is imported by every entrypoint).
+type EnvSpec =
+  | { kind: "int"; min?: number; max?: number }
+  | { kind: "bool" }
+  | { kind: "url"; protocols: readonly string[] }
+  | { kind: "enum"; values: readonly string[] }
+  | { kind: "string"; minLength?: number };
+
+type Service = "api" | "worker";
+
+interface EnvVar {
+  spec: EnvSpec;
+  /** Required (non-empty) in production for these services. */
+  requiredIn?: readonly Service[];
+  /** Explain why the default is unsafe when the var is missing in production. */
+  why?: string;
+}
+
+const int = (min = 0, max?: number): EnvSpec => ({ kind: "int", min, max });
+const url = (...protocols: string[]): EnvSpec => ({ kind: "url", protocols });
+const BOTH: readonly Service[] = ["api", "worker"];
+
+export const ENV_SCHEMA: Record<string, EnvVar> = {
+  // Datastores — every one of these has a localhost/dev-credential fallback in code, which is
+  // exactly what must never be reached in production.
+  DATABASE_URL: { spec: url("postgresql:", "postgres:"), requiredIn: BOTH },
+  REDIS_URL: { spec: url("redis:", "rediss:"), requiredIn: BOTH, why: "the fallback is localhost:6379" },
+  BLOB_ENDPOINT: { spec: url("http:", "https:"), requiredIn: BOTH, why: "the fallback is a local MinIO" },
+  BLOB_ACCESS_KEY_ID: { spec: { kind: "string" }, requiredIn: BOTH, why: "the fallback is a public dev credential" },
+  BLOB_SECRET_ACCESS_KEY: {
+    spec: { kind: "string" },
+    requiredIn: BOTH,
+    why: "the fallback is a public dev credential",
+  },
+  BLOB_BUCKET: { spec: { kind: "string" } },
+  BLOB_REGION: { spec: { kind: "string" } },
+  BLOB_FORCE_PATH_STYLE: { spec: { kind: "bool" } },
+  TELEMETRY_ENGINE: { spec: { kind: "enum", values: ["doris", "postgres", "pg"] } },
+  TELEMETRY_DATABASE_URL: { spec: url("postgresql:", "postgres:") },
+  DORIS_HOST: { spec: { kind: "string" } }, // required-in-prod only on the Doris engine (checked below)
+  DORIS_PORT: { spec: int(1, 65535) },
+  DORIS_HTTP_PORT: { spec: int(1, 65535) },
+  DORIS_STREAM_LOAD_PORT: { spec: int(1, 65535) },
+  DORIS_STREAM_LOAD_TIMEOUT_MS: { spec: int(1000) },
+  DORIS_POOL_SIZE: { spec: int(1, 1000) },
+  DORIS_CONNECT_TIMEOUT_MS: { spec: int(100) },
+  DORIS_QUERY_TIMEOUT_S: { spec: int(1) },
+  TELEMETRY_STREAM_LOAD: { spec: { kind: "bool" } },
+  TELEMETRY_PG_POOL_SIZE: { spec: int(1, 1000) },
+  TELEMETRY_PG_STATEMENT_TIMEOUT_MS: { spec: int(100) },
+  PRISMA_POOL_SIZE: { spec: int(1, 1000) },
+  PRISMA_TRANSACTION_TIMEOUT_MS: { spec: int(100) },
+  PRISMA_TRANSACTION_MAX_WAIT_MS: { spec: int(100) },
+  // API
+  API_PORT: { spec: int(1, 65535) },
+  API_REQUEST_TIMEOUT_MS: { spec: int(1000) },
+  SSE_MAX_STREAMS_PER_PROJECT: { spec: int(0) },
+  RATE_LIMIT_PER_MINUTE: { spec: int(0) },
+  INGEST_EVENTS_PER_MINUTE: { spec: int(0) },
+  RATE_LIMIT_TRUSTED_PROXIES: { spec: int(0, 16) },
+  MCP_RATE_LIMIT_PER_MINUTE: { spec: int(0) },
+  PLAYGROUND_MAX_TOKENS: { spec: int(1) },
+  LLM_TIMEOUT_MS: { spec: int(1000) },
+  LLM_STREAM_TIMEOUT_MS: { spec: int(1000) },
+  GUARDRAIL_EVALUATOR_TIMEOUT_MS: { spec: int(100) },
+  LOG_LEVEL: { spec: { kind: "enum", values: ["debug", "info", "warn", "error"] } },
+  // Worker
+  WORKER_PORT: { spec: int(1, 65535) },
+  WORKER_CONCURRENCY: { spec: int(1, 1000) },
+  EXPERIMENT_CONCURRENCY: { spec: int(1, 100) },
+  EXPERIMENT_ITEM_CONCURRENCY: { spec: int(1, 100) },
+  EVAL_BACKFILL_CONCURRENCY: { spec: int(1, 100) },
+  MAINTENANCE_CONCURRENCY: { spec: int(1, 100) },
+  SANDBOX_CONCURRENCY: { spec: int(1, 100) },
+  WORKER_SHUTDOWN_TIMEOUT_MS: { spec: int(1000) },
+  STATE_RETENTION_HOURS: { spec: int(1) },
+  DLQ_ALERT_DEPTH: { spec: int(0) },
+  // Auth
+  AUTH_BASE_URL: {
+    spec: url("http:", "https:"),
+    requiredIn: BOTH,
+    why: "emails and OAuth callbacks are built from it",
+  },
+  AUTH_MIN_PASSWORD_LENGTH: { spec: int(8, 256) },
+  AUTH_ORG_MEMBERSHIP_LIMIT: { spec: int(1) },
+  AUTH_ORG_INVITATION_LIMIT: { spec: int(1) },
+  AUTH_COOKIE_CACHE_MAX_AGE: { spec: int(0) },
+  AUTH_REQUIRE_EMAIL_VERIFICATION: { spec: { kind: "bool" } },
+  AUTH_DISABLE_PASSWORD_SIGNUP: { spec: { kind: "bool" } },
+  AUTH_HIBP_DISABLED: { spec: { kind: "bool" } },
+  AUTH_COOKIE_CACHE_DISABLED: { spec: { kind: "bool" } },
+  // Demo
+  DEMO_MODE: { spec: { kind: "bool" } },
+  DEMO_TTL_DAYS: { spec: int(1) },
+  DEMO_MAX_SANDBOXES: { spec: int(1) },
+  DEMO_SEED_DAYS: { spec: int(1) },
+  DEMO_SEED_TRACES_PER_DAY: { spec: int(1) },
+  DEMO_FINALIZE_DELAY_MS: { spec: int(0) },
+  DEMO_START_RATE_LIMIT_PER_MINUTE: { spec: int(0) },
+};
+
+function checkSpec(name: string, raw: string, spec: EnvSpec): string | null {
+  switch (spec.kind) {
+    case "int": {
+      if (!/^-?\d+$/.test(raw.trim())) return `${name}=${JSON.stringify(raw)} is not an integer`;
+      const n = Number(raw);
+      if (spec.min !== undefined && n < spec.min) return `${name}=${raw} is below the minimum ${spec.min}`;
+      if (spec.max !== undefined && n > spec.max) return `${name}=${raw} is above the maximum ${spec.max}`;
+      return null;
+    }
+    case "bool":
+      return /^(1|0|true|false)$/i.test(raw.trim()) ? null : `${name}=${JSON.stringify(raw)} must be 1/0/true/false`;
+    case "url": {
+      let u: URL;
+      try {
+        u = new URL(raw);
+      } catch {
+        return `${name} is not a valid URL`;
+      }
+      return spec.protocols.includes(u.protocol) ? null : `${name} must use ${spec.protocols.join(" or ")}`;
+    }
+    case "enum":
+      return spec.values.includes(raw.trim().toLowerCase())
+        ? null
+        : `${name}=${JSON.stringify(raw)} must be one of ${spec.values.join(", ")}`;
+    case "string":
+      return spec.minLength !== undefined && raw.length < spec.minLength
+        ? `${name} must be at least ${spec.minLength} characters`
+        : null;
+  }
+}
+
+/**
+ * Validate every declared variable that is set (shape/range) and, in production, every one
+ * that is required for `service`. Returns human-readable problems; empty = fine.
+ */
+export function envSchemaProblems(service: Service, production = isProduction()): string[] {
+  const problems: string[] = [];
+  const engine = (process.env.TELEMETRY_ENGINE ?? "doris").toLowerCase();
+  for (const [name, def] of Object.entries(ENV_SCHEMA)) {
+    const raw = process.env[name];
+    if (raw === undefined || raw === "") {
+      if (production && def.requiredIn?.includes(service)) {
+        problems.push(`${name} must be set in production${def.why ? ` — ${def.why}` : ""}`);
+      }
+      continue;
+    }
+    const p = checkSpec(name, raw, def.spec);
+    if (p) problems.push(p);
+  }
+  if (production && engine !== "postgres" && engine !== "pg" && !process.env.DORIS_HOST) {
+    problems.push("DORIS_HOST must be set in production on the Doris engine (or set TELEMETRY_ENGINE=postgres)");
+  }
+  return problems;
+}
+
+/** Read an integer knob with a fallback — malformed values fall back rather than becoming NaN. */
+export function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.trunc(n) : fallback;
+}
+
+/**
+ * True when AUTH_BASE_URL points at a public https origin — the strongest available signal
+ * that this process is a real deployment. Used to catch a forgotten NODE_ENV=production,
+ * because every production-only protection (secret guard, Secure cookies, dev fallbacks)
+ * keys on NODE_ENV and would silently stay off.
+ */
+export function looksDeployed(): boolean {
+  const raw = process.env.AUTH_BASE_URL;
+  if (!raw) return false;
+  try {
+    const u = new URL(raw);
+    return u.protocol === "https:" && !/^(localhost|127\.0\.0\.1|\[::1\])$/i.test(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function secretProblem(name: string): string | null {
   const v = process.env[name];
   if (!v || v.length < MIN_SECRET_LEN) {
@@ -49,8 +235,16 @@ function secretProblem(name: string): string | null {
  * Validate the environment for a given service ("api" | "worker"). Throws in production
  * when configuration is insecure; warns in development. Call once at process boot.
  */
-export function validateRuntimeEnv(service: string): void {
+export function validateRuntimeEnv(service: Service): void {
   const required = ["ENCRYPTION_KEY", "BETTER_AUTH_SECRET"];
+
+  if (!isProduction() && looksDeployed()) {
+    throw new Error(
+      `[${service}] refusing to start — AUTH_BASE_URL is a public https origin (${process.env.AUTH_BASE_URL}) ` +
+        "but NODE_ENV is not 'production'. Every production protection (secret guard, Secure cookies, no dev " +
+        "fallbacks) keys on NODE_ENV=production — set it.",
+    );
+  }
 
   if (isProduction()) {
     const problems: string[] = [];
@@ -58,6 +252,7 @@ export function validateRuntimeEnv(service: string): void {
       const p = secretProblem(name);
       if (p) problems.push(p);
     }
+    problems.push(...envSchemaProblems(service, true));
     if (!process.env.AUTH_TRUSTED_ORIGINS) {
       problems.push("AUTH_TRUSTED_ORIGINS must be set to your console origin(s) in production");
     }
@@ -113,6 +308,21 @@ export function validateRuntimeEnv(service: string): void {
       );
     }
   }
+  // Malformed knobs are still worth a warning in dev — they'd silently become NaN otherwise.
+  for (const p of envSchemaProblems(service, false)) console.warn(`[${service}] env: ${p}`);
+}
+
+/**
+ * The Better Auth signing secret. In production it is mandatory (the boot guard already
+ * enforces this for the API and worker); this point-of-use check covers every OTHER
+ * process that imports the auth config — the migrate container, scripts, a future CLI —
+ * so none of them can ever sign a session with the public development fallback.
+ */
+export function authSecret(): string {
+  const secret = process.env.BETTER_AUTH_SECRET;
+  if (secret) return secret;
+  if (isProduction()) throw new Error("BETTER_AUTH_SECRET is required in production");
+  return "dev-only-change-me";
 }
 
 /**

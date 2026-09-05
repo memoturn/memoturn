@@ -11,6 +11,12 @@ describe("shouldDeadLetter", () => {
     expect(shouldDeadLetter("telemetry insert failed", 3, 8)).toBe(false);
   });
 
+  it("dead-letters an unrecoverable failure on the first attempt", () => {
+    expect(shouldDeadLetter("unrecoverable: raw batch not found at events/p/2026-09-04/x.json", 1, 8)).toBe(true);
+    expect(shouldDeadLetter("Unrecoverable: raw batch is malformed", 0, 8)).toBe(true);
+    expect(shouldDeadLetter("insert failed: unrecoverable-looking but not prefixed", 1, 8)).toBe(false);
+  });
+
   it("dead-letters a stalled job even with attempts remaining (the bypass fix)", () => {
     // BullMQ moves a stalled job to `failed` with attemptsMade possibly below `attempts`.
     expect(shouldDeadLetter("job stalled more than allowable limit", 1, 8)).toBe(true);

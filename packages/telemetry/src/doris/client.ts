@@ -27,6 +27,22 @@ export interface DorisConfig {
   database: string;
 }
 
+/** Integer env knob with a fallback and bounds — a malformed value never becomes NaN. */
+export function envInt(name: string, fallback: number, min = 0, max = Number.MAX_SAFE_INTEGER): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(n)));
+}
+
+/**
+ * Per-session query timeout (seconds). Doris enforces `query_timeout` server-side, so a
+ * pathological scan is killed on the FE instead of holding one of the pool's connections
+ * (and an API request) open indefinitely. Applied on every new pooled connection.
+ */
+export const DORIS_QUERY_TIMEOUT_S = envInt("DORIS_QUERY_TIMEOUT_S", 60, 1);
+
 export function dorisConfig(): DorisConfig {
   return {
     host: process.env.DORIS_HOST ?? "localhost",
@@ -43,7 +59,11 @@ function poolOptions(config: Partial<DorisConfig> = {}): mysql.PoolOptions {
     ...dorisConfig(),
     ...config,
     waitForConnections: true,
-    connectionLimit: 10,
+    // Size the pool per replica: replicas × DORIS_POOL_SIZE must stay under the FE's
+    // max_connections (default 1024 in 4.x — but each FE connection also holds BE resources).
+    connectionLimit: envInt("DORIS_POOL_SIZE", 10, 1, 1000),
+    // A hung FE must fail fast instead of pinning a pool slot forever.
+    connectTimeout: envInt("DORIS_CONNECT_TIMEOUT_MS", 10_000, 100),
     dateStrings: true,
     multipleStatements: false,
     // Recycle idle connections long before Doris's server-side wait_timeout (default 8h)
@@ -78,14 +98,21 @@ export function isFatalConnectionError(err: unknown): boolean {
 /** Create a standalone pool (used by the migration runner, which manages the database). */
 export function createDorisPool(config: Partial<DorisConfig> = {}): Pool {
   const pool = mysql.createPool(poolOptions(config));
-  pool.on("connection", (conn) => conn.query("SET time_zone = '+00:00'"));
+  pool.on("connection", (conn) => {
+    conn.query("SET time_zone = '+00:00'");
+    conn.query(`SET query_timeout = ${DORIS_QUERY_TIMEOUT_S}`);
+  });
   return pool.promise();
 }
 
 export function dorisPool(): Pool {
   if (!promisePool) {
     base = mysql.createPool(poolOptions());
-    base.on("connection", (conn) => conn.query("SET time_zone = '+00:00'"));
+    base.on("connection", (conn) => {
+      conn.query("SET time_zone = '+00:00'");
+      // Server-side kill switch for a runaway scan; see DORIS_QUERY_TIMEOUT_S.
+      conn.query(`SET query_timeout = ${DORIS_QUERY_TIMEOUT_S}`);
+    });
     promisePool = base.promise();
   }
   return promisePool;

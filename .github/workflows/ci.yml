@@ -15,8 +15,8 @@ jobs:
   go-sdk:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: "1.22"
           cache: false # stdlib-only, no modules to cache
@@ -73,11 +73,16 @@ jobs:
       BLOB_FORCE_PATH_STYLE: "true"
 
     steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.1"
       - run: bun install --frozen-lockfile
+      # Known-vulnerability audit of the installed tree (dependency-review only covers what a
+      # PR adds). Advisory for now — flip `continue-on-error` off once the baseline is clean.
+      - name: Dependency audit (advisory)
+        run: bun audit --audit-level=high
+        continue-on-error: true
       - run: bun run lint
       # Doc/code drift — read-only, no infra needed; fails fast before the DB/build steps.
       - name: Docs in sync with code
@@ -136,7 +141,7 @@ jobs:
       - name: Postgres-engine conformance
         run: TELEMETRY_ENGINE=postgres bun --filter @memoturn/telemetry test
       # Python SDK unit tests (stdlib-only SDK; pytest mocks urllib, no infra needed).
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - name: Python SDK tests
         working-directory: sdks/python
         run: uv run --with pytest pytest -q

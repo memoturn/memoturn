@@ -107,7 +107,11 @@ Per-project settings (`/v1/sampling`, `/v1/usage`, or the console **Settings** p
   HTTP query API (8030) accepts *any* credentials — anyone who can reach it can run SQL
   (★ the prod compose keeps Doris internal-only and always sets `DORIS_PASSWORD`).
 - [ ] API `/metrics` is off by default (404). To scrape it, set `API_METRICS_TOKEN` and send
-  `Authorization: Bearer <token>` — don't front it with an unauthenticated path.
+  `Authorization: Bearer <token>` — don't front it with an unauthenticated path. It serves
+  Prometheus text exposition when the scraper asks for it (`Accept: text/plain`, which
+  Prometheus sends, or `?format=prometheus`) and JSON otherwise; the worker's `/metrics`
+  does the same. `GET /ready` (API + worker) is a public readiness probe that reports
+  only ok/latency per dependency — never error details.
 - [ ] The worker's `/health` + `/metrics` server binds to **loopback** by default
   (`WORKER_HOST=127.0.0.1`) because `/metrics` is unauthenticated and leaks queue depths and
   per-project evaluator names. Only set `WORKER_HOST=0.0.0.0` for cross-host probes on a
@@ -124,6 +128,16 @@ Per-project settings (`/v1/sampling`, `/v1/usage`, or the console **Settings** p
   startup guard **refuses to boot** with it set unless `ALLOW_PRIVATE_WEBHOOK_TARGETS_ACK=1`
   is also present — the dev `.env.example` ships it on, and this stops that file from being
   copied to a server unnoticed. `AUTH_RATE_LIMIT_DISABLED` is refused outright.
+
+## Images & supply chain
+
+- [ ] Pin the image tag you deploy (`ghcr.io/memoturn/api:<version>`), never `latest`, and
+  verify provenance: every published image carries an SBOM and SLSA provenance attestation
+  (`docker buildx imagetools inspect <image> --format '{{json .Provenance}}'`).
+- [ ] The published images are Trivy-scanned weekly (Security tab of the repo); re-pull on a
+  new patch release rather than patching inside a running container.
+- [ ] Prefer `NODE_ENV=production` explicitly — the startup guard now refuses a public https
+  `AUTH_BASE_URL` without it, because every production protection keys on that variable.
 
 ## Seeding & data
 

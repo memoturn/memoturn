@@ -25,6 +25,9 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "memoturn.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.api.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- include "memoturn.podSecurityContext" . | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -33,6 +36,12 @@ spec:
         - name: api
           image: {{ include "memoturn.image" (list . "api") }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "memoturn.containerSecurityContext" (list . .Values.api) | nindent 12 }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep {{ .Values.api.preStopSleepSeconds }}"]
           ports:
             - name: http
               containerPort: {{ .Values.api.port }}
@@ -48,9 +57,10 @@ spec:
             {{- end }}
           envFrom:
             {{- include "memoturn.envFrom" . | nindent 12 }}
+          # Readiness pings Postgres/Redis/telemetry/blob (cached 5s); liveness stays cheap.
           readinessProbe:
             httpGet:
-              path: /v1/health
+              path: /ready
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10

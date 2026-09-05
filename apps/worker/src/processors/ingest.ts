@@ -42,6 +42,7 @@ import {
 } from "@memoturn/server";
 import { type TelemetryRowMap, type TelemetryTable, telemetry } from "@memoturn/telemetry";
 import type { Job } from "bullmq";
+import { UnrecoverableError } from "bullmq";
 import { mapEvents } from "../mappers.js";
 import { inc, logJson, observeInsert } from "../metrics.js";
 import { applySampling, sample } from "../sampling.js";
@@ -229,13 +230,33 @@ async function rehydratePruned(
 export async function processIngest(job: Job<IngestJob>): Promise<void> {
   const { projectId, blobKey } = job.data;
 
-  const raw = await getRawBatch(blobKey);
-  if (!raw) throw new Error(`raw batch not found at ${blobKey}`);
+  // A missing or unparseable batch can never succeed on retry — dead-letter it on the first
+  // attempt (BullMQ's UnrecoverableError skips the backoff ladder; `shouldDeadLetter` matches
+  // the prefix) instead of burning 8 attempts × ~2 min of exponential backoff.
+  let raw: string;
+  try {
+    raw = await getRawBatch(blobKey);
+  } catch (err) {
+    const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+    if (e?.name === "NoSuchKey" || e?.$metadata?.httpStatusCode === 404) {
+      throw new UnrecoverableError(`unrecoverable: raw batch not found at ${blobKey}`);
+    }
+    throw err; // transient blob error — let the retry ladder handle it
+  }
+  if (!raw) throw new UnrecoverableError(`unrecoverable: raw batch is empty at ${blobKey}`);
 
   // Keep the pre-zod-parse JSON so the mutable-state merge can tell which fields the client
   // actually SENT (present keys) vs. zod-filled defaults — the two diverge (e.g. `environment`).
-  const rawJson = JSON.parse(raw) as { batch: Array<{ body?: Record<string, unknown> }> };
-  const parsed = ingestRequest.parse(rawJson);
+  let rawJson: { batch: Array<{ body?: Record<string, unknown> }> };
+  let parsed: ReturnType<typeof ingestRequest.parse>;
+  try {
+    rawJson = JSON.parse(raw) as { batch: Array<{ body?: Record<string, unknown> }> };
+    parsed = ingestRequest.parse(rawJson);
+  } catch (err) {
+    throw new UnrecoverableError(
+      `unrecoverable: raw batch at ${blobKey} is malformed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 
   // Volume-based usage metering (best-effort — never fails ingestion). Measured on the raw
   // batch, so usage counts everything ingested regardless of sampling. Gated on the first

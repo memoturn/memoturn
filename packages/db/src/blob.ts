@@ -2,6 +2,7 @@ import {
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
@@ -43,6 +44,11 @@ export async function putRawBatch(projectId: string, batchId: string, payload: u
     }),
   );
   return key;
+}
+
+/** Readiness probe: can we reach the bucket with our credentials? Throws otherwise. */
+export async function headBucket(): Promise<void> {
+  await blob().send(new HeadBucketCommand({ Bucket: BLOB_BUCKET }));
 }
 
 /** Delete one object (no-op if absent). Used to roll back a blob write whose enqueue failed. */

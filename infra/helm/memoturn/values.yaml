@@ -16,6 +16,42 @@ serviceAccount:
   name: ""
   annotations: {}
 
+# ── Pod hardening (applied to api, worker, console, and the migrate Job) ─────────
+# The images already run as a non-root user (uid 1000: `bun` in the Bun images, `console`
+# in the Caddy image); these settings make the pod spec ENFORCE that, drop every Linux
+# capability, and forbid privilege escalation. readOnlyRootFilesystem is on for the
+# console (Caddy's writable dirs are emptyDir-mounted) and off for api/worker by default
+# — Bun and Prisma write to /tmp and $HOME/.cache; flip it per component once you've
+# mounted those paths.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  readOnlyRootFilesystem: false
+
+# PodDisruptionBudgets keep at least one api/console replica up through node drains and
+# cluster upgrades. Only rendered when the component has more than one replica.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Optional default-deny NetworkPolicy: pods in this release may talk to each other and to
+# the datastores you list; everything else is blocked. Off by default because the
+# datastore CIDRs/selectors are cluster-specific — enable once you've filled in egress.
+networkPolicy:
+  enabled: false
+  # Extra egress rules appended to the release-internal ones (datastores, DNS, provider APIs).
+  egress: []
+  # - to:
+  #     - ipBlock: { cidr: 10.0.0.0/8 }
+
 # ── Datastores + secrets ─────────────────────────────────────────────────────────
 # memoturn does NOT ship Postgres/Doris/Redis/blob — point these at managed
 # services or in-cluster operators (e.g. the doris-operator). Provide values here (a
@@ -49,15 +85,29 @@ config:
   authTrustedOrigins: "" # comma-separated console origins allowed to call auth
 
 # Extra env injected into api + worker (e.g. RATE_LIMIT_PER_MINUTE, WORKER_CONCURRENCY).
+# Connection budget: every api/worker replica opens PRISMA_POOL_SIZE (10) Postgres
+# connections (+ TELEMETRY_PG_POOL_SIZE on the Postgres tier, + DORIS_POOL_SIZE to the FE).
+# With api.autoscaling.maxReplicas=10 that is 110+ Postgres connections — above the
+# default max_connections of 100. Lower the pools here, raise max_connections, or front
+# Postgres with PgBouncer before relying on the HPA. See docs/deployment.md#scaling.
 extraEnv: []
 # - name: RATE_LIMIT_PER_MINUTE
 #   value: "600"
+# - name: PRISMA_POOL_SIZE
+#   value: "5"
 extraEnvFrom: []
 
 # Run `db:migrate` (Prisma) + the Doris DDL as a pre-install/upgrade Job.
 migrations:
   enabled: true
   backoffLimit: 3
+  # A migration that can't finish in this window is a problem to look at, not to wait on
+  # forever (the Doris DDL runner retries connection errors for minutes by design).
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 3600
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
 
 api:
   replicaCount: 2
@@ -65,6 +115,12 @@ api:
   service:
     type: ClusterIP
     port: 3001
+  # preStop sleep lets the endpoint controller remove the pod from Service endpoints before
+  # the process gets SIGTERM, so in-flight ingest acks aren't cut off by a rolling update.
+  preStopSleepSeconds: 5
+  terminationGracePeriodSeconds: 30
+  # Override the pod/container security context for this component (merged over the globals).
+  containerSecurityContext: {}
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }
@@ -84,6 +140,7 @@ worker:
   # Seconds the kubelet waits for the drain before SIGKILL. Experiment and evaluator-backfill
   # jobs run for minutes — size this above your longest expected job.
   terminationGracePeriodSeconds: 600
+  containerSecurityContext: {}
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }
@@ -104,6 +161,9 @@ console:
   service:
     type: ClusterIP
     port: 3000
+  # Caddy only writes to /config and /data (emptyDir-mounted), so the root fs can be read-only.
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: 500m, memory: 256Mi }
