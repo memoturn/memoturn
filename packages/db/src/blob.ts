@@ -105,6 +105,22 @@ export async function deleteBlobPrefixOlderThan(prefix: string, cutoff: Date): P
   return deleted;
 }
 
+/** Page through every key under `prefix` (oldest date-partition first — S3 lists lexically). */
+export async function* listBlobKeys(
+  prefix: string,
+): AsyncGenerator<{ key: string; size: number; lastModified?: Date }> {
+  let continuationToken: string | undefined;
+  do {
+    const list = await blob().send(
+      new ListObjectsV2Command({ Bucket: BLOB_BUCKET, Prefix: prefix, ContinuationToken: continuationToken }),
+    );
+    for (const o of list.Contents ?? []) {
+      if (o.Key) yield { key: o.Key, size: o.Size ?? 0, lastModified: o.LastModified };
+    }
+    continuationToken = list.IsTruncated ? list.NextContinuationToken : undefined;
+  } while (continuationToken);
+}
+
 /** Fetch raw bytes + content type for a key, or null if missing. */
 export async function getBlobBytes(key: string): Promise<{ body: Uint8Array; contentType: string } | null> {
   try {

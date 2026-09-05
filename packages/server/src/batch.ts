@@ -1,5 +1,5 @@
-import { telemetry } from "@memoturn/telemetry";
 import { addDatasetItems, createDataset } from "./datasets.js";
+import { deleteTraceData } from "./lifecycle.js";
 import { rehydratePayload } from "./payloads.js";
 import { addReviewItems } from "./review.js";
 import { getTraceIO } from "./traces.js";
@@ -31,8 +31,9 @@ export async function runBatchAction(projectId: string, input: BatchInput) {
   if (ids.length === 0) return { action: input.action, affected: 0 };
 
   if (input.action === "delete") {
-    await telemetry().deleteTraces(projectId, ids);
-    return { action: "delete", affected: ids.length };
+    // Telemetry rows + Postgres state mirror + offloaded payload objects, together.
+    const r = await deleteTraceData(projectId, ids);
+    return { action: "delete", affected: r.traces };
   }
 
   if (input.action === "add-to-dataset") {

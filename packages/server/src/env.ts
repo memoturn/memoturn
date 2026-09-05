@@ -115,6 +115,7 @@ export const ENV_SCHEMA: Record<string, EnvVar> = {
   SANDBOX_CONCURRENCY: { spec: int(1, 100) },
   WORKER_SHUTDOWN_TIMEOUT_MS: { spec: int(1000) },
   STATE_RETENTION_HOURS: { spec: int(1) },
+  TELEMETRY_MAX_RETENTION_DAYS: { spec: int(0) },
   DLQ_ALERT_DEPTH: { spec: int(0) },
   // Auth
   AUTH_BASE_URL: {

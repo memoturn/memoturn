@@ -39,6 +39,7 @@ const ADMIN_PREFIXES = [
   "/v1/ingest/health",
   "/v1/sso",
   "/v1/organizations/{id}/members",
+  "/v1/users/{userId}/data",
 ];
 // Reads that enumerate credentials or pipeline internals are admin-only too; other reads
 // under an admin prefix (e.g. listing members) stay open to any member.

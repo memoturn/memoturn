@@ -26,6 +26,7 @@ export * from "./export.js";
 export * from "./guardrails.js";
 export * from "./ingest.js";
 export * from "./ingest-health.js";
+export * from "./lifecycle.js";
 export * from "./live.js";
 export * from "./lock.js";
 export * from "./mailer.js";

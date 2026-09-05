@@ -60,6 +60,7 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | `INGEST_LOCK_DURATION_MS` | `60000` | BullMQ lock for an ingest job; a job that outlives it is marked stalled (2 stalls → failed → DLQ). Raise if inserts routinely exceed a minute. |
 | `LONG_JOB_LOCK_DURATION_MS` | `600000` | BullMQ lock for experiment / evaluator-backfill jobs (minutes-long, LLM-bound). |
 | `DLQ_ALERT_DEPTH` | `1000` | When the dead-letter queue reaches this depth the worker logs an error-level line ("failing systemically"). `0` disables. |
+| `TELEMETRY_MAX_RETENTION_DAYS` | `0` (off) | Instance-wide retention ceiling: every project — with or without a policy — is swept at `min(policy, ceiling)` across the telemetry store, the blob event log, and the Postgres state mirror. |
 | `WORKER_SHUTDOWN_TIMEOUT_MS` | `570000` | Drain budget on SIGTERM: how long the worker waits for in-flight jobs (experiments/backfills run for minutes) before force-exiting. Keep it under the orchestrator's grace period (Helm `worker.terminationGracePeriodSeconds`, compose `stop_grace_period`). |
 | `WORKER_PORT` | `3002` | Worker `/health` (liveness), `/ready` (readiness — pings every datastore), and `/metrics` (JSON, or Prometheus text with `Accept: text/plain` / `?format=prometheus`) HTTP endpoint |
 | `WORKER_HOST` | `127.0.0.1` | Bind host for the worker health/metrics server. Loopback by default — `/metrics` is unauthenticated and leaks queue depths and per-project evaluator names. Set `0.0.0.0` only for cross-host probes on a trusted network. |

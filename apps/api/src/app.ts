@@ -70,6 +70,8 @@ import {
   deleteSavedView,
   deleteScore,
   deleteScoreConfig,
+  deleteTraceData,
+  deleteUserData,
   deleteWebhook,
   deleteWidget,
   demoModeEnabled,
@@ -444,6 +446,7 @@ app.use("/v1/sessions", requireAuth);
 app.use("/v1/sessions/*", requireAuth);
 app.use("/v1/live/*", requireAuth);
 app.use("/v1/users", requireAuth);
+app.use("/v1/users/*", requireAuth);
 app.use("/v1/metrics", requireAuth);
 app.use("/v1/metrics/*", requireAuth);
 app.use("/v1/usage", requireAuth);
@@ -1490,6 +1493,66 @@ app.openapi(
     },
   }),
   async (c) => c.json({ data: await getSdkVersions(c.get("projectId"), c.req.valid("query").days ?? 30) }),
+);
+
+// ── Erasure ───────────────────────────────────────────────────────────────────────
+// Both routes delete COMPLETELY: telemetry rows in every table, the Postgres state mirror
+// (full input/output copies), and the offloaded payload objects the rows reference. The raw
+// event batches are multi-trace and governed by retention — a blob replay could
+// re-materialize a deleted trace, so follow an erasure request with a retention cutoff.
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/traces/{id}",
+    summary: "Delete one trace and everything attached to it (observations, scores, payloads, state)",
+    tags: ["traces"],
+    security,
+    request: { params: z.object({ id: z.string().min(1).max(256) }) },
+    responses: {
+      200: {
+        description: "Deleted",
+        content: { "application/json": { schema: z.object({ deleted: z.boolean(), payloadObjects: z.number() }) } },
+      },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const id = c.req.valid("param").id;
+    const r = await deleteTraceData(c.get("projectId"), [id]);
+    await recordAudit(c.get("projectId"), c.get("actor"), "trace.delete", `trace:${id}`, {
+      payloadObjects: r.payloadObjects,
+    });
+    return c.json({ deleted: true, payloadObjects: r.payloadObjects });
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/users/{userId}/data",
+    summary: "Right to erasure: delete every trace this project recorded for an end user",
+    tags: ["traces"],
+    security,
+    request: { params: z.object({ userId: z.string().min(1).max(512) }) },
+    responses: {
+      200: {
+        description: "Deleted",
+        content: { "application/json": { schema: z.object({ deleted: z.boolean(), traces: z.number() }) } },
+      },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    // Destructive across everything one person ever did — admin only.
+    const denied = denyIfReadOnly(c) ?? denyIfNotAdmin(c);
+    if (denied) return denied;
+    const userId = c.req.valid("param").userId;
+    const r = await deleteUserData(c.get("projectId"), userId);
+    await recordAudit(c.get("projectId"), c.get("actor"), "user.erase", `user:${userId}`, { traces: r.traces });
+    return c.json({ deleted: true, traces: r.traces });
+  },
 );
 
 app.openapi(

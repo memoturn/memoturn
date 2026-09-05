@@ -454,11 +454,80 @@ export function statePruneWindowHours(): number {
  * by the rehydrate path (Phase 3b). Runs in one transaction; global (the window is operational, not
  * per-project data retention, which applies to Doris).
  */
+const PRUNE_CHUNK = 5_000;
+
+/**
+ * Delete rows matching `where` in bounded chunks (Postgres has no `DELETE … LIMIT`, so each
+ * pass selects a page of ids first). One giant `deleteMany` across every tenant used to run
+ * inside a single 20 s transaction: on a large table it timed out every hour and the sweep
+ * never converged. Chunking keeps each statement small and lets a partial run make progress.
+ */
+async function deleteInChunks(
+  model: "traceState" | "observationState" | "scoreState",
+  where: Record<string, unknown>,
+): Promise<number> {
+  let total = 0;
+  for (;;) {
+    // The three delegates are structurally identical for these two calls.
+    const delegate = prisma[model] as unknown as {
+      findMany(args: unknown): Promise<{ projectId: string; id: string }[]>;
+      deleteMany(args: unknown): Promise<{ count: number }>;
+    };
+    const page: { projectId: string; id: string }[] = await delegate.findMany({
+      where,
+      select: { projectId: true, id: true },
+      take: PRUNE_CHUNK,
+    });
+    if (page.length === 0) break;
+    const { count } = await delegate.deleteMany({
+      where: { OR: page.map((r) => ({ projectId: r.projectId, id: r.id })) },
+    });
+    total += count;
+    if (page.length < PRUNE_CHUNK) break;
+  }
+  return total;
+}
+
 export async function pruneMutableState(cutoff: Date): Promise<StatePruneResult> {
-  const [traces, observations, scores] = await prisma.$transaction([
-    prisma.traceState.deleteMany({ where: { updatedAt: { lt: cutoff } } }),
-    prisma.observationState.deleteMany({ where: { updatedAt: { lt: cutoff } } }),
-    prisma.scoreState.deleteMany({ where: { updatedAt: { lt: cutoff } } }),
+  const where = { updatedAt: { lt: cutoff } };
+  return {
+    traces: await deleteInChunks("traceState", where),
+    observations: await deleteInChunks("observationState", where),
+    scores: await deleteInChunks("scoreState", where),
+  };
+}
+
+/**
+ * Per-project retention on the mutable-state mirror: rows whose entity time (trace
+ * timestamp / observation start / score timestamp — falling back to updatedAt for rows
+ * that never carried one) is older than the cutoff. Called by the retention sweep so a
+ * project's configured window also governs the full input/output copies in Postgres, not
+ * just the analytical store and blob.
+ */
+export async function pruneProjectState(projectId: string, cutoff: Date): Promise<StatePruneResult> {
+  return {
+    traces: await deleteInChunks("traceState", {
+      projectId,
+      OR: [{ timestamp: { lt: cutoff } }, { timestamp: null, updatedAt: { lt: cutoff } }],
+    }),
+    observations: await deleteInChunks("observationState", {
+      projectId,
+      OR: [{ startTime: { lt: cutoff } }, { startTime: null, updatedAt: { lt: cutoff } }],
+    }),
+    scores: await deleteInChunks("scoreState", {
+      projectId,
+      OR: [{ timestamp: { lt: cutoff } }, { timestamp: null, updatedAt: { lt: cutoff } }],
+    }),
+  };
+}
+
+/** Remove the mirror rows for specific traces (their observations + scores included). */
+export async function deleteStatesForTraces(projectId: string, traceIds: string[]): Promise<StatePruneResult> {
+  if (traceIds.length === 0) return { traces: 0, observations: 0, scores: 0 };
+  const [observations, scores, traces] = await prisma.$transaction([
+    prisma.observationState.deleteMany({ where: { projectId, traceId: { in: traceIds } } }),
+    prisma.scoreState.deleteMany({ where: { projectId, traceId: { in: traceIds } } }),
+    prisma.traceState.deleteMany({ where: { projectId, id: { in: traceIds } } }),
   ]);
   return { traces: traces.count, observations: observations.count, scores: scores.count };
 }

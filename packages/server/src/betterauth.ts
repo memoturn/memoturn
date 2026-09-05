@@ -20,6 +20,7 @@ import { recordAuthAudit } from "./audit.js";
 import { demoModeEnabled, provisionSandboxForUser } from "./demo.js";
 import { brandedEmail } from "./emailtemplate.js";
 import { authSecret, isProduction, consoleOrigin as resolveConsoleOrigin } from "./env.js";
+import { purgeProjectData } from "./lifecycle.js";
 import { mailerStatus, sendEmail } from "./mailer.js";
 
 /**
@@ -427,6 +428,13 @@ export const auth = betterAuth({
         });
       },
       organizationHooks: {
+        // Deleting an organization cascades every project in Postgres — but the telemetry
+        // store and blob prefixes don't cascade. Purge them first so an org deletion is a
+        // real deletion and not a pile of orphaned, unreachable (but present) data.
+        beforeDeleteOrganization: async ({ organization: org }) => {
+          const projects = await prisma.project.findMany({ where: { organizationId: org.id }, select: { id: true } });
+          for (const { id } of projects) await purgeProjectData(id);
+        },
         // Every new org gets a default project so it's immediately usable.
         afterCreateOrganization: async ({ organization: org }) => {
           await prisma.project.upsert({

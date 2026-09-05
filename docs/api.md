@@ -188,6 +188,8 @@ Server-executed experiments run a prompt/model across a dataset and auto-score e
 | GET | `/v1/scores/agreement` | Agreement between two score sources over the traces carrying both. Numeric pairs return correlation + MAE/RMSE; label pairs return agreement rate, Cohen's Kappa, and per-label F1. Always returns a confusion matrix (numeric values are bucketed). Query: `a`, `b` (required), `days`. Scans at most 20 000 pairs; past that `sampled` is true. |
 | PATCH | `/v1/scores/{id}` | Correct a score's `value`/`stringValue`/`comment` (inserts a replacement row; audited). |
 | DELETE | `/v1/scores/{id}` | Hard-delete a score (Doris `DELETE`, project-scoped). |
+| DELETE | `/v1/traces/{id}` | Delete one trace completely: every telemetry table, the Postgres state mirror, and the offloaded payload objects it references. Audited. (Raw event batches are multi-trace and governed by retention — follow an erasure with a retention cutoff.) |
+| DELETE | `/v1/users/{userId}/data` | Right to erasure for an END USER of the traced app: every trace recorded under that `userId`, with the same completeness as `DELETE /v1/traces/{id}`. **Admin-only**; audited; returns `{ traces }`. |
 | GET / POST | `/v1/saved-views` | List / save a table view (named set of filters). |
 | PATCH / DELETE | `/v1/saved-views/{id}` | Update a saved view’s name/state / delete it. |
 | GET / POST | `/v1/comments` | List comments on an object (trace/observation/session/prompt) / add one. |
