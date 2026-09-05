@@ -11,7 +11,9 @@ import datetime as _dt
 import json
 import logging
 import os
+import random
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -57,6 +59,65 @@ def _is_transient(code: int) -> bool:
     return code >= 500 or code in (408, 429)
 
 
+# Hard limits of ``POST /v1/ingest``: at most 1000 events per request and a 12 MB body. A flush
+# never sends more than one request's worth at a time — the buffer can hold far more than one
+# request (it exists to ride out an outage), and a single over-limit POST would be rejected as
+# a permanent 400/413 and drop everything it carried.
+MAX_BATCH_EVENTS = 1000
+MAX_BATCH_BYTES = 10 * 1024 * 1024  # headroom under the API's 12 MB cap
+_BACKOFF_BASE_S = 1.0
+_BACKOFF_MAX_S = 60.0
+
+
+class _TransientIngestError(Exception):
+    """A retryable ingest failure: carries the original exception and any Retry-After."""
+
+    def __init__(self, original: BaseException, retry_after: Optional[float]) -> None:
+        super().__init__(str(original))
+        self.original = original
+        self.retry_after = retry_after
+
+
+def _retry_after_seconds(e: urllib.error.HTTPError) -> Optional[float]:
+    try:
+        raw = e.headers.get("Retry-After") if e.headers is not None else None
+    except Exception:
+        raw = None
+    if not raw:
+        return None
+    try:
+        return min(max(float(raw), 0.0), _BACKOFF_MAX_S)
+    except ValueError:
+        return None
+
+
+def _chunk_batch(events: list[dict[str, Any]], max_events: int) -> list[list[dict[str, Any]]]:
+    """Split a buffer into request-sized chunks (by event count AND serialized bytes). An event
+    that alone exceeds the byte cap can never be accepted — it is dropped with an error rather
+    than poisoning the chunk it would ride in."""
+    chunks: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    current_bytes = 0
+    for event in events:
+        size = len(json.dumps(event, default=str).encode()) + 1
+        if size > MAX_BATCH_BYTES:
+            logger.error(
+                "memoturn: dropping event %s (%s) — %d bytes exceeds the ingest limit",
+                event.get("id"),
+                event.get("type"),
+                size,
+            )
+            continue
+        if len(current) >= max_events or current_bytes + size > MAX_BATCH_BYTES:
+            chunks.append(current)
+            current, current_bytes = [], 0
+        current.append(event)
+        current_bytes += size
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def _env_int(name: str, default: int) -> int:
     try:
         n = int(os.environ.get(name, ""))
@@ -94,6 +155,8 @@ class Memoturn:
         flush_at: flush when the buffer reaches this many events (default 20).
         max_buffer_size: hard cap on buffered events; incoming events are dropped with a
             one-time warning once reached (default 10000, or ``MEMOTURN_MAX_BUFFER_SIZE``).
+        max_batch_size: events per ingest request when flushing — a large buffer is sent as
+            several requests (default and hard maximum 1000, the API's per-request limit).
         request_timeout: per-request timeout in seconds (default 10).
         mask: redaction hook ``mask(value, field, event_type)`` applied to the ``input``,
             ``output``, and ``metadata`` of every event before buffering.
@@ -108,6 +171,7 @@ class Memoturn:
         environment: Optional[str] = None,
         flush_at: int = 20,
         max_buffer_size: Optional[int] = None,
+        max_batch_size: int = MAX_BATCH_EVENTS,
         request_timeout: float = 10.0,
         mask: Optional[MaskFunction] = None,
         allow_insecure_http: bool = False,
@@ -118,11 +182,15 @@ class Memoturn:
         self.environment = environment or os.environ.get("MEMOTURN_ENVIRONMENT", "default")
         self.flush_at = flush_at
         self.max_buffer_size = max_buffer_size or _env_int("MEMOTURN_MAX_BUFFER_SIZE", 10_000)
+        self.max_batch_size = min(MAX_BATCH_EVENTS, max(1, max_batch_size))
         self.request_timeout = request_timeout
         self._mask = mask
         self._buffer: list[dict[str, Any]] = []
         self._lock = threading.Lock()
         self._warned_buffer_full = False
+        # Backoff for background flushes after a transient failure (explicit flush() always tries).
+        self._transient_failures = 0
+        self._backoff_until = 0.0
 
         _warn_if_insecure(self.base_url, allow_insecure_http)
         if not self.public_key and not self.secret_key:
@@ -161,14 +229,57 @@ class Memoturn:
 
     # ── internal ──────────────────────────────────────────────────────────────
     def _flush_quietly(self) -> None:
-        """Flush without raising — used by the size trigger and the atexit hook."""
+        """Flush without raising — used by the size trigger and the atexit hook. Honors the
+        backoff window after a transient failure so a fleet of clients doesn't hammer a
+        recovering API in lockstep."""
+        if time.monotonic() < self._backoff_until:
+            return
         self._flush(raise_on_error=False)
 
+    def _note_transient_failure(self, retry_after: Optional[float]) -> None:
+        exp = min(_BACKOFF_MAX_S, _BACKOFF_BASE_S * (2**self._transient_failures))
+        jitter = 0.75 + random.random() * 0.5  # ±25% so retries de-synchronize across processes
+        delay = retry_after if retry_after is not None else exp * jitter
+        self._transient_failures = min(self._transient_failures + 1, 16)
+        self._backoff_until = time.monotonic() + delay
+
     def _flush(self, raise_on_error: bool) -> None:
+        """Send everything buffered, in request-sized chunks (≤ 1000 events / ~10 MB each).
+
+        A transient failure re-buffers the failing chunk and every chunk after it (nothing is
+        lost, order is kept) and stops; a permanent reject drops only that chunk and continues.
+        """
         with self._lock:
-            batch, self._buffer = self._buffer, []
-        if not batch:
+            pending, self._buffer = self._buffer, []
+        if not pending:
             return
+        chunks = _chunk_batch(pending, self.max_batch_size)
+        first_reject: Optional[BaseException] = None
+        for i, chunk in enumerate(chunks):
+            try:
+                self._send(chunk)
+            except _TransientIngestError as t:
+                self._rebuffer([e for c in chunks[i:] for e in c])
+                self._note_transient_failure(t.retry_after)
+                if raise_on_error:
+                    raise t.original
+                logger.error(
+                    "memoturn: ingest failed, re-buffered %d event(s): %s",
+                    sum(len(c) for c in chunks[i:]),
+                    _truncate(str(t.original)),
+                )
+                return
+            except urllib.error.HTTPError as e:
+                if first_reject is None:
+                    first_reject = e
+        self._transient_failures = 0
+        self._backoff_until = 0.0
+        if first_reject is not None and raise_on_error:
+            raise first_reject
+
+    def _send(self, batch: list[dict[str, Any]]) -> None:
+        """One ``POST /v1/ingest``. Raises ``_TransientIngestError`` (retry) or the permanent
+        ``HTTPError`` (the batch is already dropped and logged)."""
         auth = base64.b64encode(f"{self.public_key}:{self.secret_key}".encode()).decode()
         req = urllib.request.Request(
             f"{self.base_url}/v1/ingest",
@@ -185,24 +296,14 @@ class Memoturn:
             except Exception:
                 detail = ""
             if _is_transient(e.code):
-                self._rebuffer(batch)
-                if raise_on_error:
-                    raise
-                logger.error("memoturn: ingest failed (%s), re-buffered %d event(s): %s", e.code, len(batch), detail)
-            else:
-                # Permanent reject (bad request/auth) — retrying can never succeed; drop the batch.
-                logger.error("memoturn: dropping %d event(s) rejected at ingest: %s %s", len(batch), e.code, detail)
-                if raise_on_error:
-                    raise
-            return
+                raise _TransientIngestError(e, _retry_after_seconds(e)) from e
+            # Permanent reject (bad request/auth) — retrying can never succeed; drop the batch.
+            logger.error("memoturn: dropping %d event(s) rejected at ingest: %s %s", len(batch), e.code, detail)
+            raise
         except urllib.error.URLError as e:
             # Network failure (connection refused / DNS / TLS) — transient: re-buffer so
             # the batch is not lost.
-            self._rebuffer(batch)
-            if raise_on_error:
-                raise
-            logger.error("memoturn: ingest failed, re-buffered %d event(s): %s", len(batch), _truncate(str(e)))
-            return
+            raise _TransientIngestError(e, None) from e
 
         # A 207 reports per-event results; surface rejected events instead of silently
         # dropping them (they are NOT retried — a schema reject is permanent).
