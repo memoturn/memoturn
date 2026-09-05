@@ -123,6 +123,10 @@ jobs:
       - run: bun --filter @memoturn/db generate
       - run: bun --filter @memoturn/db migrate
       - run: bun run db:telemetry
+      # A fresh install must come up partitioned (the migrator's step 0); the CLI reports any
+      # table that isn't. Guards the canonical DDL against silently regressing to the legacy shape.
+      - name: Doris tables are partitioned
+        run: bun scripts/telemetry-repartition.ts --plan | tee /dev/stderr | grep -q "UNPARTITIONED" && exit 1 || true
       # Wait for MinIO before the integration test writes a blob (services start
       # concurrently and bitnami/minio doesn't expose a health-cmd we can wire here).
       - name: Wait for MinIO

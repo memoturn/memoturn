@@ -25,7 +25,7 @@ const MUTATING = new Set(["post", "put", "patch", "delete"]);
 
 // Routes that legitimately bypass the write-role gate: SDK ingest (API-key OWNER)
 // and stateless compute. Everything else that mutates must guard.
-const EXEMPT_PATHS = new Set(["/v1/ingest", "/v1/otel/v1/traces"]);
+const EXEMPT_PATHS = new Set(["/v1/ingest", "/v1/otel/v1/traces", "/v1/otel/v1/metrics"]);
 
 // Admin-only surfaces: routes that manage credentials, membership, the project's lifecycle,
 // or the ingest pipeline must ALSO call `denyIfNotAdmin(c)` (OWNER/ADMIN — API keys only via
@@ -39,6 +39,7 @@ const ADMIN_PREFIXES = [
   "/v1/ingest/health",
   "/v1/sso",
   "/v1/organizations/{id}/members",
+  "/v1/users/{userId}/data",
 ];
 // Reads that enumerate credentials or pipeline internals are admin-only too; other reads
 // under an admin prefix (e.g. listing members) stay open to any member.

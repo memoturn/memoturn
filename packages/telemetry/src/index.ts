@@ -25,3 +25,6 @@ export function telemetry(): TelemetryStore {
   }
   return store;
 }
+export { createDorisPool, dorisConfig, REPLICATION_NUM } from "./doris/client.js";
+export { inspectTable, retentionCountFromEnv } from "./doris/migrate.js";
+export { ALL_TABLES, columnList, createTableDdl, PARTITION_COLUMN, PARTITIONED_TABLES } from "./doris/schema.js";

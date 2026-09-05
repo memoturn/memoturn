@@ -28,6 +28,12 @@ export interface IngestJob {
   blobKey: string;
   /** The API request that accepted the batch — correlates API + worker log lines. */
   requestId?: string;
+  /**
+   * Set by the blob-replay tool (disaster recovery / engine rebuild): the batch was already
+   * ingested once, so the worker must not meter usage again or re-run online evaluators
+   * (LLM spend). Rows are re-written idempotently (LWW).
+   */
+  replay?: boolean;
 }
 
 /** Dead-lettered ingest job — the original payload plus failure context. */

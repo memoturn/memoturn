@@ -1,4 +1,5 @@
 import type { GenerationBody, ScoreBody, TraceBody } from "@memoturn/core";
+import { clampFutureDate } from "@memoturn/core";
 import { prisma } from "@memoturn/db";
 import { redisConnection } from "@memoturn/db/queue";
 import type { ObservationRow, TraceRow } from "@memoturn/telemetry";
@@ -41,6 +42,9 @@ interface StateUpsert {
  * `COALESCE(provided, stored)`; the optional `arrayCol` uses a provided-flag CASE because a
  * non-null array can't ride the COALESCE-of-NULL trick. Returns the number of rows applied.
  */
+/** Columns that are set once (the entity's own time) and never moved by a later event. */
+const FIRST_WRITE_WINS = new Set(["timestamp", "startTime"]);
+
 async function upsertState(
   table: string,
   scalarCols: readonly ColDef[],
@@ -56,7 +60,17 @@ async function upsertState(
 
     const insertCols = scalarCols.map(([c]) => `"${c}"`).join(", ");
     const insertVals = scalarCols.map((_, i) => cast(i)).join(", ");
-    const colAssign = scalarCols.map(([c], i) => `"${c}" = COALESCE(${cast(i)}, "${table}"."${c}")`).join(", ");
+    // Per-field merge: a provided value replaces the stored one — EXCEPT the entity's time
+    // column, where the FIRST stored value wins for the life of the entity. On Doris that
+    // column is part of the partitioned UNIQUE KEY (schema.ts): letting a later event move it
+    // would mint a second physical row instead of overwriting the first.
+    const colAssign = scalarCols
+      .map(([c], i) =>
+        FIRST_WRITE_WINS.has(c)
+          ? `"${c}" = COALESCE("${table}"."${c}", ${cast(i)})`
+          : `"${c}" = COALESCE(${cast(i)}, "${table}"."${c}")`,
+      )
+      .join(", ");
 
     let idx = base + scalarCols.length; // index of the last scalar param
     let arrayInsertCol = "";
@@ -132,7 +146,12 @@ export function extractTracePatch(
   const has = (k: string) => Object.hasOwn(rawBody, k);
   const s: Record<string, unknown> = {};
   if (has("name")) s.name = maskedBody.name ?? "";
-  if (has("timestamp") && maskedBody.timestamp) s.timestamp = new Date(maskedBody.timestamp);
+  // Always proposed (first write wins in the upsert): the client's timestamp if it sent one,
+  // else the event time. A null here would make the mirror fall back to the ever-changing
+  // state version — which, as a partition key, would duplicate the row on every update.
+  s.timestamp = clampFutureDate(
+    has("timestamp") && maskedBody.timestamp ? new Date(maskedBody.timestamp) : new Date(eventTs),
+  );
   if (has("userId")) s.userId = maskedBody.userId ?? "";
   if (has("sessionId")) s.sessionId = maskedBody.sessionId ?? "";
   if (has("sessionPath")) s.sessionPath = maskedBody.sessionPath ?? "";
@@ -234,7 +253,10 @@ export function extractObservationPatch(
   s.traceId = maskedBody.traceId; // required on every observation event
   if (has("parentObservationId")) s.parentObservationId = maskedBody.parentObservationId ?? "";
   if (has("name")) s.name = maskedBody.name ?? "";
-  if (has("startTime") && maskedBody.startTime) s.startTime = new Date(maskedBody.startTime);
+  // Proposed on every event (first write wins): the carried startTime, else the event time.
+  s.startTime = clampFutureDate(
+    has("startTime") && maskedBody.startTime ? new Date(maskedBody.startTime) : new Date(eventTs),
+  );
   if (has("endTime") && maskedBody.endTime) s.endTime = new Date(maskedBody.endTime);
   if (has("environment")) s.environment = maskedBody.environment;
   if (has("level")) s.level = maskedBody.level ?? "DEFAULT";
@@ -314,7 +336,9 @@ export function extractScorePatch(
   s.traceId = maskedBody.traceId; // required on every score
   s.name = maskedBody.name; // required
   if (has("observationId")) s.observationId = maskedBody.observationId ?? "";
-  if (has("timestamp") && maskedBody.timestamp) s.timestamp = new Date(maskedBody.timestamp);
+  s.timestamp = clampFutureDate(
+    has("timestamp") && maskedBody.timestamp ? new Date(maskedBody.timestamp) : new Date(eventTs),
+  );
   if (has("environment")) s.environment = maskedBody.environment;
   if (has("source")) s.source = maskedBody.source;
   if (has("dataType")) s.dataType = maskedBody.dataType;
@@ -454,11 +478,80 @@ export function statePruneWindowHours(): number {
  * by the rehydrate path (Phase 3b). Runs in one transaction; global (the window is operational, not
  * per-project data retention, which applies to Doris).
  */
+const PRUNE_CHUNK = 5_000;
+
+/**
+ * Delete rows matching `where` in bounded chunks (Postgres has no `DELETE … LIMIT`, so each
+ * pass selects a page of ids first). One giant `deleteMany` across every tenant used to run
+ * inside a single 20 s transaction: on a large table it timed out every hour and the sweep
+ * never converged. Chunking keeps each statement small and lets a partial run make progress.
+ */
+async function deleteInChunks(
+  model: "traceState" | "observationState" | "scoreState",
+  where: Record<string, unknown>,
+): Promise<number> {
+  let total = 0;
+  for (;;) {
+    // The three delegates are structurally identical for these two calls.
+    const delegate = prisma[model] as unknown as {
+      findMany(args: unknown): Promise<{ projectId: string; id: string }[]>;
+      deleteMany(args: unknown): Promise<{ count: number }>;
+    };
+    const page: { projectId: string; id: string }[] = await delegate.findMany({
+      where,
+      select: { projectId: true, id: true },
+      take: PRUNE_CHUNK,
+    });
+    if (page.length === 0) break;
+    const { count } = await delegate.deleteMany({
+      where: { OR: page.map((r) => ({ projectId: r.projectId, id: r.id })) },
+    });
+    total += count;
+    if (page.length < PRUNE_CHUNK) break;
+  }
+  return total;
+}
+
 export async function pruneMutableState(cutoff: Date): Promise<StatePruneResult> {
-  const [traces, observations, scores] = await prisma.$transaction([
-    prisma.traceState.deleteMany({ where: { updatedAt: { lt: cutoff } } }),
-    prisma.observationState.deleteMany({ where: { updatedAt: { lt: cutoff } } }),
-    prisma.scoreState.deleteMany({ where: { updatedAt: { lt: cutoff } } }),
+  const where = { updatedAt: { lt: cutoff } };
+  return {
+    traces: await deleteInChunks("traceState", where),
+    observations: await deleteInChunks("observationState", where),
+    scores: await deleteInChunks("scoreState", where),
+  };
+}
+
+/**
+ * Per-project retention on the mutable-state mirror: rows whose entity time (trace
+ * timestamp / observation start / score timestamp — falling back to updatedAt for rows
+ * that never carried one) is older than the cutoff. Called by the retention sweep so a
+ * project's configured window also governs the full input/output copies in Postgres, not
+ * just the analytical store and blob.
+ */
+export async function pruneProjectState(projectId: string, cutoff: Date): Promise<StatePruneResult> {
+  return {
+    traces: await deleteInChunks("traceState", {
+      projectId,
+      OR: [{ timestamp: { lt: cutoff } }, { timestamp: null, updatedAt: { lt: cutoff } }],
+    }),
+    observations: await deleteInChunks("observationState", {
+      projectId,
+      OR: [{ startTime: { lt: cutoff } }, { startTime: null, updatedAt: { lt: cutoff } }],
+    }),
+    scores: await deleteInChunks("scoreState", {
+      projectId,
+      OR: [{ timestamp: { lt: cutoff } }, { timestamp: null, updatedAt: { lt: cutoff } }],
+    }),
+  };
+}
+
+/** Remove the mirror rows for specific traces (their observations + scores included). */
+export async function deleteStatesForTraces(projectId: string, traceIds: string[]): Promise<StatePruneResult> {
+  if (traceIds.length === 0) return { traces: 0, observations: 0, scores: 0 };
+  const [observations, scores, traces] = await prisma.$transaction([
+    prisma.observationState.deleteMany({ where: { projectId, traceId: { in: traceIds } } }),
+    prisma.scoreState.deleteMany({ where: { projectId, traceId: { in: traceIds } } }),
+    prisma.traceState.deleteMany({ where: { projectId, id: { in: traceIds } } }),
   ]);
   return { traces: traces.count, observations: observations.count, scores: scores.count };
 }

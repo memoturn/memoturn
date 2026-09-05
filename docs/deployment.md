@@ -137,14 +137,30 @@ console SPA — so the console's default `VITE_API_BASE=/api` works unchanged.
 `https://DOMAIN/`, sign up the first admin (Better Auth email/password) — the org plugin auto-provisions
 a default project — then mint an SDK API key from Settings. Point the SDK at `https://DOMAIN/api`.
 
-**Backups:** `bun run prod:backup` (scripts/backup.sh) dumps Postgres (`pg_dump | gzip`) and
-mirrors the blob bucket — the replayable raw event log, the source of truth from which Doris can
-be rebuilt — into `./backups/`, keeping the newest `BACKUP_KEEP` (default 7) of each. Schedule it
-with cron (`0 2 * * * cd /opt/memoturn && bun run prod:backup`) and ship `./backups/` off-host; a
-backup on the same disk is not a backup. Doris itself is not snapshotted — recovery is blob replay
-(add Doris `BACKUP SNAPSHOT` to an S3 repository if you need faster restores). Restore commands
-are documented at the top of the script. All datastores persist to named volumes (`pgdata`,
-`dorisfemeta`, `dorisbedata`, `redisdata`, `miniodata`).
+**Backups:** `bun run prod:backup` (scripts/backup.sh) takes a verified Postgres dump
+(`pg_dump -Fc`, checked with `pg_restore --list`), a Redis/Valkey RDB snapshot (the queues,
+including the ingest dead-letter queue), and a mirror of the blob bucket — the replayable raw
+event log, the source of truth from which Doris or the Postgres tier is rebuilt — into
+`./backups/`, keeping the newest `BACKUP_KEEP` (default 7) of each. It exits non-zero if any
+artifact fails verification. Schedule it with cron (`0 2 * * * cd /opt/memoturn && bun run
+prod:backup`, hourly on a busy install — the blob mirror is incremental) and ship `./backups/`
+off-host; a backup on the same disk is not a backup. **RPO** is the backup interval; for
+point-in-time recovery add WAL archiving (pgBackRest/wal-g) against the `pgdata` volume.
+
+**Restore:** `bash scripts/restore.sh <timestamp>` stops the app tier, restores Postgres from
+the dump, Redis from the RDB, mirrors the blob backup into the bucket, then rebuilds the
+telemetry store by replaying every raw batch through the ingest queue (`bun run replay --
+--all`) and restarts the api. Doris (or the Postgres tier) is deliberately not snapshotted:
+the replay is the recovery path, and it is idempotent (last-writer-wins by `event_ts`), so
+replaying on top of surviving rows is safe. Replayed batches skip usage metering and online
+evaluators. Expect the rebuild to take roughly the original ingest volume ÷ worker throughput;
+`bun run dlq` shows any batch that failed to re-apply. Add Doris `BACKUP SNAPSHOT` to an S3
+repository if you need faster restores than a full replay. **Run the drill** on a staging
+copy before you need it — see [Runbooks](./runbooks.md#restore-from-backup). All datastores
+persist to named volumes (`pgdata`, `dorisfemeta`, `dorisbedata`, `redisdata`, `miniodata`).
+
+`bun run replay -- --project <id> [--from YYYY-MM-DD --to YYYY-MM-DD]` also backfills a single
+project (e.g. after an engine move, or into a fresh store); `--dry-run` sizes the job first.
 
 **Note:** a single VM has no HA. If volume or uptime needs grow, move to the Helm chart below with
 managed datastores.
@@ -219,6 +235,33 @@ render a default-deny NetworkPolicy (`networkPolicy.enabled`).
 See `infra/helm/memoturn/README.md` for required values (datastore URLs, `betterAuthSecret`,
 `encryptionKey`) and the ingress / autoscaling options.
 
+## Repartitioning
+
+Fresh installs create the three time-series tables (`traces`, `observations`, `scores`)
+**AUTO-partitioned by day** (`packages/telemetry/src/doris/schema.ts`): time-range queries
+prune to the partitions they touch, and `TELEMETRY_MAX_RETENTION_DAYS` maps onto Doris's
+native `partition.retention_count` so old partitions drop for free (per-project retention
+is still a key-predicate `DELETE`, now partition-pruned). Installs created before this
+change have unpartitioned tables — the migrator warns on every deploy until they are
+converted:
+
+```bash
+bun run telemetry:repartition -- --plan     # which tables are unpartitioned, row counts
+bun run telemetry:repartition               # bulk copy into <t>__v2, verify, atomic swap (system live)
+# pause the worker (API keeps acking; queue + blob buffer ingest)
+bun run telemetry:repartition               # fast top-up of anything ingested during the bulk copy
+# resume the worker
+bun run telemetry:repartition -- --cleanup  # drop the retained legacy copies once satisfied
+```
+
+Each conversion copies the table month by month with `INSERT … SELECT` (disk temporarily
+doubles for that table), verifies per-project row counts on both copies, refuses to swap on
+any mismatch, and then runs `ALTER TABLE … REPLACE WITH TABLE` — an atomic rename, so reads
+and writes never see a half-state. Every write is last-writer-wins by `event_ts`, so a top-up
+run over live ingest is idempotent. `--set-replication N` raises `replication_num` on every
+table (and the migrations ledger) for multi-BE clusters; set `DORIS_REPLICATION_NUM` so new
+partitions inherit it.
+
 ## Migrations
 
 ```bash
@@ -228,6 +271,15 @@ bun run db:telemetry    # Doris DDL (infra/doris/*.sql, tracked in a schema_migr
 
 Run these on deploy. After a Prisma schema change, the client is regenerated by
 `postinstall` (or `bun run db:generate`).
+
+The Doris runner is single-runner by design (Doris DDL is not transactional): the compose
+`migrate` service runs once before api/worker start, and the Helm hook Job has parallelism 1.
+It only retries cluster-warming errors (no alive BE, connection refused) — a bad statement
+fails immediately with its index in the file. `ADD COLUMN` statements are skipped when the
+column already exists, so a file that failed halfway can be re-run; other partially-applied
+statements are reported for manual inspection and the file is not recorded until every
+statement has succeeded. `DORIS_REPLICATION_NUM` (default 1) is substituted into new DDL
+files' `${REPLICATION_NUM}` placeholder.
 
 ## Upgrading
 
@@ -321,7 +373,10 @@ Notes:
 
 ## Data retention
 
-Set a per-project max age; a daily worker cron deletes older telemetry:
+Set a per-project max age; a daily worker cron deletes older telemetry — from the telemetry
+store, the blob event log/payloads/media under the project's prefixes, AND the Postgres
+mutable-state mirror (which holds full input/output copies). `TELEMETRY_MAX_RETENTION_DAYS`
+sets an instance-wide ceiling applied to every project, with or without a policy.
 
 ```bash
 curl -u pk-mt-dev:sk-mt-dev -X POST http://localhost:3001/v1/retention \

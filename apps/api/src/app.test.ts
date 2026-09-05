@@ -1,6 +1,7 @@
 import { prisma } from "@memoturn/db";
 import { redisConnection } from "@memoturn/db/queue";
 import { createApiKey } from "@memoturn/server";
+import { telemetry } from "@memoturn/telemetry";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { app } from "./app.js";
 
@@ -173,6 +174,52 @@ describe.skipIf(!HAS_INFRA)("authenticated /v1 routes (infra)", () => {
     } finally {
       blobFault.on = false;
     }
+  });
+
+  it("replays the original 207 for a retried Idempotency-Key instead of accepting a second batch", async () => {
+    const event = {
+      id: `${slug}-evt-idem`,
+      type: "trace-create",
+      timestamp: new Date().toISOString(),
+      body: { id: `${slug}-trace-idem`, name: "apitest", environment: "test" },
+    };
+    const headers = {
+      authorization: basic(full.publicKey, full.secretKey),
+      "content-type": "application/json",
+      "idempotency-key": `${slug}-key-1`,
+    };
+    const first = await app.request("/v1/ingest", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ batch: [event] }),
+    });
+    expect(first.status).toBe(207);
+    expect(first.headers.get("idempotent-replayed")).toBeNull();
+    const firstBody = await first.text();
+    const second = await app.request("/v1/ingest", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ batch: [event] }),
+    });
+    expect(second.status).toBe(207);
+    expect(second.headers.get("idempotent-replayed")).toBe("true");
+    expect(await second.text()).toBe(firstBody);
+    const bad = await app.request("/v1/ingest", {
+      method: "POST",
+      headers: { ...headers, "idempotency-key": "has spaces!" },
+      body: JSON.stringify({ batch: [event] }),
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it("answers OTLP metrics exports with an explicit 501", async () => {
+    const res = await app.request("/v1/otel/v1/metrics", {
+      method: "POST",
+      headers: { authorization: basic(full.publicKey, full.secretKey), "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(501);
+    expect(((await res.json()) as { error: string }).error).toContain("not ingested");
   });
 
   it("rejects a malformed batch with 400", async () => {
@@ -352,6 +399,53 @@ describe.skipIf(!HAS_INFRA)("authenticated /v1 routes (infra)", () => {
       else process.env.SSE_MAX_STREAMS_PER_PROJECT = saved;
       await redisConnection().del(`memoturn:sse:${projectId}`);
     }
+  });
+
+  it("DELETE /v1/traces/{id} and /v1/users/{userId}/data erase completely; user erasure is admin-only", async () => {
+    const write = { authorization: basic(full.publicKey, full.secretKey), "content-type": "application/json" };
+    const enduser = `${slug}-enduser`;
+    const row = (id: string) => ({
+      id,
+      project_id: projectId,
+      timestamp: new Date().toISOString(),
+      name: "erase",
+      user_id: enduser,
+      session_id: "",
+      session_path: "",
+      release: "",
+      version: "",
+      environment: "test",
+      public: 0,
+      tags: [],
+      metadata: "{}",
+      input: "",
+      output: "",
+      event_ts: new Date().toISOString(),
+    });
+    // Write the rows the worker would have written so the deletes have targets, plus a
+    // state-mirror row (ADR-0001) that must go with the trace.
+    await telemetry().insertRows("traces", [row(`${slug}-erase-a`), row(`${slug}-erase-b`)]);
+    await prisma.traceState.create({ data: { projectId, id: `${slug}-erase-a`, userId: enduser } });
+
+    const one = await app.request(`/v1/traces/${slug}-erase-a`, { method: "DELETE", headers: write });
+    expect(one.status).toBe(200);
+    expect(
+      await prisma.traceState.findUnique({ where: { projectId_id: { projectId, id: `${slug}-erase-a` } } }),
+    ).toBeNull();
+    expect(await telemetry().getTraceIO(projectId, [`${slug}-erase-a`])).toHaveLength(0);
+
+    // Erasing a whole end user is admin-only: the default (MEMBER) key gets 403 …
+    const denied = await app.request(`/v1/users/${enduser}/data`, { method: "DELETE", headers: write });
+    expect(denied.status).toBe(403);
+    // … an admin key does it and reports the count.
+    const admin = await createApiKey(projectId, { name: "eraser", scopes: ["read", "write", "ingest", "admin"] });
+    const erased = await app.request(`/v1/users/${enduser}/data`, {
+      method: "DELETE",
+      headers: { authorization: basic(admin.publicKey, admin.secretKey) },
+    });
+    expect(erased.status).toBe(200);
+    expect(((await erased.json()) as { traces: number }).traces).toBeGreaterThanOrEqual(1);
+    expect(await telemetry().getTraceIO(projectId, [`${slug}-erase-b`])).toHaveLength(0);
   });
 
   it("rejects an MCP call to another tenant's project with a key scoped to this one (401)", async () => {

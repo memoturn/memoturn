@@ -1966,6 +1966,25 @@ export class DorisTelemetryStore implements TelemetryStore {
     ]);
   }
 
+  async deleteByUserId(projectId: string, userId: string): Promise<number> {
+    if (!userId) return 0;
+    let total = 0;
+    // Page the id lookup: a chatty end user can own many thousands of traces, and the
+    // per-table `IN (?)` deletes are bounded per chunk.
+    for (;;) {
+      const rows = await this.query<{ id: string }>(
+        "SELECT id FROM traces WHERE project_id = ? AND user_id = ? LIMIT 500",
+        [projectId, userId],
+      );
+      if (rows.length === 0) break;
+      const ids = rows.map((r) => r.id);
+      await this.deleteTraces(projectId, ids);
+      total += ids.length;
+      if (rows.length < 500) break;
+    }
+    return total;
+  }
+
   async deleteOlderThan(projectId: string, days: number): Promise<void> {
     const cutoff = cutoffDaysAgo(days);
     await this.exec("DELETE FROM traces WHERE project_id = ? AND `timestamp` < ?", [projectId, cutoff]);

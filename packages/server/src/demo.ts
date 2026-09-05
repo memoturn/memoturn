@@ -1,13 +1,12 @@
 import { newId } from "@memoturn/core";
 import { prisma } from "@memoturn/db";
-import { deleteBlobPrefixOlderThan } from "@memoturn/db/blob";
 import { getSandboxQueue } from "@memoturn/db/queue";
-import { telemetry } from "@memoturn/telemetry";
 import { sendDemoMagicLink } from "./betterauth.js";
 import { seedSandboxEntities } from "./demo-entities.js";
 import { generateDemoBatches } from "./demodata.js";
 import { runProjectionForProject } from "./embeddings.js";
 import { submitBatch } from "./ingest.js";
+import { purgeProjectData } from "./lifecycle.js";
 
 /**
  * Public-demo sandboxes (DEMO_MODE only — every install has this off by default).
@@ -304,13 +303,7 @@ export async function pruneExpiredSandboxes(now: Date = new Date()): Promise<{ d
         select: { id: true },
       });
       for (const { id: projectId } of projects) {
-        await telemetry().deleteProjectData(projectId);
-        // A cutoff in the future means "everything under this prefix" — reusing the
-        // retention sweep's paginated, batched delete rather than a near-duplicate.
-        const everything = new Date(Date.now() + 86_400_000);
-        for (const prefix of ["events", "payloads", "media"]) {
-          await deleteBlobPrefixOlderThan(`${prefix}/${projectId}/`, everything).catch(() => {});
-        }
+        await purgeProjectData(projectId); // telemetry rows + every blob prefix
       }
       // Cascades projects + every project-scoped row, members, invitations, and the
       // DemoSandbox row itself.

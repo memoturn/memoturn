@@ -20,7 +20,8 @@ Bun-native.
 - [Evaluation](./evaluation.md) — offline, online, and human review
 - [Deployment](./deployment.md) — Docker, scaling, upgrades, sizing, retention
 - [Security hardening](./hardening.md) — go-live checklist for self-host operators
-- [Troubleshooting](./troubleshooting.md) — common failure modes and fixes
+- [Troubleshooting](./troubleshooting.md)
+- [Runbooks](./runbooks.md) — restore, replay, DLQ, Doris FE, disk, key rotation, erasure — common failure modes and fixes
 - [Roadmap](./roadmap.md) — shipped + prioritized backlog
 
 ## Screenshots

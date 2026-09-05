@@ -48,6 +48,33 @@ Production-readiness tranche, phase 0 (see the audit plan for the full picture).
 - Docs: `AUTH_BASE_URL` is the origin (no `/api`); rate-limit defaults corrected; console
   image now sets its own CSP/security headers so Kubernetes deployments keep them.
 
+Production-readiness tranche, phase 2 (data durability + lifecycle).
+
+- **Blob replay tool** (`bun run replay`): rebuilds or backfills the telemetry store from the
+  raw event log — the disaster-recovery path the backup strategy always relied on but never
+  had. Replayed batches skip usage metering and online evaluators.
+- **Backups verify themselves and cover Redis**: `pg_dump -Fc` checked with `pg_restore --list`,
+  an RDB snapshot (the DLQ lives there), blob mirror object counts compared; new
+  `scripts/restore.sh` restores all three and runs the replay. `docs/runbooks.md` added.
+- **Deletion is now complete.** Deleting a project or an organization purges its telemetry
+  rows AND every blob object under its prefixes (previously the raw, unmasked event log was
+  orphaned forever). Deleting traces (batch action, new `DELETE /v1/traces/{id}`) also removes
+  the Postgres state mirror rows and offloaded payload objects. New admin-only
+  `DELETE /v1/users/{userId}/data` implements right to erasure for an end user of the traced
+  application (`TelemetryStore.deleteByUserId`, both engines, conformance-tested).
+- **Retention reaches the state mirror** and honours a new instance-wide ceiling
+  (`TELEMETRY_MAX_RETENTION_DAYS`); the hourly state prune is chunked so it converges on
+  large tables instead of timing out every run.
+
+- **Doris tables are partitioned.** Fresh installs create `traces`/`observations`/`scores`
+  AUTO-partitioned by day (time-range queries prune; `TELEMETRY_MAX_RETENTION_DAYS` maps to
+  Doris's native partition TTL). Existing installs convert with the new
+  `bun run telemetry:repartition` (month-chunked copy, count verification, atomic swap,
+  `--set-replication N` for multi-BE clusters, `DORIS_REPLICATION_NUM` for new DDL). The
+  worker now pins a row's time column for the life of the entity and clamps far-future
+  timestamps, which the partition key relies on. The migrator warns on every deploy until
+  legacy tables are converted.
+
 Production-readiness tranche, phase 1 (operability).
 
 - **Typed environment validation.** Every knob the API/worker read is declared with its

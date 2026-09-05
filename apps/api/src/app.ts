@@ -27,6 +27,7 @@ import {
   checkDatasetItems,
   checkGuardrails,
   checkRateLimit,
+  claimIdempotencyKey,
   clampExportLimit,
   compilePrompt,
   correctScore,
@@ -70,6 +71,8 @@ import {
   deleteSavedView,
   deleteScore,
   deleteScoreConfig,
+  deleteTraceData,
+  deleteUserData,
   deleteWebhook,
   deleteWidget,
   demoModeEnabled,
@@ -121,6 +124,7 @@ import {
   importDatasetCsv,
   ingestRateLimitConfig,
   instantiateEvaluatorTemplate,
+  isValidIdempotencyKey,
   listAlertRules,
   listApiKeys,
   listAuditLogs,
@@ -169,6 +173,7 @@ import {
   recordAuthAudit,
   recordRun,
   recordRunItem,
+  releaseIdempotencyKey,
   removeProjectMember,
   renameProject,
   replayDlq,
@@ -200,6 +205,7 @@ import {
   startExperiment,
   stopExperiment,
   storeDataUri,
+  storeIdempotentResponse,
   streamPlayground,
   submitBatch,
   submitReviewScore,
@@ -444,6 +450,7 @@ app.use("/v1/sessions", requireAuth);
 app.use("/v1/sessions/*", requireAuth);
 app.use("/v1/live/*", requireAuth);
 app.use("/v1/users", requireAuth);
+app.use("/v1/users/*", requireAuth);
 app.use("/v1/metrics", requireAuth);
 app.use("/v1/metrics/*", requireAuth);
 app.use("/v1/usage", requireAuth);
@@ -815,6 +822,7 @@ app.openapi(
       },
       400: { description: "Invalid batch" },
       401: { description: "Unauthorized" },
+      409: { description: "A request with the same `Idempotency-Key` is still being processed — retry shortly" },
       429: { description: "Event rate limit exceeded" },
       503: { description: "Blob store or queue unavailable — transient; honour `Retry-After` and re-send" },
     },
@@ -826,6 +834,26 @@ app.openapi(
     // — the previous handler acked every event unconditionally, hiding rejects in the DLQ.
     const envelope = ingestEnvelope.safeParse(json);
     if (!envelope.success) return c.json({ error: "invalid batch", details: z.flattenError(envelope.error) }, 400);
+
+    // Optional Idempotency-Key: a retried POST (client timeout after we already accepted)
+    // gets the original 207 replayed instead of creating a second batch (double usage
+    // metering + re-run online evaluators). See packages/server/src/idempotency.ts.
+    const idemHeader = c.req.header("idempotency-key");
+    const idemKey = isValidIdempotencyKey(idemHeader) ? idemHeader : undefined;
+    if (idemHeader !== undefined && !idemKey) {
+      return c.json({ error: "Idempotency-Key must be 1-128 chars of [A-Za-z0-9_.:-]" }, 400);
+    }
+    if (idemKey) {
+      const claim = await claimIdempotencyKey(c.get("projectId"), idemKey);
+      if (claim.status === "replay") {
+        c.header("Idempotent-Replayed", "true");
+        return c.body(claim.body, 207, { "content-type": "application/json" });
+      }
+      if (claim.status === "pending") {
+        c.header("Retry-After", "1");
+        return c.json({ error: "a request with this Idempotency-Key is still being processed" }, 409);
+      }
+    }
 
     // Event-volume rate limit (separate budget from the per-request limit): a single POST
     // can carry up to 1000 events, so meter the actual (raw) event count — invalid events
@@ -850,11 +878,16 @@ app.openapi(
     // mutable-state merge (ADR-0001) needs that; the Doris path re-applies defaults on re-parse.
     if (persist.length > 0) {
       // `sdk` rides along into the blob so the identity survives replay, where headers don't exist.
-      await submitBatch(
-        c.get("projectId"),
-        { batch: persist as IngestEvent[], sdk: readSdkInfo(envelope.data.sdk) },
-        { requestId: c.get("requestId") },
-      );
+      try {
+        await submitBatch(
+          c.get("projectId"),
+          { batch: persist as IngestEvent[], sdk: readSdkInfo(envelope.data.sdk) },
+          { requestId: c.get("requestId") },
+        );
+      } catch (err) {
+        if (idemKey) await releaseIdempotencyKey(c.get("projectId"), idemKey);
+        throw err;
+      }
     }
     if (errors.length > 0) {
       console.error(
@@ -868,7 +901,9 @@ app.openapi(
       );
     }
     const successes: IngestResult[] = valid.map((e) => ({ id: e.id, status: 201 }));
-    return c.json({ successes, errors }, 207);
+    const body = { successes, errors };
+    if (idemKey) await storeIdempotentResponse(c.get("projectId"), idemKey, JSON.stringify(body));
+    return c.json(body, 207);
   },
 );
 
@@ -965,6 +1000,20 @@ app.post("/v1/otel/v1/traces", async (c) => {
   }
   return c.json({ partialSuccess: {} }, 200);
 });
+
+// OTLP/HTTP metrics: not ingested (yet). A stock collector with the base endpoint configured
+// exports metrics too — answer with an explicit 501 + JSON (not a 404 that looks like a
+// misconfigured URL) so its error is self-explanatory and it doesn't retry forever.
+app.post("/v1/otel/v1/metrics", (c) =>
+  c.json(
+    {
+      error:
+        "OTLP metrics are not ingested by Memoturn — traces and logs are. Disable the metrics pipeline for this exporter.",
+      requestId: c.get("requestId"),
+    },
+    501,
+  ),
+);
 
 // OTLP/HTTP logs receiver. Log records become EVENT observations — this is how Claude Code's
 // verbatim user-prompt / assistant-response text arrives (log events only, never spans).
@@ -1490,6 +1539,66 @@ app.openapi(
     },
   }),
   async (c) => c.json({ data: await getSdkVersions(c.get("projectId"), c.req.valid("query").days ?? 30) }),
+);
+
+// ── Erasure ───────────────────────────────────────────────────────────────────────
+// Both routes delete COMPLETELY: telemetry rows in every table, the Postgres state mirror
+// (full input/output copies), and the offloaded payload objects the rows reference. The raw
+// event batches are multi-trace and governed by retention — a blob replay could
+// re-materialize a deleted trace, so follow an erasure request with a retention cutoff.
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/traces/{id}",
+    summary: "Delete one trace and everything attached to it (observations, scores, payloads, state)",
+    tags: ["traces"],
+    security,
+    request: { params: z.object({ id: z.string().min(1).max(256) }) },
+    responses: {
+      200: {
+        description: "Deleted",
+        content: { "application/json": { schema: z.object({ deleted: z.boolean(), payloadObjects: z.number() }) } },
+      },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    const denied = denyIfReadOnly(c);
+    if (denied) return denied;
+    const id = c.req.valid("param").id;
+    const r = await deleteTraceData(c.get("projectId"), [id]);
+    await recordAudit(c.get("projectId"), c.get("actor"), "trace.delete", `trace:${id}`, {
+      payloadObjects: r.payloadObjects,
+    });
+    return c.json({ deleted: true, payloadObjects: r.payloadObjects });
+  },
+);
+
+app.openapi(
+  createRoute({
+    method: "delete",
+    path: "/v1/users/{userId}/data",
+    summary: "Right to erasure: delete every trace this project recorded for an end user",
+    tags: ["traces"],
+    security,
+    request: { params: z.object({ userId: z.string().min(1).max(512) }) },
+    responses: {
+      200: {
+        description: "Deleted",
+        content: { "application/json": { schema: z.object({ deleted: z.boolean(), traces: z.number() }) } },
+      },
+      403: { description: "Forbidden" },
+    },
+  }),
+  async (c) => {
+    // Destructive across everything one person ever did — admin only.
+    const denied = denyIfReadOnly(c) ?? denyIfNotAdmin(c);
+    if (denied) return denied;
+    const userId = c.req.valid("param").userId;
+    const r = await deleteUserData(c.get("projectId"), userId);
+    await recordAudit(c.get("projectId"), c.get("actor"), "user.erase", `user:${userId}`, { traces: r.traces });
+    return c.json({ deleted: true, traces: r.traces });
+  },
 );
 
 app.openapi(

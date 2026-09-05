@@ -282,6 +282,12 @@ export interface TelemetryStore {
   deleteScore(projectId: string, scoreId: string): Promise<void>;
   /** Delete the given traces plus their observations and scores. */
   deleteTraces(projectId: string, traceIds: string[]): Promise<void>;
+  /**
+   * Right-to-erasure for an END USER of the traced application: delete every trace whose
+   * `user_id` matches (plus observations, scores, retrieval docs, embeddings, projections).
+   * Returns the number of traces removed.
+   */
+  deleteByUserId(projectId: string, userId: string): Promise<number>;
   /** Retention: delete traces/observations/scores older than `days`. */
   deleteOlderThan(projectId: string, days: number): Promise<void>;
   /** Delete ALL telemetry for a project (project deletion, seed wipe, test cleanup). */

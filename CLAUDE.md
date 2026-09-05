@@ -24,6 +24,8 @@ bun run db:telemetry # apply Doris migrations (infra/doris; schema_migrations le
 bun run seed         # seed organization/project/dev API key
 bun run seed:demo    # seed ~30 days of realistic demo telemetry via /v1/ingest (--days, --traces-per-day, --wipe, --dry-run); needs dev api+worker running
 bun run dlq          # inspect the ingest dead-letter queue; `--replay` re-enqueues failed batches from blob
+bun run replay       # rebuild/backfill the telemetry store from the raw blob event log (`-- --project <id> | --all`, `--from/--to`, `--dry-run`)
+bun run prod:backup / bash scripts/restore.sh <ts>   # verified pg dump + Redis RDB + blob mirror; restore = the reverse + blob replay
 bun run telemetry:migrate  # engine-to-engine telemetry copy + verify (ADR-0004): `-- --from postgres --to doris` (+ --dry-run/--verify-only)
 bun run deploy:site  # wrangler deploy of memoturn.com + docs.memoturn.com (Cloudflare Workers; per-app deploy:staging for staging)
 ```

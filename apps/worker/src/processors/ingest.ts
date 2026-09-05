@@ -262,7 +262,7 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
   // batch, so usage counts everything ingested regardless of sampling. Gated on the first
   // attempt so a BullMQ retry (which re-runs this whole idempotent processor) can't
   // double-count; a rare pre-count failure under-counts, the billing-safe direction.
-  if (job.attemptsMade === 0) {
+  if (job.attemptsMade === 0 && !job.data.replay) {
     const traceIds = new Set<string>();
     for (const e of parsed.batch) {
       const tid = e.type === "trace-create" ? e.body.id : (e.body as { traceId?: string }).traceId;
@@ -451,7 +451,9 @@ export async function processIngest(job: Job<IngestJob>): Promise<void> {
   // data that already landed. The invariant is "evals never fail ingestion"; this closes the
   // gap the per-evaluator catch inside runOnlineEvals didn't cover.
   try {
-    await runOnlineEvals(projectId, parsed.batch);
+    // A replayed batch was scored when it first arrived; re-running judges would double
+    // the LLM spend for no new information.
+    if (!job.data.replay) await runOnlineEvals(projectId, parsed.batch);
   } catch (err) {
     inc("evaluator_runs_total", { evaluator: "*", result: "phase_error" });
     logJson("error", "online-eval phase failed (ingestion unaffected)", {

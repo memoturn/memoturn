@@ -1,7 +1,8 @@
 import type { IngestEvent } from "@memoturn/core";
+import { clampFuture } from "@memoturn/core";
 import { telemetry } from "@memoturn/telemetry";
 import { describe, expect, it } from "vitest";
-import { mapEvents } from "./mappers.js";
+import { mapEvents, stableTime } from "./mappers.js";
 
 const PROJECT = "test-proj";
 
@@ -381,5 +382,26 @@ describe.skipIf(!storeReachable)("ingest → telemetry store round-trip", () => 
 
     // cleanup (removes the trace, its observations, and any scores)
     await store.deleteTraces(PROJECT, [traceId]);
+  });
+});
+
+describe("time-column invariants (Doris partition keys)", () => {
+  it("keeps an existing row's timestamp even when a later event carries a different one", () => {
+    // A trace-create re-sent with a new timestamp must NOT move the row to another partition
+    // (the time column is in the physical key) — the first value wins.
+    expect(stableTime("2026-09-01T00:00:00.000Z", "2026-09-02T00:00:00.000Z", "2026-09-03T00:00:00.000Z")).toBe(
+      "2026-09-01T00:00:00.000Z",
+    );
+    expect(stableTime(undefined, "2026-09-02T00:00:00.000Z", "2026-09-03T00:00:00.000Z")).toBe(
+      "2026-09-02T00:00:00.000Z",
+    );
+    expect(stableTime(null, undefined, "2026-09-03T00:00:00.000Z")).toBe("2026-09-03T00:00:00.000Z");
+  });
+
+  it("clamps timestamps more than a day in the future so a skewed clock can't mint junk partitions", () => {
+    const now = Date.parse("2026-09-05T00:00:00.000Z");
+    expect(clampFuture("2030-01-01T00:00:00.000Z", now)).toBe("2026-09-06T00:00:00.000Z");
+    expect(clampFuture("2026-09-05T12:00:00.000Z", now)).toBe("2026-09-05T12:00:00.000Z");
+    expect(clampFuture("not a date", now)).toBe("not a date"); // zod already rejected these upstream
   });
 });

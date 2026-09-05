@@ -98,6 +98,8 @@ export const ENV_SCHEMA: Record<string, EnvVar> = {
   SSE_MAX_STREAMS_PER_PROJECT: { spec: int(0) },
   RATE_LIMIT_PER_MINUTE: { spec: int(0) },
   INGEST_EVENTS_PER_MINUTE: { spec: int(0) },
+  INGEST_MAX_EVENT_BYTES: { spec: int(1024) },
+  INGEST_MAX_JSON_DEPTH: { spec: int(4, 512) },
   RATE_LIMIT_TRUSTED_PROXIES: { spec: int(0, 16) },
   MCP_RATE_LIMIT_PER_MINUTE: { spec: int(0) },
   PLAYGROUND_MAX_TOKENS: { spec: int(1) },
@@ -115,6 +117,7 @@ export const ENV_SCHEMA: Record<string, EnvVar> = {
   SANDBOX_CONCURRENCY: { spec: int(1, 100) },
   WORKER_SHUTDOWN_TIMEOUT_MS: { spec: int(1000) },
   STATE_RETENTION_HOURS: { spec: int(1) },
+  TELEMETRY_MAX_RETENTION_DAYS: { spec: int(0) },
   DLQ_ALERT_DEPTH: { spec: int(0) },
   // Auth
   AUTH_BASE_URL: {

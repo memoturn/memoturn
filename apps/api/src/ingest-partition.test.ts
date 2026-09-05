@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { partitionIngestBatch } from "./ingest-partition.js";
+import { jsonDepth, MAX_EVENT_BYTES, MAX_JSON_DEPTH, partitionIngestBatch } from "./ingest-partition.js";
 
 const TS = "2026-01-01T00:00:00.000Z";
 
@@ -29,5 +29,31 @@ describe("partitionIngestBatch", () => {
     expect(valid).toHaveLength(1);
     expect(persist).toEqual([good]);
     expect(errors.map((e) => e.index)).toEqual([1, 2]);
+  });
+
+  it("rejects an event over the per-event byte cap without parsing it, keeping the rest", () => {
+    const ok = { id: "ok", type: "trace-create", timestamp: new Date().toISOString(), body: { id: "t" } };
+    const huge = { ...ok, id: "huge", body: { id: "t2", input: "x".repeat(MAX_EVENT_BYTES + 1) } };
+    const { valid, persist, errors } = partitionIngestBatch([huge, ok]);
+    expect(valid.map((e) => e.id)).toEqual(["ok"]);
+    expect(persist).toHaveLength(1);
+    expect(errors).toEqual([{ id: "huge", index: 0, status: 400, error: expect.stringContaining("per-event limit") }]);
+  });
+
+  it("rejects an event nested deeper than the JSON depth cap", () => {
+    let deep: unknown = "leaf";
+    for (let i = 0; i < MAX_JSON_DEPTH + 5; i++) deep = { deep };
+    const ev = {
+      id: "deep",
+      type: "trace-create",
+      timestamp: new Date().toISOString(),
+      body: { id: "t", metadata: deep },
+    };
+    const { valid, errors } = partitionIngestBatch([ev]);
+    expect(valid).toHaveLength(0);
+    expect(errors[0]?.error).toContain("nested deeper");
+    // jsonDepth itself: scalars are 0, an object is 1, arrays count.
+    expect(jsonDepth("x")).toBe(0);
+    expect(jsonDepth({ a: [{ b: 1 }] })).toBe(3);
   });
 });

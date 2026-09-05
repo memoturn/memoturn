@@ -1147,4 +1147,119 @@ describe.skipIf(!reachable)("telemetry store conformance", () => {
     expect(await store.listEmbeddingsForProjection(P, { days: 30, limit: 100 })).toHaveLength(0);
     expect(await store.listEmbeddingProjection(P, { runId: "run1" })).toHaveLength(0);
   });
+
+  it("retention cutoff deletes only rows older than `days`, in every table, for that project only", async () => {
+    const OLD = -40 * 86_400_000; // 40 days ago
+    const other = `${P}-other`;
+    await store.insertRows("traces", [
+      trace({ id: "old-t", timestamp: iso(OLD), event_ts: iso(OLD) }),
+      trace({ id: "new-t", timestamp: iso(-3_600_000) }),
+      trace({ id: "other-old", project_id: other, timestamp: iso(OLD), event_ts: iso(OLD) }),
+    ]);
+    await store.insertRows("observations", [
+      observation({ id: "old-o", trace_id: "old-t", start_time: iso(OLD), event_ts: iso(OLD) }),
+      observation({ id: "new-o", trace_id: "new-t" }),
+    ]);
+    await store.insertRows("scores", [
+      score({ id: "old-s", trace_id: "old-t", timestamp: iso(OLD), event_ts: iso(OLD) }),
+      score({ id: "new-s", trace_id: "new-t" }),
+    ]);
+    await store.insertRows("retrieval_documents", [
+      retrievalDoc({ observation_id: "old-o", trace_id: "old-t", event_ts: iso(OLD) }),
+    ]);
+    await store.insertRows("embeddings", [
+      embeddingRow({ observation_id: "old-o", trace_id: "old-t", event_ts: iso(OLD) }),
+    ]);
+    await store.insertRows("embedding_projections", [
+      projectionRow({ run_id: "run-old", observation_id: "old-o", trace_id: "old-t", event_ts: iso(OLD) }),
+    ]);
+    expect(await store.countTracesOlderThan(P, 30)).toBe(1);
+
+    await store.deleteOlderThan(P, 30);
+
+    expect(await store.countProjectRows(P)).toEqual({ traces: 1, observations: 1, scores: 1 });
+    expect(await store.getTraceIO(P, ["old-t", "new-t"])).toHaveLength(1);
+    expect(await store.listRetrievalDocumentsByObservationIds(P, ["old-o"])).toHaveLength(0);
+    expect(await store.listEmbeddingProjection(P, { runId: "run-old" })).toHaveLength(0);
+    // Another project's old rows are untouched.
+    expect((await store.countProjectRows(other)).traces).toBe(1);
+
+    await store.deleteTraces(P, ["new-t"]);
+    await store.deleteProjectData(other);
+  });
+
+  it("deletes every trace of an end user (right to erasure), across pages, for that project only", async () => {
+    const other = `${P}-other2`;
+    const rows: TraceRow[] = [];
+    for (let i = 0; i < 12; i++) rows.push(trace({ id: `u-${i}`, user_id: "erase-me" }));
+    rows.push(trace({ id: "keep-1", user_id: "someone-else" }));
+    rows.push(trace({ id: "other-u", project_id: other, user_id: "erase-me" }));
+    await store.insertRows("traces", rows);
+    await store.insertRows("observations", [observation({ id: "u-o", trace_id: "u-0" })]);
+    await store.insertRows("scores", [score({ id: "u-s", trace_id: "u-1" })]);
+
+    expect(await store.deleteByUserId(P, "erase-me")).toBe(12);
+    expect(await store.countProjectRows(P)).toEqual({ traces: 1, observations: 0, scores: 0 });
+    expect(await store.deleteByUserId(P, "erase-me")).toBe(0); // idempotent
+    expect(await store.deleteByUserId(P, "")).toBe(0); // never a wildcard
+    expect((await store.countProjectRows(other)).traces).toBe(1);
+
+    await store.deleteTraces(P, ["keep-1"]);
+    await store.deleteProjectData(other);
+  });
+
+  it("deleteProjectData removes every table for the project and nothing else", async () => {
+    const other = `${P}-other3`;
+    await store.insertRows("traces", [trace({ id: "pd-t" }), trace({ id: "pd-other", project_id: other })]);
+    await store.insertRows("observations", [observation({ id: "pd-o", trace_id: "pd-t" })]);
+    await store.insertRows("scores", [score({ id: "pd-s", trace_id: "pd-t" })]);
+    await store.insertRows("retrieval_documents", [retrievalDoc({ observation_id: "pd-o", trace_id: "pd-t" })]);
+    await store.insertRows("embeddings", [embeddingRow({ observation_id: "pd-o", trace_id: "pd-t" })]);
+    await store.insertRows("embedding_projections", [
+      projectionRow({ run_id: "run-pd", observation_id: "pd-o", trace_id: "pd-t" }),
+    ]);
+
+    await store.deleteProjectData(P);
+
+    expect(await store.countProjectRows(P)).toEqual({ traces: 0, observations: 0, scores: 0 });
+    expect(await store.listRetrievalDocumentsByObservationIds(P, ["pd-o"])).toHaveLength(0);
+    expect(await store.listEmbeddingsForProjection(P, { days: 30, limit: 100 })).toHaveLength(0);
+    expect(await store.listEmbeddingProjection(P, { runId: "run-pd" })).toHaveLength(0);
+    expect((await store.countProjectRows(other)).traces).toBe(1);
+    await store.deleteProjectData(other);
+  });
+
+  it.skipIf((process.env.TELEMETRY_ENGINE ?? "doris").toLowerCase() !== "doris")(
+    "Doris: the three time-series tables are AUTO-partitioned by day and time-range scans prune",
+    async () => {
+      const { createDorisPool } = await import("./doris/client.js");
+      const { inspectTable } = await import("./doris/migrate.js");
+      const pool = createDorisPool();
+      try {
+        for (const table of ["traces", "observations", "scores"]) {
+          const shape = await inspectTable(pool, table);
+          expect(shape?.partitioned, `${table} partitioned`).toBe(true);
+        }
+        // A row 40 days back plus today's rows exist from the retention test above; a 7-day
+        // window must not touch the old partition.
+        await store.insertRows("traces", [
+          trace({ id: "part-old", timestamp: iso(-40 * 86_400_000), event_ts: iso(-40 * 86_400_000) }),
+          trace({ id: "part-new" }),
+        ]);
+        const [plan] = (await pool.query("EXPLAIN SELECT id FROM traces WHERE project_id = ? AND `timestamp` >= ?", [
+          P,
+          iso(-7 * 86_400_000)
+            .slice(0, 19)
+            .replace("T", " "),
+        ])) as unknown as [Record<string, string>[]];
+        const text = plan.map((r) => Object.values(r)[0]).join("\n");
+        const m = /partitions=(\d+)\/(\d+)/.exec(text);
+        expect(m, "explain shows partition pruning").not.toBeNull();
+        expect(Number(m?.[1])).toBeLessThan(Number(m?.[2]));
+        await store.deleteTraces(P, ["part-old", "part-new"]);
+      } finally {
+        await pool.end();
+      }
+    },
+  );
 });
