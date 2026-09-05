@@ -48,6 +48,20 @@ Production-readiness tranche, phase 0 (see the audit plan for the full picture).
 - Docs: `AUTH_BASE_URL` is the origin (no `/api`); rate-limit defaults corrected; console
   image now sets its own CSP/security headers so Kubernetes deployments keep them.
 
+Production-readiness tranche, phase 4 (test + CI coverage).
+
+- The authenticated API route suite now runs in CI (it gated on `DORIS_HOST`, which the
+  build job deliberately unset — only the three no-infra cases had ever executed); the full
+  suite also runs on the Postgres telemetry tier, and the store conformance suite fails
+  rather than skips when no engine answers in CI.
+- New unit tests for the Redis lock, retention, deletion lifecycle, project deletion, DLQ
+  tenant scoping, and batch actions; console e2e specs for the admin-only API-keys tab,
+  the hard-cap budget switch, and the ops page (`--passWithNoTests` removed).
+- `scripts/load/ingest.k6.js` + a nightly ingest load workflow (non-blocking trend: p95 ack,
+  req/s, queue depth, insert latency).
+- `docs:check` requires a `## [version]` changelog entry for the current package version;
+  the missing 0.6.0 entry is added.
+
 Production-readiness tranche, phase 3 (tenant isolation + abuse controls).
 
 - **DLQ views are project-scoped**: `/v1/ingest/health` and `/v1/ingest/dlq/replay` see and
@@ -134,6 +148,24 @@ Production-readiness tranche, phase 1 (operability).
   and the published `:latest` images are re-scanned weekly into the Security tab; `bun audit` runs
   in CI (advisory); the api/worker images drop devDependencies and non-runtime trees; the
   console's Caddy base is digest-pinned.
+
+## [0.6.0] — 2026-09-04
+
+- Release pipeline: multi-arch (amd64 + arm64) container images built on native runners and
+  joined into one manifest list per service; the JS SDK is published with an explicit
+  `--tag latest`.
+- Tracing UI/UX tranche: sortable trace-list columns with input/output previews, trace
+  explorer deep links, waterfall metrics + scores, a trace Log view with in-trace search,
+  corrected-output annotations on generations, a role-aware session conversation view, and
+  saved views v2 (shareable `viewId` URLs, full-state capture).
+- Models + demo: current-generation model registry; richer demo telemetry (7 scenario
+  archetypes with threads, guardrails, and agent trees); the trace-volume histogram spans
+  the selected range and dashboard bar charts show every label.
+- OTel: a trace is named from its root span, not whichever span arrived first.
+- Analytics: env-gated GA4/GTM across marketing, docs, and the demo console with Consent
+  Mode v2, consent banners, a privacy page, and UTM conventions.
+- Fixes: the demo worker receives `AUTH_BASE_URL` so first-visit magic links no longer
+  point at localhost.
 
 ## [0.5.0] — 2026-08-02
 

@@ -1,0 +1,101 @@
+name: Load (ingest)
+
+# Nightly ingest-throughput run on the CI-sized stack (Postgres telemetry tier: no Doris on
+# a hosted runner). Non-blocking — the numbers are a trend, not a gate: p95 ack latency and
+# the batches/s the API sustained land in the job summary. Run on demand with a higher
+# EVENTS_PER_SEC to find the knee on your own hardware.
+on:
+  schedule:
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+    inputs:
+      events_per_sec:
+        description: "Target events/second"
+        default: "500"
+      duration:
+        description: "Run duration (k6 syntax)"
+        default: "2m"
+
+permissions:
+  contents: read
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: memoturn
+          POSTGRES_PASSWORD: memoturn
+          POSTGRES_DB: memoturn
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U memoturn" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      redis:
+        image: valkey/valkey:8-alpine
+        ports: ["6379:6379"]
+      minio:
+        image: bitnamilegacy/minio:2025.7.23-debian-12-r5
+        env:
+          MINIO_ROOT_USER: memoturn
+          MINIO_ROOT_PASSWORD: memoturn123
+          MINIO_DEFAULT_BUCKETS: memoturn
+        ports: ["9000:9000"]
+    env:
+      TELEMETRY_ENGINE: postgres
+      DATABASE_URL: postgresql://memoturn:memoturn@localhost:5432/memoturn?schema=public
+      REDIS_URL: redis://localhost:6379
+      BLOB_ENDPOINT: http://localhost:9000
+      BLOB_REGION: us-east-1
+      BLOB_BUCKET: memoturn
+      BLOB_ACCESS_KEY_ID: memoturn
+      BLOB_SECRET_ACCESS_KEY: memoturn123
+      BLOB_FORCE_PATH_STYLE: "true"
+      BETTER_AUTH_SECRET: load-test-secret-not-real-0123456789
+      ENCRYPTION_KEY: load-test-encryption-not-real-0123456789
+      AUTH_TRUSTED_ORIGINS: http://localhost:3000
+      RATE_LIMIT_PER_MINUTE: "0"
+      INGEST_EVENTS_PER_MINUTE: "0"
+      ALLOW_SEED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.1"
+      - run: bun install --frozen-lockfile
+      - run: bun --filter @memoturn/db generate
+      - run: bun --filter @memoturn/db migrate
+      - run: bun packages/telemetry/src/migrate.ts
+      - run: bun scripts/seed.ts
+      - name: Start api + worker
+        run: |
+          (bun --filter @memoturn/api start > api.log 2>&1 &)
+          (bun --filter @memoturn/worker start > worker.log 2>&1 &)
+          for i in $(seq 1 30); do curl -sf http://localhost:3001/ready && break; sleep 2; done
+      - name: k6
+        uses: grafana/setup-k6-action@ffe7d7290dfa715e48c2ccc924d068444c94bde2 # v1.1.0
+      - name: Ingest load
+        run: |
+          k6 run --summary-export=summary.json \
+            -e BASE_URL=http://localhost:3001 -e PK=pk-mt-dev -e SK=sk-mt-dev \
+            -e EVENTS_PER_SEC="${{ inputs.events_per_sec || '500' }}" \
+            -e DURATION="${{ inputs.duration || '2m' }}" \
+            scripts/load/ingest.k6.js || true
+      - name: Drain + summarize
+        run: |
+          # Let the worker catch up, then report queue depth + insert latency alongside k6's numbers.
+          sleep 20
+          WORKER=$(curl -s http://127.0.0.1:3002/metrics)
+          {
+            echo "## Ingest load"
+            echo '```'
+            jq -r '.metrics | "ack p95 (ms): \(.ingest_ack_ms["p(95)"] // "n/a")\nack p50 (ms): \(.ingest_ack_ms.med // "n/a")\nreq/s: \(.http_reqs.rate // "n/a")\nfailed: \(.http_req_failed.value // "n/a")"' summary.json
+            echo "worker: $(echo "$WORKER" | jq -c '{queues: .queues.ingest, dlqDepth, insert: .metrics.telemetry_insert}')"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Logs on failure
+        if: failure()
+        run: tail -50 api.log worker.log

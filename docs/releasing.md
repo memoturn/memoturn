@@ -35,7 +35,10 @@ be exercised by a real publish, so a green dry run confirms the builds, not the 
 
 ## Cut a release
 
-1. Bump the version everywhere it is declared so they stay in lockstep (`bun run docs:check`
+1. Add a `## [x.y.z] — YYYY-MM-DD` entry to `CHANGELOG.md` (`docs:check` fails when the
+   package.json version has no entry) with a **Migration notes** line whenever the release
+   adds an env var, a Prisma migration, or telemetry DDL.
+2. Bump the version everywhere it is declared so they stay in lockstep (`bun run docs:check`
    fails the push if any of these drift):
    - `sdks/js/package.json` → `version`
    - `sdks/js/src/version.ts` → `SDK_VERSION` (reported to `/v1/ingest`)
@@ -45,12 +48,12 @@ be exercised by a real publish, so a green dry run confirms the builds, not the 
    - `infra/helm/memoturn/Chart.yaml` → `version` **and** `appVersion` (the chart's default
      image tag — a stale value makes `helm install` pull old images)
    - (optional) root `package.json` → `version`
-2. Commit, then tag and push:
+3. Commit, then tag and push:
    ```bash
    git tag v0.2.0
    git push origin v0.2.0
    ```
-3. The workflow runs three independent jobs:
+4. The workflow runs these independent jobs:
    - **npm** — `bun install` → `bun --filter @memoturn/sdk build` → flatten `publishConfig`
      into the manifest (points `main`/`types`/`exports` at `dist/`) →
      `npm publish --provenance --tag latest`.
