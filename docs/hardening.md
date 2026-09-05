@@ -135,7 +135,10 @@ Per-project settings (`/v1/sampling`, `/v1/usage`, or the console **Settings** p
   verify provenance: every published image carries an SBOM and SLSA provenance attestation
   (`docker buildx imagetools inspect <image> --format '{{json .Provenance}}'`).
 - [ ] The published images are Trivy-scanned weekly (Security tab of the repo); re-pull on a
-  new patch release rather than patching inside a running container.
+  new patch release rather than patching inside a running container. PR builds gate on
+  fixable OS-package findings (the images apply Debian/Alpine security updates at build
+  time) and report application-library findings, which close only with an upstream
+  release (a new Caddy tag, `bun update`).
 - [ ] Prefer `NODE_ENV=production` explicitly — the startup guard now refuses a public https
   `AUTH_BASE_URL` without it, because every production protection keys on that variable.
 

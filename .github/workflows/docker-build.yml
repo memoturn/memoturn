@@ -51,8 +51,15 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}-${{ matrix.platform.arch }}
 
   # Vulnerability scan of the built images (amd64 is representative — the arm64 layers carry
-  # the same packages). CRITICAL/HIGH with a fix available fail the PR; unfixed findings are
-  # reported, not blocking. Exceptions go in .trivyignore with a reason.
+  # the same packages). Two passes with different consequences:
+  #   1. OS packages (Debian/Alpine): CRITICAL/HIGH with a fix available FAIL the PR. The
+  #      Dockerfiles run apt-get/apk upgrade, so a red here means a new advisory landed
+  #      since the last build — rebuild, or bump the base digest.
+  #   2. Application libraries (the Caddy Go binary, node_modules): reported, non-blocking.
+  #      Those close only with an upstream release (a new Caddy tag, `bun update`); every
+  #      upstream base image carries some at any given time, so gating on them would never be
+  #      green. They still surface in the weekly published-image scan (Security tab).
+  # Exceptions go in .trivyignore with a reason.
   scan:
     name: Scan ${{ matrix.service }} image (Trivy)
     runs-on: ubuntu-latest
@@ -75,12 +82,26 @@ jobs:
           load: true
           tags: memoturn-${{ matrix.service }}:scan
           cache-from: type=gha,scope=${{ matrix.service }}-amd64
-      - name: Trivy
+      - name: Trivy — OS packages (blocking)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: memoturn-${{ matrix.service }}:scan
+          scan-type: image
+          vuln-type: os
           format: table
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
+          trivyignores: .trivyignore
+      - name: Trivy — application libraries (report only)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: memoturn-${{ matrix.service }}:scan
+          scan-type: image
+          vuln-type: library
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+          skip-setup-trivy: true
           trivyignores: .trivyignore

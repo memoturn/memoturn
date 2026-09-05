@@ -81,8 +81,9 @@ Production-readiness tranche, phase 1 (operability).
   resources; an opt-in default-deny NetworkPolicy. The chart is published to
   `oci://ghcr.io/memoturn/charts` on every release.
 - **Supply chain.** Every GitHub Action is pinned by commit SHA; images carry an SBOM and
-  max-mode provenance; PR builds are Trivy-scanned (CRITICAL/HIGH with a fix fail) and the
-  published `:latest` images are re-scanned weekly into the Security tab; `bun audit` runs
+  max-mode provenance; PR builds are Trivy-scanned (fixable OS-package findings fail; the images apply
+  Debian/Alpine security updates at build time; application-library findings are reported)
+  and the published `:latest` images are re-scanned weekly into the Security tab; `bun audit` runs
   in CI (advisory); the api/worker images drop devDependencies and non-runtime trees; the
   console's Caddy base is digest-pinned.
 

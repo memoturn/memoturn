@@ -39,6 +39,10 @@ RUN bun --filter @memoturn/db generate
 RUN rm -rf apps/web apps/docs apps/console apps/mcp sdks/python sdks/go docs examples \
       integrations .claude infra scripts/screenshots.ts \
   && find . -name "*.test.ts" -not -path "./node_modules/*" -delete
+# Pull in every Debian security fix published since the base image was cut — the base tag
+# moves rarely, the advisories don't. The CI Trivy gate scans OS packages after this step.
+USER root
+RUN apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
 # Drop root for the runtime process (the oven/bun image ships a non-root `bun` user).
 USER bun
