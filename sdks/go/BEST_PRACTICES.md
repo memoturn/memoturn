@@ -24,7 +24,8 @@ Without it, up to `flushInterval` (default 5s) of trailing events — often the 
 How the pipeline behaves under failure (all in `Flush`/`enqueue`/`rebuffer`):
 
 - Events buffer in memory and flush when the buffer reaches `WithFlushAt` (default 20, single-flight background flush) or every `WithFlushInterval` (default 5s).
-- **Transient failures** — network errors, 5xx, 408, 429 — re-buffer the batch ahead of newer events; the next flush retries it. Nothing is lost while the buffer has room.
+- **Transient failures** — network errors, 5xx, 408, 429 — re-buffer the failing chunk and every chunk after it ahead of newer events; the next flush retries them. Nothing is lost while the buffer has room. Background flushes then back off exponentially with jitter (honouring `Retry-After`, capped at 60 s); an explicit `Flush()` always tries.
+- **Request sizing** — a flush sends at most `WithMaxBatchSize` events (default and hard maximum 1000, the API's per-request limit) and ~10 MB per `POST`, so a buffer that grew during an outage drains as several requests instead of one over-limit request that would be rejected outright.
 - **Permanent rejects** — any other 4xx (400, 401, 403…) — drop the batch with a log line. Retrying a bad request or bad credentials can never succeed, so the SDK refuses to retry-loop on them.
 - **Schema rejects** inside a 207 response are logged and *not* retried (a schema rejection is permanent); the rest of the batch is accepted.
 - The buffer is capped at `WithMaxBufferSize` (default 10 000, `MEMOTURN_MAX_BUFFER_SIZE`). When full, **new events are dropped** with a one-time warning; when a re-buffered failed batch overflows the cap, the **oldest events are dropped** first. Size the cap for your worst-case outage window: `events/sec × acceptable outage seconds`, bounded by memory (each buffered event holds its full input/output payloads).
