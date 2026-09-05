@@ -28,7 +28,7 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 | POST | `/v1/otel/v1/traces` | OpenTelemetry OTLP/HTTP (JSON + protobuf) receiver; maps GenAI semconv spans. |
 | POST | `/v1/otel/v1/logs` | OTLP/HTTP logs receiver (JSON + protobuf); log records become EVENT observations (e.g. Claude Code prompt/response text). |
 | POST | `/v1/otel/v1/metrics` | Always `501` with a JSON explanation — OTLP metrics are not ingested. Exists so a collector configured with the base endpoint gets a clear answer instead of a 404. |
-| GET | `/v1/ingest/health` | Ingest-pipeline health for the ops console: DLQ depth, insert latency, error counters, recent failed batches. OWNER/ADMIN only. | Project-scoped: DLQ depth and recent failures cover the caller's project only.
+| GET | `/v1/ingest/health` | Ingest-pipeline health for the ops console: DLQ depth, insert latency, error counters, recent failed batches. OWNER/ADMIN only. Project-scoped: DLQ depth and recent failures cover the caller's project only. |
 | POST | `/v1/ingest/dlq/replay` | Re-enqueue dead-lettered batches from blob onto the ingest queue. Body: `{ limit? }`. OWNER/ADMIN only; audited. |
 | GET | `/health` | Liveness probe (public, unauthenticated) — `{ status: "ok" }`. |
 | GET | `/auth-config` | Which auth methods are enabled (public, unauthenticated) — password/social/magic-link/email-OTP flags the console reads to render the sign-in surfaces the server accepts. |

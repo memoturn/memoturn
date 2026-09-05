@@ -11,6 +11,8 @@ defaults match `infra/docker-compose.dev.yml`.
 | Var | Default | Notes |
 | --- | --- | --- |
 | `DATABASE_URL` | `postgresql://memoturn:memoturn@localhost:5433/memoturn?schema=public` | Host port is **5433** in dev to avoid clashing with other local Postgres |
+| `PRISMA_POOL_SIZE` | `10` | Prisma (metadata) connection pool size **per replica**. |
+| `PRISMA_CONNECT_TIMEOUT_MS` | `10000` | How long to wait for a pooled Postgres connection before failing the query. |
 
 ## Telemetry engine
 
@@ -38,6 +40,13 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | `DORIS_STREAM_LOAD_HOST` | `DORIS_HOST` | Override for a host-run worker that should load a BE directly instead of going through the FE redirect. |
 | `DORIS_STREAM_LOAD_PORT` | `8030` | FE HTTP port by default; point at a BE webserver (`8040`) to load it directly. |
 | `DORIS_STREAM_LOAD_TIMEOUT_MS` | `60000` | Per-call Stream Load timeout so a wedged BE can't pin an ingest worker slot forever. |
+| `DORIS_REPLICATION_NUM` | `1` | Replicas per tablet for NEW tables/partitions (`${REPLICATION_NUM}` in DDL, the migrations ledger). Raise on multi-BE clusters; existing tables are changed with `bun run telemetry:repartition -- --set-replication N`. |
+| `DORIS_POOL_SIZE` | `10` | Doris FE connection pool size **per replica**. |
+| `DORIS_CONNECT_TIMEOUT_MS` | `10000` | Connect timeout to the FE. |
+| `DORIS_QUERY_TIMEOUT_S` | `60` | Server-side `query_timeout` set on every pooled session — a runaway scan is killed on the FE instead of pinning a pool slot. |
+| `TELEMETRY_PG_POOL_SIZE` | `10` | Postgres-tier telemetry pool size per replica (`TELEMETRY_ENGINE=postgres`). |
+| `TELEMETRY_PG_CONNECT_TIMEOUT_MS` | `10000` | Connect timeout for that pool. |
+| `TELEMETRY_PG_STATEMENT_TIMEOUT_MS` | `60000` | `statement_timeout` on every telemetry session. |
 
 ## Redis / Valkey
 
@@ -50,7 +59,12 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | Var | Default | Notes |
 | --- | --- | --- |
 | `WORKER_CONCURRENCY` | `10` | Ingest worker concurrency |
-| `WORKER_PORT` | `3002` | Worker `/health` + `/metrics` HTTP endpoint |
+| `INGEST_LOCK_DURATION_MS` | `60000` | BullMQ lock for an ingest job; a job that outlives it is marked stalled (2 stalls → failed → DLQ). Raise if inserts routinely exceed a minute. |
+| `LONG_JOB_LOCK_DURATION_MS` | `600000` | BullMQ lock for experiment / evaluator-backfill jobs (minutes-long, LLM-bound). |
+| `DLQ_ALERT_DEPTH` | `1000` | When the dead-letter queue reaches this depth the worker logs an error-level line ("failing systemically"). `0` disables. |
+| `TELEMETRY_MAX_RETENTION_DAYS` | `0` (off) | Instance-wide retention ceiling: every project — with or without a policy — is swept at `min(policy, ceiling)` across the telemetry store, the blob event log, and the Postgres state mirror. |
+| `WORKER_SHUTDOWN_TIMEOUT_MS` | `570000` | Drain budget on SIGTERM: how long the worker waits for in-flight jobs (experiments/backfills run for minutes) before force-exiting. Keep it under the orchestrator's grace period (Helm `worker.terminationGracePeriodSeconds`, compose `stop_grace_period`). |
+| `WORKER_PORT` | `3002` | Worker `/health` (liveness), `/ready` (readiness — pings every datastore), and `/metrics` (JSON, or Prometheus text with `Accept: text/plain` / `?format=prometheus`) HTTP endpoint |
 | `WORKER_HOST` | `127.0.0.1` | Bind host for the worker health/metrics server. Loopback by default — `/metrics` is unauthenticated and leaks queue depths and per-project evaluator names. Set `0.0.0.0` only for cross-host probes on a trusted network. |
 | `WORKER_METRICS_URL` | `http://127.0.0.1:3002/metrics` | Where the API fetches worker metrics for the ingest-health panel. Set it when the API and worker run on different hosts/pods; fetch failures degrade gracefully (`workerReachable: false`). |
 | `STATE_RETENTION_HOURS` | `72` | Hours a mutable-entity `*State` row stays in Postgres after its last update before the hourly prune drops it (Doris keeps full history). |
@@ -85,11 +99,19 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | `API_PORT` | `3001` | Hono API |
 | `CONSOLE_PORT` | `3000` | Vite SPA |
 | `MEMOTURN_API_URL` | `http://localhost:3001` | API target for the console dev proxy |
-| `RATE_LIMIT_PER_MINUTE` | `0` | Per-project global request rate limit (requests/minute); `0` disables it (per-key limits still apply) |
-| `INGEST_EVENTS_PER_MINUTE` | `0` | Per-project ingest event-rate budget (events/minute; `0` = disabled). Meters actual event volume — a single POST can carry up to 1000 events, so this catches burst loads that the request-count limit would miss. Returns `429` with `Retry-After` when exceeded. |
+| `RATE_LIMIT_PER_MINUTE` | `600` | Per-project global request rate limit (requests/minute). ON by default; `0` disables it (per-key limits still apply). Also applied to the remote MCP endpoint once its principal resolves. |
+| `INGEST_EVENTS_PER_MINUTE` | `60000` | Per-project ingest **event** budget (a POST can carry 1000 events). ON by default; `0` disables. |
+| `API_DOCS_PUBLIC` | `true` | Set `false` to put `/docs` + `/openapi.json` behind auth. |
+| `API_KEY_DEFAULT_EXPIRY_DAYS` | unset | Default lifetime for API keys minted without an explicit `expiresInDays` (unset = never expire). |
+| `PLAYGROUND_MAX_TOKENS` | `32768` | Ceiling on `maxTokens` for a single playground/assistant completion (these spend the project's provider key) |
 | `MCP_RATE_LIMIT_PER_MINUTE` | `120` | Per-IP budget for the remote MCP endpoint (`/v1/mcp/:projectId`). Unlike the project limiter it defaults **on** — the route runs a credential lookup before auth resolves, so unauthenticated clients must not get unthrottled tries. `0` disables. |
+| `INGEST_MAX_EVENT_BYTES` | `1048576` | Per-event size cap on `/v1/ingest` (serialized). Over-limit events are rejected individually in the 207 body; large payloads belong in `/v1/media`. |
+| `INGEST_MAX_JSON_DEPTH` | `32` | Per-event nesting cap — protects the worker's recursive masking/offload walks. |
+| `API_REQUEST_TIMEOUT_MS` | `60000` | Wall-clock budget per non-streaming `/v1` request; past it the API answers `504` (JSON) instead of holding the connection. SSE and MCP routes are exempt. |
+| `SSE_MAX_STREAMS_PER_PROJECT` | `20` | Cap on concurrently open SSE streams (live tail, playground/assistant streaming) per project, shared across replicas via Redis; the 21st gets `429`. `0` disables. |
+| `LOG_LEVEL` | `info` | Minimum level emitted by the API's and worker's structured logs (`debug`/`info`/`warn`/`error`). `warn` silences the per-request access line on a busy install. |
 | `RATE_LIMIT_TRUSTED_PROXIES` | `1` | Number of trusted reverse proxies in front of the API, used to derive the real client IP from the right of `X-Forwarded-For` (a spoofed XFF prefix can't evade per-IP limits). The shipped Caddy deploy is one proxy; set `0` if the API is directly internet-exposed. |
-| `API_METRICS_TOKEN` | unset | Enables `GET /metrics` (request counts, status classes, per-route latency percentiles). Unset → `404`; set → requires `Authorization: Bearer <token>`. |
+| `API_METRICS_TOKEN` | unset | Enables `GET /metrics` (request counts, status classes, per-route latency percentiles). Unset → `404`; set → requires `Authorization: Bearer <token>`. JSON by default; Prometheus text exposition with `Accept: text/plain` (what Prometheus sends) or `?format=prometheus`. `GET /ready` (public) is the readiness probe — `200` only when Postgres, Redis, the telemetry store, and the blob bucket all answer; `GET /health` / `/v1/health` stay pure liveness. |
 
 ## Auth
 
@@ -105,6 +127,7 @@ fresh values with `openssl rand -base64 48`.
 | `CONSOLE_PUBLIC_URL` | first `AUTH_TRUSTED_ORIGINS` entry | Public origin of the console, used for links in emails (mentions, sign-in, invites). Defaults to the first `AUTH_TRUSTED_ORIGINS` entry, which is already the console origin — set this only when they differ. Deliberately **not** `AUTH_BASE_URL`: that is the API origin (`:3001`). A localhost value means "no public URL", so notification emails ship without a link rather than a dead one. |
 | `AUTH_TRUSTED_ORIGINS` | `http://localhost:3000` | **Required in production** — comma-separated console origins for CORS + auth. |
 | `ENCRYPTION_KEY` | dev placeholder | **Required in production** — AES-256-GCM key for provider API keys stored at rest. Independent of `BETTER_AUTH_SECRET`. Rotating this invalidates all stored provider keys (they must be re-entered in Settings → Providers). |
+| `ENCRYPTION_KEYS` | unset | Comma-separated key ring for rotation — first entry is ACTIVE (used to encrypt), the rest only decrypt. Procedure: `ENCRYPTION_KEYS=new,old` → restart → `bun run rotate-secrets` → `ENCRYPTION_KEYS=new`. Ciphertexts are `v2.<keyId>.…` (scrypt-derived AES-256-GCM); pre-v2 ciphertexts still decrypt and are rewritten by the rotation. |
 | `MCP_LOGIN_PAGE` | `<first AUTH_TRUSTED_ORIGINS>/login` | Console sign-in page the remote-MCP OAuth 2.1 flow (Better Auth `@better-auth/oauth-provider` plugin) redirects unauthenticated users to. Override only if the console login lives elsewhere. |
 | `MCP_CONSENT_PAGE` | `<first AUTH_TRUSTED_ORIGINS>/consent` | Console consent page where the OAuth flow asks the signed-in user to approve the client's requested scopes. |
 
@@ -116,6 +139,8 @@ fresh values with `openssl rand -base64 48`.
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | unset | Set `true` to require a verified email before sign-in (needs a working email transport). Default off so self-host accounts aren't locked out. |
 | `AUTH_MIN_PASSWORD_LENGTH` | `12` | Minimum length for **new** passwords (existing shorter passwords still sign in). |
 | `AUTH_HIBP_DISABLED` | unset | The breached-password check (k-anonymity, `api.pwnedpasswords.com`) is on by default and **fails closed** — signup/password-change return 500 when the service is unreachable. Airgapped/offline installs must set `true`. |
+| `AUTH_SIGNIN_MAX_PER_15M` | `10` | Password sign-in attempts per client IP per 15 minutes (brute-force guard, on top of the generic 30/min auth window). 2FA code verification has fixed sub-limits (10 TOTP, 5 backup codes / 15 min). |
+| `AUTH_OAUTH_REGISTER_MAX_PER_HOUR` | `20` | Unauthenticated OAuth dynamic client registrations per IP per hour (remote MCP clients). |
 | `AUTH_COOKIE_CACHE_MAX_AGE` | `300` | Session cookie cache lifetime (seconds) — `getSession` is served from a short-lived signed cookie instead of a Postgres query. Revocations/bans take up to this long to bite on issued cookies. |
 | `AUTH_COOKIE_CACHE_DISABLED` | unset | Set `true` to disable the session cookie cache entirely (every `getSession` hits Postgres). |
 | `AUTH_ORG_MEMBERSHIP_LIMIT` | `10000` | Max members per organization. |
@@ -156,7 +181,8 @@ without a mail server.
 
 | Var | Default | Notes |
 | --- | --- | --- |
-| `ALLOW_PRIVATE_WEBHOOK_TARGETS` | unset | Set to `1` to permit `http://` and private/loopback webhook, automation, and analytics-sink URLs. Blocked by default in every environment to prevent SSRF (not just production). Useful for dev/LAN self-hosted targets. |
+| `ALLOW_PRIVATE_WEBHOOK_TARGETS` | unset | Set to `1` to permit `http://` and private/loopback webhook, automation, and analytics-sink URLs. Blocked by default in every environment to prevent SSRF (not just production). Useful for dev/LAN self-hosted targets. In production the API/worker refuse to start with it set unless `ALLOW_PRIVATE_WEBHOOK_TARGETS_ACK=1` is also set. |
+| `ALLOW_PRIVATE_WEBHOOK_TARGETS_ACK` | unset | Production-only acknowledgement that `ALLOW_PRIVATE_WEBHOOK_TARGETS=1` is intentional (see above). |
 
 ## SDK / examples
 

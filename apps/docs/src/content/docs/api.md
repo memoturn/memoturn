@@ -27,10 +27,11 @@ Write endpoints require a non-`VIEWER` role (viewers get `403`).
 
 | Method | Path | Description |
 | --- | --- | --- |
-| POST | `/v1/ingest` | Batched events (`trace-create`, `span/generation-create/update`, `event-create`, `score-create`). Returns `207` with per-event results: schema-invalid events are rejected individually in `errors` (id, index, reason) while valid events are accepted — inspect `errors` to catch silent data loss. Per-event `input`/`output`/`metadata` JSON capped at 1 MB (400 on oversize). Returns `429` when the per-project event rate limit (`INGEST_EVENTS_PER_MINUTE`) is exceeded; `Retry-After` header indicates when to retry. The body also accepts an optional `sdk: { name, version }` identifying the client build — the official SDKs send it, and it feeds `GET /v1/usage/sdks`. |
+| POST | `/v1/ingest` | Batched events (`trace-create`, `span/generation-create/update`, `event-create`, `score-create`). Returns `207` with per-event results: schema-invalid events are rejected individually in `errors` (id, index, reason) while valid events are accepted — inspect `errors` to catch silent data loss. Per-event `input`/`output`/`metadata` JSON capped at 1 MB (400 on oversize). Returns `429` when the per-project event rate limit (`INGEST_EVENTS_PER_MINUTE`) is exceeded; `Retry-After` header indicates when to retry. The body also accepts an optional `sdk: { name, version }` identifying the client build — the official SDKs send it, and it feeds `GET /v1/usage/sdks`. Per-event limits: `INGEST_MAX_EVENT_BYTES` (1 MB) and `INGEST_MAX_JSON_DEPTH` (32) — oversize/over-deep events are per-event 400s in the 207 body. Optional `Idempotency-Key` header (≤128 chars): a retry within 24 h replays the original 207 (`Idempotent-Replayed: true`) instead of accepting a second batch; 409 while the first is still in flight. |
 | POST | `/v1/otel/v1/traces` | OpenTelemetry OTLP/HTTP (JSON + protobuf) receiver; maps GenAI semconv spans. |
 | POST | `/v1/otel/v1/logs` | OTLP/HTTP logs receiver (JSON + protobuf); log records become EVENT observations (e.g. Claude Code prompt/response text). |
-| GET | `/v1/ingest/health` | Ingest-pipeline health for the ops console: DLQ depth, insert latency, error counters, recent failed batches. OWNER/ADMIN only. |
+| POST | `/v1/otel/v1/metrics` | Always `501` with a JSON explanation — OTLP metrics are not ingested. Exists so a collector configured with the base endpoint gets a clear answer instead of a 404. |
+| GET | `/v1/ingest/health` | Ingest-pipeline health for the ops console: DLQ depth, insert latency, error counters, recent failed batches. OWNER/ADMIN only. Project-scoped: DLQ depth and recent failures cover the caller's project only. |
 | POST | `/v1/ingest/dlq/replay` | Re-enqueue dead-lettered batches from blob onto the ingest queue. Body: `{ limit? }`. OWNER/ADMIN only; audited. |
 | GET | `/health` | Liveness probe (public, unauthenticated) — `{ status: "ok" }`. |
 | GET | `/auth-config` | Which auth methods are enabled (public, unauthenticated) — password/social/magic-link/email-OTP flags the console reads to render the sign-in surfaces the server accepts. |
@@ -112,10 +113,10 @@ filter=[{"column":"scores","type":"numberObject","key":"accuracy","operator":"lt
 
 | Method | Path | Description |
 | --- | --- | --- |
-| POST | `/v1/playground/chat` | One-shot completion. `trace:true` (default) records it as a trace. |
-| POST | `/v1/assistant/chat` | In-app assistant: a bounded agentic loop over the project's read-only MCP tools. Body: `provider`, `model`, `messages[]`, optional `context` (organization/project/page/rangeDays); returns `{content, steps[]}`. Read-only. |
-| POST | `/v1/assistant/stream` | Streaming assistant (SSE): same loop and body as `/chat`, but tool steps are emitted as they execute and answer text arrives incrementally (`data: {"step":...}` \| `{"delta":...}` then `[DONE]`). Read-only. |
-| POST | `/v1/playground/stream` | Streaming completion (SSE: `data: {"delta":...}` then `[DONE]`). |
+| POST | `/v1/playground/chat` | One-shot completion. `trace:true` (default) records it as a trace. Write-gated (spends the project's provider key — VIEWERs get 403); `maxTokens` is capped at `PLAYGROUND_MAX_TOKENS` (default 32768). |
+| POST | `/v1/assistant/chat` | In-app assistant: a bounded agentic loop over the project's read-only MCP tools. Body: `provider`, `model`, `messages[]`, optional `context` (organization/project/page/rangeDays); returns `{content, steps[]}`. Never mutates project data, but write-gated because each turn spends the provider key (VIEWERs get 403). |
+| POST | `/v1/assistant/stream` | Streaming assistant (SSE): same loop and body as `/chat`, but tool steps are emitted as they execute and answer text arrives incrementally (`data: {"step":...}` \| `{"delta":...}` then `[DONE]`). Write-gated like `/chat`. |
+| POST | `/v1/playground/stream` | Streaming completion (SSE: `data: {"delta":...}` then `[DONE]`). Same body, validation, and write gate as `/chat`. |
 
 ### Evaluators
 
@@ -191,8 +192,10 @@ Server-executed experiments run a prompt/model across a dataset and auto-score e
 | GET | `/v1/scores/agreement` | Agreement between two score sources over the traces carrying both. Numeric pairs return correlation + MAE/RMSE; label pairs return agreement rate, Cohen's Kappa, and per-label F1. Always returns a confusion matrix (numeric values are bucketed). Query: `a`, `b` (required), `days`. Scans at most 20 000 pairs; past that `sampled` is true. |
 | PATCH | `/v1/scores/{id}` | Correct a score's `value`/`stringValue`/`comment` (inserts a replacement row; audited). |
 | DELETE | `/v1/scores/{id}` | Hard-delete a score (Doris `DELETE`, project-scoped). |
+| DELETE | `/v1/traces/{id}` | Delete one trace completely: every telemetry table, the Postgres state mirror, and the offloaded payload objects it references. Audited. (Raw event batches are multi-trace and governed by retention — follow an erasure with a retention cutoff.) |
+| DELETE | `/v1/users/{userId}/data` | Right to erasure for an END USER of the traced app: every trace recorded under that `userId`, with the same completeness as `DELETE /v1/traces/{id}`. **Admin-only**; audited; returns `{ traces }`. |
 | GET / POST | `/v1/saved-views` | List / save a table view (named set of filters). |
-| DELETE | `/v1/saved-views/{id}` | Delete a saved view. |
+| PATCH / DELETE | `/v1/saved-views/{id}` | Update a saved view's name/state / delete it. |
 | GET / POST | `/v1/comments` | List comments on an object (trace/observation/session/prompt) / add one. |
 | GET | `/v1/comments/mentions` | Comments in this project that @mention the signed-in user. |
 | DELETE | `/v1/comments/{id}` | Delete a comment. |
@@ -248,8 +251,8 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | POST | `/v1/guardrails/check` | Runtime guardrails: scan `{ text }` for PII / prompt injection / SQL injection / blocked terms / required-match / JSON shape, plus opt-in LLM guards — evaluator (judge) guards and built-in **restricted-topic** + **toxicity** model guards; returns `{ verdict: allow\|redact\|block, findings, redactedText? }`. Read-only compute (the LLM guard calls write nothing and fail open on timeout/error). SDK: `checkGuardrails` / `check_guardrails`. |
 | GET / POST | `/v1/guardrails` | Get / configure the project's guardrail policy (PII action, prompt-injection/SQL-injection detection, blocked terms, `requireMatch`, `requireValidJson`/`requiredJsonKeys`, evaluator-backed `evaluatorGuards`, and model guards `restrictedTopics`/`toxicity`+`toxicityThreshold` judged by `judgeProvider`/`judgeModel`). |
 | GET / POST | `/v1/analytics-sink` | Get / configure the event sink — forwarding trace/score events to a product-analytics/CDP endpoint (PostHog-compatible capture API). POST `host` URL is SSRF-validated (400 on private/loopback targets). |
-| GET / POST | `/v1/api-keys` | List project API keys (public key + hint) / mint a new pair (secret returned once). |
-| DELETE | `/v1/api-keys/{id}` | Revoke an API key. |
+| GET / POST | `/v1/api-keys` | List project API keys (public key + hint) / mint a new pair (secret returned once). **Admin-only** (OWNER/ADMIN). Scopes: `read`, `write`, `ingest` (the default set) and `admin`. A key acts as MEMBER unless it carries `admin`, in which case it acts as OWNER on admin-only routes — never granted by default. |
+| DELETE | `/v1/api-keys/{id}` | Revoke an API key. Admin-only. |
 | GET | `/v1/account/mcp-connections` | List the OAuth clients (remote MCP IDEs/agents) the signed-in user has authorized. Empty for API-key callers (no user). |
 | DELETE | `/v1/account/mcp-connections/{consentId}` | Disconnect an OAuth client: deletes the consent and revokes its refresh tokens (access ends when the last ≤1 h JWT expires). |
 | GET | `/v1/health` | Liveness (no auth). |
