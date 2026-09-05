@@ -38,15 +38,29 @@ export function pgTelemetryConfig(): PgTelemetryConfig {
   return { connectionString: url.toString(), schema };
 }
 
+/** Integer env knob with a fallback and bounds — a malformed value never becomes NaN. */
+function envIntPg(name: string, fallback: number, min = 0, max = Number.MAX_SAFE_INTEGER): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(n)));
+}
+
 function poolOptions(config: Partial<PgTelemetryConfig> = {}): pg.PoolConfig {
   const resolved = { ...pgTelemetryConfig(), ...config };
   return {
     connectionString: resolved.connectionString,
-    max: 10,
+    // Size per replica: replicas × TELEMETRY_PG_POOL_SIZE (+ the Prisma pool) must stay under
+    // Postgres max_connections (default 100) — see docs/deployment.md#scaling.
+    max: envIntPg("TELEMETRY_PG_POOL_SIZE", 10, 1, 1000),
     idleTimeoutMillis: 60_000,
+    connectionTimeoutMillis: envIntPg("TELEMETRY_PG_CONNECT_TIMEOUT_MS", 10_000, 100),
     keepAlive: true,
     // Startup-packet session config: active before the first query on every connection.
-    options: `-c search_path=${resolved.schema},public -c TimeZone=UTC`,
+    // statement_timeout kills a runaway analytical query server-side instead of letting it
+    // pin a pool slot (and an API request) indefinitely.
+    options: `-c search_path=${resolved.schema},public -c TimeZone=UTC -c statement_timeout=${envIntPg("TELEMETRY_PG_STATEMENT_TIMEOUT_MS", 60_000, 100)}`,
   };
 }
 

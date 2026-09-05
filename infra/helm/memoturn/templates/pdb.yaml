@@ -1,0 +1,25 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+{{- range $c := list "api" "console" }}
+{{- $v := index $.Values $c }}
+{{- $scaled := and (hasKey $v "autoscaling") $v.autoscaling.enabled }}
+{{- $replicas := ternary (int (dig "autoscaling" "minReplicas" $v.replicaCount $v)) (int $v.replicaCount) $scaled }}
+{{- if and (or (ne $c "console") $.Values.console.enabled) (gt $replicas 1) }}
+---
+# Keeps at least minAvailable replica(s) up through voluntary disruptions (node drains,
+# cluster upgrades). Only rendered when the component actually has >1 replica.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "memoturn.fullname" $ }}-{{ $c }}
+  labels:
+    {{- include "memoturn.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $c }}
+spec:
+  minAvailable: {{ $.Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "memoturn.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $c }}
+{{- end }}
+{{- end }}
+{{- end }}

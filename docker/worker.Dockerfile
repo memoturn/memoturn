@@ -26,11 +26,23 @@ COPY packages/llm/package.json packages/llm/package.json
 COPY packages/ui/package.json packages/ui/package.json
 COPY packages/tsconfig/package.json packages/tsconfig/package.json
 COPY sdks/js/package.json sdks/js/package.json
-RUN bun install --frozen-lockfile
+# Production install only: no devDependencies (turbo, biome, vitest, playwright, typescript …)
+# ever enter the image. The prisma CLI is a runtime dependency of @memoturn/db because the
+# migrate container runs `prisma migrate deploy` from this same image.
+RUN bun install --frozen-lockfile --production
 
 FROM deps AS runner
 COPY . .
 RUN bun --filter @memoturn/db generate
+# Drop the trees this service never imports (public sites, console, other SDKs, docs) and the
+# test files. Bun runs the TypeScript sources directly, so the remaining workspaces stay as-is.
+RUN rm -rf apps/web apps/docs apps/console apps/mcp sdks/python sdks/go docs examples \
+      integrations .claude infra scripts/screenshots.ts \
+  && find . -name "*.test.ts" -not -path "./node_modules/*" -delete
+# Pull in every Debian security fix published since the base image was cut — the base tag
+# moves rarely, the advisories don't. The CI Trivy gate scans OS packages after this step.
+USER root
+RUN apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
 # Drop root for the runtime process (the oven/bun image ships a non-root `bun` user).
 USER bun

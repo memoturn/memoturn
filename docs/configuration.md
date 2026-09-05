@@ -9,6 +9,9 @@ defaults match `infra/docker-compose.dev.yml`.
 | --- | --- | --- |
 | `DATABASE_URL` | `postgresql://memoturn:memoturn@localhost:5433/memoturn?schema=public` | Host port is **5433** in dev to avoid clashing with other local Postgres |
 
+| `PRISMA_POOL_SIZE` | `10` | Prisma (metadata) connection pool size **per replica**. |
+| `PRISMA_CONNECT_TIMEOUT_MS` | `10000` | How long to wait for a pooled Postgres connection before failing the query. |
+
 ## Telemetry engine
 
 | Var | Default | Notes |
@@ -36,6 +39,13 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | `DORIS_STREAM_LOAD_PORT` | `8030` | FE HTTP port by default; point at a BE webserver (`8040`) to load it directly. |
 | `DORIS_STREAM_LOAD_TIMEOUT_MS` | `60000` | Per-call Stream Load timeout so a wedged BE can't pin an ingest worker slot forever. |
 
+| `DORIS_POOL_SIZE` | `10` | Doris FE connection pool size **per replica**. |
+| `DORIS_CONNECT_TIMEOUT_MS` | `10000` | Connect timeout to the FE. |
+| `DORIS_QUERY_TIMEOUT_S` | `60` | Server-side `query_timeout` set on every pooled session — a runaway scan is killed on the FE instead of pinning a pool slot. |
+| `TELEMETRY_PG_POOL_SIZE` | `10` | Postgres-tier telemetry pool size per replica (`TELEMETRY_ENGINE=postgres`). |
+| `TELEMETRY_PG_CONNECT_TIMEOUT_MS` | `10000` | Connect timeout for that pool. |
+| `TELEMETRY_PG_STATEMENT_TIMEOUT_MS` | `60000` | `statement_timeout` on every telemetry session. |
+
 ## Redis / Valkey
 
 | Var | Default | Notes |
@@ -47,8 +57,11 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | Var | Default | Notes |
 | --- | --- | --- |
 | `WORKER_CONCURRENCY` | `10` | Ingest worker concurrency |
+| `INGEST_LOCK_DURATION_MS` | `60000` | BullMQ lock for an ingest job; a job that outlives it is marked stalled (2 stalls → failed → DLQ). Raise if inserts routinely exceed a minute. |
+| `LONG_JOB_LOCK_DURATION_MS` | `600000` | BullMQ lock for experiment / evaluator-backfill jobs (minutes-long, LLM-bound). |
+| `DLQ_ALERT_DEPTH` | `1000` | When the dead-letter queue reaches this depth the worker logs an error-level line ("failing systemically"). `0` disables. |
 | `WORKER_SHUTDOWN_TIMEOUT_MS` | `570000` | Drain budget on SIGTERM: how long the worker waits for in-flight jobs (experiments/backfills run for minutes) before force-exiting. Keep it under the orchestrator's grace period (Helm `worker.terminationGracePeriodSeconds`, compose `stop_grace_period`). |
-| `WORKER_PORT` | `3002` | Worker `/health` + `/metrics` HTTP endpoint |
+| `WORKER_PORT` | `3002` | Worker `/health` (liveness), `/ready` (readiness — pings every datastore), and `/metrics` (JSON, or Prometheus text with `Accept: text/plain` / `?format=prometheus`) HTTP endpoint |
 | `WORKER_HOST` | `127.0.0.1` | Bind host for the worker health/metrics server. Loopback by default — `/metrics` is unauthenticated and leaks queue depths and per-project evaluator names. Set `0.0.0.0` only for cross-host probes on a trusted network. |
 | `WORKER_METRICS_URL` | `http://127.0.0.1:3002/metrics` | Where the API fetches worker metrics for the ingest-health panel. Set it when the API and worker run on different hosts/pods; fetch failures degrade gracefully (`workerReachable: false`). |
 | `STATE_RETENTION_HOURS` | `72` | Hours a mutable-entity `*State` row stays in Postgres after its last update before the hourly prune drops it (Doris keeps full history). |
@@ -87,8 +100,11 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | `PLAYGROUND_MAX_TOKENS` | `32768` | Ceiling on `maxTokens` for a single playground/assistant completion (these spend the project's provider key) |
 | `INGEST_EVENTS_PER_MINUTE` | `0` | Per-project ingest event-rate budget (events/minute; `0` = disabled). Meters actual event volume — a single POST can carry up to 1000 events, so this catches burst loads that the request-count limit would miss. Returns `429` with `Retry-After` when exceeded. |
 | `MCP_RATE_LIMIT_PER_MINUTE` | `120` | Per-IP budget for the remote MCP endpoint (`/v1/mcp/:projectId`). Unlike the project limiter it defaults **on** — the route runs a credential lookup before auth resolves, so unauthenticated clients must not get unthrottled tries. `0` disables. |
+| `API_REQUEST_TIMEOUT_MS` | `60000` | Wall-clock budget per non-streaming `/v1` request; past it the API answers `504` (JSON) instead of holding the connection. SSE and MCP routes are exempt. |
+| `SSE_MAX_STREAMS_PER_PROJECT` | `20` | Cap on concurrently open SSE streams (live tail, playground/assistant streaming) per project, shared across replicas via Redis; the 21st gets `429`. `0` disables. |
+| `LOG_LEVEL` | `info` | Minimum level emitted by the API's and worker's structured logs (`debug`/`info`/`warn`/`error`). `warn` silences the per-request access line on a busy install. |
 | `RATE_LIMIT_TRUSTED_PROXIES` | `1` | Number of trusted reverse proxies in front of the API, used to derive the real client IP from the right of `X-Forwarded-For` (a spoofed XFF prefix can't evade per-IP limits). The shipped Caddy deploy is one proxy; set `0` if the API is directly internet-exposed. |
-| `API_METRICS_TOKEN` | unset | Enables `GET /metrics` (request counts, status classes, per-route latency percentiles). Unset → `404`; set → requires `Authorization: Bearer <token>`. |
+| `API_METRICS_TOKEN` | unset | Enables `GET /metrics` (request counts, status classes, per-route latency percentiles). Unset → `404`; set → requires `Authorization: Bearer <token>`. JSON by default; Prometheus text exposition with `Accept: text/plain` (what Prometheus sends) or `?format=prometheus`. `GET /ready` (public) is the readiness probe — `200` only when Postgres, Redis, the telemetry store, and the blob bucket all answer; `GET /health` / `/v1/health` stay pure liveness. |
 
 ## Auth
 

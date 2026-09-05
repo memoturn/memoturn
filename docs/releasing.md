@@ -65,12 +65,19 @@ be exercised by a real publish, so a green dry run confirms the builds, not the 
      > deprecated in place rather than removed; the long-term fix is to move the coordination
      > SDK to its own package name.
    - **pypi** — `uv build` (wheel + sdist) → `uv publish --trusted-publishing always`.
+   - **helm** — after the image manifests exist, `helm package` + `helm push` publishes the
+     chart to `oci://ghcr.io/memoturn/charts/memoturn:<version>` (GITHUB_TOKEN; `Chart.yaml`
+     must match the release version — `docs:check` enforces it).
    - **images** — matrix over `api` / `worker` / `console` **× `amd64` / `arm64`**: build
      each `docker/<svc>.Dockerfile` and push it to `ghcr.io/memoturn/<svc>` *by digest*,
      untagged. A follow-on **image-manifests** job then joins each service's two digests
      into one manifest list and applies the tags — `{version}`, `{major}.{minor}`, `latest`
      — so every published tag is multi-arch (see
      [Deployment → Architectures](./deployment.md#architectures)).
+
+     Each per-arch image is pushed with an **SBOM** (SPDX) and **SLSA provenance**
+     (`mode=max`) attached as attestation manifests — inspect with
+     `docker buildx imagetools inspect ghcr.io/memoturn/api:<version> --format '{{json .Provenance}}'`.
 
      Each architecture builds on a **native runner** (`ubuntu-latest` / `ubuntu-24.04-arm`)
      rather than cross-building under QEMU: these are Bun images, and Bun's JIT is not

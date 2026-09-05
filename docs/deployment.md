@@ -208,7 +208,13 @@ before pods roll. Published images come from `ghcr.io/memoturn/*`.
 
 ```bash
 helm install memoturn ./infra/helm/memoturn -f my-values.yaml
+# or the published chart, versioned with the platform:
+helm install memoturn oci://ghcr.io/memoturn/charts/memoturn --version <release> -f my-values.yaml
 ```
+
+The chart enforces non-root pods with all capabilities dropped, keeps one api/console replica
+up through node drains (PodDisruptionBudgets), points readiness probes at `/ready`, and can
+render a default-deny NetworkPolicy (`networkPolicy.enabled`).
 
 See `infra/helm/memoturn/README.md` for required values (datastore URLs, `betterAuthSecret`,
 `encryptionKey`) and the ingress / autoscaling options.
@@ -267,10 +273,25 @@ and evaluator-backfill jobs drain on restart instead of being SIGKILLed.
 
 ## Scaling
 
-- **API** is stateless — scale horizontally behind a load balancer.
+- **API** is stateless — scale horizontally behind a load balancer. Point the balancer's
+  health check (and Kubernetes' readiness probe) at `GET /ready`, which pings Postgres, Redis,
+  the telemetry store, and the blob bucket; `/health` is liveness only and never fails.
+- **Connection budget.** Every replica opens its own pools: `PRISMA_POOL_SIZE` (10) against
+  Postgres, `DORIS_POOL_SIZE` (10) against the Doris FE, and on the Postgres tier
+  `TELEMETRY_PG_POOL_SIZE` (10) too. Keep
+  `Σ replicas × (PRISMA_POOL_SIZE + TELEMETRY_PG_POOL_SIZE)` — API and worker replicas
+  alike — under Postgres `max_connections` (default 100) with headroom for migrations and
+  ops sessions, or put PgBouncer in front. The Helm defaults (API 2→10 + 1 worker) reach
+  110 connections at full scale, so either raise `max_connections`, lower the pool sizes via
+  `extraEnv`, or add a pooler before letting the HPA out.
+- **Timeouts.** `API_REQUEST_TIMEOUT_MS` (60 s) bounds non-streaming requests;
+  `DORIS_QUERY_TIMEOUT_S` / `TELEMETRY_PG_STATEMENT_TIMEOUT_MS` kill runaway analytical
+  queries server-side; `SSE_MAX_STREAMS_PER_PROJECT` (20) caps open live-tail/streaming
+  connections per project across replicas.
 - **Worker** scales by process count and `WORKER_CONCURRENCY`; the BullMQ queue
-  distributes ingest jobs. It also serves `/health` + `/metrics` on `WORKER_PORT`
-  (default `3002`) for liveness/observability probes.
+  distributes ingest jobs. It also serves `/health` (liveness), `/ready` (readiness), and
+  `/metrics` (JSON, or Prometheus text with `Accept: text/plain`) on `WORKER_PORT`
+  (default `3002`).
 - **Apache Doris** holds the high-volume telemetry; use a managed Doris or the community
   doris-operator in production — the store only needs the FE MySQL endpoint. **Postgres**
   stays small (metadata).

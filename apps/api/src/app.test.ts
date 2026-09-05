@@ -1,4 +1,5 @@
 import { prisma } from "@memoturn/db";
+import { redisConnection } from "@memoturn/db/queue";
 import { createApiKey } from "@memoturn/server";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { app } from "./app.js";
@@ -291,6 +292,66 @@ describe.skipIf(!HAS_INFRA)("authenticated /v1 routes (infra)", () => {
     expect(huge.status).toBe(400);
     const streamBad = await app.request("/v1/assistant/stream", { method: "POST", headers: auth, body: "not json" });
     expect(streamBad.status).toBe(400);
+  });
+
+  it("GET /ready reports every dependency and is 200 when they all answer", async () => {
+    const res = await app.request("/ready");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string; checks: Record<string, { ok: boolean; ms: number }> };
+    expect(body.status).toBe("ok");
+    for (const dep of ["postgres", "redis", "telemetry", "blob"]) {
+      expect(body.checks[dep]?.ok, dep).toBe(true);
+      expect(typeof body.checks[dep]?.ms).toBe("number");
+    }
+  });
+
+  it("GET /metrics renders Prometheus text when asked and JSON otherwise (token-gated)", async () => {
+    const saved = process.env.API_METRICS_TOKEN;
+    process.env.API_METRICS_TOKEN = "scrape-me";
+    try {
+      const noToken = await app.request("/metrics");
+      expect(noToken.status).toBe(401);
+      const json = await app.request("/metrics", { headers: { authorization: "Bearer scrape-me" } });
+      expect(json.headers.get("content-type")).toContain("application/json");
+      expect((await json.json()) as { requestsTotal: number }).toHaveProperty("requestsTotal");
+      const prom = await app.request("/metrics", {
+        headers: { authorization: "Bearer scrape-me", accept: "text/plain;version=0.0.4" },
+      });
+      expect(prom.status).toBe(200);
+      expect(prom.headers.get("content-type")).toContain("text/plain; version=0.0.4");
+      const text = await prom.text();
+      expect(text).toMatch(/^# TYPE memoturn_api_requests_total counter$/m);
+      expect(text).toMatch(/^memoturn_api_requests_total \d+$/m);
+      expect(text).toMatch(/memoturn_api_route_latency_ms\{method="GET",route="\/v1\/traces",quantile="0.95"\} \d+/);
+    } finally {
+      if (saved === undefined) delete process.env.API_METRICS_TOKEN;
+      else process.env.API_METRICS_TOKEN = saved;
+    }
+  });
+
+  it("caps concurrent SSE streams per project (429) and frees the slot when a stream aborts", async () => {
+    const saved = process.env.SSE_MAX_STREAMS_PER_PROJECT;
+    process.env.SSE_MAX_STREAMS_PER_PROJECT = "1";
+    await redisConnection().del(`memoturn:sse:${projectId}`);
+    const headers = { authorization: basic(full.publicKey, full.secretKey) };
+    try {
+      const first = await app.request("/v1/live/traces", { headers });
+      expect(first.status).toBe(200);
+      const second = await app.request("/v1/live/traces", { headers });
+      expect(second.status).toBe(429);
+      expect(((await second.json()) as { error: string }).error).toContain("too many concurrent streams");
+      // A client disconnect surfaces as the response body being cancelled (that is what
+      // Bun.serve does) — Hono then fires onAbort, which releases the slot.
+      await first.body?.cancel();
+      await new Promise((r) => setTimeout(r, 50));
+      const third = await app.request("/v1/live/traces", { headers });
+      expect(third.status).toBe(200);
+      await third.body?.cancel();
+    } finally {
+      if (saved === undefined) delete process.env.SSE_MAX_STREAMS_PER_PROJECT;
+      else process.env.SSE_MAX_STREAMS_PER_PROJECT = saved;
+      await redisConnection().del(`memoturn:sse:${projectId}`);
+    }
   });
 
   it("rejects an MCP call to another tenant's project with a key scoped to this one (401)", async () => {

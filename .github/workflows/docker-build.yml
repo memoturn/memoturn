@@ -8,6 +8,11 @@ on:
   pull_request:
     paths:
       - "docker/**"
+      - "apps/api/**"
+      - "apps/worker/**"
+      - "apps/console/**"
+      - "packages/**"
+      - "sdks/js/**"
       - "**/package.json"
       - "bun.lock"
       - ".github/workflows/docker-build.yml"
@@ -30,10 +35,10 @@ jobs:
           - { arch: amd64, docker: linux/amd64, runner: ubuntu-latest }
           - { arch: arm64, docker: linux/arm64, runner: ubuntu-24.04-arm }
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
       - name: Build (no push)
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           file: docker/${{ matrix.service }}.Dockerfile
@@ -44,3 +49,59 @@ jobs:
           # Same cache scopes as release.yml, so a PR build warms the release build.
           cache-from: type=gha,scope=${{ matrix.service }}-${{ matrix.platform.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}-${{ matrix.platform.arch }}
+
+  # Vulnerability scan of the built images (amd64 is representative — the arm64 layers carry
+  # the same packages). Two passes with different consequences:
+  #   1. OS packages (Debian/Alpine): CRITICAL/HIGH with a fix available FAIL the PR. The
+  #      Dockerfiles run apt-get/apk upgrade, so a red here means a new advisory landed
+  #      since the last build — rebuild, or bump the base digest.
+  #   2. Application libraries (the Caddy Go binary, node_modules): reported, non-blocking.
+  #      Those close only with an upstream release (a new Caddy tag, `bun update`); every
+  #      upstream base image carries some at any given time, so gating on them would never be
+  #      green. They still surface in the weekly published-image scan (Security tab).
+  # Exceptions go in .trivyignore with a reason.
+  scan:
+    name: Scan ${{ matrix.service }} image (Trivy)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, worker, console]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+      - name: Build (load into the local daemon)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: docker/${{ matrix.service }}.Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: memoturn-${{ matrix.service }}:scan
+          cache-from: type=gha,scope=${{ matrix.service }}-amd64
+      - name: Trivy — OS packages (blocking)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: memoturn-${{ matrix.service }}:scan
+          scan-type: image
+          vuln-type: os
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
+      - name: Trivy — application libraries (report only)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: memoturn-${{ matrix.service }}:scan
+          scan-type: image
+          vuln-type: library
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+          skip-setup-trivy: true
+          trivyignores: .trivyignore

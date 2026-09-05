@@ -28,7 +28,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Create release with generated notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -43,11 +43,11 @@ jobs:
       contents: read
       id-token: write # npm Trusted Publishing (OIDC) + provenance
     steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.1"
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
@@ -94,8 +94,8 @@ jobs:
     permissions:
       id-token: write # PyPI Trusted Publishing (OIDC) — no token needed
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - name: Build wheel + sdist
         working-directory: sdks/python
         run: uv build
@@ -110,8 +110,8 @@ jobs:
     permissions:
       contents: write # pushes the sdks/go/vX.Y.Z module tag
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: sdks/go/go.mod
       - name: Vet + test
@@ -154,11 +154,11 @@ jobs:
           - { arch: amd64, docker: linux/amd64, runner: ubuntu-latest }
           - { arch: arm64, docker: linux/arm64, runner: ubuntu-24.04-arm }
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
       - name: Log in to GHCR
         if: ${{ !inputs.dry_run }}
-        uses: docker/login-action@v4.6.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -168,14 +168,14 @@ jobs:
       # to a per-arch build — see the job comment.
       - name: Image metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}
 
       # Dry run stops here: prove the image still builds on this architecture, push nothing.
       - name: Build (no push)
         if: ${{ inputs.dry_run }}
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           file: docker/${{ matrix.service }}.Dockerfile
@@ -190,13 +190,18 @@ jobs:
       - name: Build + push by digest
         id: build
         if: ${{ !inputs.dry_run }}
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           file: docker/${{ matrix.service }}.Dockerfile
           platforms: ${{ matrix.platform.docker }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/${{ matrix.service }},push-by-digest=true,name-canonical=true,push=true
+          # Supply-chain metadata on the images self-hosters actually run: an SBOM (SPDX) and
+          # max-mode SLSA provenance are attached to each per-arch image as attestation
+          # manifests; `docker buildx imagetools inspect --format '{{json .Provenance}}'` reads them.
+          sbom: true
+          provenance: mode=max
           cache-from: type=gha,scope=${{ matrix.service }}-${{ matrix.platform.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}-${{ matrix.platform.arch }}
       # The digest is the whole payload — an empty file named after it is enough for the
@@ -210,7 +215,7 @@ jobs:
           touch "/tmp/digests/${DIGEST#sha256:}"
       - name: Upload digest
         if: ${{ !inputs.dry_run }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: digest-${{ matrix.service }}-${{ matrix.platform.arch }}
           path: /tmp/digests/*
@@ -232,21 +237,21 @@ jobs:
       matrix:
         service: [api, worker, console]
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: /tmp/digests
           pattern: digest-${{ matrix.service }}-*
           merge-multiple: true
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
       - name: Log in to GHCR
-        uses: docker/login-action@v4.6.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Image metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         env:
           # `imagetools create` annotates the INDEX. metadata-action defaults to the
           # `manifest:` level, which buildx rejects outright:
@@ -298,3 +303,26 @@ jobs:
             grep -qx "$want" platforms.txt \
               || { echo "::error::${IMAGE}:${VERSION} does not include ${want}"; exit 1; }
           done
+
+  # Publish the Helm chart as an OCI artifact alongside the images, versioned with the
+  # platform (docs:check enforces Chart.yaml == the SDK/package version).
+  helm:
+    name: Publish Helm chart
+    if: ${{ !inputs.dry_run }}
+    needs: image-manifests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Lint + package
+        run: |
+          helm lint infra/helm/memoturn
+          helm package infra/helm/memoturn --destination /tmp/chart
+      - name: Push to GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GH_TOKEN" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm push /tmp/chart/memoturn-*.tgz "oci://ghcr.io/${{ github.repository_owner }}/charts"

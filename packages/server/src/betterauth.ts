@@ -19,7 +19,7 @@ import { adminAc, defaultStatements, memberAc, ownerAc } from "better-auth/plugi
 import { recordAuthAudit } from "./audit.js";
 import { demoModeEnabled, provisionSandboxForUser } from "./demo.js";
 import { brandedEmail } from "./emailtemplate.js";
-import { isProduction, consoleOrigin as resolveConsoleOrigin } from "./env.js";
+import { authSecret, isProduction, consoleOrigin as resolveConsoleOrigin } from "./env.js";
 import { mailerStatus, sendEmail } from "./mailer.js";
 
 /**
@@ -264,7 +264,7 @@ export const auth = betterAuth({
   // The jwt plugin's /token endpoint mints session-bearer JWTs we don't use (OAuth access
   // tokens come from /oauth2/token); disable it rather than expose a second token surface.
   disabledPaths: ["/token"],
-  secret: process.env.BETTER_AUTH_SECRET ?? "dev-only-change-me",
+  secret: authSecret(),
   trustedOrigins: (process.env.AUTH_TRUSTED_ORIGINS ?? "http://localhost:3000").split(","),
   // 7-day sessions, refreshed at most daily. cookieCache serves getSession from a short-lived
   // SIGNED cookie instead of a Postgres query — the single biggest auth read on the API (every

@@ -12,6 +12,7 @@ import {
 import {
   ALERT_COMPARATORS,
   ALERT_METRICS,
+  acquireStreamSlot,
   addDatasetItems,
   addReviewItems,
   annotateTrace,
@@ -55,6 +56,7 @@ import {
   type DatasetExportFormat,
   DatasetRunnerError,
   DatasetSchemaError,
+  DlqReplayInProgressError,
   decodeOtlpLogs,
   decodeOtlpTraces,
   deleteAlertRule,
@@ -73,6 +75,7 @@ import {
   demoModeEnabled,
   disconnectMcpClient,
   EvaluatorConfigError,
+  envInt,
   evaluateGate,
   exportDatasetJsonl,
   exportTraceJson,
@@ -161,6 +164,7 @@ import {
   PromptCompositionError,
   previewEvaluatorBackfill,
   RoleHierarchyError,
+  readiness,
   recordAudit,
   recordAuthAudit,
   recordRun,
@@ -216,9 +220,18 @@ import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
+import { timeout } from "hono/timeout";
 import { partitionIngestBatch } from "./ingest-partition.js";
 import { clientIpFrom, handleMcp } from "./mcp.js";
-import { logJson, recordRequest, requestStarted, snapshot } from "./metrics.js";
+import {
+  logJson,
+  PROMETHEUS_CONTENT_TYPE,
+  recordRequest,
+  renderPrometheus,
+  requestStarted,
+  snapshot,
+  wantsPrometheus,
+} from "./metrics.js";
 import { type AuthVars, denyIfNotAdmin, denyIfReadOnly, requireAuth } from "./middleware/auth.js";
 import { rateLimit } from "./middleware/ratelimit.js";
 
@@ -297,6 +310,15 @@ app.notFound((c) => c.json({ error: "not found", requestId: c.get("requestId") }
 // Liveness probe (public, unauthenticated) — cheap, no dependencies touched.
 app.get("/health", (c) => c.json({ status: "ok", service: "memoturn-api" }));
 
+// Readiness probe (public, unauthenticated): 200 only when Postgres, Redis, the telemetry
+// store, and the blob bucket all answer. Wire this — not /health — to the orchestrator's
+// readiness check so a replica with a dead pool is pulled from rotation instead of
+// answering 500s. The body carries ok/ms per dependency only; errors go to the log.
+app.get("/ready", async (c) => {
+  const report = await readiness((msg) => logJson("warn", "readiness check failed", { check: msg }));
+  return c.json({ status: report.ok ? "ok" : "degraded", service: "memoturn-api", ...report }, report.ok ? 200 : 503);
+});
+
 // Which auth methods are enabled (public, unauthenticated) — the console reads this on the
 // login/signup pages to render only the sign-in surfaces the server actually accepts, so the
 // UI never offers a social button or passwordless option that isn't configured.
@@ -304,10 +326,15 @@ app.get("/auth-config", (c) => c.json(authMethods()));
 
 // Metrics scrape — token-gated (returns 404 unless API_METRICS_TOKEN is set, so it's off
 // by default; the snapshot leaks route names + latencies, not tenant data).
+// Two formats from one snapshot: JSON (default — the console + scripts) and Prometheus
+// text when the scraper asks for it (`Accept: text/plain` / openmetrics, or `?format=prometheus`).
 app.get("/metrics", (c) => {
   const token = process.env.API_METRICS_TOKEN;
   if (!token) return c.json({ error: "not found" }, 404);
   if (c.req.header("authorization") !== `Bearer ${token}`) return c.json({ error: "unauthorized" }, 401);
+  if (wantsPrometheus(c.req.header("accept"), c.req.query("format"))) {
+    return c.body(renderPrometheus(), 200, { "content-type": PROMETHEUS_CONTENT_TYPE });
+  }
   return c.json(snapshot());
 });
 
@@ -336,6 +363,21 @@ app.use("/v1/*", (c, next) => {
     p === "/v1/ingest" || p.startsWith("/v1/otel") || p.startsWith("/v1/media") || p.startsWith("/v1/mcp");
   return (isLarge ? largeBodyLimit : defaultBodyLimit)(c, next);
 });
+
+// Auth routes take small JSON bodies (credentials, tokens, an OAuth client registration);
+// they are unauthenticated, so cap them too — without this a sign-in POST could buffer an
+// arbitrarily large body.
+app.use("/auth/*", bodyLimit({ maxSize: 256 * 1024 }));
+
+// Wall-clock budget per request. Streaming routes (SSE, MCP) are exempt by design; everything
+// else that outlives the budget answers 504 (JSON, via onError) instead of holding the
+// connection — and the operator's proxy timeout no longer has to be the only backstop.
+const REQUEST_TIMEOUT_MS = envInt("API_REQUEST_TIMEOUT_MS", 60_000);
+const STREAMING_PREFIXES = ["/v1/live/", "/v1/playground/stream", "/v1/assistant/stream", "/v1/mcp/"];
+const requestTimeout = timeout(REQUEST_TIMEOUT_MS);
+app.use("/v1/*", (c, next) =>
+  STREAMING_PREFIXES.some((p) => c.req.path.startsWith(p)) ? next() : requestTimeout(c, next),
+);
 
 // ── Better Auth: dashboard auth routes (email/password, sessions) ────────────────
 app.on(["GET", "POST"], "/auth/*", (c) => auth.handler(c.req.raw));
@@ -528,7 +570,10 @@ app.post("/v1/playground/stream", async (c) => {
   const parsed = playgroundChatBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: "invalid body", details: z.flattenError(parsed.error) }, 400);
   const { trace: _trace, ...input } = parsed.data;
+  const slot = await acquireStreamSlot(c.get("projectId"));
+  if (!slot) return tooManyStreams(c);
   return streamSSE(c, async (s) => {
+    s.onAbort(() => void slot.release());
     try {
       for await (const delta of streamPlayground(c.get("projectId"), input)) {
         await s.writeSSE({ data: JSON.stringify({ delta }) });
@@ -537,21 +582,31 @@ app.post("/v1/playground/stream", async (c) => {
     } catch (err) {
       console.error(JSON.stringify({ level: "error", scope: "playground.stream", message: String(err) }));
       await s.writeSSE({ data: JSON.stringify({ error: String(err instanceof Error ? err.message : err) }) });
+    } finally {
+      await slot.release();
     }
   });
 });
 
+/** 429 for a project that already holds SSE_MAX_STREAMS_PER_PROJECT open streams. */
+function tooManyStreams(c: { json: (b: unknown, s: 429) => Response; get: (k: "requestId") => string }): Response {
+  return c.json({ error: "too many concurrent streams for this project", requestId: c.get("requestId") }, 429);
+}
+
 // Live tail (SSE) — plain route (streaming). Streams a `trace` event per trace as it lands,
 // plus periodic `ping` heartbeats to keep the connection open through proxies. The project is
 // resolved by requireAuth (via header or the `?project=` query for EventSource clients).
-app.get("/v1/live/traces", (c) => {
+app.get("/v1/live/traces", async (c) => {
   const projectId = c.get("projectId");
+  const slot = await acquireStreamSlot(projectId);
+  if (!slot) return tooManyStreams(c);
   return streamSSE(c, async (s) => {
     let unsubscribe: (() => Promise<void>) | null = null;
     let open = true;
     s.onAbort(() => {
       open = false;
       void unsubscribe?.();
+      void slot.release();
     });
     unsubscribe = subscribeLiveTraces(projectId, (e) => {
       void s.writeSSE({ event: "trace", data: JSON.stringify(e) }).catch(() => {});
@@ -852,6 +907,7 @@ app.openapi(
       },
     },
     responses: {
+      409: { description: "A replay is already in progress" },
       200: {
         description: "Replayed",
         content: { "application/json": { schema: z.object({ replayed: z.number(), failed: z.number() }) } },
@@ -863,7 +919,13 @@ app.openapi(
     const denied = denyIfReadOnly(c) ?? denyIfNotAdmin(c);
     if (denied) return denied;
     const { limit } = c.req.valid("json");
-    const result = await replayDlq(limit ?? Number.POSITIVE_INFINITY);
+    let result: { replayed: number; failed: number };
+    try {
+      result = await replayDlq(limit ?? Number.POSITIVE_INFINITY);
+    } catch (err) {
+      if (err instanceof DlqReplayInProgressError) return c.json({ error: err.message }, 409);
+      throw err;
+    }
     await recordAudit(c.get("projectId"), c.get("actor"), "ingest.dlq.replay", `replayed:${result.replayed}`);
     return c.json(result);
   },
@@ -2653,7 +2715,10 @@ app.post("/v1/assistant/stream", async (c) => {
   const parsed = assistantChatBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: "invalid body", details: z.flattenError(parsed.error) }, 400);
   const input = parsed.data;
+  const slot = await acquireStreamSlot(c.get("projectId"));
+  if (!slot) return tooManyStreams(c);
   return streamSSE(c, async (s) => {
+    s.onAbort(() => void slot.release());
     try {
       for await (const event of runAssistantStream(c.get("projectId"), input)) {
         await s.writeSSE({ data: JSON.stringify(event) });
@@ -2662,6 +2727,8 @@ app.post("/v1/assistant/stream", async (c) => {
     } catch (err) {
       console.error(JSON.stringify({ level: "error", scope: "assistant.stream", message: String(err) }));
       await s.writeSSE({ data: JSON.stringify({ error: String(err instanceof Error ? err.message : err) }) });
+    } finally {
+      await slot.release();
     }
   });
 });

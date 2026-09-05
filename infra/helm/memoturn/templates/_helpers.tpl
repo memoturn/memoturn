@@ -72,3 +72,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ toYaml . }}
 {{- end }}
 {{- end -}}
+
+{{/* Pod-level security context (global). */}}
+{{- define "memoturn.podSecurityContext" -}}
+{{- toYaml .Values.podSecurityContext -}}
+{{- end -}}
+
+{{/* Container security context: global merged with the component's override. Usage: (list . .Values.api) */}}
+{{- define "memoturn.containerSecurityContext" -}}
+{{- $top := index . 0 -}}
+{{- $component := index . 1 -}}
+{{- toYaml (merge (deepCopy ($component.containerSecurityContext | default dict)) $top.Values.containerSecurityContext) -}}
+{{- end -}}

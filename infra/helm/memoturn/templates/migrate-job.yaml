@@ -13,6 +13,8 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: {{ .Values.migrations.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ .Values.migrations.ttlSecondsAfterFinished }}
   template:
     metadata:
       labels:
@@ -21,6 +23,8 @@ spec:
     spec:
       restartPolicy: Never
       serviceAccountName: {{ include "memoturn.serviceAccountName" . }}
+      securityContext:
+        {{- include "memoturn.podSecurityContext" . | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -29,6 +33,8 @@ spec:
         - name: migrate
           image: {{ include "memoturn.image" (list . "api") }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "memoturn.containerSecurityContext" (list . .Values.migrations) | nindent 12 }}
           # Apply Prisma (Postgres) migrations, then the Doris DDL (called directly to
           # bypass the package script's --env-file, which doesn't exist in the image).
           command: ["/bin/sh", "-c"]
@@ -36,4 +42,6 @@ spec:
             - bun run db:migrate && bun packages/telemetry/src/migrate.ts
           envFrom:
             {{- include "memoturn.envFrom" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
 {{- end }}
