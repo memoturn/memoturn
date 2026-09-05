@@ -2,7 +2,7 @@ import { redisConnection } from "@memoturn/db/queue";
 
 /**
  * Per-project API rate limiting, Redis-backed (fixed window). The limit is a global
- * default from RATE_LIMIT_PER_MINUTE (0 = disabled); each project gets its own counter,
+ * default from RATE_LIMIT_PER_MINUTE (default 600; 0 = disabled); each project gets its own counter,
  * so projects are isolated from one another. Fails open if Redis is unavailable — a
  * cache outage must never take the API down.
  */
@@ -15,8 +15,21 @@ export interface RateLimitResult {
   resetSeconds: number;
 }
 
+// Defaults are ON (a fresh install is throttled); `0` disables explicitly. Both compose stacks
+// and the Helm chart pass these through, so the numbers here are what an operator who set
+// nothing gets.
+export const DEFAULT_RATE_LIMIT_PER_MINUTE = 600;
+export const DEFAULT_INGEST_EVENTS_PER_MINUTE = 60_000;
+
+function envLimit(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : fallback;
+}
+
 export function rateLimitConfig(): { limit: number; window: number } {
-  return { limit: Number(process.env.RATE_LIMIT_PER_MINUTE ?? 0), window: WINDOW_SECONDS };
+  return { limit: envLimit("RATE_LIMIT_PER_MINUTE", DEFAULT_RATE_LIMIT_PER_MINUTE), window: WINDOW_SECONDS };
 }
 
 /**
@@ -25,7 +38,7 @@ export function rateLimitConfig(): { limit: number; window: number } {
  * this meters the actual event volume. Counted on a distinct key from the request limit.
  */
 export function ingestRateLimitConfig(): { limit: number; window: number } {
-  return { limit: Number(process.env.INGEST_EVENTS_PER_MINUTE ?? 0), window: WINDOW_SECONDS };
+  return { limit: envLimit("INGEST_EVENTS_PER_MINUTE", DEFAULT_INGEST_EVENTS_PER_MINUTE), window: WINDOW_SECONDS };
 }
 
 /**

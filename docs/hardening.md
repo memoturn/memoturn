@@ -12,8 +12,11 @@ See [Configuration](./configuration.md) for the full variable reference and
 
 - [ ] **`BETTER_AUTH_SECRET`** — signs session cookies and tokens. Generate with
   `openssl rand -base64 48`.
-- [ ] **`ENCRYPTION_KEY`** — AES-256-GCM key for provider API keys stored at rest. Must be
-  *distinct* from `BETTER_AUTH_SECRET`; rotating it invalidates all stored provider keys.
+- [ ] **`ENCRYPTION_KEY`** — AES-256-GCM key (scrypt-derived) for every secret stored at rest:
+  provider API keys, automation secrets, analytics-sink keys, webhook signing secrets. Must be
+  *distinct* from `BETTER_AUTH_SECRET`. **Rotatable** without losing anything:
+  `ENCRYPTION_KEYS=new,old` → restart → `bun run rotate-secrets` → `ENCRYPTION_KEYS=new`
+  (see [Runbooks](./runbooks.md#rotate-encryption_key)).
 - [ ] The startup guard is fail-closed: in `NODE_ENV=production` the API and worker **refuse to
   start** if either secret is missing, shorter than 16 characters, or a known development
   placeholder (anything containing `please-change-in-prod`), or if `AUTH_TRUSTED_ORIGINS` is
@@ -41,12 +44,15 @@ See [Configuration](./configuration.md) for the full variable reference and
 
 ## Rate limits
 
-- [ ] `RATE_LIMIT_PER_MINUTE` — per-project API request budget. The code default is `0`
-  (disabled — the API logs a startup warning in production when unset); both shipped compose
-  stacks set it to `600`. Set it, or enforce limits at your edge.
-- [ ] `INGEST_EVENTS_PER_MINUTE` — per-project ingest **event** budget. The request limit alone
-  is bypassable by packing up to 1000 events into one POST; this meters actual event volume.
-  Code default `0`; the compose stacks set `60000`.
+- [ ] `RATE_LIMIT_PER_MINUTE` — per-project API request budget, **on by default (600/min)**;
+  `0` disables (the API warns at boot in production). Also enforced on the remote MCP
+  endpoint once the key/user resolves.
+- [ ] `INGEST_EVENTS_PER_MINUTE` — per-project ingest **event** budget, on by default
+  (60000/min). The request limit alone is bypassable by packing up to 1000 events into one
+  POST; this meters actual event volume.
+- [ ] **Hard cost cap** — a project's monthly budget (Settings → Alerts) can be a *cap*: with
+  "Hard cap" on, the playground, assistant, evaluators, and experiments refuse to spend
+  (HTTP 402) once month-to-date cost reaches the budget. Without it the budget only notifies.
 - [ ] `PLAYGROUND_MAX_TOKENS` — ceiling on a single playground/assistant completion (default
   `32768`). The playground and assistant spend the project's provider key, so they are
   write-gated (VIEWERs get 403) and every request is validated against this cap.
@@ -87,8 +93,16 @@ Per-project settings (`/v1/sampling`, `/v1/usage`, or the console **Settings** p
 - [ ] The breached-password check (have-i-been-pwned, k-anonymity) is **on by default and fails
   closed**: if `api.pwnedpasswords.com` is unreachable, signup/password-change return 500.
   Airgapped installs must set `AUTH_HIBP_DISABLED=true` — everyone else should leave it on.
-- [ ] `AUTH_REQUIRE_EMAIL_VERIFICATION=true` — require a verified email before sign-in
-  (needs a working [email transport](./configuration.md#email); default off).
+- [ ] `AUTH_REQUIRE_EMAIL_VERIFICATION` — require a verified email before sign-in. **Default
+  on in production whenever an email transport is configured** (off in dev, and on installs
+  with no mailer); set `false` to opt out.
+- [ ] Brute-force guards: password sign-in is limited to `AUTH_SIGNIN_MAX_PER_15M` (10)
+  attempts per IP per 15 min on top of the generic auth window; 2FA code checks have fixed
+  sub-limits. An organization can **require 2FA** for every member by setting
+  `{"requireTwoFactor": true}` in its metadata (`authClient.organization.update`) — members
+  without 2FA enrolled get 403 until they enrol.
+- [ ] API keys can carry a default lifetime (`API_KEY_DEFAULT_EXPIRY_DAYS`); unknown org roles
+  from an IdP mapping now resolve to VIEWER (read-only), never to a writing role.
 - [ ] `AUTH_DISABLE_PASSWORD_SIGNUP=true` — once your IdP/SSO (or social sign-in) is live,
   disable **new** email/password signups; existing password logins keep working.
 - [ ] **API keys act as MEMBER, not OWNER.** A key with the default `read`/`write`/`ingest`

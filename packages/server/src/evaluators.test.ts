@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+/** The judge's user turn fences the payload as data (<content_to_evaluate>…); tests read the JSON inside. */
+function unfence(content: string): string {
+  const m = /<content_to_evaluate>\n?([\s\S]*?)\n?<\/content_to_evaluate>/.exec(content);
+  return m ? (m[1] as string) : content;
+}
+
 const findUnique = vi.fn();
 vi.mock("@memoturn/db", () => ({ prisma: { evaluator: { findUnique } } }));
 
@@ -156,7 +162,7 @@ describe("judge variable mapping", () => {
     const call = generate.mock.calls[0]![0] as { messages: { role: string; content: string }[] };
     expect(call.messages[0]!.content).toContain("Is the answer supported by the context?");
     // The judged payload is the mapping, not the built-in input/output/expectedOutput triple.
-    expect(JSON.parse(call.messages[1]!.content)).toEqual({ answer: "the answer", context: "the context" });
+    expect(JSON.parse(unfence(call.messages[1]!.content))).toEqual({ answer: "the answer", context: "the context" });
   });
 
   it("keeps the built-in payload when no mapping is declared", async () => {
@@ -164,7 +170,11 @@ describe("judge variable mapping", () => {
     generate.mockResolvedValue({ content: '{"score":1,"reasoning":"good"}' });
     await judgeWithEvaluator("p1", "quality", { input: "in", output: "out", expectedOutput: "exp" });
     const call = generate.mock.calls[0]![0] as { messages: { content: string }[] };
-    expect(JSON.parse(call.messages[1]!.content)).toEqual({ input: "in", output: "out", expectedOutput: "exp" });
+    expect(JSON.parse(unfence(call.messages[1]!.content))).toEqual({
+      input: "in",
+      output: "out",
+      expectedOutput: "exp",
+    });
   });
 });
 

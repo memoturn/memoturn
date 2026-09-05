@@ -4,6 +4,7 @@ import {
   getUserProjectAccess,
   mcpRateLimitConfig,
   parseBasicAuth,
+  rateLimitConfig,
   recordAudit,
   tools,
   verifyMcpBearer,
@@ -148,6 +149,15 @@ export async function handleMcp(c: Context): Promise<Response> {
   }
 
   const mcpAuth = await resolveMcpAuth(c, projectId);
+  // The route is registered ahead of the global /v1/* limiter (it must own its auth), so
+  // apply the same per-project budget here once the principal is known.
+  if (mcpAuth && "projectId" in mcpAuth) {
+    const project = rateLimitConfig();
+    const prl = await checkRateLimit(mcpAuth.projectId, project.limit, project.window);
+    if (!prl.allowed) {
+      return c.json({ error: "rate limited" }, 429, { "retry-after": String(prl.resetSeconds) });
+    }
+  }
   if (!mcpAuth) {
     // Advertise both auth schemes: Bearer points OAuth clients at the protected-resource
     // metadata (spec discovery); Basic is for programmatic clients holding an API key pair.

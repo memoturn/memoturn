@@ -80,14 +80,21 @@ export function requiredScope(method: string, path: string): Exclude<Scope, "adm
 }
 
 /** Normalize create-key options: valid scopes (default read+write+ingest — never admin), expiry, per-key limit. */
+/** Default lifetime for a new key when the caller sets none (API_KEY_DEFAULT_EXPIRY_DAYS; unset = no expiry). */
+function defaultExpiryDays(): number | null {
+  const n = Number(process.env.API_KEY_DEFAULT_EXPIRY_DAYS);
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
+}
+
 export function resolveKeyControls(input: CreateApiKeyInput, nowMs = Date.now()) {
   const requested = input.scopes?.length
     ? input.scopes.filter((s) => (VALID_SCOPES as readonly string[]).includes(s))
     : [];
+  // `expiresInDays: null` is an explicit "never"; undefined falls back to the instance default.
+  const days = input.expiresInDays === undefined ? defaultExpiryDays() : input.expiresInDays;
   return {
     scopes: requested.length ? requested : [...ALL_SCOPES],
-    expiresAt:
-      input.expiresInDays && input.expiresInDays > 0 ? new Date(nowMs + input.expiresInDays * 86_400_000) : null,
+    expiresAt: days && days > 0 ? new Date(nowMs + days * 86_400_000) : null,
     rateLimitPerMinute: input.rateLimitPerMinute ?? null,
   };
 }

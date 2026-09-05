@@ -2,6 +2,7 @@ import {
   auth,
   authenticateKeys,
   getUserProjectAccess,
+  orgRequiresTwoFactor,
   parseBasicAuth,
   requiredScope,
   roleForScopes,
@@ -75,6 +76,20 @@ export async function requireAuth(c: Context<{ Variables: AuthVars }>, next: Nex
   const requested = c.req.header("x-memoturn-project") || c.req.query("project") || undefined;
   const access = await getUserProjectAccess(session.user.id, requested, session.session.activeOrganizationId);
   if (!access) return c.json({ error: "no accessible project" }, 403);
+
+  // Organization policy: members of an org that requires 2FA must have it enrolled.
+  if (await orgRequiresTwoFactor(access.organizationId)) {
+    const enrolled = (session.user as { twoFactorEnabled?: boolean | null }).twoFactorEnabled === true;
+    if (!enrolled) {
+      return c.json(
+        {
+          error: "your organization requires two-factor authentication — enrol in Settings → Security",
+          code: "2fa_required",
+        },
+        403,
+      );
+    }
+  }
 
   c.set("projectId", access.projectId);
   c.set("role", access.role);

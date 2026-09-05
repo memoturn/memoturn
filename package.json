@@ -45,6 +45,7 @@
     "replay": "bun --env-file=.env scripts/replay-blob.ts",
     "telemetry:migrate": "bun --env-file=.env scripts/telemetry-migrate.ts",
     "telemetry:repartition": "bun --env-file=.env scripts/telemetry-repartition.ts",
+    "rotate-secrets": "bun --env-file=.env scripts/rotate-secrets.ts",
     "quickstart": "bun --env-file=.env examples/quickstart.ts",
     "screenshots": "bun scripts/screenshots.ts",
     "docs:check": "bun scripts/check-doc-drift.ts",

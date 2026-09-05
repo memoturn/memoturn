@@ -1012,6 +1012,9 @@ model CostBudget {
   project           Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   monthlyUsd        Float
   thresholds        Json     @default("[0.5,0.8,1.0]")
+  // When true, LLM-backed features (playground, assistant, evaluators, experiments) REFUSE to
+  // spend once month-to-date cost reaches monthlyUsd (402) instead of only notifying.
+  hardCap           Boolean  @default(false)
   notifiedThreshold Float    @default(0) // highest step already notified this month
   channels          Json     @default("[]")
   createdAt         DateTime @default(now())

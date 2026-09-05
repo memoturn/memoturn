@@ -58,7 +58,9 @@ export async function getOffloadedPayload(
   fetch: (key: string) => Promise<{ body: Uint8Array } | null> = getBlobBytes,
 ): Promise<string | null> {
   const key = keyOrRef.startsWith(PAYLOAD_REF_PREFIX) ? keyOrRef.slice(PAYLOAD_REF_PREFIX.length) : keyOrRef;
-  if (!key.startsWith(`payloads/${projectId}/`)) return null; // cross-project / malformed
+  // Prefix-scoped AND no traversal segments — S3 keys are opaque today, but a filesystem
+  // or path-mapping blob backend would honour `..`.
+  if (!key.startsWith(`payloads/${projectId}/`) || key.split("/").includes("..")) return null; // cross-project / malformed
   const obj = await fetch(key);
   if (!obj) return null;
   return new TextDecoder().decode(obj.body);

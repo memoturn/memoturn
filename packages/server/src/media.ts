@@ -66,7 +66,9 @@ export async function getMedia(
   projectId: string,
   key: string,
 ): Promise<{ body: Uint8Array; contentType: string } | null> {
-  if (!key.startsWith(`media/${projectId}/`)) return null;
+  // Prefix-scoped AND no traversal segments — S3 keys are opaque today, but a filesystem
+  // or path-mapping blob backend would honour `..`.
+  if (!key.startsWith(`media/${projectId}/`) || key.split("/").includes("..")) return null;
   return getBlobBytes(key);
 }
 

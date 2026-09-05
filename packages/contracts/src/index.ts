@@ -560,6 +560,8 @@ export const costBudget = z
     monthlyUsd: z.number(),
     thresholds: z.array(z.number()),
     channels: z.array(alertChannel),
+    /** When true, LLM-backed features refuse to spend (402) once month-to-date cost reaches monthlyUsd. */
+    hardCap: z.boolean(),
     createdAt: z.string(),
   })
   .nullable();

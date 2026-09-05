@@ -133,6 +133,10 @@ export const ENV_SCHEMA: Record<string, EnvVar> = {
   AUTH_DISABLE_PASSWORD_SIGNUP: { spec: { kind: "bool" } },
   AUTH_HIBP_DISABLED: { spec: { kind: "bool" } },
   AUTH_COOKIE_CACHE_DISABLED: { spec: { kind: "bool" } },
+  AUTH_SIGNIN_MAX_PER_15M: { spec: int(1) },
+  AUTH_OAUTH_REGISTER_MAX_PER_HOUR: { spec: int(1) },
+  API_KEY_DEFAULT_EXPIRY_DAYS: { spec: int(1) },
+  API_DOCS_PUBLIC: { spec: { kind: "bool" } },
   // Demo
   DEMO_MODE: { spec: { kind: "bool" } },
   DEMO_TTL_DAYS: { spec: int(1) },
@@ -285,10 +289,14 @@ export function validateRuntimeEnv(service: Service): void {
     }
     // Non-fatal: API rate limiting defaults to disabled. Warn (don't throw — some deployments
     // rate-limit at the edge) so an unthrottled ingest/read surface isn't a silent posture.
-    if (service === "api" && !(Number(process.env.RATE_LIMIT_PER_MINUTE) > 0)) {
+    if (
+      service === "api" &&
+      process.env.RATE_LIMIT_PER_MINUTE !== undefined &&
+      Number(process.env.RATE_LIMIT_PER_MINUTE) === 0
+    ) {
       console.warn(
-        `[${service}] RATE_LIMIT_PER_MINUTE is unset/0 — the API is unthrottled. Set it (and ` +
-          "INGEST_EVENTS_PER_MINUTE) or ensure an upstream proxy enforces limits in production.",
+        `[${service}] RATE_LIMIT_PER_MINUTE=0 — the API is unthrottled. Remove the override (default 600) ` +
+          "or ensure an upstream proxy enforces limits in production.",
       );
     }
     // DEMO_MODE exposes an UNAUTHENTICATED provisioning endpoint (POST /v1/demo/start creates
