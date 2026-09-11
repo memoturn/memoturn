@@ -76,7 +76,7 @@ jobs:
           (bun --filter @memoturn/worker start > worker.log 2>&1 &)
           for i in $(seq 1 30); do curl -sf http://localhost:3001/ready && break; sleep 2; done
       - name: k6
-        uses: grafana/setup-k6-action@ffe7d7290dfa715e48c2ccc924d068444c94bde2 # v1.1.0
+        uses: grafana/setup-k6-action@db07bd9765aac508ef18982e52ab937fe633a065 # v1.2.1
       - name: Ingest load
         run: |
           k6 run --summary-export=summary.json \
