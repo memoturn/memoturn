@@ -1,15 +1,15 @@
 # Web analytics conventions
 
-How we measure the public surfaces (memoturn.com, docs.memoturn.com, demo.memoturn.com)
-and tag the links we control. Self-hosted Memoturn ships **zero** analytics — everything
+How we measure the public surfaces (memoturn.com, docs.memoturn.com) and tag the links
+we control. Self-hosted Memoturn ships **zero** analytics — everything
 here applies only to our hosted properties.
 
 ## The setup
 
 One GA4 property, one web data stream (`memoturn.com` — subdomains share the
-`.memoturn.com` cookie, so a marketing → docs → demo journey is one session). Plain
-gtag.js everywhere, no Google Tag Manager: the demo console renders untrusted trace
-content, and GTM's dynamically configurable tag injection has no place on that surface.
+`.memoturn.com` cookie, so a marketing → docs journey is one session). Plain gtag.js
+everywhere, no Google Tag Manager: a console surface renders untrusted trace content, and
+GTM's dynamically configurable tag injection has no place anywhere near it.
 
 Where the id is wired (all env-gated; unset = no tag):
 
@@ -17,7 +17,6 @@ Where the id is wired (all env-gated; unset = no tag):
 | --- | --- | --- |
 | memoturn.com | `VITE_GA_MEASUREMENT_ID` | `GA_MEASUREMENT_ID` repo variable → `deploy-site.yml` |
 | docs.memoturn.com | `PUBLIC_GA_MEASUREMENT_ID` | same repo variable, same workflow |
-| demo.memoturn.com | `VITE_GA_MEASUREMENT_ID` | demo VM `.env` → compose build arg (baked at image build) |
 
 ## Consent (Consent Mode v2)
 
@@ -28,8 +27,7 @@ Where the id is wired (all env-gated; unset = no tag):
   `apps/web/src/lib/analytics.ts`, `apps/docs/astro.config.mjs`,
   `apps/console/src/lib/analytics.ts`.
 - memoturn.com and docs.memoturn.com show a consent banner (choice stored per-site in
-  `localStorage["mt-consent"]`). The demo shows none — EEA/UK/CH demo visitors stay on
-  cookieless pings permanently.
+  `localStorage["mt-consent"]`).
 - The public privacy note is `https://memoturn.com/privacy`
   (`apps/web/src/routes/privacy.tsx`). Keep it truthful when any of the above changes.
 
@@ -53,6 +51,6 @@ for launches (`utm_campaign=<launch-slug>`).
 | Blog/guest posts | `<site>` | `post` |
 | Transactional email | — never; sign-in links must stay clean — | |
 
-Currently applied: the root `README.md` (demo + site + docs links). SDK READMEs pick up
+Currently applied: the root `README.md` (site + docs links). SDK READMEs pick up
 `utm_source=npm|pypi&utm_medium=listing` at their next routine release — don't cut a
 release just for UTMs.
