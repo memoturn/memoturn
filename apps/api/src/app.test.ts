@@ -313,8 +313,7 @@ describe.skipIf(!HAS_INFRA)("authenticated /v1 routes (infra)", () => {
 
   // ── Cost-bearing routes are write-gated ───────────────────────────────────────────────
   // The playground/assistant never mutate project data but spend the operator's provider
-  // key. A read-only principal (a VIEWER, every public-demo sandbox visitor) must get 403,
-  // not a completion — this is the guarantee `demo.ts` relies on.
+  // key. A read-only principal (a VIEWER) must get 403, not a completion.
   it("a read-only key cannot run the playground or the assistant (403)", async () => {
     const auth = { authorization: basic(readOnly.publicKey, readOnly.secretKey), "content-type": "application/json" };
     const body = JSON.stringify({ provider: "mock", model: "mock", messages: [{ role: "user", content: "hi" }] });

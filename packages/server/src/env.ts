@@ -137,14 +137,6 @@ export const ENV_SCHEMA: Record<string, EnvVar> = {
   AUTH_OAUTH_REGISTER_MAX_PER_HOUR: { spec: int(1) },
   API_KEY_DEFAULT_EXPIRY_DAYS: { spec: int(1) },
   API_DOCS_PUBLIC: { spec: { kind: "bool" } },
-  // Demo
-  DEMO_MODE: { spec: { kind: "bool" } },
-  DEMO_TTL_DAYS: { spec: int(1) },
-  DEMO_MAX_SANDBOXES: { spec: int(1) },
-  DEMO_SEED_DAYS: { spec: int(1) },
-  DEMO_SEED_TRACES_PER_DAY: { spec: int(1) },
-  DEMO_FINALIZE_DELAY_MS: { spec: int(0) },
-  DEMO_START_RATE_LIMIT_PER_MINUTE: { spec: int(0) },
 };
 
 function checkSpec(name: string, raw: string, spec: EnvSpec): string | null {
@@ -297,15 +289,6 @@ export function validateRuntimeEnv(service: Service): void {
       console.warn(
         `[${service}] RATE_LIMIT_PER_MINUTE=0 — the API is unthrottled. Remove the override (default 600) ` +
           "or ensure an upstream proxy enforces limits in production.",
-      );
-    }
-    // DEMO_MODE exposes an UNAUTHENTICATED provisioning endpoint (POST /v1/demo/start creates
-    // orgs/projects/users and seeds telemetry). It's one env var away on every install, so
-    // announce it at boot where an operator reviewing logs will see it.
-    if (isTruthy(process.env.DEMO_MODE)) {
-      console.warn(
-        `[${service}] DEMO_MODE is ON — this deployment is a PUBLIC DEMO: anyone with an email address ` +
-          "can provision a read-only sandbox via POST /v1/demo/start. Unset DEMO_MODE for a normal install.",
       );
     }
     return;

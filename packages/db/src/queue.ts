@@ -123,52 +123,6 @@ export function getEvalQueue(): Queue<EvalBackfillJob> {
   return evalQueue;
 }
 
-/**
- * Payload enqueued when a demo sandbox is provisioned — the worker seeds it.
- *
- * Two-phase lifecycle (defaults to "seed" for back-compat with any job already on the queue):
- *  - "seed": submit telemetry batches, then enqueue a DELAYED "finalize" job for the same
- *    sandbox. Kept short so the visitor's dashboard has data quickly.
- *  - "finalize": runs once the telemetry has drained into the store — seeds the remaining
- *    product entities + the 3D embedding projection (both need real trace ids), marks the
- *    sandbox READY, and (for the email-after-ready flow) emails the deferred magic link.
- *
- * `email`/`sendMagicLink` are threaded from seed → finalize so the sign-in link is emailed
- * only when the sandbox is actually ready (change 2). `sendMagicLink` is false for the
- * legacy session-hook path (the visitor is already signed in there).
- */
-export interface SandboxJob {
-  organizationId: string;
-  projectId: string;
-  phase?: "seed" | "finalize";
-  email?: string;
-  sendMagicLink?: boolean;
-}
-
-let sandboxQueue: Queue<SandboxJob> | undefined;
-
-/**
- * Queue for seeding public-demo sandboxes (DEMO_MODE only). Seeding generates a few
- * hundred events and submits them through the normal ingest path, so a job is seconds
- * of work; retries are safe because the generated entity ids are deterministic and the
- * store merges last-writer-wins.
- */
-export function getSandboxQueue(): Queue<SandboxJob> {
-  if (!sandboxQueue) {
-    sandboxQueue = new Queue<SandboxJob>(QUEUE_NAMES.sandbox, {
-      connection: connectionOptions(),
-      prefix: QUEUE_PREFIX,
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 2000 },
-        removeOnComplete: 100,
-        removeOnFail: 500,
-      },
-    });
-  }
-  return sandboxQueue;
-}
-
 let dlqQueue: Queue<IngestDlqJob> | undefined;
 
 /** Dead-letter queue for ingest batches that exhaust their retries (inspect/replay). */

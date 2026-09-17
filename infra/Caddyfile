@@ -40,7 +40,7 @@
 		# Defense-in-depth CSP for the console document (where user-controlled trace/LLM
 		# content renders). Tuned for the bundled Vite SPA — images allow data:/blob: for
 		# inline media, styles allow 'unsafe-inline' for Tailwind/chart styles. The ONLY
-		# external origins are Google gtag/GA4 collect endpoints for the public demo's
+		# external origins are Google gtag/GA4 collect endpoints for the opt-in console
 		# analytics (apps/console/src/lib/analytics.ts; inert unless the image was built
 		# with VITE_GA_MEASUREMENT_ID). Deliberately gtag, not GTM: no dynamically
 		# configurable tag injection on the surface that renders untrusted trace content.

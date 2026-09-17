@@ -17,7 +17,6 @@ import { haveIBeenPwned } from "better-auth/plugins/haveibeenpwned";
 import { organization } from "better-auth/plugins/organization";
 import { adminAc, defaultStatements, memberAc, ownerAc } from "better-auth/plugins/organization/access";
 import { recordAuthAudit } from "./audit.js";
-import { demoModeEnabled, provisionSandboxForUser } from "./demo.js";
 import { brandedEmail } from "./emailtemplate.js";
 import { authSecret, isProduction, consoleOrigin as resolveConsoleOrigin } from "./env.js";
 import { purgeProjectData } from "./lifecycle.js";
@@ -532,14 +531,6 @@ export const auth = betterAuth({
             orderBy: { createdAt: "asc" },
           });
           if (m) return { data: { ...session, activeOrganizationId: m.organizationId } };
-          // Public demo: a visitor with no membership gets a throwaway sandbox provisioned
-          // here — before the session lands — so they skip the create-an-organization
-          // onboarding bounce and go straight to seeded data. No-op unless DEMO_MODE.
-          if (demoModeEnabled()) {
-            const user = await prisma.user.findUnique({ where: { id: session.userId }, select: { email: true } });
-            const organizationId = await provisionSandboxForUser(session.userId, user?.email ?? "");
-            if (organizationId) return { data: { ...session, activeOrganizationId: organizationId } };
-          }
           return { data: { ...session, activeOrganizationId: null } };
         },
         // Auth-lifecycle audit: every new session is a sign-in — regardless of method
@@ -559,29 +550,6 @@ export const auth = betterAuth({
 });
 
 export type AuthSession = typeof auth.$Infer.Session;
-
-/**
- * Server-side magic-link send for the public demo's worker-driven finalize step (change 2).
- * The console POSTs an email to /v1/demo/start; provisioning + seeding run async and the
- * sign-in link is emailed only once the sandbox is READY — from the worker, which has no HTTP
- * request context.
- *
- * We drive Better Auth's own magic-link endpoint headlessly via `auth.api.signInMagicLink`,
- * which generates + stores the verification token and invokes the `magicLink.sendMagicLink`
- * callback above (the branded email) — so link generation stays entirely inside Better Auth
- * and the callback keeps its single "just send the email" job. Two headless caveats, both
- * handled here: the endpoint is `requireHeaders: true`, so we pass a Headers object (Better
- * Auth throws without one); and its form-CSRF middleware is a no-op when there's no
- * request/Origin/cookie, so an empty Headers passes cleanly. The callback URL returns the
- * visitor to the console's /demo route, where the preparing screen polls to READY then lands
- * on the dashboard.
- */
-export async function sendDemoMagicLink(email: string): Promise<void> {
-  await auth.api.signInMagicLink({
-    body: { email, callbackURL: `${consoleOrigin}/demo` },
-    headers: new Headers(),
-  });
-}
 
 /**
  * OAuth discovery documents for remote MCP clients, bound to this auth instance. The

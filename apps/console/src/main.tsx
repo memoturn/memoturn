@@ -14,7 +14,7 @@ const queryClient = new QueryClient({
 
 const router = createRouter();
 
-// Public-demo builds only (VITE_GA_MEASUREMENT_ID) — no-op everywhere else.
+// Opt-in builds only (VITE_GA_MEASUREMENT_ID) — no-op everywhere else.
 initAnalytics();
 if (analyticsEnabled) {
   // onResolved fires on the initial load and after every navigation, so this is the
