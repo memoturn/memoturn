@@ -70,7 +70,7 @@ services:
     restart: unless-stopped
     profiles: ["doris"]
     # Cap BE process memory for dev (default is ~90% of system memory, which assumes a
-    # dedicated host). 6G is comfortable for the demo dataset while leaving room for the FE
+    # dedicated host). 6G is comfortable for a seeded dev dataset while leaving room for the FE
     # and the other dev containers; a lower cap OOMs analytical queries with MEM_ALLOC_FAILED.
     # Override with DORIS_BE_MEM_LIMIT in .env (absolute like 4G, or a % of host memory).
     entrypoint:

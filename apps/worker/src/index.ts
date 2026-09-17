@@ -7,16 +7,13 @@ import {
   getDlqQueue,
   getIngestQueue,
   type IngestJob,
-  type SandboxJob,
 } from "@memoturn/db/queue";
 import {
   applyAllRetention,
   consumeRehydrateRate,
-  demoModeEnabled,
   envInt,
   evaluateAllAlerts,
   evaluateBudgets,
-  pruneExpiredSandboxes,
   pruneMutableState,
   readiness,
   runAllEmbeddingProjections,
@@ -32,7 +29,6 @@ import { logJson, PROMETHEUS_CONTENT_TYPE, renderPrometheus, snapshot, wantsProm
 import { processEvalBackfill } from "./processors/eval-backfill.js";
 import { processExperiment } from "./processors/experiment.js";
 import { processIngest } from "./processors/ingest.js";
-import { processSandbox } from "./processors/sandbox.js";
 
 /**
  * memoturn worker — consumes BullMQ queues and writes telemetry to the Doris store.
@@ -135,21 +131,6 @@ evalBackfillWorker.on("failed", (job, err) =>
   }),
 );
 
-// ── Demo sandboxes (public demo only) ────────────────────────────────────────────
-// Seeds a freshly provisioned sandbox with generated telemetry. Only runs when the
-// deployment opts into DEMO_MODE — a normal install never starts this worker.
-const sandboxWorker = demoModeEnabled()
-  ? new Worker<SandboxJob>(QUEUE_NAMES.sandbox, processSandbox, {
-      connection: connectionOptions(),
-      prefix: QUEUE_PREFIX,
-      concurrency: Number(process.env.SANDBOX_CONCURRENCY ?? 2),
-    })
-  : null;
-sandboxWorker?.on("ready", () => console.log("[worker] sandbox seeder ready (DEMO_MODE)"));
-sandboxWorker?.on("failed", (job, err) =>
-  logJson("error", "sandbox job failed", { jobId: job?.id, attemptsMade: job?.attemptsMade, error: err.message }),
-);
-
 // ── Daily maintenance crons (retention + scheduled exports) ──────────────────────
 const maintenanceQueue = new Queue(QUEUE_NAMES.export, {
   connection: connectionOptions(),
@@ -208,19 +189,6 @@ const maintenanceWorker = new Worker(
         { failClosed: true },
       );
       if (ran === null) console.log("[state-prune] skipped — lock held or (Redis down) fail-closed");
-    } else if (job.name === "sandbox-prune") {
-      // Public demo: hard-delete expired sandboxes (telemetry + blob + the whole Prisma
-      // tenant). Destructive, so lock-guarded fail-closed like the other sweeps.
-      const ran = await withLock(
-        "sandbox-prune",
-        30 * 60,
-        async () => {
-          const r = await pruneExpiredSandboxes();
-          console.log(`[sandbox-prune] deleted ${r.deleted} sandbox(es), ${r.failed} failed`);
-        },
-        { failClosed: true },
-      );
-      if (ran === null) console.log("[sandbox-prune] skipped — lock held or (Redis down) fail-closed");
     } else if (job.name === "alert-eval") {
       // Short TTL: this runs every minute, so a stuck holder shouldn't block the next tick long.
       const ran = await withLock("alert-eval", 120, async () => {
@@ -289,18 +257,6 @@ await maintenanceQueue.add(
     removeOnComplete: true,
   },
 );
-// Demo sandboxes: hard-delete expired tenants daily (public demo only).
-if (demoModeEnabled()) {
-  await maintenanceQueue.add(
-    "sandbox-prune",
-    {},
-    {
-      repeat: { pattern: "30 3 * * *" },
-      jobId: "sandbox-prune-daily",
-      removeOnComplete: true,
-    },
-  );
-}
 // Alert rules + cost budgets: evaluated every minute (stateful firing/resolved, dedup).
 await maintenanceQueue.add(
   "alert-eval",
@@ -386,7 +342,6 @@ async function shutdown(signal: string) {
     experimentWorker.close(),
     evalBackfillWorker.close(),
     maintenanceWorker.close(),
-    sandboxWorker?.close(),
     dlq.close(),
   ]);
   clearTimeout(forceExit);

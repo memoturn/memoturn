@@ -36,7 +36,7 @@ FROM deps AS build
 COPY . .
 ARG VITE_API_BASE=/api
 ENV VITE_API_BASE=$VITE_API_BASE
-# GA4 measurement id (G-XXXXXXX) for the PUBLIC DEMO build only. Empty (the default)
+# GA4 measurement id (G-XXXXXXX) for builds that opt in. Empty (the default)
 # means the analytics module is a no-op and no third-party code ships — self-host
 # images built without the arg get zero analytics.
 ARG VITE_GA_MEASUREMENT_ID=

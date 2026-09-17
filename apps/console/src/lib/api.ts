@@ -115,14 +115,6 @@ export type AuthConfig = {
   emailConfigured: boolean;
 };
 
-/** Public-demo sandbox status (DEMO_MODE). Not a /v1 contract route — shape lives here. */
-export type DemoStatus = {
-  status: "PENDING" | "SEEDING" | "READY" | "FAILED";
-  error: string;
-  expiresAt: string;
-  seededAt: string | null;
-};
-
 export function getActiveProject(): string {
   return (typeof localStorage !== "undefined" && localStorage.getItem(PROJECT_KEY)) || "";
 }
@@ -293,22 +285,6 @@ export const api = {
   getMetrics: (days = 30) => get<MetricsSummary>(`/v1/metrics${qs({ days })}`),
   listSdkVersions: (days = 30) => get<{ data: SdkVersionUsage[] }>(`/v1/usage/sdks${qs({ days })}`).then((r) => r.data),
   getUsage: (days = 30) => get<UsageSummary>(`/v1/usage${qs({ days })}`),
-  getDemoStatus: () => get<{ sandbox: DemoStatus | null }>(`/v1/demo/status`).then((r) => r.sandbox),
-  // Public pre-provision (DEMO_MODE): POST an email; the server provisions + seeds a sandbox
-  // async and emails the sign-in link once it's READY. Unauthenticated — no session cookie needed.
-  startDemo: async (
-    email: string,
-  ): Promise<{ status: "seeding" | "ready"; capacity?: boolean; rateLimited?: boolean }> => {
-    const res = await fetch(`${API_BASE}/v1/demo/start`, {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ email }),
-    });
-    if (res.status === 429) return { status: "seeding", rateLimited: true };
-    if (res.status === 503) return { status: "seeding", capacity: true };
-    if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
-    return res.json() as Promise<{ status: "seeding" | "ready" }>;
-  },
   runAnalyticsQuery: (query: AnalyticsQuery) => post<QueryResult>(`/v1/metrics/query`, query),
   getToolAnalytics: (days = 30) =>
     get<{ data: ToolAnalyticsRow[] }>(`/v1/metrics/tools${qs({ days })}`).then((r) => r.data),
