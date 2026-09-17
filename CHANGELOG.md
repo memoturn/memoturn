@@ -19,8 +19,7 @@ Production-readiness tranche, phase 0 (see the audit plan for the full picture).
   admin-only. Automations that used a default key against those routes need an `admin`
   key (`bun run seed` gives the dev key `admin`). This closes a MEMBER→OWNER escalation.
 - **Playground and assistant are write-gated.** `/v1/playground/*` and `/v1/assistant/*`
-  spend the project's provider key, so VIEWERs (including public-demo sandboxes) now get
-  403. Both streaming routes validate their bodies like the OpenAPI routes; `maxTokens` is
+  spend the project's provider key, so VIEWERs now get 403. Both streaming routes validate their bodies like the OpenAPI routes; `maxTokens` is
   capped by `PLAYGROUND_MAX_TOKENS` (default 32768).
 - **Ingest error contract.** Every API error is JSON `{ error, requestId }`; a blob-store or
   queue outage on `/v1/ingest` returns `503` + `Retry-After` (SDKs re-send) instead of a
@@ -44,7 +43,14 @@ Production-readiness tranche, phase 0 (see the audit plan for the full picture).
   `TELEMETRY_STREAM_LOAD` (ingest-event budget defaults on). The plain
   `infra/docker-compose.yml` no longer publishes the API on every interface without TLS.
 - **Startup guard** refuses to boot in production with `ALLOW_PRIVATE_WEBHOOK_TARGETS=1`
-  (unless `..._ACK=1`) or `AUTH_RATE_LIMIT_DISABLED`, and announces `DEMO_MODE` loudly.
+  (unless `..._ACK=1`) or `AUTH_RATE_LIMIT_DISABLED`.
+- **Removed — the public demo (`DEMO_MODE`).** The hosted demo at demo.memoturn.com is
+  retired, and the per-visitor sandbox feature it ran on is gone with it: the unauthenticated
+  `POST /v1/demo/start` and `GET /v1/demo/status` routes, the sandbox seed queue and its
+  worker, the daily `sandbox-prune` cron, the console's `/demo` route and banner, the
+  `DemoSandbox` table (dropped by migration `drop_demo_sandbox`), and every `DEMO_*` env var.
+  Self-host installs are unaffected — the feature was off by default and 404'd when unset.
+  `bun run seed:demo`, which fills a local project with realistic telemetry, is unchanged.
 - Docs: `AUTH_BASE_URL` is the origin (no `/api`); rate-limit defaults corrected; console
   image now sets its own CSP/security headers so Kubernetes deployments keep them.
 

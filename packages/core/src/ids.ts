@@ -32,5 +32,4 @@ export const QUEUE_NAMES = {
   export: "export",
   automation: "automation",
   experiment: "experiment", // server-executed dataset experiments (fan-out per item)
-  sandbox: "sandbox", // public-demo sandbox seeding (DEMO_MODE only)
 } as const;
