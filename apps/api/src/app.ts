@@ -75,7 +75,6 @@ import {
   deleteUserData,
   deleteWebhook,
   deleteWidget,
-  demoModeEnabled,
   disconnectMcpClient,
   EvaluatorConfigError,
   envInt,
@@ -111,7 +110,6 @@ import {
   getRetrievalAnalytics,
   getReviewAnalytics,
   getSampling,
-  getSandboxForUser,
   getScheduledExport,
   getScoreAgreement,
   getScoreDistribution,
@@ -203,7 +201,6 @@ import {
   setScheduledExport,
   setTraceTags,
   skipReviewItem,
-  startDemoSandbox,
   startExperiment,
   stopExperiment,
   storeDataUri,
@@ -230,7 +227,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
 import { timeout } from "hono/timeout";
 import { partitionIngestBatch } from "./ingest-partition.js";
-import { clientIpFrom, handleMcp } from "./mcp.js";
+import { handleMcp } from "./mcp.js";
 import {
   logJson,
   PROMETHEUS_CONTENT_TYPE,
@@ -408,36 +405,6 @@ app.get("/.well-known/oauth-authorization-server", (c) => mcpAuthorizationServer
 app.get("/.well-known/openid-configuration", (c) => mcpOpenIdConfigMetadata(c.req.raw));
 app.get("/.well-known/oauth-protected-resource", (c) => mcpProtectedResourceMetadata(c.req.raw));
 
-// ── Public-demo pre-provision (DEMO_MODE only) ───────────────────────────────────
-// UNAUTHENTICATED: a visitor POSTs their email and we provision + seed a sandbox async,
-// emailing the sign-in link only once it's READY. Registered BEFORE the `/v1/demo/*`
-// requireAuth guard below — Hono runs matching handlers in registration order and this one
-// returns without calling next(), so the guard (and the post-auth per-project rate limiter)
-// never fire for this path. Per-IP throttled since it writes before any auth resolves.
-const DEMO_TRUSTED_PROXIES = Math.max(0, Math.floor(Number(process.env.RATE_LIMIT_TRUSTED_PROXIES ?? 1)));
-function demoStartRateLimit(): number {
-  const raw = process.env.DEMO_START_RATE_LIMIT_PER_MINUTE;
-  return raw === undefined ? 10 : Number(raw);
-}
-app.post("/v1/demo/start", async (c) => {
-  // rbac-exempt: public unauthenticated pre-provision — no session role exists to gate, and
-  // DEMO_MODE is off in every normal install (route 404s). Its own per-IP throttle is the guard.
-  if (!demoModeEnabled()) return c.json({ error: "not found" }, 404);
-  const ip = clientIpFrom(c.req.header("x-forwarded-for"), c.req.header("x-real-ip"), DEMO_TRUSTED_PROXIES);
-  const rl = await checkRateLimit(`demo-start:${ip}`, demoStartRateLimit(), 60);
-  if (!rl.allowed) return c.json({ error: "rate limited" }, 429, { "retry-after": String(rl.resetSeconds) });
-  const body = (await c.req.json().catch(() => ({}))) as { email?: unknown };
-  const email = typeof body?.email === "string" ? body.email : "";
-  if (!email.trim()) return c.json({ error: "email is required" }, 400);
-  try {
-    const { status } = await startDemoSandbox(email);
-    // capacity → 503 so the client can show a "try later" message; seeding/ready → 200.
-    return status === "capacity" ? c.json({ status }, 503) : c.json({ status }, 200);
-  } catch (err) {
-    return c.json({ error: err instanceof Error ? err.message : "failed to start demo" }, 400);
-  }
-});
-
 // ── Security scheme + auth on everything under /v1 (except health) ──────────────
 app.openAPIRegistry.registerComponent("securitySchemes", "apiKey", {
   type: "http",
@@ -461,7 +428,6 @@ app.use("/v1/metrics", requireAuth);
 app.use("/v1/metrics/*", requireAuth);
 app.use("/v1/usage", requireAuth);
 app.use("/v1/usage/*", requireAuth);
-app.use("/v1/demo/*", requireAuth);
 app.use("/v1/prompts", requireAuth);
 app.use("/v1/prompts/*", requireAuth);
 app.use("/v1/dataset-run-items", requireAuth);
@@ -576,7 +542,7 @@ const assistantChatBody = z.object({
 
 // Streaming playground (SSE) — plain route; emits { delta } events then [DONE].
 // Spends the project's provider key, so it is write-gated like /v1/playground/chat: a VIEWER
-// (including every public-demo sandbox visitor) must not be able to run completions.
+// must not be able to run completions.
 app.post("/v1/playground/stream", async (c) => {
   const denied = denyIfReadOnly(c);
   if (denied) return denied; // 403: read-only role
@@ -681,15 +647,6 @@ app.get("/v1/payloads/*", async (c) => {
   const body = await getOffloadedPayload(c.get("projectId"), key);
   if (body === null) return c.json({ error: "not found" }, 404);
   return c.body(body, 200, { "content-type": "application/json", "cache-control": "private, max-age=31536000" });
-});
-
-// Public-demo sandbox status — powers the console's "preparing your sandbox" screen.
-// User-scoped (not project-scoped) and only meaningful when DEMO_MODE is on; returns
-// null elsewhere so the console can treat "no sandbox" as the normal case.
-app.get("/v1/demo/status", async (c) => {
-  const userId = c.get("userId");
-  if (!userId) return c.json({ sandbox: null });
-  return c.json({ sandbox: await getSandboxForUser(userId) });
 });
 
 // Single-trace export (JSON download) — plain route so we can set a file download header.
@@ -2770,7 +2727,7 @@ app.openapi(
     },
   }),
   async (c) => {
-    // Spends the project's provider key — write-gated so VIEWERs (and demo sandboxes) can't.
+    // Spends the project's provider key — write-gated so VIEWERs can't.
     const denied = denyIfReadOnly(c);
     if (denied) return denied;
     try {
@@ -2786,7 +2743,7 @@ app.openapi(
 
 // In-app assistant — a copilot that runs an agentic loop over the project's READ MCP tools.
 // It never mutates project data, but every turn spends the operator's provider key, so it is
-// write-gated like the playground: a VIEWER (and every public-demo sandbox) gets a 403.
+// write-gated like the playground: a VIEWER gets a 403.
 app.openapi(
   createRoute({
     method: "post",

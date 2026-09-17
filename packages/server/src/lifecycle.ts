@@ -5,8 +5,8 @@ import { deleteStatesForTraces } from "./mutablestate.js";
 import { PAYLOAD_REF_PREFIX } from "./payloads.js";
 
 /**
- * Data-lifecycle primitives shared by project deletion, organization deletion, the demo
- * sandbox pruner, batch trace deletion, and the right-to-erasure endpoints. Every "delete"
+ * Data-lifecycle primitives shared by project deletion, organization deletion, batch
+ * trace deletion, and the right-to-erasure endpoints. Every "delete"
  * in the product routes through here so that all three places a project's data lives —
  * the telemetry store, the Postgres mutable-state mirror (ADR-0001), and blob storage
  * (raw event log, offloaded payloads, media) — are cleaned together. Deleting rows in

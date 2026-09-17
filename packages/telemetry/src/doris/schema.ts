@@ -10,7 +10,7 @@
  *
  * Partitioning (traces / observations / scores):
  *  - AUTO PARTITION BY RANGE(date_trunc(<time>, 'day')): partitions are created on demand,
- *    including for backdated rows (blob replay, demo seed, engine moves) — dynamic
+ *    including for backdated rows (blob replay, seeded data, engine moves) — dynamic
  *    partitioning would reject those.
  *  - The partition column must be a KEY column on a UNIQUE KEY table, so `timestamp` /
  *    `start_time` join the key AFTER the id columns. The LOGICAL identity stays

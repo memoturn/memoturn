@@ -308,15 +308,6 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_SECURE: ${SMTP_SECURE:-}
-      # Public demo (per-visitor throwaway sandboxes). Unset/empty = normal install.
-      DEMO_MODE: ${DEMO_MODE:-}
-      DEMO_TTL_DAYS: ${DEMO_TTL_DAYS:-}
-      DEMO_MAX_SANDBOXES: ${DEMO_MAX_SANDBOXES:-}
-      DEMO_SEED_DAYS: ${DEMO_SEED_DAYS:-}
-      DEMO_SEED_TRACES_PER_DAY: ${DEMO_SEED_TRACES_PER_DAY:-}
-      DEMO_MEMBER_ROLE: ${DEMO_MEMBER_ROLE:-}
-      DEMO_FINALIZE_DELAY_MS: ${DEMO_FINALIZE_DELAY_MS:-}
-      DEMO_START_RATE_LIMIT_PER_MINUTE: ${DEMO_START_RATE_LIMIT_PER_MINUTE:-}
     # Probe with bun itself — the oven/bun base image doesn't guarantee curl/wget.
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3001/v1/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
@@ -364,9 +355,8 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?}
       AUTH_TRUSTED_ORIGINS: https://${MEMOTURN_DOMAIN:?}
-      # The worker sends Better Auth emails too (the demo finalize job emails the first
-      # sign-in magic link) — without AUTH_BASE_URL its links are built against the
-      # localhost fallback and land dead in inboxes. Keep in sync with the api service.
+      # The worker sends Better Auth emails too — without AUTH_BASE_URL its links are built
+      # against the localhost fallback and land dead in inboxes. Keep in sync with the api service.
       AUTH_BASE_URL: https://${MEMOTURN_DOMAIN:?}
       ALLOW_PRIVATE_WEBHOOK_TARGETS: ${ALLOW_PRIVATE_WEBHOOK_TARGETS:-0}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-10}
@@ -379,7 +369,7 @@ services:
       # page) can reach it across the Docker network. Only exposed on the internal network —
       # no host port is published for 3002 — so this isn't internet-reachable.
       WORKER_HOST: 0.0.0.0
-      # Email transport — the worker sends alert emails and runs the demo seed/prune jobs.
+      # Email transport — the worker sends alert emails.
       EMAIL_FROM: ${EMAIL_FROM:-}
       ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-}
       EMAIL_TRANSPORT: ${EMAIL_TRANSPORT:-}
@@ -390,15 +380,6 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_SECURE: ${SMTP_SECURE:-}
-      # Public demo — the worker owns the sandbox seed queue + the sandbox-prune cron.
-      DEMO_MODE: ${DEMO_MODE:-}
-      DEMO_TTL_DAYS: ${DEMO_TTL_DAYS:-}
-      DEMO_MAX_SANDBOXES: ${DEMO_MAX_SANDBOXES:-}
-      DEMO_SEED_DAYS: ${DEMO_SEED_DAYS:-}
-      DEMO_SEED_TRACES_PER_DAY: ${DEMO_SEED_TRACES_PER_DAY:-}
-      DEMO_MEMBER_ROLE: ${DEMO_MEMBER_ROLE:-}
-      DEMO_FINALIZE_DELAY_MS: ${DEMO_FINALIZE_DELAY_MS:-}
-      DEMO_START_RATE_LIMIT_PER_MINUTE: ${DEMO_START_RATE_LIMIT_PER_MINUTE:-}
     stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-600s}
     # The worker's health server binds 127.0.0.1 by default — in-container probes still reach it.
     healthcheck:
@@ -419,7 +400,7 @@ services:
       context: ..
       dockerfile: docker/console.Dockerfile
       args:
-        # Public demo only: bakes GA4 into the console bundle when set in the host .env
+        # Bakes GA4 into the console bundle when set in the host .env
         # (empty default = analytics module compiled out; see docker/console.Dockerfile).
         VITE_GA_MEASUREMENT_ID: ${VITE_GA_MEASUREMENT_ID:-}
     restart: unless-stopped

@@ -14,8 +14,6 @@ export * from "./dashboards.js";
 export * from "./dataset-runner.js";
 export * from "./dataset-schema.js";
 export * from "./datasets.js";
-export * from "./demo.js";
-export * from "./demo-entities.js";
 export * from "./demodata.js";
 export * from "./embeddings.js";
 export * from "./env.js";

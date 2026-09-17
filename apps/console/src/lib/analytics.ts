@@ -1,7 +1,7 @@
 /**
- * GA4 (gtag.js) for the PUBLIC DEMO deployment only. Gated on VITE_GA_MEASUREMENT_ID at
- * build time — regular self-host and dev builds never define it, so no analytics code
- * runs and no third-party request is ever made.
+ * GA4 (gtag.js) for console deployments that opt in. Gated on VITE_GA_MEASUREMENT_ID at
+ * build time — self-host and dev builds never define it, so no analytics code runs and
+ * no third-party request is ever made.
  *
  * Deliberately gtag.js and not Google Tag Manager: the console renders user/LLM-controlled
  * trace content behind a strict CSP (infra/Caddyfile), and GTM would let anyone with
@@ -35,7 +35,7 @@ export function initAnalytics(): void {
     window.dataLayer?.push(arguments);
   };
   window.gtag("js", new Date());
-  // Consent Mode v2: the demo shows no consent banner, so EEA/UK/CH visitors stay on
+  // Consent Mode v2: the console shows no consent banner, so EEA/UK/CH visitors stay on
   // denied analytics storage permanently (gtag sends cookieless pings only there);
   // elsewhere granted. Ad signals are always denied — we run no ads. Keep the region
   // list in sync with apps/web/src/lib/analytics.ts and apps/docs/astro.config.mjs.

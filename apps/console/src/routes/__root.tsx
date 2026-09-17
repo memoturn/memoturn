@@ -51,7 +51,6 @@ import {
 import { useEffect } from "react";
 import { AssistantDrawer } from "../components/assistant-chat";
 import { CommandPalette } from "../components/CommandPalette";
-import { DemoBanner } from "../components/demo-banner";
 import { KeyboardHelp } from "../components/keyboard-help";
 import { Logo } from "../components/logo";
 import { ModeToggle } from "../components/mode-toggle";
@@ -130,7 +129,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
 // Secondary navigation — pinned to the bottom (sidebar-08 NavSecondary pattern):
 // operate/admin surfaces that shouldn't compete with the primary workflow groups.
 // `adminOnly` entries hit endpoints gated by the server's denyIfNotAdmin (OWNER/ADMIN); they're
-// hidden for MEMBER/VIEWER so read-only users (e.g. demo sandboxes) don't land on a 403'd page.
+// hidden for MEMBER/VIEWER so read-only users don't land on a 403'd page.
 // (Audit-logs is NOT admin-gated — any authenticated role can read it — so it stays visible.)
 const NAV_SECONDARY: NavItem[] = [
   { to: "/ops", label: "Ingest health", icon: HeartPulse, adminOnly: true },
@@ -444,7 +443,6 @@ const PUBLIC_AUTH_ROUTES = [
   "/reset-password",
   "/accept-invite",
   "/two-factor",
-  "/demo", // public-demo landing (DEMO_MODE); also the post-magic-link "preparing sandbox" screen
 ];
 // Entry points a signed-in user should be bounced away from (they're already authenticated).
 const AUTH_ENTRY_ROUTES = ["/login", "/signup"];
@@ -491,7 +489,6 @@ function RootComponent() {
           so a wide data table stretches it past the viewport and eats the right-hand padding.
           Wide content should scroll inside its own container instead. */}
       <SidebarInset className="min-w-0">
-        <DemoBanner />
         <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/70">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-1 !h-5" />

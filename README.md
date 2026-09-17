@@ -8,7 +8,7 @@
 Open-source **AI engineering platform** — LLM observability, evals, metrics, prompt
 management, playground, and datasets. Self-hostable, OpenTelemetry-native, Bun-native.
 
-**[Live demo](https://demo.memoturn.com/demo?utm_source=github&utm_medium=readme)** · **[memoturn.com](https://memoturn.com/?utm_source=github&utm_medium=readme)** · **[docs.memoturn.com](https://docs.memoturn.com/?utm_source=github&utm_medium=readme)** · **[Documentation (in-repo)](./docs/README.md)** — getting started, architecture, API, SDKs, integrations, evaluation, deployment.
+**[memoturn.com](https://memoturn.com/?utm_source=github&utm_medium=readme)** · **[docs.memoturn.com](https://docs.memoturn.com/?utm_source=github&utm_medium=readme)** · **[Documentation (in-repo)](./docs/README.md)** — getting started, architecture, API, SDKs, integrations, evaluation, deployment.
 
 ![Memoturn dashboard](./docs/images/dashboard.png)
 
@@ -50,10 +50,6 @@ SDKs / OTel / LangChain / OpenAI
 ```
 
 ## Quickstart
-
-Want to look before you install? The [live demo](https://demo.memoturn.com/demo?utm_source=github&utm_medium=readme) gives you a
-read-only sandbox of the console, seeded with generated traces, dashboards, prompts, and
-evaluator scores — no setup, expires after 7 days.
 
 ```bash
 cp .env.example .env

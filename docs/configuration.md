@@ -196,25 +196,11 @@ without a mail server.
 | `SEED_ADMIN_EMAIL` | `admin@memoturn.dev` | Override the seeded admin email. In production a random value is generated unless this is set. |
 | `SEED_ADMIN_PASSWORD` | `memoturn-dev-123` | Override the seeded admin password. In production a random value is generated unless this is set. |
 
-## Public demo (`DEMO_MODE`)
-
-Off by default and inert on a normal install. When enabled, a visitor who signs in with an
-email that has no organization gets a throwaway **sandbox** provisioned automatically —
-their own organization + project, seeded with generated telemetry — which is hard-deleted
-after `DEMO_TTL_DAYS`. Used to run the public demo; see the worker's `sandbox-prune` cron.
+## Console analytics (`VITE_GA_MEASUREMENT_ID`)
 
 | Var | Default | Notes |
 | --- | --- | --- |
-| `DEMO_MODE` | unset | `true`/`1` enables per-visitor sandbox provisioning, the sandbox seeder, and the daily prune cron. Leave unset for every normal deployment. |
-| `DEMO_TTL_DAYS` | `7` | Sandbox lifetime. The prune cron hard-deletes telemetry, blob objects, the organization (Prisma cascade), and the visitor's user row. |
-| `DEMO_MAX_SANDBOXES` | `500` | Cap on concurrently-active sandboxes; signups past it are refused. |
-| `DEMO_SEED_DAYS` | `3` | Days of backdated demo telemetry generated per sandbox. |
-| `DEMO_SEED_TRACES_PER_DAY` | `15` | Traces per day per sandbox — keep small; every sandbox pays this ingest cost. |
-| `DEMO_MEMBER_ROLE` | `viewer` | Role the visitor gets. `viewer` is read-only (every mutating route is gated), which is what stops a public sandbox from ingesting, spending on the playground, or minting API keys. |
-| `DEMO_FINALIZE_DELAY_MS` | `120000` | How long the finalize job waits after the seed batches are submitted, so async ingest can drain before the sign-in link is emailed. Raise it if visitors land on a half-empty dashboard. |
-| `DEMO_START_RATE_LIMIT_PER_MINUTE` | `10` | Per-IP cap on `POST /v1/demo/start`, the unauthenticated pre-provision route. Honors `RATE_LIMIT_TRUSTED_PROXIES` when resolving the client IP. |
-| `SANDBOX_CONCURRENCY` | `2` | Worker concurrency for the sandbox seed queue. |
-| `VITE_GA_MEASUREMENT_ID` | unset | GA4 measurement id baked into the demo's console bundle at image build (compose build arg, not runtime env). Unset ships zero analytics code — leave it unset on self-host installs. Page views are sent with query strings stripped, so magic-link tokens never reach analytics, and Consent Mode v2 keeps analytics storage denied for EEA/UK/CH visitors. |
+| `VITE_GA_MEASUREMENT_ID` | unset | GA4 measurement id baked into the console bundle at image build (compose build arg, not runtime env). Unset ships zero analytics code — leave it unset on self-host installs. Page views are sent with query strings stripped, so magic-link tokens never reach analytics, and Consent Mode v2 keeps analytics storage denied for EEA/UK/CH visitors. |
 
 ## Dev tooling
 
