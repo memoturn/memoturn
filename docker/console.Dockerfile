@@ -46,7 +46,7 @@ RUN bun --filter @memoturn/console build
 # Digest-pinned like the Bun base (Dependabot updates it); the tag alone floats. Alpine
 # security fixes published since the image was cut are applied below (the CI Trivy gate
 # scans OS packages); CVEs inside the caddy binary itself only close with a Caddy release.
-FROM caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 AS runner
+FROM caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f AS runner
 RUN apk upgrade --no-cache
 COPY docker/console.Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /app/apps/console/dist /srv
