@@ -122,6 +122,7 @@ import {
   importDatasetCsv,
   ingestRateLimitConfig,
   instantiateEvaluatorTemplate,
+  isAuthRouteAllowed,
   isValidIdempotencyKey,
   listAlertRules,
   listApiKeys,
@@ -389,7 +390,9 @@ app.use("/v1/*", (c, next) =>
 );
 
 // ── Better Auth: dashboard auth routes (email/password, sessions) ────────────────
-app.on(["GET", "POST"], "/auth/*", (c) => auth.handler(c.req.raw));
+app.on(["GET", "POST"], "/auth/*", (c) =>
+  isAuthRouteAllowed(c.req.method, c.req.path) ? auth.handler(c.req.raw) : c.json({ error: "not found" }, 404),
+);
 
 // ── Remote MCP: per-project Streamable-HTTP endpoint (own API-key auth, see mcp.ts) ─
 // Not guarded by requireAuth — the method-based scope gate can't tell read tools from

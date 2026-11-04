@@ -186,6 +186,25 @@ async function main() {
     });
   }
 
+  // Public read-only demo: the shared login gets VIEWER, re-asserted on every run so a role edit
+  // can't leave published credentials with write access.
+  const demoEmail = process.env.PUBLIC_DEMO_EMAIL;
+  const demoPassword = process.env.PUBLIC_DEMO_PASSWORD;
+  if (demoEmail && demoPassword) {
+    if (demoEmail === DEV_EMAIL) throw new Error("PUBLIC_DEMO_EMAIL must differ from the admin login");
+    let demoUser = await prisma.user.findUnique({ where: { email: demoEmail } });
+    if (!demoUser) {
+      await auth.api.signUpEmail({ body: { email: demoEmail, password: demoPassword, name: "Demo Viewer" } });
+      demoUser = await prisma.user.findUniqueOrThrow({ where: { email: demoEmail } });
+    }
+    await prisma.member.upsert({
+      where: { organizationId_userId: { userId: demoUser.id, organizationId: org.id } },
+      update: { role: "viewer" },
+      create: { userId: demoUser.id, organizationId: org.id, role: "viewer" },
+    });
+    console.log(`  demo login: ${demoEmail} (viewer)`);
+  }
+
   console.log("Seeded:");
   console.log(`  login     : ${DEV_EMAIL} / ${DEV_PASSWORD}`);
   console.log(`  org       : ${org.name} (${org.id})`);

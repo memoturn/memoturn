@@ -2,7 +2,7 @@ import { prisma } from "@memoturn/db";
 import { redisConnection } from "@memoturn/db/queue";
 import { createApiKey } from "@memoturn/server";
 import { telemetry } from "@memoturn/telemetry";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { app } from "./app.js";
 
 // Fault injection for the ingest write path: flip `blobFault.on` to make the blob store
@@ -31,6 +31,43 @@ const HAS_INFRA = Boolean(
 );
 
 const basic = (pk: string, sk: string) => `Basic ${Buffer.from(`${pk}:${sk}`).toString("base64")}`;
+
+describe("auth lockdown (no infra)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  const lockDown = () => {
+    vi.stubEnv("AUTH_LOCKDOWN", "true");
+    vi.stubEnv("PUBLIC_DEMO_EMAIL", "demo@example.com");
+    vi.stubEnv("PUBLIC_DEMO_PASSWORD", "published-password");
+  };
+
+  it.each([
+    "/auth/organization/create",
+    "/auth/change-password",
+    "/auth/two-factor/enable",
+    "/auth/sso/register",
+  ])("404s POST %s before it reaches Better Auth", async (path) => {
+    lockDown();
+    const res = await app.request(path, { method: "POST" });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not found" });
+  });
+
+  it("publishes the demo login and hides other sign-in methods", async () => {
+    lockDown();
+    const cfg = await (await app.request("/auth-config")).json();
+    expect(cfg.demoLogin).toEqual({ email: "demo@example.com", password: "published-password" });
+    expect(cfg).toMatchObject({ lockdown: true, magicLink: false, passkey: false });
+    expect(cfg.password.signupDisabled).toBe(true);
+  });
+
+  it("keeps the demo login private when lockdown is off", async () => {
+    vi.stubEnv("PUBLIC_DEMO_EMAIL", "demo@example.com");
+    vi.stubEnv("PUBLIC_DEMO_PASSWORD", "published-password");
+    const cfg = await (await app.request("/auth-config")).json();
+    expect(cfg.demoLogin).toBeNull();
+  });
+});
 
 describe("public + auth gating (no infra)", () => {
   it("GET /v1/health is public and reports the service", async () => {

@@ -288,6 +288,10 @@ services:
       # from the right of X-Forwarded-For. Wrong values let a spoofed XFF evade per-IP limits.
       RATE_LIMIT_TRUSTED_PROXIES: ${RATE_LIMIT_TRUSTED_PROXIES:-1}
       AUTH_IP_HEADERS: ${AUTH_IP_HEADERS:-}
+      # Public read-only demo only: see "Public read-only demo" in docs/deployment.md.
+      AUTH_LOCKDOWN: ${AUTH_LOCKDOWN:-}
+      PUBLIC_DEMO_EMAIL: ${PUBLIC_DEMO_EMAIL:-}
+      PUBLIC_DEMO_PASSWORD: ${PUBLIC_DEMO_PASSWORD:-}
       MCP_RATE_LIMIT_PER_MINUTE: ${MCP_RATE_LIMIT_PER_MINUTE:-120}
       # Token-gate the /metrics scrape endpoint (unset = 404).
       API_METRICS_TOKEN: ${API_METRICS_TOKEN:-}

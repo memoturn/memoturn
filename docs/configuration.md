@@ -130,6 +130,8 @@ Applies when `TELEMETRY_ENGINE=doris` (the default).
 | Var | Default | Notes |
 | --- | --- | --- |
 | `AUTH_DISABLE_PASSWORD_SIGNUP` | unset | Set `true` to disable **new** email/password signups (existing password logins still work). Meant for hosted/IdP-only deployments; leave unset for self-host so the first admin can register without SMTP or an IdP. |
+| `AUTH_LOCKDOWN` | unset | Set `true` on a public read-only demo. Every `/auth/*` route returns 404 except sign-in, sign-out, session and organization read, and the login page offers only the demo button. Don't set it on a normal install: it also blocks sign-up, password reset, SSO and 2FA. |
+| `PUBLIC_DEMO_EMAIL`, `PUBLIC_DEMO_PASSWORD` | unset | The shared viewer login. `bun run seed` creates it, and `/auth-config` publishes it, but only when `AUTH_LOCKDOWN=true`. |
 | `AUTH_REQUIRE_EMAIL_VERIFICATION` | unset | Set `true` to require a verified email before sign-in (needs a working email transport). Default off so self-host accounts aren't locked out. |
 | `AUTH_MIN_PASSWORD_LENGTH` | `12` | Minimum length for **new** passwords (existing shorter passwords still sign in). |
 | `AUTH_HIBP_DISABLED` | unset | The breached-password check (k-anonymity, `api.pwnedpasswords.com`) is on by default and **fails closed** — signup/password-change return 500 when the service is unreachable. Airgapped/offline installs must set `true`. |

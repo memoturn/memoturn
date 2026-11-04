@@ -10,6 +10,11 @@ released together from `v*` tags.
 
 ## [Unreleased]
 
+- **Public read-only demo.** `AUTH_LOCKDOWN=true` closes every `/auth/*` route except sign-in,
+  sign-out, session and organization read. With `PUBLIC_DEMO_EMAIL` and `PUBLIC_DEMO_PASSWORD`
+  set, the login page becomes a one-click "View live demo" as a shared viewer. See
+  `docs/deployment.md`.
+
 Production-readiness tranche, phase 0 (see the audit plan for the full picture).
 
 - **Breaking — API keys no longer act as OWNER.** A key's role is derived from its scopes:
