@@ -17,6 +17,7 @@ import { haveIBeenPwned } from "better-auth/plugins/haveibeenpwned";
 import { organization } from "better-auth/plugins/organization";
 import { adminAc, defaultStatements, memberAc, ownerAc } from "better-auth/plugins/organization/access";
 import { recordAuthAudit } from "./audit.js";
+import { authLockdownEnabled, publicDemoLogin } from "./auth-lockdown.js";
 import { brandedEmail } from "./emailtemplate.js";
 import { authSecret, isProduction, consoleOrigin as resolveConsoleOrigin } from "./env.js";
 import { purgeProjectData } from "./lifecycle.js";
@@ -170,19 +171,22 @@ const rateLimitStorage = {
  * same env the plugins above read, so the UI never drifts from what the server accepts.
  */
 export function authMethods() {
+  const lockdown = authLockdownEnabled();
   return {
     password: {
       enabled: true,
-      signupDisabled: process.env.AUTH_DISABLE_PASSWORD_SIGNUP === "true",
+      signupDisabled: lockdown || process.env.AUTH_DISABLE_PASSWORD_SIGNUP === "true",
     },
     social: {
-      google: "google" in socialProviders,
-      github: "github" in socialProviders,
+      google: !lockdown && "google" in socialProviders,
+      github: !lockdown && "github" in socialProviders,
     },
-    magicLink: passwordlessUsable,
-    emailOtp: passwordlessUsable,
-    passkey: true,
+    magicLink: !lockdown && passwordlessUsable,
+    emailOtp: !lockdown && passwordlessUsable,
+    passkey: !lockdown,
     emailConfigured: mailerStatus().configured,
+    lockdown,
+    demoLogin: publicDemoLogin(),
   };
 }
 

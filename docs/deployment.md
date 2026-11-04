@@ -165,6 +165,43 @@ project (e.g. after an engine move, or into a fresh store); `--dry-run` sizes th
 **Note:** a single VM has no HA. If volume or uptime needs grow, move to the Helm chart below with
 managed datastores.
 
+## Public read-only demo
+
+You can run a public instance that anyone can open with one click. Visitors share a viewer login on
+sample data, so they can browse everything but change nothing and spend nothing: the playground and
+assistant reject viewers.
+
+Use a dedicated instance with only sample data on it, because every visitor sees all of it.
+
+1. Deploy the [single-VM stack](#single-vm-production-docker-compose--caddy) with the Postgres overlay,
+   and add this to `.env`:
+
+   ```bash
+   AUTH_LOCKDOWN=true
+   PUBLIC_DEMO_EMAIL=demo@your-domain.example
+   PUBLIC_DEMO_PASSWORD=<long random value; it is published>
+   ```
+
+   Leave `AUTH_DISABLE_PASSWORD_SIGNUP` unset, because the seed creates the login through sign-up.
+   Leave email unconfigured too. If a CDN sits in front of Caddy, set `AUTH_IP_HEADERS` to its
+   client-IP header, or all visitors share one sign-in rate limit.
+
+2. Create the org, the viewer login and an ingest key. Note the keys it prints:
+
+   ```bash
+   docker compose -f infra/docker-compose.prod.yml -f infra/docker-compose.prod.postgres.yml \
+     exec -e ALLOW_SEED=1 api bun scripts/seed.ts
+   ```
+
+3. Load the sample data, and run the same command weekly (cron or a systemd timer) so the charts
+   stay current. `--wipe` empties the project first, so schedule it for a quiet hour:
+
+   ```bash
+   docker compose -f infra/docker-compose.prod.yml -f infra/docker-compose.prod.postgres.yml \
+     exec -e ALLOW_SEED=1 api bun scripts/seed-demo.ts \
+     --base-url http://127.0.0.1:3001 --keys <publicKey>:<secretKey> --traces-per-day 100 --wipe
+   ```
+
 ## Kubernetes (Helm)
 
 For production, the chart at `infra/helm/memoturn` deploys the stateless API (behind an

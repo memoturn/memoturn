@@ -4,6 +4,7 @@ export * from "./apikeys.js";
 export * from "./assistant.js";
 export * from "./audit.js";
 export * from "./auth.js";
+export * from "./auth-lockdown.js";
 export * from "./automations.js";
 export * from "./batch.js";
 export * from "./betterauth.js";

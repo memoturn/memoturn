@@ -113,6 +113,8 @@ export type AuthConfig = {
   emailOtp: boolean;
   passkey: boolean;
   emailConfigured: boolean;
+  lockdown: boolean;
+  demoLogin: { email: string; password: string } | null;
 };
 
 export function getActiveProject(): string {

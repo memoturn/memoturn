@@ -131,6 +131,7 @@ export const ENV_SCHEMA: Record<string, EnvVar> = {
   AUTH_COOKIE_CACHE_MAX_AGE: { spec: int(0) },
   AUTH_REQUIRE_EMAIL_VERIFICATION: { spec: { kind: "bool" } },
   AUTH_DISABLE_PASSWORD_SIGNUP: { spec: { kind: "bool" } },
+  AUTH_LOCKDOWN: { spec: { kind: "bool" } },
   AUTH_HIBP_DISABLED: { spec: { kind: "bool" } },
   AUTH_COOKIE_CACHE_DISABLED: { spec: { kind: "bool" } },
   AUTH_SIGNIN_MAX_PER_15M: { spec: int(1) },
