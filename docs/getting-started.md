@@ -1,5 +1,9 @@
 # Getting started
 
+**Not ready to install?** Open the [live demo](https://demo.memoturn.com) instead. It's a read-only
+console pre-loaded with generated traces, dashboards, prompts, and evaluator scores, with no
+sign-up. Come back here when you want your own instance.
+
 ## Prerequisites
 
 - [Bun](https://bun.sh) ≥ 1.3 (package manager + runtime)

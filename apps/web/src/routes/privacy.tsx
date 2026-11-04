@@ -5,7 +5,7 @@ import { GITHUB_URL } from "../lib/public-urls";
 
 const TITLE = "Privacy — Memoturn";
 const DESCRIPTION =
-  "What the Memoturn public sites collect, why, and how to opt out. Self-hosted Memoturn sends us nothing.";
+  "What the Memoturn public sites and hosted demo collect, why, and how to opt out. Self-hosted Memoturn sends us nothing.";
 
 export const Route = createFileRoute("/privacy")({
   head: () => ({
@@ -33,10 +33,10 @@ function PrivacyPage() {
           Privacy, in plain terms.
         </h1>
         <p className={P_CLASS}>
-          This page covers the Memoturn public web properties: <strong className="text-foreground">memoturn.com</strong>{" "}
-          and <strong className="text-foreground">docs.memoturn.com</strong>. It does not cover Memoturn installations
-          you run yourself — a self-hosted Memoturn sends nothing to us, and its builds contain no analytics code at
-          all.
+          This page covers the Memoturn public web properties: <strong className="text-foreground">memoturn.com</strong>
+          , <strong className="text-foreground">docs.memoturn.com</strong>, and the hosted demo at{" "}
+          <strong className="text-foreground">demo.memoturn.com</strong>. It does not cover Memoturn installations you
+          run yourself — a self-hosted Memoturn sends nothing to us, and its builds contain no analytics code at all.
         </p>
 
         <h2 className={H2_CLASS}>Analytics</h2>
@@ -44,7 +44,7 @@ function PrivacyPage() {
           We use Google Analytics 4 to understand which pages matter and where visitors come from: pages viewed,
           referring site, approximate location (city level), and browser/device type. We run no ads, do no ad tracking,
           and never sell or share visitor data. In the EEA, the UK, and Switzerland, analytics cookies stay off until
-          you accept the consent banner; declining (anywhere) turns them off.
+          you accept the consent banner; declining (anywhere) turns them off. The hosted demo runs no analytics.
         </p>
         <p className={P_CLASS}>
           <Button
@@ -59,10 +59,18 @@ function PrivacyPage() {
           </Button>
         </p>
 
+        <h2 className={H2_CLASS}>The hosted demo</h2>
+        <p className={P_CLASS}>
+          The demo needs no account or email address. Everyone shares one read-only login, so what you do there isn't
+          tied to you. Opening it sets a sign-in cookie that lasts up to a week. We don't store your IP address or
+          browser details there: your IP is held briefly to rate-limit sign-ins, then dropped. The telemetry in the demo
+          is generated sample data.
+        </p>
+
         <h2 className={H2_CLASS}>Service providers</h2>
         <p className={P_CLASS}>
-          The public sites are served by Cloudflare; analytics is processed by Google. Each receives only what's needed
-          to do its job.
+          The public sites are served by Cloudflare; the demo runs on Google Cloud; analytics is processed by Google.
+          Each receives only what's needed to do its job.
         </p>
 
         <h2 className={H2_CLASS}>Questions</h2>
