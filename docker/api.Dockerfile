@@ -36,9 +36,14 @@ COPY . .
 RUN bun --filter @memoturn/db generate
 # Drop the trees this service never imports (public sites, console, other SDKs, docs) and the
 # test files. Bun runs the TypeScript sources directly, so the remaining workspaces stay as-is.
+# infra/doris and infra/postgres-telemetry stay: the migrate service runs from this image.
 RUN rm -rf apps/web apps/docs apps/console apps/mcp sdks/python sdks/go docs examples \
-      integrations .claude infra scripts/screenshots.ts \
+      integrations .claude scripts/screenshots.ts \
+  && find infra -mindepth 1 -maxdepth 1 ! -name doris ! -name postgres-telemetry -exec rm -rf {} + \
   && find . -name "*.test.ts" -not -path "./node_modules/*" -delete
+# Workspace packages are only linked under each app, so link them at the root too for scripts/*.
+RUN mkdir -p node_modules/@memoturn \
+  && for p in packages/*; do ln -sfn "../../$p" "node_modules/@memoturn/${p#packages/}"; done
 # Pull in every Debian security fix published since the base image was cut — the base tag
 # moves rarely, the advisories don't. The CI Trivy gate scans OS packages after this step.
 USER root

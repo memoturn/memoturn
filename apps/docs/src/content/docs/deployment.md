@@ -101,7 +101,7 @@ docker buildx imagetools inspect ghcr.io/memoturn/api:latest
 ```
 
 Every dependency the compose stacks pin publishes arm64 as well — `pgvector/pgvector:pg16`,
-`valkey/valkey:8-alpine`, `minio/minio`, `caddy:2-alpine`, and `apache/doris:{fe,be}-4.1.2` — so
+`valkey/valkey:8-alpine`, `cgr.dev/chainguard/minio`, `caddy:2-alpine`, and `apache/doris:{fe,be}-4.1.2` — so
 the full self-host stack runs natively on arm64, Doris included. (Doris on a laptop is still a
 memory-hungry neighbour; for local or small installs the
 [Postgres telemetry tier](#telemetry-engine-doris-or-postgres) is the lighter path, independent
