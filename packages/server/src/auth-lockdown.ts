@@ -26,6 +26,15 @@ export function isAuthRouteAllowed(method: string, path: string): boolean {
 }
 
 /**
+ * Viewers can read the audit log, and on a shared login every visitor is the same viewer. Sign-in
+ * audit entries copy the session's IP, so keeping it would show visitors each other's addresses.
+ * Rate limiting is unaffected: it reads the live request, not the stored session.
+ */
+export function withoutVisitorIdentity<T extends object>(session: T): T {
+  return authLockdownEnabled() ? { ...session, ipAddress: null, userAgent: null } : session;
+}
+
+/**
  * The credentials the console's "View live demo" button signs in with. Served only under lockdown,
  * so setting these on an ordinary install can never publish a working login.
  */

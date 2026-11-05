@@ -17,7 +17,7 @@ import { haveIBeenPwned } from "better-auth/plugins/haveibeenpwned";
 import { organization } from "better-auth/plugins/organization";
 import { adminAc, defaultStatements, memberAc, ownerAc } from "better-auth/plugins/organization/access";
 import { recordAuthAudit } from "./audit.js";
-import { authLockdownEnabled, publicDemoLogin } from "./auth-lockdown.js";
+import { authLockdownEnabled, publicDemoLogin, withoutVisitorIdentity } from "./auth-lockdown.js";
 import { brandedEmail } from "./emailtemplate.js";
 import { authSecret, isProduction, consoleOrigin as resolveConsoleOrigin } from "./env.js";
 import { purgeProjectData } from "./lifecycle.js";
@@ -534,8 +534,9 @@ export const auth = betterAuth({
             where: { userId: session.userId },
             orderBy: { createdAt: "asc" },
           });
-          if (m) return { data: { ...session, activeOrganizationId: m.organizationId } };
-          return { data: { ...session, activeOrganizationId: null } };
+          const data = withoutVisitorIdentity(session);
+          if (m) return { data: { ...data, activeOrganizationId: m.organizationId } };
+          return { data: { ...data, activeOrganizationId: null } };
         },
         // Auth-lifecycle audit: every new session is a sign-in — regardless of method
         // (password, social, SSO, magic-link, OTP, passkey). Attaches to the active org.
