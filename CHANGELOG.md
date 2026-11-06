@@ -15,6 +15,8 @@ released together from `v*` tags.
   Bitnami archive's client, pinned by digest. Existing MinIO volumes carry over.
 - **Production migrations and scripts work from the API image.** The image deleted `infra/`,
   which holds the telemetry migrations, and `scripts/*` couldn't resolve workspace packages.
+- **Lockdown no longer stores visitor IPs.** Under `AUTH_LOCKDOWN`, sessions drop the IP address
+  and user agent. Viewers can read the audit log, so a shared demo login exposed sign-in IPs.
 
 - **Public read-only demo.** `AUTH_LOCKDOWN=true` closes every `/auth/*` route except sign-in,
   sign-out, session and organization read. With `PUBLIC_DEMO_EMAIL` and `PUBLIC_DEMO_PASSWORD`

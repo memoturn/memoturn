@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isAuthRouteAllowed, publicDemoLogin } from "./auth-lockdown.js";
+import { isAuthRouteAllowed, publicDemoLogin, withoutVisitorIdentity } from "./auth-lockdown.js";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -38,6 +38,20 @@ describe("isAuthRouteAllowed", () => {
     expect(isAuthRouteAllowed("GET", "/auth/sign-in/email")).toBe(false);
     expect(isAuthRouteAllowed("POST", "/auth/sign-in/email/")).toBe(false);
     expect(isAuthRouteAllowed("POST", "/auth/sign-in/email/../../change-password")).toBe(false);
+  });
+});
+
+describe("withoutVisitorIdentity", () => {
+  const session = { userId: "u1", ipAddress: "203.0.113.7", userAgent: "Mozilla/5.0" };
+
+  it("drops the IP and user agent under lockdown", () => {
+    vi.stubEnv("AUTH_LOCKDOWN", "true");
+    expect(withoutVisitorIdentity(session)).toEqual({ userId: "u1", ipAddress: null, userAgent: null });
+  });
+
+  it("keeps them on a normal install", () => {
+    vi.stubEnv("AUTH_LOCKDOWN", "");
+    expect(withoutVisitorIdentity(session)).toEqual(session);
   });
 });
 
