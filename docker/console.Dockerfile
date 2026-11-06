@@ -7,7 +7,7 @@
 # by SEPARATE jobs on separate runners, so a tag that moves between them would put two
 # different Bun versions in one manifest list. The digest is the multi-arch index, so it
 # still resolves per-architecture. Dependabot updates digest pins.
-FROM oven/bun:1.4@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895 AS base
+FROM oven/bun:1.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS base
 WORKDIR /app
 
 FROM base AS deps
