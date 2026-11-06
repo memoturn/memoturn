@@ -10,6 +10,14 @@ released together from `v*` tags.
 
 ## [Unreleased]
 
+- **Fresh installs work again.** `minio/minio` and `minio/mc` no longer pull from Docker Hub, so
+  every compose file failed on a new machine. Compose now uses Chainguard's MinIO and the
+  Bitnami archive's client, pinned by digest. Existing MinIO volumes carry over.
+- **Production migrations and scripts work from the API image.** The image deleted `infra/`,
+  which holds the telemetry migrations, and `scripts/*` couldn't resolve workspace packages.
+- **Lockdown no longer stores visitor IPs.** Under `AUTH_LOCKDOWN`, sessions drop the IP address
+  and user agent. Viewers can read the audit log, so a shared demo login exposed sign-in IPs.
+
 - **Public read-only demo.** `AUTH_LOCKDOWN=true` closes every `/auth/*` route except sign-in,
   sign-out, session and organization read. With `PUBLIC_DEMO_EMAIL` and `PUBLIC_DEMO_PASSWORD`
   set, the login page becomes a one-click "View live demo" as a shared viewer. See
