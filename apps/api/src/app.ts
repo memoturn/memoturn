@@ -3472,9 +3472,15 @@ app.openapi(
     request: { query: z.object({ limit: z.coerce.number().int().min(1).max(500).optional() }) },
     responses: {
       200: { description: "Audit log", content: { "application/json": { schema: C.listOf(C.auditEntry) } } },
+      403: { description: "Forbidden (admin only)" },
     },
   }),
-  async (c) => c.json({ data: await listAuditLogs(c.get("projectId"), c.req.valid("query").limit ?? 100) }),
+  async (c) => {
+    // Entries carry sign-in IP addresses, so this stays with OWNER/ADMIN.
+    const denied = denyIfNotAdmin(c);
+    if (denied) return denied;
+    return c.json({ data: await listAuditLogs(c.get("projectId"), c.req.valid("query").limit ?? 100) });
+  },
 );
 
 // ── Review queues (human annotation) ─────────────────────────────────────────────

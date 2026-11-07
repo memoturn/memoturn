@@ -234,7 +234,7 @@ Multimodal attachments (images, audio, files). Inline base64 data URIs in trace/
 | GET | `/v1/projects/{id}/members` | Project-level RBAC: the project's org members, each with any per-project role override. `{id}` must be the active project. |
 | PUT | `/v1/projects/{id}/members/{userId}` | Assign/update a user's role on this project (overrides their org role). OWNER/ADMIN only; audited. |
 | DELETE | `/v1/projects/{id}/members/{userId}` | Remove a user's per-project role override (revert to org role). OWNER/ADMIN only; audited. |
-| GET | `/v1/audit-logs` | Recent audit entries. |
+| GET | `/v1/audit-logs` | Recent audit entries. Admin only (OWNER/ADMIN). |
 | GET / POST | `/v1/retention` | Get / set retention (days; 0 = keep forever). |
 | POST | `/v1/retention/apply` | Apply retention now. |
 | GET / POST | `/v1/sampling` | Get / set ingest sampling. Head: `rate` (0–100 = percent of traces kept in the query store; 100 = all, stable per-trace). Tail keep-rules (kept regardless of the head dice below 100): `keepOnError`, `keepLatencyMs`, `keepMinCostUsd` (null = off). Dropped traces stay in blob for replay. Audited. |
