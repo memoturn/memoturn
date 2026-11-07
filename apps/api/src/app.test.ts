@@ -336,6 +336,15 @@ describe.skipIf(!HAS_INFRA)("authenticated /v1 routes (infra)", () => {
     expect(await prisma.project.findUnique({ where: { id: projectId } })).not.toBeNull();
   });
 
+  it("limits the audit log to admins, because entries carry sign-in IPs", async () => {
+    const admin = await createApiKey(projectId, { name: "auditor", scopes: ["read", "write", "ingest", "admin"] });
+    const status = async (k: { publicKey: string; secretKey: string }) =>
+      (await app.request("/v1/audit-logs", { headers: { authorization: basic(k.publicKey, k.secretKey) } })).status;
+    expect(await status(readOnly)).toBe(403);
+    expect(await status(full)).toBe(403);
+    expect(await status(admin)).toBe(200);
+  });
+
   it("an admin-scoped key can list the project's keys; `admin` is never granted by default", async () => {
     const admin = await createApiKey(projectId, { name: "admin", scopes: ["read", "write", "ingest", "admin"] });
     expect(full.scopes).not.toContain("admin");

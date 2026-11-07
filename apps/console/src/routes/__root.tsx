@@ -135,7 +135,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
 const NAV_SECONDARY: NavItem[] = [
   { to: "/ops", label: "Ingest health", icon: HeartPulse, adminOnly: true },
   { to: "/mentions", label: "Mentions", icon: AtSign },
-  { to: "/audit", label: "Audit", icon: History },
+  { to: "/audit", label: "Audit", icon: History, adminOnly: true },
   { to: "/organizations", label: "Organizations", icon: Building2 },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];

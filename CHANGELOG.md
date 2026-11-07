@@ -10,6 +10,9 @@ released together from `v*` tags.
 
 ## [Unreleased]
 
+- **Breaking — the audit log is admin-only.** `GET /v1/audit-logs` now returns 403 for MEMBER and
+  VIEWER, including default API keys, because entries carry sign-in IP addresses. The console
+  hides the Audit page for those roles.
 - **Fresh installs work again.** `minio/minio` and `minio/mc` no longer pull from Docker Hub, so
   every compose file failed on a new machine. Compose now uses Chainguard's MinIO and the
   Bitnami archive's client, pinned by digest. Existing MinIO volumes carry over.
